@@ -170,6 +170,16 @@ test('scheduling workspace applies map-sourced rail-route focus before scheduler
         sourceActionRequestId: null,
       },
       globalFilter: '',
+      commodities: [
+        {
+          code: 'Gas',
+          name: 'Gas',
+          description: 'Test gas commodity',
+          is_active: true,
+          commodity_class: 'GAS',
+          allowed_transport_modes: ['RAIL', 'TRUCK'],
+        },
+      ],
       deliveries: [
         buildDelivery({ delivery_id: 'DLV-1001', trade_id: 'TRD-1001' }),
         buildDelivery({
@@ -223,12 +233,18 @@ test('scheduling workspace applies map-sourced rail-route focus before scheduler
   )
 
   assert.match(markup, /Open scheduling for BNSF_WAHA_TO_HSC/)
-  assert.match(markup, /Rail Route Focus/)
+  assert.match(markup, /Scope the board/)
+  assert.match(markup, /Filter by operational state/)
+  assert.match(markup, /Visible Queue/)
+  assert.match(markup, /Unallocated/)
+  assert.match(markup, /Unshipped/)
   assert.match(markup, /All Rail Routes/)
   assert.match(markup, /BNSF_WAHA_TO_HSC - BNSF Waha to Houston Ship Channel/)
   assert.match(markup, /Rail route BNSF_WAHA_TO_HSC .* is currently in focus/)
   assert.match(markup, /TRD-1001/)
   assert.doesNotMatch(markup, /DLV-2002/)
   assert.doesNotMatch(markup, /TRD-2002/)
+  assert.doesNotMatch(markup, /Stage Coverage/)
+  assert.doesNotMatch(markup, /Scheduler Handoffs and Data Gaps/)
   assert.match(markup, /Show Full Board/)
 })

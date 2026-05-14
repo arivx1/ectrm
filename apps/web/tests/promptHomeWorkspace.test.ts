@@ -34,6 +34,7 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   const deskTimeIndex = markup.indexOf("Desk Time");
   const mapIndex = markup.indexOf("Open Map Workspace");
   const documentUploadIndex = markup.indexOf("Upload documents");
+  const communicationIndex = markup.indexOf("Communication center");
   const promptCardIndex = markup.indexOf("Ask the desk assistant");
   const operatorPromptIndex = markup.indexOf("Operator prompt");
 
@@ -70,14 +71,17 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   );
   assert.doesNotMatch(markup, /Governed Review/);
   assert.doesNotMatch(markup, /Review queue/);
-  assert.doesNotMatch(markup, /Sign in to review/);
+  assert.doesNotMatch(markup, /Sign in to review PDFs/);
   assert.ok(deskTimeIndex >= 0);
   assert.ok(mapIndex > deskTimeIndex);
   assert.ok(documentUploadIndex > mapIndex);
+  assert.ok(communicationIndex > documentUploadIndex);
   assert.ok(promptCardIndex > documentUploadIndex);
+  assert.ok(promptCardIndex > communicationIndex);
   assert.ok(operatorPromptIndex > promptCardIndex);
   assert.match(markup, />Voice Unavailable</);
   assert.match(markup, /Desk Time/);
+  assert.doesNotMatch(markup, /Desk clocks and calendars/);
   assert.match(
     markup,
     /aria-expanded="true" aria-controls="prompt-home-timeframe-panel"/,
@@ -176,8 +180,14 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     /id="prompt-home-map-records-card-panel" class="asset-map-records-card-body" hidden=""/,
   );
   assert.match(markup, /Open Map Workspace/);
-  assert.match(markup, /<strong>Upload documents<\/strong>/);
-  assert.match(markup, /Protected intake card\. Sign in to upload and review PDFs\./);
+  assert.match(
+    markup,
+    /<div class="prompt-home-document-upload-card-copy"><span class="eyebrow">Documents<\/span><strong>Upload documents<\/strong><\/div>/,
+  );
+  assert.doesNotMatch(
+    markup,
+    /Protected intake card\. Sign in to upload and review PDFs\./,
+  );
   assert.match(
     markup,
     /aria-expanded="false" aria-controls="prompt-home-document-upload-panel"/,
@@ -186,7 +196,32 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     markup,
     /id="prompt-home-document-upload-panel" class="prompt-home-document-upload-card-body" hidden=""/,
   );
-  assert.match(markup, /<strong>Ask the desk assistant<\/strong>/);
+  assert.match(markup, /Communication center/);
+  assert.match(
+    markup,
+    /Incoming messages, integrated email, to-do items, and issues stay grouped here before you jump into the owning workspace\./,
+  );
+  assert.match(
+    markup,
+    /aria-expanded="true" aria-controls="prompt-home-communication-panel"/,
+  );
+  assert.match(
+    markup,
+    /id="prompt-home-communication-panel" class="prompt-home-communication-card-body"/,
+  );
+  assert.match(markup, /Incoming messages/);
+  assert.match(markup, /Integrated email/);
+  assert.match(markup, /To-do items/);
+  assert.match(markup, /Issues and attention/);
+  assert.match(markup, /Assistant inbox and governed follow-through/);
+  assert.match(markup, /Gmail intake and document follow-through/);
+  assert.match(markup, /7 open work items/);
+  assert.match(markup, /5 attention items/);
+  assert.match(markup, /Sign In to Review Communication/);
+  assert.match(
+    markup,
+    /<div class="prompt-home-prompt-card-copy"><span class="eyebrow">Prompt<\/span><strong>Ask the desk assistant<\/strong><\/div>/,
+  );
   assert.match(
     markup,
     /aria-expanded="true" aria-controls="prompt-home-prompt-card-panel"/,
@@ -194,6 +229,11 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.match(
     markup,
     /id="prompt-home-prompt-card-panel" class="prompt-home-prompt-card-body"/,
+  );
+  assert.match(markup, />Verbalize</);
+  assert.match(
+    markup,
+    /Automatically read assistant responses aloud\./,
   );
   assert.match(markup, /aria-label="Resize map height"/);
   assert.match(markup, /Time zone/);
@@ -209,7 +249,10 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.match(markup, /Trading opens/);
   assert.match(markup, /Desk EOD/);
   assert.match(markup, /EOD 10:00 PM local/);
-  assert.match(markup, /Add Event/);
+  assert.match(
+    markup,
+    /id="prompt-home-timeframe-panel" class="prompt-home-timeframe-panel-body">[\s\S]*Add Event/,
+  );
   assert.match(markup, /href="\/\?view=settings#settings-custom-events-card"/);
   assert.match(markup, /Representative trading hours/);
   assert.match(markup, /Show details/);
@@ -321,7 +364,7 @@ test("prompt home map summarizes filtered records and caps the visible map direc
     }),
   );
 
-  assert.match(markup, /Showing 1,000 of 1,050 records on the map\./);
+  assert.match(markup, /1,000 of 1,050 shown on map/);
   assert.match(markup, /Showing 1,000 of 1,050 map records/);
   assert.equal(
     (markup.match(/aria-label="Focus HOME_\d{4} on map"/g) ?? []).length,
@@ -373,7 +416,7 @@ test("prompt home map reports zero records when the assets layer starts hidden",
 
   assert.match(
     markup,
-    /Assets layer is hidden\. 0 records are currently shown on the map\./,
+    /Assets hidden · 0 shown on map/,
   );
   assert.match(markup, /<p>0 map records<\/p>/);
   assert.match(

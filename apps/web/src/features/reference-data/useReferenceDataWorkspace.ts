@@ -36,14 +36,24 @@ import {
   DEFAULT_LOCATION_STANDARDS as defaultLocationStandards,
   DEFAULT_SPATIAL_FEATURE_STANDARDS as defaultSpatialFeatureStandards,
 } from '../../shared/models'
+import type { ConfigurableTransportMode } from '../../shared/transportModes'
 import { formatAssetGeometryInput } from './referenceDataFormState'
 
 export function emptyBookForm(): BookForm {
   return { code: '', name: '', description: '' }
 }
 
-export function emptyCommodityForm(defaultClass: string): CommodityForm {
-  return { code: '', name: '', description: '', commodity_class: defaultClass }
+export function emptyCommodityForm(
+  defaultClass: string,
+  defaultAllowedTransportModes: ConfigurableTransportMode[] = [],
+): CommodityForm {
+  return {
+    code: '',
+    name: '',
+    description: '',
+    commodity_class: defaultClass,
+    allowed_transport_modes: defaultAllowedTransportModes,
+  }
 }
 
 export function emptyAssetForm(assetStandards: AssetStandards = defaultAssetStandards): AssetForm {
@@ -628,7 +638,12 @@ export function useReferenceDataWorkspace({
 
   function startCreateCommodity() {
     setCommodityFormMode('create')
-    setCommodityForm(emptyCommodityForm(selectedCommodity?.commodity_class ?? commodityClassOrder[0]))
+    setCommodityForm(
+      emptyCommodityForm(
+        selectedCommodity?.commodity_class ?? commodityClassOrder[0],
+        selectedCommodity?.allowed_transport_modes ?? [],
+      ),
+    )
   }
 
   function startEditCommodity(code: string) {
@@ -643,6 +658,7 @@ export function useReferenceDataWorkspace({
       name: record.name,
       description: record.description ?? '',
       commodity_class: record.commodity_class ?? commodityClassOrder[0],
+      allowed_transport_modes: record.allowed_transport_modes ?? [],
     })
   }
 

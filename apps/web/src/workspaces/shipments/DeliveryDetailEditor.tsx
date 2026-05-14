@@ -11,8 +11,14 @@ import type {
   DeliveryExecutionStatus,
   DeliveryFieldSource,
   DeliveryRecord,
+  ReferenceRecord,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import {
+  buildTransportModeSelectOptions,
+  formatTransportModeLabel,
+  resolveAllowedTransportModesForDelivery,
+} from '../../shared/transportModes'
 import { DeliveryEventTimelineEditor } from './DeliveryEventTimelineEditor'
 import { DeliveryModeDetailEditor } from './DeliveryModeDetailEditor'
 import {
@@ -23,6 +29,7 @@ import {
 
 type DeliveryDetailEditorProps = {
   authSession: StoredAuthSession | null
+  commodities: ReferenceRecord[]
   delivery: DeliveryRecord
   saveError: string
   savingDeliveryId: string | null
@@ -54,17 +61,6 @@ type DeliveryDetailDraft = {
   externalReference: string
   opsNotes: string
 }
-
-const TRANSPORT_MODE_OPTIONS: DeliveryRecord['transport_mode'][] = [
-  'UNSPECIFIED',
-  'TRUCK',
-  'RAIL',
-  'BARGE',
-  'VESSEL',
-  'PIPELINE',
-  'POWER_GRID',
-  'STORAGE',
-]
 
 const EXECUTION_STATUS_OPTIONS: DeliveryExecutionStatus[] = [
   'PLANNED',
@@ -208,6 +204,7 @@ function sharedResetSourceTone(
 
 export function DeliveryDetailEditor({
   authSession,
+  commodities,
   delivery,
   saveError,
   savingDeliveryId,
@@ -232,6 +229,14 @@ export function DeliveryDetailEditor({
   const resetDisabled = mutationPending || !authSession || resetOptions.length === 0
   const pendingModeFamily = modeFamilyForTransportMode(draft.transportMode)
   const modeSectionNeedsRefresh = pendingModeFamily !== delivery.mode_family
+  const allowedTransportModes = resolveAllowedTransportModesForDelivery(delivery, commodities)
+  const transportModeOptions = buildTransportModeSelectOptions({
+    allowedModes: allowedTransportModes,
+    currentMode: draft.transportMode,
+  })
+  const transportConstraintLoaded = allowedTransportModes.length > 0
+  const currentModeAllowed =
+    draft.transportMode === 'UNSPECIFIED' || allowedTransportModes.includes(draft.transportMode)
 
   async function handleSave() {
     if (!hasChanges || validationMessage) {
@@ -298,14 +303,19 @@ export function DeliveryDetailEditor({
               }
               disabled={mutationPending}
             >
-              {TRANSPORT_MODE_OPTIONS.map((option) => (
+              {transportModeOptions.map((option) => (
                 <option key={option} value={option}>
-                  {formatEnumLabel(option)}
+                  {formatTransportModeLabel(option)}
                 </option>
               ))}
             </select>
             <small className="shipment-editor-source">
               Source {formatEnumLabel(delivery.transport_mode_source)}
+            </small>
+            <small className={`shipment-editor-source ${transportConstraintLoaded && !currentModeAllowed ? 'field-error' : ''}`}>
+              {transportConstraintLoaded
+                ? `Allowed for ${delivery.commodity}: ${allowedTransportModes.map(formatTransportModeLabel).join(', ')}`
+                : 'No commodity transport rule is loaded for this product yet.'}
             </small>
           </label>
 

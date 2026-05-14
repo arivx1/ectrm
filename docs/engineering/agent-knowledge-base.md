@@ -83,6 +83,44 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-14 - Constrain Delivery Transport Modes Through Commodity Reference Data
+
+- Type: algorithm-added
+- Domain: operations scheduling, delivery controls, and commodity reference
+  governance
+- Applies to: reference commodity masters, delivery transport-mode edits,
+  scheduling transport filters, and future product onboarding
+- Status: implemented
+- Source:
+  `apps/api/app/models/reference_commodity.py`,
+  `apps/api/app/routes/reference_data_routes/commodities.py`,
+  `apps/api/app/domains/reference_data/services/commodity_transport_modes.py`,
+  `apps/api/app/domains/operations/services/shipments.py`,
+  `apps/web/src/workspaces/shipments/DeliveryDetailEditor.tsx`,
+  `apps/web/src/workspaces/scheduling/SchedulingWorkspace.tsx`,
+  `apps/api/tests/test_deliveries_api.py`,
+  `apps/api/tests/test_reference_data.py`, and
+  `apps/web/tests/transportModes.test.ts`
+- Lesson: when product transport feasibility varies by commodity, keep the
+  allowed mode list on the governed commodity master and enforce delivery edits
+  against that typed list. Operators should not have to remember which products
+  can move by pipeline, vessel, rail, truck, air, or power grid, and agents
+  should not invent transport compatibility from prose.
+- Deterministic opportunity: use the same commodity-owned transport list to
+  drive scheduler filters, delivery-control dropdowns, and seeded defaults for
+  newly onboarded products instead of duplicating the rule across prompts or
+  screens.
+- Agent autonomy impact: agents can explain which modes are available for a
+  product, but they should not propose unsupported transport combinations that
+  fall outside the commodity reference record.
+- Tests or evidence:
+  `apps/api/tests/test_deliveries_api.py`,
+  `apps/api/tests/test_reference_data.py`,
+  `apps/web/tests/schedulingWorkspace.test.ts`, and
+  `apps/web/tests/transportModes.test.ts`
+- Follow-up: review and refine the seeded mode sets commodity by commodity as
+  more metals, coal, and other physical products are introduced.
+
 ### 2026-05-10 - Organization Prompt Context Should Come From Published Metadata Before Env Fallback
 
 - Type: lesson
@@ -112,8 +150,37 @@ proposal form until a human owner approves the domain rule.
   `PYTHONPATH=. .venv/bin/python -m unittest apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_prompt_context_preview_includes_business_user_and_data_sections`
   and
   `PYTHONPATH=. .venv/bin/python -m unittest apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_prompt_context_preview_prefers_published_organization_registry_sections`
-- Follow-up: add governed admin CRUD and publish/retire controls before
-  exposing organization-wide editing outside developer or database workflows.
+- Follow-up: keep organization-wide editing on the governed admin surface for
+  now, then layer team or user configurability on top of the same versioned
+  metadata seam instead of exposing freeform prompt editing.
+
+### 2026-05-14 - Versioned Organization Context Should Use Draft Edit And Explicit Publish Semantics
+
+- Type: lesson
+- Domain: assistant prompt governance and admin lifecycle controls
+- Applies to: organization context definitions, glossary terms, guardrails,
+  and future team or user context profiles
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/services/organization_context_registry.py`,
+  `apps/api/app/routes/assistant.py`,
+  `apps/api/app/schemas/assistant.py`,
+  `apps/api/tests/test_assistant_api.py`, and
+  `docs/engineering/ai-workflow.md`
+- Lesson: once organization context becomes versioned metadata, published
+  records should stop being directly editable. Keep edits on drafts only,
+  publish the latest version explicitly, and retire prior published versions
+  automatically for the same `definition_key` so prompt provenance stays
+  reviewable.
+- Deterministic opportunity: reuse the same draft, publish, and retire
+  lifecycle for future user or team context-profile objects instead of
+  inventing prompt-specific editing rules later.
+- Agent autonomy impact: this widens configuration governance and reviewability
+  without widening agent runtime authority or allowing silent prompt mutation.
+- Tests or evidence:
+  `PYTHONPATH=. .venv/bin/python -m unittest apps.api.tests.test_assistant_api.AssistantApiTests.test_admin_organization_context_definition_crud_publish_and_retire_flow`
+- Follow-up: add a web admin surface when the backend workflow stabilizes, then
+  reuse the same lifecycle for scoped context profiles in WP-06.
 
 ### 2026-05-08 - Simple Arbitrage Detection Should Become A Deterministic Pre-Trade Service
 

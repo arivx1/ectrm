@@ -665,6 +665,7 @@ def _safe_count(db: Session, model: type[object]) -> int | None:
     try:
         return db.execute(select(func.count()).select_from(model)).scalar_one()
     except SQLAlchemyError:
+        db.rollback()
         return None
 
 
@@ -673,7 +674,11 @@ def _safe_count_active(db: Session, model: type[object]) -> int | None:
         return db.execute(
             select(func.count()).select_from(model).where(getattr(model, "is_active").is_(True))
         ).scalar_one()
-    except (AttributeError, SQLAlchemyError):
+    except AttributeError:
+        return None
+    except SQLAlchemyError:
+        # Swallowed read failures still abort the transaction on PostgreSQL.
+        db.rollback()
         return None
 
 
@@ -681,6 +686,7 @@ def _safe_count_where(db: Session, model: type[object], condition) -> int | None
     try:
         return db.execute(select(func.count()).select_from(model).where(condition)).scalar_one()
     except SQLAlchemyError:
+        db.rollback()
         return None
 
 

@@ -84,7 +84,8 @@ beforeEach(() => {
       {
         id: "evt-1",
         summary: "Desk sync",
-        description: null,
+        description:
+          "Review the overnight hedge report with Houston before the desk opens.",
         location: "Houston",
         htmlLink: "https://calendar.google.com/calendar/event?eid=desk-sync",
         status: "confirmed",
@@ -104,7 +105,7 @@ beforeEach(() => {
       {
         id: "evt-2",
         summary: "Settlement cutoff",
-        description: null,
+        description: "Confirm invoices before the cash settlement run.",
         location: null,
         htmlLink: null,
         status: "confirmed",
@@ -124,7 +125,8 @@ beforeEach(() => {
       {
         id: "evt-3",
         summary: "Weekend nominations",
-        description: null,
+        description:
+          "Prepare weekend pipeline nomination changes for the remote team.",
         location: "Remote",
         htmlLink: null,
         status: "tentative",
@@ -187,6 +189,15 @@ test("prompt home timeline cards render cached Google Calendar agenda items", ()
   assert.match(markup, /Desk sync/);
   assert.match(markup, /Settlement cutoff/);
   assert.match(markup, /Weekend nominations/);
+  assert.match(
+    markup,
+    /Review the overnight hedge report with Houston before the desk opens\./,
+  );
+  assert.match(markup, /Confirm invoices before the cash settlement run\./);
+  assert.match(
+    markup,
+    /Prepare weekend pipeline nomination changes for the remote team\./,
+  );
   assert.match(markup, /Pull Google Calendar into the day timeline card/);
   assert.match(markup, /Pull Google Calendar into the week timeline card/);
   assert.match(markup, /Pull Google Calendar into the month timeline card/);

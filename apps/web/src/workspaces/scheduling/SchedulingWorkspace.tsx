@@ -8,36 +8,49 @@ import {
   type AppRouteHandoff,
 } from '../../shared/appRouteHandoff'
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
-import type { DeliveryRecord, DeliverySchedulingWorkflowItemRecord, RailRouteRecord } from '../../shared/models'
+import type {
+  DeliveryRecord,
+  DeliverySchedulingWorkflowItemRecord,
+  RailRouteRecord,
+  ReferenceRecord,
+} from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import {
+  formatTransportModeLabel,
+  resolveAllowedTransportModes,
+} from '../../shared/transportModes'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import { WorkspaceHandoffFocusBanner } from '../../shared/ui/WorkspaceHandoffFocusBanner'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import { OperationalBoardController } from '../operations/OperationalBoardController'
 import { renderOperationalActionPanel } from '../operations/operationalActionPanelRegistry'
-import { OperationalWorkboardBanner } from '../operations/OperationalWorkboardBanner'
 import { resolveOperationalWorkboardDefinition } from '../operations/operationalWorkboardRegistry'
 import type {
+  SchedulingAllocationFilter,
+  SchedulingLifecycleFilter,
   SchedulingStage,
-  SchedulingViewPreset,
+  SchedulingShipmentFilter,
   SchedulingWindowBand,
   SchedulingWorkbenchRow,
 } from './schedulingHelpers'
 import {
   ALLOCATION_COMPLETE_STATUSES,
   buildSchedulingWorkbenchRows,
-  deliveryStartTimestamp,
-  matchesSchedulingView,
+  isAllocatedSchedulingDelivery,
+  isClosedSchedulingDelivery,
+  isShippedSchedulingDelivery,
+  matchesSchedulingAllocationFilter,
+  matchesSchedulingLifecycleFilter,
+  matchesSchedulingShipmentFilter,
   SCHEDULED_NOMINATION_STATUSES,
   SCHEDULING_WINDOW_HOURS,
-  selectUpcomingSchedulingWindows,
-  windowBandForDelivery,
 } from './schedulingHelpers'
 
 type SchedulingWorkspaceProps = {
   authSession: StoredAuthSession | null
   routeHandoff: AppRouteHandoff | null
   globalFilter: string
+  commodities: ReferenceRecord[]
   deliveries: DeliveryRecord[]
   railRoutes: RailRouteRecord[]
   operationalResourceDescriptors: OperationalResourceDescriptor[]
@@ -63,7 +76,8 @@ type SchedulingWorkspaceProps = {
   onSaveWorkflowItem: (itemId: number, payload: UpdateTradeWorkflowItemInput) => Promise<void>
 }
 
-type SchedulingModeFilter = 'ALL' | DeliveryRecord['mode_family']
+type SchedulingTransportFilter = 'ALL' | DeliveryRecord['transport_mode']
+type SchedulingStateSection = SchedulingStage | 'CLOSED'
 
 const MODE_LABELS: Record<DeliveryRecord['mode_family'], string> = {
   LOGISTICS: 'Logistics',
@@ -71,93 +85,59 @@ const MODE_LABELS: Record<DeliveryRecord['mode_family'], string> = {
   POWER_SCHEDULE: 'Power Schedule',
 }
 
-const MODE_DESCRIPTIONS: Record<DeliveryRecord['mode_family'], string> = {
-  LOGISTICS: 'Discrete moves that still need explicit transport, terminal, or vessel handling.',
-  NETWORK_FLOW: 'Pipeline-style flow work where path, nomination, and allocation handoffs matter most.',
-  POWER_SCHEDULE: 'Interval-driven obligations where scheduler confidence is shaped by hourly completeness.',
-}
-
-const MODE_FILTER_OPTIONS: Array<{ value: SchedulingModeFilter; label: string }> = [
-  { value: 'ALL', label: 'All Modes' },
-  { value: 'LOGISTICS', label: MODE_LABELS.LOGISTICS },
-  { value: 'NETWORK_FLOW', label: MODE_LABELS.NETWORK_FLOW },
-  { value: 'POWER_SCHEDULE', label: MODE_LABELS.POWER_SCHEDULE },
+const LIFECYCLE_FILTER_OPTIONS: Array<{ value: SchedulingLifecycleFilter; label: string }> = [
+  { value: 'ALL', label: 'All Rows' },
+  { value: 'OPEN', label: 'Open' },
+  { value: 'CLOSED', label: 'Closed' },
 ]
 
-const VIEW_PRESET_OPTIONS: Array<{
-  value: SchedulingViewPreset
-  label: string
-  detail: string
-}> = [
-  {
-    value: 'DESK',
-    label: 'Desk View',
-    detail: 'The full scheduler queue across every stage.',
-  },
-  {
-    value: 'HOT_WINDOW',
-    label: 'Hot Window',
-    detail: 'Rows whose delivery window is already live or inside the next 72 hours.',
-  },
-  {
-    value: 'BLOCKED',
-    label: 'Blocked',
-    detail: 'Rows blocked by upstream controls, data quality, or overdue workflow items.',
-  },
-  {
-    value: 'READY',
-    label: 'Ready',
-    detail: 'Commercially ready rows that can move into scheduling now.',
-  },
-  {
-    value: 'IN_FLIGHT',
-    label: 'In Flight',
-    detail: 'Rows already being worked by a scheduler or waiting on downstream acknowledgement.',
-  },
-  {
-    value: 'WATCHLIST',
-    label: 'Watchlist',
-    detail: 'Later-dated obligations that still need visibility but not immediate schedule action.',
-  },
+const ALLOCATION_FILTER_OPTIONS: Array<{ value: SchedulingAllocationFilter; label: string }> = [
+  { value: 'ALL', label: 'All Allocation' },
+  { value: 'UNALLOCATED', label: 'Unallocated' },
+  { value: 'ALLOCATED', label: 'Allocated' },
 ]
 
-const STAGE_ORDER: SchedulingStage[] = ['BLOCKED', 'READY', 'IN_FLIGHT', 'WATCHLIST']
+const SHIPMENT_FILTER_OPTIONS: Array<{ value: SchedulingShipmentFilter; label: string }> = [
+  { value: 'ALL', label: 'All Shipment' },
+  { value: 'UNSHIPPED', label: 'Unshipped' },
+  { value: 'SHIPPED', label: 'Shipped' },
+]
 
-const STAGE_META: Record<
-  SchedulingStage,
+const SECTION_ORDER: SchedulingStateSection[] = ['BLOCKED', 'READY', 'IN_FLIGHT', 'WATCHLIST', 'CLOSED']
+
+const SECTION_META: Record<
+  SchedulingStateSection,
   {
     label: string
     description: string
-    tone: 'active' | 'blocked' | 'in-progress' | 'planned'
+    tone: 'active' | 'blocked' | 'in-progress' | 'planned' | 'shipped'
   }
 > = {
   BLOCKED: {
     label: 'Blocked',
-    description: 'Rows waiting on upstream confirmation, data repair, or overdue workflow cleanup.',
+    description: 'Cannot move until confirmations, data gaps, or workflow blockers are cleared.',
     tone: 'blocked',
   },
   READY: {
     label: 'Ready',
-    description: 'Rows that are commercially clean and ready for schedule action.',
+    description: 'Commercially clean rows waiting for the next schedule action.',
     tone: 'active',
   },
   IN_FLIGHT: {
     label: 'In Flight',
-    description: 'Rows already being worked, submitted, or handed off into follow-up.',
+    description: 'Rows already being worked, submitted, or handed into follow-up.',
     tone: 'in-progress',
   },
   WATCHLIST: {
     label: 'Watchlist',
-    description: 'Rows that still matter, but do not require the scheduler’s next click yet.',
+    description: 'Still open, but not the scheduler’s next click.',
     tone: 'planned',
   },
-}
-
-const STAGE_TO_VIEW_PRESET: Record<SchedulingStage, SchedulingViewPreset> = {
-  BLOCKED: 'BLOCKED',
-  READY: 'READY',
-  IN_FLIGHT: 'IN_FLIGHT',
-  WATCHLIST: 'WATCHLIST',
+  CLOSED: {
+    label: 'Closed',
+    description: 'Completed rows kept visible for closure and audit checks.',
+    tone: 'shipped',
+  },
 }
 
 const WINDOW_BAND_META: Record<
@@ -213,6 +193,34 @@ function tradeReferenceLabel(delivery: DeliveryRecord): string {
   return delivery.leg_no === null ? delivery.trade_id : `${delivery.trade_id} · leg ${delivery.leg_no}`
 }
 
+function deliveryRouteLabel(
+  delivery: Pick<
+    DeliveryRecord,
+    | 'location_code'
+    | 'origin_location_code'
+    | 'destination_location_code'
+    | 'receipt_location_code'
+    | 'delivery_location_code'
+  >,
+): string {
+  if (delivery.origin_location_code && delivery.destination_location_code) {
+    return `${delivery.origin_location_code} -> ${delivery.destination_location_code}`
+  }
+
+  if (delivery.receipt_location_code && delivery.delivery_location_code) {
+    return `${delivery.receipt_location_code} -> ${delivery.delivery_location_code}`
+  }
+
+  return (
+    delivery.location_code ??
+    delivery.delivery_location_code ??
+    delivery.receipt_location_code ??
+    delivery.destination_location_code ??
+    delivery.origin_location_code ??
+    'Location TBD'
+  )
+}
+
 function deliveryWindowLabel(
   delivery: DeliveryRecord,
   formatDateOnly: SchedulingWorkspaceProps['formatDateOnly'],
@@ -240,6 +248,38 @@ function nextActionText(row: SchedulingWorkbenchRow): string {
 
 function schedulerOwnerLabel(row: SchedulingWorkbenchRow): string {
   return row.owner?.trim() || 'Unassigned'
+}
+
+function lifecycleStateLabel(delivery: Pick<DeliveryRecord, 'status'>): string {
+  return isClosedSchedulingDelivery(delivery) ? 'Closed' : 'Open'
+}
+
+function allocationStateLabel(delivery: Pick<DeliveryRecord, 'allocation_status'>): string {
+  return isAllocatedSchedulingDelivery(delivery) ? 'Allocated' : 'Unallocated'
+}
+
+function shipmentStateLabel(
+  delivery: Pick<DeliveryRecord, 'actualization_status' | 'execution_status' | 'status'>,
+): string {
+  return isShippedSchedulingDelivery(delivery) ? 'Shipped' : 'Unshipped'
+}
+
+function lifecycleStateTone(delivery: Pick<DeliveryRecord, 'status'>): 'attention' | 'complete' {
+  return isClosedSchedulingDelivery(delivery) ? 'complete' : 'attention'
+}
+
+function allocationStateTone(delivery: Pick<DeliveryRecord, 'allocation_status'>): 'attention' | 'complete' {
+  return isAllocatedSchedulingDelivery(delivery) ? 'complete' : 'attention'
+}
+
+function shipmentStateTone(
+  delivery: Pick<DeliveryRecord, 'actualization_status' | 'execution_status' | 'status'>,
+): 'attention' | 'complete' {
+  return isShippedSchedulingDelivery(delivery) ? 'complete' : 'attention'
+}
+
+function sectionKeyForRow(row: SchedulingWorkbenchRow): SchedulingStateSection {
+  return isClosedSchedulingDelivery(row.delivery) ? 'CLOSED' : row.stage
 }
 
 function matchesSchedulingWorkbenchFilter(row: SchedulingWorkbenchRow, query: string): boolean {
@@ -290,6 +330,7 @@ export function SchedulingWorkspace({
   authSession,
   routeHandoff,
   globalFilter,
+  commodities,
   deliveries,
   railRoutes,
   operationalResourceDescriptors,
@@ -308,8 +349,11 @@ export function SchedulingWorkspace({
   onSaveActualization,
   onSaveWorkflowItem,
 }: SchedulingWorkspaceProps) {
-  const [modeFilter, setModeFilter] = useState<SchedulingModeFilter>('ALL')
-  const [viewPreset, setViewPreset] = useState<SchedulingViewPreset>('DESK')
+  const [lifecycleFilter, setLifecycleFilter] = useState<SchedulingLifecycleFilter>('OPEN')
+  const [allocationFilter, setAllocationFilter] = useState<SchedulingAllocationFilter>('ALL')
+  const [shipmentFilter, setShipmentFilter] = useState<SchedulingShipmentFilter>('ALL')
+  const [selectedCommodityCode, setSelectedCommodityCode] = useState('ALL')
+  const [transportFilter, setTransportFilter] = useState<SchedulingTransportFilter>('ALL')
   const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(null)
   const [selectedRailRouteFilterCode, setSelectedRailRouteFilterCode] = useState('')
   const [now, setNow] = useState<number>(() => currentTimestamp())
@@ -374,21 +418,73 @@ export function SchedulingWorkspace({
   }, [])
 
   const schedulingWindowMs = SCHEDULING_WINDOW_HOURS * 60 * 60 * 1000
-  const openDeliveries = deliveries.filter((delivery) => delivery.status !== 'COMPLETED')
-  const scopedOpenDeliveries = appliedRailRouteCode
-    ? openDeliveries.filter((delivery) => delivery.rail_route_code === appliedRailRouteCode)
-    : openDeliveries
+  const scopedDeliveries = appliedRailRouteCode
+    ? deliveries.filter((delivery) => delivery.rail_route_code === appliedRailRouteCode)
+    : deliveries
   const workbenchRows = useMemo(
-    () => buildSchedulingWorkbenchRows(scopedOpenDeliveries, now, schedulingWindowMs),
-    [now, scopedOpenDeliveries, schedulingWindowMs],
+    () => buildSchedulingWorkbenchRows(scopedDeliveries, now, schedulingWindowMs),
+    [now, scopedDeliveries, schedulingWindowMs],
   )
-  const globallyVisibleRows = useMemo(
+  const textFilteredRows = useMemo(
     () => workbenchRows.filter((row) => matchesSchedulingWorkbenchFilter(row, effectiveGlobalFilter)),
     [effectiveGlobalFilter, workbenchRows],
   )
-  const modeScopedRows = globallyVisibleRows.filter((row) => modeFilter === 'ALL' || row.delivery.mode_family === modeFilter)
-  const filteredRows = modeScopedRows.filter((row) => matchesSchedulingView(row, viewPreset))
-  const filteredOpenDeliveries = filteredRows.map((row) => row.delivery)
+  const commodityFilterOptions = useMemo(() => {
+    const optionsByCode = new Map<string, { value: string; label: string }>()
+    for (const row of textFilteredRows) {
+      if (optionsByCode.has(row.delivery.commodity)) {
+        continue
+      }
+      const commodityRecord = commodities.find((record) => record.code === row.delivery.commodity)
+      optionsByCode.set(row.delivery.commodity, {
+        value: row.delivery.commodity,
+        label: commodityRecord?.name ?? row.delivery.commodity,
+      })
+    }
+    return [...optionsByCode.values()].sort((left, right) => left.label.localeCompare(right.label))
+  }, [commodities, textFilteredRows])
+  const effectiveSelectedCommodityCode =
+    selectedCommodityCode !== 'ALL' &&
+    !commodityFilterOptions.some((option) => option.value === selectedCommodityCode)
+      ? 'ALL'
+      : selectedCommodityCode
+  const selectedCommodityRecord =
+    effectiveSelectedCommodityCode === 'ALL'
+      ? null
+      : commodities.find((record) => record.code === effectiveSelectedCommodityCode) ?? null
+  const commodityScopedRows =
+    effectiveSelectedCommodityCode === 'ALL'
+      ? textFilteredRows
+      : textFilteredRows.filter((row) => row.delivery.commodity === effectiveSelectedCommodityCode)
+  const transportFilterOptions = useMemo(() => {
+    const constrainedModes = resolveAllowedTransportModes(selectedCommodityRecord)
+    const visibleModes = new Set<DeliveryRecord['transport_mode']>()
+    for (const row of commodityScopedRows) {
+      visibleModes.add(row.delivery.transport_mode)
+    }
+
+    const orderedModes: DeliveryRecord['transport_mode'][] = []
+    for (const mode of constrainedModes) {
+      orderedModes.push(mode)
+    }
+    for (const mode of visibleModes) {
+      if (!orderedModes.includes(mode)) {
+        orderedModes.push(mode)
+      }
+    }
+    return orderedModes
+  }, [commodityScopedRows, selectedCommodityRecord])
+  const effectiveTransportFilter =
+    transportFilter !== 'ALL' && !transportFilterOptions.includes(transportFilter) ? 'ALL' : transportFilter
+  const transportScopedRows =
+    effectiveTransportFilter === 'ALL'
+      ? commodityScopedRows
+      : commodityScopedRows.filter((row) => row.delivery.transport_mode === effectiveTransportFilter)
+  const lifecycleScopedRows = transportScopedRows
+  const filteredRows = lifecycleScopedRows
+    .filter((row) => matchesSchedulingLifecycleFilter(row, lifecycleFilter))
+    .filter((row) => matchesSchedulingAllocationFilter(row, allocationFilter))
+    .filter((row) => matchesSchedulingShipmentFilter(row, shipmentFilter))
 
   useEffect(() => {
     if (filteredRows.length === 0) {
@@ -404,90 +500,71 @@ export function SchedulingWorkspace({
 
   const selectedRow =
     filteredRows.find((row) => row.delivery.delivery_id === selectedDeliveryId) ?? filteredRows[0] ?? null
-  const activeViewOption =
-    VIEW_PRESET_OPTIONS.find((option) => option.value === viewPreset) ?? VIEW_PRESET_OPTIONS[0]
-  const activeModeLabel = MODE_FILTER_OPTIONS.find((option) => option.value === modeFilter)?.label ?? 'All Modes'
-  const matchingRatio = scopedOpenDeliveries.length > 0 ? Math.round((filteredRows.length / scopedOpenDeliveries.length) * 100) : 0
-  const dueSoonRows = filteredRows.filter((row) => row.isDueSoon)
-  const blockedRows = filteredRows.filter((row) => row.stage === 'BLOCKED')
-  const readyRows = filteredRows.filter((row) => row.stage === 'READY')
+  const filteredQueueCount = lifecycleScopedRows.length
+  const activeCommodityLabel = selectedCommodityRecord?.name ?? 'All Products'
+  const activeTransportLabel =
+    effectiveTransportFilter === 'ALL' ? 'All Modes' : formatTransportModeLabel(effectiveTransportFilter)
+  const activeLifecycleLabel =
+    LIFECYCLE_FILTER_OPTIONS.find((option) => option.value === lifecycleFilter)?.label ?? 'Open'
+  const activeAllocationLabel =
+    ALLOCATION_FILTER_OPTIONS.find((option) => option.value === allocationFilter)?.label ?? 'All Allocation'
+  const activeShipmentLabel =
+    SHIPMENT_FILTER_OPTIONS.find((option) => option.value === shipmentFilter)?.label ?? 'All Shipment'
+  const openCount = lifecycleScopedRows.filter((row) => !isClosedSchedulingDelivery(row.delivery)).length
+  const closedCount = lifecycleScopedRows.filter((row) => isClosedSchedulingDelivery(row.delivery)).length
+  const allocatedCount = lifecycleScopedRows.filter((row) => isAllocatedSchedulingDelivery(row.delivery)).length
+  const unallocatedCount = lifecycleScopedRows.length - allocatedCount
+  const shippedCount = lifecycleScopedRows.filter((row) => isShippedSchedulingDelivery(row.delivery)).length
+  const unshippedCount = lifecycleScopedRows.length - shippedCount
+  const dueSoonRows = lifecycleScopedRows.filter((row) => row.isDueSoon && !isClosedSchedulingDelivery(row.delivery))
+  const blockedRows = lifecycleScopedRows.filter((row) => row.stage === 'BLOCKED' && !isClosedSchedulingDelivery(row.delivery))
   const unassignedRows = filteredRows.filter((row) =>
     row.openWorkflowItems.some((item) => !item.owner?.trim()),
   )
-  const stageSections = STAGE_ORDER.map((stage) => ({
-    stage,
-    rows: filteredRows.filter((row) => row.stage === stage),
+  const stageSections = SECTION_ORDER.map((section) => ({
+    section,
+    rows: filteredRows.filter((row) => sectionKeyForRow(row) === section),
   })).filter((section) => section.rows.length > 0)
-  const stageLanes = STAGE_ORDER.map((stage) => {
-    const rows = modeScopedRows.filter((row) => row.stage === stage)
-    const nextRow =
-      [...rows].sort((left, right) => {
-        const leftStart = deliveryStartTimestamp(left.delivery) ?? Number.POSITIVE_INFINITY
-        const rightStart = deliveryStartTimestamp(right.delivery) ?? Number.POSITIVE_INFINITY
-        return leftStart - rightStart
-      })[0] ?? null
-
-    return {
-      stage,
-      count: rows.length,
-      dueSoonCount: rows.filter((row) => row.isDueSoon).length,
-      nextRow,
-      isActive: viewPreset === STAGE_TO_VIEW_PRESET[stage],
-    }
-  })
-  const presetCounts = Object.fromEntries(
-    VIEW_PRESET_OPTIONS.map((option) => [
-      option.value,
-      modeScopedRows.filter((row) => matchesSchedulingView(row, option.value)).length,
-    ]),
-  ) as Record<SchedulingViewPreset, number>
-  const handoffRows = [
-    {
-      label: 'Unassigned Scheduling Work',
-      count: unassignedRows.length,
-      detail: 'Open scheduling workflow items that still need an explicit owner.',
-    },
-    {
-      label: 'Overdue Workflow',
-      count: filteredRows.filter((row) => row.openWorkflowItems.some((item) => item.is_overdue)).length,
-      detail: 'Rows carrying overdue confirmation, nomination, or allocation follow-up.',
-    },
-    {
-      label: 'Confirmation Pending',
-      count: filteredRows.filter((row) => row.delivery.confirmation_status !== 'CONFIRMED').length,
-      detail: 'Rows still waiting on confirmed commercial terms before the schedule can be trusted.',
-    },
-    {
-      label: 'Allocation Follow-Up',
-      count: filteredRows.filter(
-        (row) =>
-          SCHEDULED_NOMINATION_STATUSES.has(row.delivery.nomination_status) &&
-          !ALLOCATION_COMPLETE_STATUSES.has(row.delivery.allocation_status),
-      ).length,
-      detail: 'Rows that have moved into schedule execution but still need downstream allocation closure.',
-    },
-    {
-      label: 'Window Data Gaps',
-      count: filteredRows.filter(
-        (row) => !row.delivery.delivery_start || !row.delivery.delivery_end,
-      ).length,
-      detail: 'Rows that still need complete delivery-window data before schedulers can plan confidently.',
-    },
-    {
-      label: 'Actualization Gaps',
-      count: filteredRows.filter((row) => row.delivery.actualization_status !== 'ACTUALIZED').length,
-      detail: 'Rows that still need executed quantity and final delivery timing captured before downstream settlement is trusted.',
-    },
-  ]
-  const upcomingWindows = selectUpcomingSchedulingWindows(filteredOpenDeliveries)
+  const confirmationPendingCount = lifecycleScopedRows.filter(
+    (row) => row.delivery.confirmation_status !== 'CONFIRMED' && !isClosedSchedulingDelivery(row.delivery),
+  ).length
+  const allocationFollowUpCount = lifecycleScopedRows.filter(
+    (row) =>
+      !isClosedSchedulingDelivery(row.delivery) &&
+      SCHEDULED_NOMINATION_STATUSES.has(row.delivery.nomination_status) &&
+      !ALLOCATION_COMPLETE_STATUSES.has(row.delivery.allocation_status),
+  ).length
+  const selectedRowAllowedTransportModes = selectedRow
+    ? resolveAllowedTransportModes(
+        commodities.find((record) => record.code === selectedRow.delivery.commodity) ?? null,
+      )
+    : []
   const schedulingWorkbenchWorkboard = resolveOperationalWorkboardDefinition(
     'schedulingWorkbench',
     operationalResourceDescriptors,
   )
+  const workbenchFilterChips = [
+    selectedCommodityRecord?.name ?? null,
+    effectiveTransportFilter !== 'ALL' ? formatTransportModeLabel(effectiveTransportFilter) : null,
+    lifecycleFilter !== 'OPEN' ? activeLifecycleLabel : 'Open queue',
+    allocationFilter !== 'ALL' ? activeAllocationLabel : null,
+    shipmentFilter !== 'ALL' ? activeShipmentLabel : null,
+    appliedRailRouteCode ? `Route ${appliedRailRoute?.code ?? appliedRailRouteCode}` : null,
+  ].filter((value): value is string => Boolean(value))
+  const hasActiveBoardFilters =
+    effectiveSelectedCommodityCode !== 'ALL' ||
+    effectiveTransportFilter !== 'ALL' ||
+    lifecycleFilter !== 'OPEN' ||
+    allocationFilter !== 'ALL' ||
+    shipmentFilter !== 'ALL' ||
+    localRailRouteCode !== null
 
   function resetFilters() {
-    setModeFilter('ALL')
-    setViewPreset('DESK')
+    setLifecycleFilter('OPEN')
+    setAllocationFilter('ALL')
+    setShipmentFilter('ALL')
+    setSelectedCommodityCode('ALL')
+    setTransportFilter('ALL')
   }
 
   function handleRailRouteFocusChange(nextCode: string) {
@@ -528,8 +605,7 @@ export function SchedulingWorkspace({
                     <h3>Global Scheduler Filter</h3>
                   </div>
                   <p>
-                    Global nav filter “{globalFilter.trim()}” is also narrowing the scheduler queue. Saved views and the
-                    mode lens still apply inside this workspace.
+                    Global nav filter “{globalFilter.trim()}” is also narrowing the scheduler queue inside this workspace.
                   </p>
                 </div>
               </section>
@@ -541,80 +617,80 @@ export function SchedulingWorkspace({
         {
           id: 'scheduling-board',
           eyebrow: 'Scheduler',
-          title: 'Scheduler Command Deck',
-          description: 'A stage-first command surface for mixed-commodity schedule work, saved views, and queue health.',
+          title: 'Scheduling Board',
+          description: 'A tighter control surface for answering the desk’s key questions first: what is open, allocated, and shipped.',
           span: 'full',
           availableSpans: ['full', 'wide'],
           content:
-            openDeliveries.length > 0 ? (
+            scopedDeliveries.length > 0 ? (
               <div className="scheduler-board">
-                <OperationalWorkboardBanner workboard={schedulingWorkbenchWorkboard} />
-                <div className="scheduler-board-head">
-                  <div className="scheduler-board-copy">
-                    <strong>
-                      Showing {formatNumber(filteredRows.length, 0)} of {formatNumber(scopedOpenDeliveries.length, 0)} open rows
-                    </strong>
+                <div className="scheduler-board-hero">
+                  <div className="scheduler-board-hero-copy">
+                    <span className="eyebrow">Operator View</span>
+                    <strong>{formatNumber(openCount, 0)} open rows still need scheduling attention</strong>
                     <p>
-                      Work the mixed-commodity scheduler queue by saved view first, then narrow by mode when you need a
-                      commodity-specific slice.
+                      {formatNumber(filteredRows.length, 0)} visible rows from a {formatNumber(filteredQueueCount, 0)} row product slice. Start with blocked, unallocated, and unshipped work.
                     </p>
-                    {appliedRailRouteCode ? (
-                      <p>
-                        Rail route {appliedRailRoute?.code ?? appliedRailRouteCode}
-                        {appliedRailRoute ? ` · ${appliedRailRoute.name}` : ''} is currently in focus. Clear the
-                        route focus to return to the full scheduler board.
-                      </p>
-                    ) : null}
+                    <div className="shipment-card-meta scheduler-board-hero-meta">
+                      <span className="entity-chip entity-chip-soft">{activeCommodityLabel}</span>
+                      <span className="entity-chip entity-chip-soft">{activeTransportLabel}</span>
+                      {appliedRailRouteCode ? (
+                        <span className="entity-chip entity-chip-soft">
+                          Route {appliedRailRoute?.code ?? appliedRailRouteCode}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="scheduler-board-focus">
-                    <span>Active View</span>
-                    <strong>{activeViewOption.label}</strong>
-                    <small>{activeModeLabel}</small>
+                    <span>Visible Queue</span>
+                    <strong>{formatNumber(filteredRows.length, 0)}</strong>
+                    <small>
+                      {lifecycleFilter === 'OPEN'
+                        ? 'open rows in the current workbench'
+                        : `${activeLifecycleLabel.toLowerCase()} rows in the current workbench`}
+                    </small>
                   </div>
                 </div>
 
-                <div className="scheduler-filter-grid">
-                  <div className="scheduler-filter-group">
-                    <span className="scheduler-filter-label">Saved Views</span>
-                    <div className="scheduler-filter-row">
-                      {VIEW_PRESET_OPTIONS.map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          className={`scheduler-filter-button ${viewPreset === option.value ? 'is-active' : ''}`}
-                          aria-pressed={viewPreset === option.value}
-                          onClick={() => setViewPreset(option.value)}
-                        >
-                          {option.label} ({formatNumber(presetCounts[option.value], 0)})
-                        </button>
-                      ))}
+                <div className="scheduler-control-grid">
+                  <section className="scheduler-control-panel">
+                    <div className="scheduler-control-head">
+                      <div className="scheduler-section-copy">
+                        <strong>Scope the board</strong>
+                        <p>Set the product, mode, and route before working the queue.</p>
+                      </div>
                     </div>
-                    <p className="scheduler-filter-detail">{activeViewOption.detail}</p>
-                  </div>
-
-                  <div className="scheduler-filter-group">
-                    <span className="scheduler-filter-label">Mode Lens</span>
-                    <div className="scheduler-filter-row">
-                      {MODE_FILTER_OPTIONS.map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          className={`scheduler-filter-button ${modeFilter === option.value ? 'is-active' : ''}`}
-                          aria-pressed={modeFilter === option.value}
-                          onClick={() => setModeFilter(option.value)}
+                    <div className="scheduler-select-grid">
+                      <label className="field">
+                        <span>Commodity</span>
+                        <select
+                          className="control control-compact"
+                          value={effectiveSelectedCommodityCode}
+                          onChange={(event) => setSelectedCommodityCode(event.target.value)}
                         >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="scheduler-filter-detail">
-                      Keep mode family as a secondary lens while the main queue stays organized by work stage.
-                    </p>
-                  </div>
-
-                  <div className="scheduler-filter-group">
-                    <span className="scheduler-filter-label">Rail Route Focus</span>
-                    <div className="scheduler-filter-row">
+                          <option value="ALL">All Products</option>
+                          {commodityFilterOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Transport</span>
+                        <select
+                          className="control control-compact"
+                          value={effectiveTransportFilter}
+                          onChange={(event) => setTransportFilter(event.target.value as SchedulingTransportFilter)}
+                        >
+                          <option value="ALL">All Modes</option>
+                          {transportFilterOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {formatTransportModeLabel(option)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       <label className="field">
                         <span>Rail Route</span>
                         <select
@@ -632,47 +708,130 @@ export function SchedulingWorkspace({
                           ))}
                         </select>
                       </label>
-                      {appliedRailRouteCode ? (
-                        <button type="button" className="button button-ghost" onClick={clearRailRouteFocus}>
-                          Clear Route
-                        </button>
-                      ) : null}
                     </div>
                     <p className="scheduler-filter-detail">
-                      {railRouteFilterOptions.length > 0
-                        ? 'Use a governed rail route to narrow the scheduler board by lane without relying on text search.'
-                        : 'No governed rail routes are loaded yet for native scheduler focus.'}
+                      {selectedCommodityRecord && selectedCommodityRecord.allowed_transport_modes?.length
+                        ? `Transport options are constrained by the ${selectedCommodityRecord.name} commodity master.`
+                        : 'Choose a product first when you want transport choices constrained to that product.'}
                     </p>
-                  </div>
+                    {appliedRailRouteCode ? (
+                      <p className="scheduler-filter-detail">
+                        Rail route {appliedRailRoute?.code ?? appliedRailRouteCode}
+                        {appliedRailRoute ? ` · ${appliedRailRoute.name}` : ''} is currently in focus. Clear the route focus to return to the full scheduler board.
+                      </p>
+                    ) : railRouteFilterOptions.length === 0 ? (
+                      <p className="scheduler-filter-detail">
+                        No governed rail routes are loaded yet for native scheduler focus.
+                      </p>
+                    ) : (
+                      <p className="scheduler-filter-detail">
+                        Use a governed rail route when you need lane-specific focus without relying on text search.
+                      </p>
+                    )}
+                  </section>
+
+                  <section className="scheduler-control-panel">
+                    <div className="scheduler-control-head">
+                      <div className="scheduler-section-copy">
+                        <strong>Filter by operational state</strong>
+                        <p>Isolate the work that still needs scheduling decisions.</p>
+                      </div>
+                      <div className="scheduler-filter-row">
+                        {appliedRailRouteCode ? (
+                          <button type="button" className="button button-ghost" onClick={clearRailRouteFocus}>
+                            Clear Route
+                          </button>
+                        ) : null}
+                        {hasActiveBoardFilters ? (
+                          <button type="button" className="button button-secondary" onClick={resetFilters}>
+                            Reset View
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="scheduler-state-filter-stack">
+                      <div className="scheduler-state-filter-group">
+                        <span className="scheduler-filter-label">Open / Closed</span>
+                        <div className="scheduler-filter-row">
+                          {LIFECYCLE_FILTER_OPTIONS.map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              className={`scheduler-filter-button ${lifecycleFilter === option.value ? 'is-active' : ''}`}
+                              aria-pressed={lifecycleFilter === option.value}
+                              onClick={() => setLifecycleFilter(option.value)}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="scheduler-state-filter-group">
+                        <span className="scheduler-filter-label">Allocation</span>
+                        <div className="scheduler-filter-row">
+                          {ALLOCATION_FILTER_OPTIONS.map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              className={`scheduler-filter-button ${allocationFilter === option.value ? 'is-active' : ''}`}
+                              aria-pressed={allocationFilter === option.value}
+                              onClick={() => setAllocationFilter(option.value)}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="scheduler-state-filter-group">
+                        <span className="scheduler-filter-label">Shipment</span>
+                        <div className="scheduler-filter-row">
+                          {SHIPMENT_FILTER_OPTIONS.map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              className={`scheduler-filter-button ${shipmentFilter === option.value ? 'is-active' : ''}`}
+                              aria-pressed={shipmentFilter === option.value}
+                              onClick={() => setShipmentFilter(option.value)}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <p className="scheduler-filter-detail">
+                      Open, allocation, and shipment states stay visible here so operators do not have to scan every row to find the real exceptions.
+                    </p>
+                  </section>
                 </div>
 
-                {filteredRows.length > 0 ? (
+                {filteredQueueCount > 0 ? (
                   <div className="scheduler-kpi-grid">
                     <article className="scheduler-kpi-card scheduler-kpi-card-open">
-                      <span>Visible Queue</span>
-                      <strong>{formatNumber(filteredRows.length, 0)}</strong>
-                      <p>Rows currently in view after saved-view and mode filters are applied.</p>
-                    </article>
-                    <article className="scheduler-kpi-card scheduler-kpi-card-window">
-                      <span>Hot Window</span>
-                      <strong>{formatNumber(dueSoonRows.length, 0)}</strong>
-                      <p>Rows whose delivery window is already live or inside the next 72 hours.</p>
+                      <span>Open</span>
+                      <strong>{formatNumber(openCount, 0)}</strong>
+                      <small>{formatNumber(closedCount, 0)} closed</small>
                     </article>
                     <article className="scheduler-kpi-card scheduler-kpi-card-ready">
-                      <span>Ready Now</span>
-                      <strong>{formatNumber(readyRows.length, 0)}</strong>
-                      <p>Rows ready for scheduler action without waiting on new upstream cleanup.</p>
+                      <span>Unallocated</span>
+                      <strong>{formatNumber(unallocatedCount, 0)}</strong>
+                      <small>{formatNumber(allocatedCount, 0)} allocated</small>
+                    </article>
+                    <article className="scheduler-kpi-card scheduler-kpi-card-window">
+                      <span>Unshipped</span>
+                      <strong>{formatNumber(unshippedCount, 0)}</strong>
+                      <small>{formatNumber(shippedCount, 0)} shipped</small>
                     </article>
                     <article className="scheduler-kpi-card scheduler-kpi-card-risk">
                       <span>Blocked</span>
                       <strong>{formatNumber(blockedRows.length, 0)}</strong>
-                      <p>Rows currently blocked by data quality, confirmation, or workflow exception gaps.</p>
+                      <small>{formatNumber(dueSoonRows.length, 0)} in hot window</small>
                     </article>
                   </div>
                 ) : (
                   <div className="scheduler-filter-empty surface">
                     <strong>No rows match the current scheduler filters</strong>
-                    <p>Clear the current saved view or mode lens to return to the broader scheduler queue.</p>
+                    <p>Clear the current product or lifecycle filters to return to the broader scheduler queue.</p>
                     <div className="stack-actions">
                       <button type="button" className="button button-secondary" onClick={resetFilters}>
                         Clear Filters
@@ -704,18 +863,14 @@ export function SchedulingWorkspace({
               isEmpty={filteredRows.length === 0}
               summary={
                 filteredRows.length > 0 ? (
-                  <div className="shipment-card-actions">
-                    <span>{formatNumber(filteredRows.length, 0)} rows in the active scheduler workbench</span>
+                  <div className="scheduler-workbench-summary">
+                    <strong>{formatNumber(filteredRows.length, 0)} rows in the active scheduler workbench</strong>
                     <div className="shipment-card-meta">
-                      <span className="entity-chip entity-chip-soft">
-                        {activeViewOption.label} • {activeModeLabel}
-                      </span>
-                      <span className="entity-chip entity-chip-soft">
-                        {formatNumber(blockedRows.length, 0)} blocked
-                      </span>
-                      <span className="entity-chip entity-chip-soft">
-                        {formatNumber(dueSoonRows.length, 0)} hot window
-                      </span>
+                      {workbenchFilterChips.map((chip) => (
+                        <span key={chip} className="entity-chip entity-chip-soft">
+                          {chip}
+                        </span>
+                      ))}
                     </div>
                   </div>
                 ) : (
@@ -731,29 +886,62 @@ export function SchedulingWorkspace({
                           <div className="scheduler-detail-copy">
                             <strong>{tradeReferenceLabel(selectedRow.delivery)}</strong>
                             <span>
-                              {selectedRow.delivery.commodity} • {selectedRow.delivery.counterparty ?? 'Counterparty TBD'} •{' '}
-                              {selectedRow.delivery.book}
+                              {selectedRow.delivery.commodity} • {selectedRow.delivery.counterparty ?? 'Counterparty TBD'} • {selectedRow.delivery.book}
                             </span>
                           </div>
-                          <span className={`status-pill status-pill-${STAGE_META[selectedRow.stage].tone}`}>
-                            {STAGE_META[selectedRow.stage].label}
+                          <span className={`status-pill status-pill-${SECTION_META[sectionKeyForRow(selectedRow)].tone}`}>
+                            {SECTION_META[sectionKeyForRow(selectedRow)].label}
                           </span>
                         </div>
 
+                        <div className="scheduler-detail-context">
+                          <span>{deliveryRouteLabel(selectedRow.delivery)}</span>
+                          <span>{deliveryWindowLabel(selectedRow.delivery, formatDateOnly)}</span>
+                          <span>{MODE_LABELS[selectedRow.delivery.mode_family]}</span>
+                        </div>
+
                         <div className="shipment-card-meta">
-                          <span className="entity-chip entity-chip-soft">{MODE_LABELS[selectedRow.delivery.mode_family]}</span>
-                          <span className="entity-chip entity-chip-soft">
-                            Confirmation {selectedRow.delivery.confirmation_status}
+                          <span className="entity-chip entity-chip-soft">{formatTransportModeLabel(selectedRow.delivery.transport_mode)}</span>
+                          <span className="entity-chip entity-chip-soft">{formatCommodityClass(selectedRow.delivery.commodity_class)}</span>
+                          <span className={`scheduler-window-band scheduler-window-band-${WINDOW_BAND_META[selectedRow.windowBand].className}`}>
+                            {WINDOW_BAND_META[selectedRow.windowBand].label}
                           </span>
-                          <span className="entity-chip entity-chip-soft">
-                            Nomination {selectedRow.delivery.nomination_status}
-                          </span>
-                          <span className="entity-chip entity-chip-soft">
-                            Allocation {selectedRow.delivery.allocation_status}
-                          </span>
-                          <span className="entity-chip entity-chip-soft">
-                            Actualization {selectedRow.delivery.actualization_status.replaceAll('_', ' ')}
-                          </span>
+                        </div>
+
+                        <article className="scheduler-next-step">
+                          <span>Next Step</span>
+                          <strong>{nextActionText(selectedRow)}</strong>
+                          <p>
+                            {selectedRow.dueAt
+                              ? `Due ${formatDateOnly(selectedRow.dueAt)}`
+                              : 'No due date has been set'} • {schedulerOwnerLabel(selectedRow)}
+                          </p>
+                        </article>
+
+                        <div className="scheduler-state-ledger">
+                          <article className={`scheduler-state-ledger-card scheduler-state-ledger-card-${lifecycleStateTone(selectedRow.delivery)}`}>
+                            <span>Lifecycle</span>
+                            <strong>{lifecycleStateLabel(selectedRow.delivery)}</strong>
+                            <small>{SECTION_META[sectionKeyForRow(selectedRow)].label} queue state</small>
+                          </article>
+                          <article className={`scheduler-state-ledger-card scheduler-state-ledger-card-${allocationStateTone(selectedRow.delivery)}`}>
+                            <span>Allocation</span>
+                            <strong>{allocationStateLabel(selectedRow.delivery)}</strong>
+                            <small>
+                              {isAllocatedSchedulingDelivery(selectedRow.delivery)
+                                ? 'Allocation coverage is already in place.'
+                                : 'This row still needs allocation follow-through.'}
+                            </small>
+                          </article>
+                          <article className={`scheduler-state-ledger-card scheduler-state-ledger-card-${shipmentStateTone(selectedRow.delivery)}`}>
+                            <span>Shipment</span>
+                            <strong>{shipmentStateLabel(selectedRow.delivery)}</strong>
+                            <small>
+                              {isShippedSchedulingDelivery(selectedRow.delivery)
+                                ? 'Movement execution is already reflected as shipped.'
+                                : 'Movement execution still needs to be completed.'}
+                            </small>
+                          </article>
                         </div>
 
                         <div className="scheduler-detail-grid">
@@ -763,16 +951,7 @@ export function SchedulingWorkspace({
                             <p>{WINDOW_BAND_META[selectedRow.windowBand].description}</p>
                           </article>
                           <article className="scheduler-detail-stat">
-                            <span>Next Action</span>
-                            <strong>{nextActionText(selectedRow)}</strong>
-                            <p>
-                              {selectedRow.dueAt
-                                ? `Workflow due ${formatDateOnly(selectedRow.dueAt)}`
-                                : 'No due date has been set on the current workflow path.'}
-                            </p>
-                          </article>
-                          <article className="scheduler-detail-stat">
-                            <span>Owner</span>
+                            <span>Workflow Owner</span>
                             <strong>{schedulerOwnerLabel(selectedRow)}</strong>
                             <p>
                               {selectedRow.openWorkflowItems.length > 0
@@ -781,11 +960,19 @@ export function SchedulingWorkspace({
                             </p>
                           </article>
                           <article className="scheduler-detail-stat">
-                            <span>Coverage</span>
-                            <strong>{matchingRatio}%</strong>
+                            <span>Transport Guardrail</span>
+                            <strong>{formatTransportModeLabel(selectedRow.delivery.transport_mode)}</strong>
                             <p>
-                              of the {appliedRailRouteCode ? 'focused rail route queue' : 'full scheduler queue'} matches
-                              the active view.
+                              {selectedRowAllowedTransportModes.length > 0
+                                ? `Allowed: ${selectedRowAllowedTransportModes.map(formatTransportModeLabel).join(', ')}`
+                                : 'No product-specific transport constraint is loaded for this row.'}
+                            </p>
+                          </article>
+                          <article className="scheduler-detail-stat">
+                            <span>Counterparty</span>
+                            <strong>{selectedRow.delivery.counterparty ?? 'Counterparty TBD'}</strong>
+                            <p>
+                              {selectedRow.delivery.book} • {formatCommodityClass(selectedRow.delivery.commodity_class)}
                             </p>
                           </article>
                         </div>
@@ -809,7 +996,9 @@ export function SchedulingWorkspace({
                         )}
 
                         <div className="shipment-card-actions">
-                          <span>{MODE_DESCRIPTIONS[selectedRow.delivery.mode_family]}</span>
+                          <span>
+                            Slice watchlist: {formatNumber(unassignedRows.length, 0)} unassigned, {formatNumber(confirmationPendingCount, 0)} confirmation gap(s), and {formatNumber(allocationFollowUpCount, 0)} allocation follow-up row(s).
+                          </span>
                           <button
                             type="button"
                             className="button button-ghost"
@@ -820,37 +1009,37 @@ export function SchedulingWorkspace({
                         </div>
                       </div>
 
-                    {renderOperationalActionPanel('deliveryActualization', operationalResourceDescriptors, {
-                      authSession,
-                      delivery: selectedRow.delivery,
-                      saveError: actualizationMutationError,
-                      savingDeliveryId: actualizationMutationPendingDeliveryId,
-                      formatDate,
-                      formatNumber,
-                      onSave: onSaveActualization,
-                    })}
+                      {renderOperationalActionPanel('deliveryActualization', operationalResourceDescriptors, {
+                        authSession,
+                        delivery: selectedRow.delivery,
+                        saveError: actualizationMutationError,
+                        savingDeliveryId: actualizationMutationPendingDeliveryId,
+                        formatDate,
+                        formatNumber,
+                        onSave: onSaveActualization,
+                      })}
 
-                    {renderOperationalActionPanel('schedulerWorkflow', operationalResourceDescriptors, {
-                      authSession,
-                      delivery: selectedRow.delivery,
-                      items: selectedRow.openWorkflowItems,
-                      creationPendingTradeId: workflowCreationPendingTradeId,
-                      savingItemId: workflowMutationPendingId,
-                      saveError: workflowMutationError,
-                      formatDate,
-                      formatDateOnly,
-                      onCreateItem: onCreateWorkflowItem,
-                      onOpenTrade,
-                      onSaveItem: onSaveWorkflowItem,
-                    })}
-                  </div>
-                ) : (
-                  <div className="empty-state">
-                    <strong>No row selected</strong>
-                    <p>Choose a row from the stage queue to inspect its scheduler detail and workflow actions.</p>
-                  </div>
-                )
-              ) : undefined
+                      {renderOperationalActionPanel('schedulerWorkflow', operationalResourceDescriptors, {
+                        authSession,
+                        delivery: selectedRow.delivery,
+                        items: selectedRow.openWorkflowItems,
+                        creationPendingTradeId: workflowCreationPendingTradeId,
+                        savingItemId: workflowMutationPendingId,
+                        saveError: workflowMutationError,
+                        formatDate,
+                        formatDateOnly,
+                        onCreateItem: onCreateWorkflowItem,
+                        onOpenTrade,
+                        onSaveItem: onSaveWorkflowItem,
+                      })}
+                    </div>
+                  ) : (
+                    <div className="empty-state">
+                      <strong>No row selected</strong>
+                      <p>Choose a row from the queue to inspect its scheduler detail and workflow actions.</p>
+                    </div>
+                  )
+                ) : undefined
               }
               emptyStateTitle="No scheduler rows in this view"
               emptyStateDetail="Clear the current filters to reopen the broader scheduler workbench."
@@ -858,13 +1047,13 @@ export function SchedulingWorkspace({
               {filteredRows.length > 0 ? (
                 <div className="scheduler-stage-stack">
                   {stageSections.map((section) => (
-                    <section key={section.stage} className="scheduler-stage-section">
+                    <section key={section.section} className="scheduler-stage-section">
                       <div className="scheduler-stage-head">
                         <div className="scheduler-stage-copy">
-                          <strong>{STAGE_META[section.stage].label}</strong>
-                          <p>{STAGE_META[section.stage].description}</p>
+                          <strong>{SECTION_META[section.section].label}</strong>
+                          <p>{SECTION_META[section.section].description}</p>
                         </div>
-                        <span className={`status-pill status-pill-${STAGE_META[section.stage].tone}`}>
+                        <span className={`status-pill status-pill-${SECTION_META[section.section].tone}`}>
                           {formatNumber(section.rows.length, 0)}
                         </span>
                       </div>
@@ -872,6 +1061,7 @@ export function SchedulingWorkspace({
                       <div className="scheduler-stage-list">
                         {section.rows.map((row) => {
                           const band = WINDOW_BAND_META[row.windowBand]
+                          const rowSectionKey = sectionKeyForRow(row)
                           const isSelected = selectedRow?.delivery.delivery_id === row.delivery.delivery_id
 
                           return (
@@ -886,25 +1076,29 @@ export function SchedulingWorkspace({
                                 <div className="scheduler-queue-card-copy">
                                   <strong>{tradeReferenceLabel(row.delivery)}</strong>
                                   <span>
-                                    {row.delivery.commodity} • {row.delivery.location_code ?? 'Location TBD'} •{' '}
-                                    {MODE_LABELS[row.delivery.mode_family]}
+                                    {row.delivery.commodity} • {deliveryRouteLabel(row.delivery)}
                                   </span>
                                 </div>
-                                <span className={`status-pill status-pill-${STAGE_META[row.stage].tone}`}>
-                                  {STAGE_META[row.stage].label}
+                                <span className={`status-pill status-pill-${SECTION_META[rowSectionKey].tone}`}>
+                                  {SECTION_META[rowSectionKey].label}
                                 </span>
                               </div>
 
                               <div className="shipment-card-meta">
-                                <span className="entity-chip entity-chip-soft">
-                                  {formatCommodityClass(row.delivery.commodity_class)}
+                                <span className={`scheduler-window-band scheduler-window-band-${band.className}`}>{band.label}</span>
+                                <span className="entity-chip entity-chip-soft">{formatTransportModeLabel(row.delivery.transport_mode)}</span>
+                                <span className="entity-chip entity-chip-soft">{MODE_LABELS[row.delivery.mode_family]}</span>
+                              </div>
+
+                              <div className="scheduler-queue-state-strip">
+                                <span className={`scheduler-state-token scheduler-state-token-${lifecycleStateTone(row.delivery)}`}>
+                                  {lifecycleStateLabel(row.delivery)}
                                 </span>
-                                <span className={`scheduler-window-band scheduler-window-band-${band.className}`}>
-                                  {band.label}
+                                <span className={`scheduler-state-token scheduler-state-token-${allocationStateTone(row.delivery)}`}>
+                                  {allocationStateLabel(row.delivery)}
                                 </span>
-                                <span className="entity-chip entity-chip-soft">{nextActionText(row)}</span>
-                                <span className="entity-chip entity-chip-soft">
-                                  {schedulerOwnerLabel(row)}
+                                <span className={`scheduler-state-token scheduler-state-token-${shipmentStateTone(row.delivery)}`}>
+                                  {shipmentStateLabel(row.delivery)}
                                 </span>
                               </div>
 
@@ -920,12 +1114,13 @@ export function SchedulingWorkspace({
 
                               <div className="scheduler-card-footer">
                                 <div className="scheduler-card-footer-copy">
-                                  <span>{deliveryWindowLabel(row.delivery, formatDateOnly)}</span>
+                                  <span>{nextActionText(row)}</span>
                                   <small>
-                                    {row.dueAt ? `Workflow due ${formatDateOnly(row.dueAt)}` : 'No workflow due date'}
+                                    {deliveryWindowLabel(row.delivery, formatDateOnly)}
+                                    {row.dueAt ? ` • due ${formatDateOnly(row.dueAt)}` : ''}
                                   </small>
                                 </div>
-                                <small>Updated {formatDate(row.delivery.last_updated_at)}</small>
+                                <small>{schedulerOwnerLabel(row)}</small>
                               </div>
                             </button>
                           )
@@ -936,180 +1131,6 @@ export function SchedulingWorkspace({
                 </div>
               ) : null}
             </OperationalBoardController>
-          ),
-        },
-        {
-          id: 'scheduling-lanes',
-          eyebrow: 'Stages',
-          title: 'Stage Coverage',
-          description: 'Use stage coverage to pivot the scheduler workbench without losing the secondary mode lens.',
-          span: 'half',
-          availableSpans: ['full', 'wide', 'half'],
-          content: modeScopedRows.length > 0 ? (
-            <div className="scheduler-lane-stack">
-              <div className="scheduler-section-banner scheduler-section-banner-compact">
-                <div className="scheduler-section-copy">
-                  <strong>Stage lanes stay stable while mode acts as a secondary filter</strong>
-                  <p>Click a stage to jump the workbench straight into that slice of the scheduler queue.</p>
-                </div>
-                {viewPreset !== 'DESK' ? (
-                  <button type="button" className="button button-ghost" onClick={() => setViewPreset('DESK')}>
-                    Show Full Desk
-                  </button>
-                ) : null}
-              </div>
-
-              <div className="scheduler-lane-grid scheduler-stage-lane-grid">
-                {stageLanes.map((lane) => (
-                  <button
-                    key={lane.stage}
-                    type="button"
-                    className={`scheduler-lane-card ${lane.isActive ? 'is-active' : ''}`}
-                    onClick={() =>
-                      setViewPreset((current) =>
-                        current === STAGE_TO_VIEW_PRESET[lane.stage] ? 'DESK' : STAGE_TO_VIEW_PRESET[lane.stage],
-                      )
-                    }
-                    aria-pressed={lane.isActive}
-                  >
-                    <div className="scheduler-lane-head">
-                      <div className="scheduler-lane-copy">
-                        <span>{STAGE_META[lane.stage].label}</span>
-                        <strong>{formatNumber(lane.count, 0)}</strong>
-                      </div>
-                      <span className={`status-pill status-pill-${STAGE_META[lane.stage].tone}`}>
-                        {formatNumber(lane.dueSoonCount, 0)} hot
-                      </span>
-                    </div>
-
-                    <div className="scheduler-lane-meta">
-                      <span>{activeModeLabel}</span>
-                      <span>{lane.nextRow ? schedulerOwnerLabel(lane.nextRow) : 'No owner yet'}</span>
-                      <span>
-                        {lane.nextRow ? deliveryWindowLabel(lane.nextRow.delivery, formatDateOnly) : 'No dated row yet'}
-                      </span>
-                    </div>
-
-                    <div className="scheduler-lane-meter" aria-hidden="true">
-                      <span
-                        className="scheduler-lane-meter-fill"
-                        style={{
-                          width: `${modeScopedRows.length > 0 ? Math.round((lane.count / modeScopedRows.length) * 100) : 0}%`,
-                        }}
-                      />
-                    </div>
-
-                    <p>{STAGE_META[lane.stage].description}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="empty-state">
-              <strong>No stage coverage in this view</strong>
-              <p>Clear the current filters to rebuild the stage lanes.</p>
-            </div>
-          ),
-        },
-        {
-          id: 'scheduling-windows',
-          eyebrow: 'Windows',
-          title: upcomingWindows.length > 0 ? 'Delivery Windows and Date Gaps' : 'No delivery windows yet',
-          description: 'A time-aware board for seeing what is live, near, and still missing usable delivery dates.',
-          span: 'half',
-          availableSpans: ['full', 'wide', 'half'],
-          content: filteredOpenDeliveries.length > 0 ? (
-            upcomingWindows.length > 0 ? (
-              <div className="scheduler-window-list">
-                {upcomingWindows.map((delivery) => {
-                  const band = WINDOW_BAND_META[windowBandForDelivery(delivery, now)]
-
-                  return (
-                    <article
-                      key={delivery.delivery_id}
-                      className={`scheduler-window-card scheduler-window-card-${band.className}`}
-                    >
-                      <div className="scheduler-window-head">
-                        <div className="scheduler-window-copy">
-                          <strong>{tradeReferenceLabel(delivery)}</strong>
-                          <span>{deliveryWindowLabel(delivery, formatDateOnly)}</span>
-                        </div>
-                        <span className={`scheduler-window-band scheduler-window-band-${band.className}`}>{band.label}</span>
-                      </div>
-
-                      <div className="scheduler-window-meta">
-                        <span className="entity-chip entity-chip-soft">{MODE_LABELS[delivery.mode_family]}</span>
-                        <span className="entity-chip entity-chip-soft">{delivery.location_code ?? 'Location TBD'}</span>
-                        <span className="entity-chip entity-chip-soft">
-                          Nomination {delivery.nomination_status}
-                        </span>
-                      </div>
-
-                      <p className="scheduler-window-description">{band.description}</p>
-
-                      <div className="scheduler-window-footer">
-                        <div className="scheduler-card-footer-copy">
-                          <span>{delivery.counterparty ?? 'Counterparty TBD'}</span>
-                          <small>Updated {formatDate(delivery.last_updated_at)}</small>
-                        </div>
-                        <button type="button" className="button button-ghost" onClick={() => onOpenTrade(delivery.trade_id)}>
-                          Open Trade
-                        </button>
-                      </div>
-                    </article>
-                  )
-                })}
-              </div>
-            ) : (
-              <div className="empty-state">
-                <strong>No dated windows in this view</strong>
-                <p>The current filter set only contains rows without a usable delivery start date.</p>
-              </div>
-            )
-          ) : (
-            <div className="empty-state">
-              <strong>No matching scheduler rows</strong>
-              <p>Clear the current filters to restore the broader window board.</p>
-            </div>
-          ),
-        },
-        {
-          id: 'scheduling-handoffs',
-          eyebrow: 'Dependencies',
-          title: 'Scheduler Handoffs and Data Gaps',
-          description: 'Keep the next operational blockers visible while the desk works the stage queue.',
-          span: 'full',
-          availableSpans: ['full', 'wide', 'half'],
-          content: filteredRows.length > 0 ? (
-            <div className="scheduler-handoff-grid">
-              {handoffRows.map((row) => {
-                const ratio =
-                  filteredRows.length > 0
-                    ? Math.min(100, Math.round((row.count / filteredRows.length) * 100))
-                    : 0
-
-                return (
-                  <article key={row.label} className="scheduler-handoff-card">
-                    <div className="scheduler-handoff-head">
-                      <div>
-                        <span>{row.label}</span>
-                        <strong>{formatNumber(row.count, 0)}</strong>
-                      </div>
-                      <small>{ratio}%</small>
-                    </div>
-                    <p>{row.detail}</p>
-                    <div className="scheduler-handoff-meter" aria-hidden="true">
-                      <span className="scheduler-handoff-meter-fill" style={{ width: `${ratio}%` }} />
-                    </div>
-                  </article>
-                )
-              })}
-            </div>
-          ) : (
-            <div className="empty-state">
-              <strong>No scheduler dependencies in this view</strong>
-              <p>Once the current filters include visible rows again, the dependency board will repopulate.</p>
-            </div>
           ),
         },
       ]}

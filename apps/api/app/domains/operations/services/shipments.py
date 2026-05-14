@@ -10,6 +10,15 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.reference_data.services.commodity_transport_modes import (
+    default_allowed_transport_modes,
+)
+from apps.api.app.domains.reference_data.services.commodity_transport_modes import (
+    is_transport_mode_allowed,
+)
+from apps.api.app.domains.reference_data.services.commodity_transport_modes import (
+    normalize_allowed_transport_modes,
+)
 from apps.api.app.domains.reference_data.services.records import normalize_code
 from apps.api.app.domains.operations.services.actualizations import (
     build_delivery_actualization_projection,
@@ -64,6 +73,7 @@ from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.delivery_power_detail import DeliveryPowerDetail
 from apps.api.app.models.delivery_rail_detail import DeliveryRailDetail
 from apps.api.app.models.delivery_event import DeliveryEvent
+from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_rail_line import ReferenceRailLine
 from apps.api.app.models.reference_rail_route import ReferenceRailRoute
 from apps.api.app.models.trade import Trade
@@ -487,6 +497,61 @@ def _validate_transport_mode(value: object | None) -> TransportMode:
         raise ValueError(
             f"Transport mode '{normalized or value}' is invalid. Expected one of: {valid_values}."
         ) from exc
+
+
+def _allowed_transport_modes_for_delivery(
+    db: Session,
+    *,
+    commodity: str | None,
+    commodity_class: str | None,
+) -> list[str]:
+    normalized_commodity = normalize_code(commodity) if commodity else ""
+    reference_commodity = (
+        db.execute(
+            select(ReferenceCommodity).where(ReferenceCommodity.code == normalized_commodity)
+        )
+        .scalars()
+        .first()
+        if normalized_commodity
+        else None
+    )
+    if reference_commodity is not None:
+        return normalize_allowed_transport_modes(
+            reference_commodity.allowed_transport_modes,
+            commodity_code=reference_commodity.code,
+            commodity_class=reference_commodity.commodity_class,
+        )
+
+    return default_allowed_transport_modes(
+        commodity_code=commodity,
+        commodity_class=commodity_class,
+    )
+
+
+def _require_allowed_transport_mode(
+    db: Session,
+    *,
+    commodity: str | None,
+    commodity_class: str | None,
+    transport_mode: TransportMode,
+) -> None:
+    allowed_transport_modes = _allowed_transport_modes_for_delivery(
+        db,
+        commodity=commodity,
+        commodity_class=commodity_class,
+    )
+    if is_transport_mode_allowed(
+        transport_mode,
+        allowed_transport_modes=allowed_transport_modes,
+    ):
+        return
+
+    allowed_modes_label = ", ".join(allowed_transport_modes)
+    commodity_label = normalize_code(commodity) if commodity else commodity_class or "this product"
+    raise ValueError(
+        f"Transport mode '{transport_mode.value}' is not allowed for {commodity_label}. "
+        f"Allowed modes: {allowed_modes_label}."
+    )
 
 
 def _normalize_optional_positive_int(value: object | None, *, label: str) -> int | None:
@@ -2655,6 +2720,12 @@ def update_delivery_obligation(
 
     if "transport_mode" in raw_changes:
         transport_mode = _validate_transport_mode(raw_changes.get("transport_mode"))
+        _require_allowed_transport_mode(
+            db,
+            commodity=delivery.commodity,
+            commodity_class=delivery.commodity_class,
+            transport_mode=transport_mode,
+        )
         next_mode_family = _mode_family_for_transport_mode(transport_mode)
         next_transport_mode_source = (
             TransportModeSource.UNSPECIFIED

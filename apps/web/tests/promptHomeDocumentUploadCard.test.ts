@@ -195,6 +195,10 @@ test('document history renders as a collapsed subcard inside the home upload car
     }),
   )
 
+  assert.match(
+    markup,
+    /<div class="prompt-home-document-upload-card-copy"><span class="eyebrow">Documents<\/span><strong>Upload documents<\/strong><\/div>/,
+  )
   assert.match(markup, /<strong>Document history<\/strong>/)
   assert.match(markup, /2 documents available in the work queue\./)
   assert.match(

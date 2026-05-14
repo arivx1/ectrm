@@ -14,7 +14,7 @@ import {
   type AppRouteHandoff,
 } from '../../shared/appRouteHandoff'
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
-import type { DeliveryRecord } from '../../shared/models'
+import type { DeliveryRecord, ReferenceRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
@@ -28,6 +28,7 @@ type DeliveryWorkspaceProps = {
   authSession: StoredAuthSession | null
   routeHandoff: AppRouteHandoff | null
   globalFilter: string
+  commodities: ReferenceRecord[]
   deliveries: DeliveryRecord[]
   operationalResourceDescriptors: OperationalResourceDescriptor[]
   formatCommodityClass: (value: string) => string
@@ -203,6 +204,7 @@ export function DeliveryWorkspace({
   authSession,
   routeHandoff,
   globalFilter,
+  commodities,
   deliveries,
   operationalResourceDescriptors,
   formatCommodityClass,
@@ -556,6 +558,7 @@ export function DeliveryWorkspace({
                   selectedDelivery ? (
                     renderOperationalActionPanel('deliveryControl', operationalResourceDescriptors, {
                       authSession,
+                      commodities,
                       delivery: selectedDelivery,
                       saveError: deliveryMutationError,
                       savingDeliveryId: deliveryMutationPendingId,

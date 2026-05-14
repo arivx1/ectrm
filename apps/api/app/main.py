@@ -134,6 +134,12 @@ def _attach_correlation_header(request: Request, response: Response) -> Response
     correlation_id = _correlation_id_for_request(request)
     if correlation_id:
         response.headers["x-correlation-id"] = correlation_id
+    origin = request.headers.get("origin")
+    if settings.is_cors_origin_allowed(origin):
+        response.headers["access-control-allow-origin"] = origin
+        response.headers["access-control-allow-credentials"] = "true"
+        response.headers["access-control-expose-headers"] = "x-correlation-id"
+        response.headers["vary"] = "Origin"
     return response
 
 

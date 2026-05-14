@@ -71,6 +71,56 @@ async function signOutFromPromptHome(page: Page): Promise<void> {
   ).toBeVisible();
 }
 
+async function installSpeechSynthesisRecorder(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const speechLog: string[] = [];
+
+    class MockSpeechSynthesisUtterance {
+      text: string;
+      lang = "en-US";
+      onend: (() => void) | null = null;
+      onerror: ((event: { error?: string | null }) => void) | null = null;
+
+      constructor(text: string) {
+        this.text = text;
+      }
+    }
+
+    Object.defineProperty(window, "__promptHomeSpeechLog", {
+      configurable: true,
+      value: speechLog,
+      writable: true,
+    });
+    Object.defineProperty(window, "SpeechSynthesisUtterance", {
+      configurable: true,
+      value: MockSpeechSynthesisUtterance,
+      writable: true,
+    });
+    Object.defineProperty(window, "speechSynthesis", {
+      configurable: true,
+      value: {
+        cancel() {},
+        speak(utterance: MockSpeechSynthesisUtterance) {
+          speechLog.push(utterance.text);
+          window.setTimeout(() => {
+            utterance.onend?.();
+          }, 0);
+        },
+      },
+      writable: true,
+    });
+  });
+}
+
+async function readPromptHomeSpeechLog(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const promptHomeWindow = window as Window & {
+      __promptHomeSpeechLog?: string[];
+    };
+    return [...(promptHomeWindow.__promptHomeSpeechLog ?? [])];
+  });
+}
+
 async function expectLocatorsOnSameLine(
   first: Locator,
   second: Locator,
@@ -502,27 +552,72 @@ test("prompt home prompt card expands and collapses independently", async ({
     );
     const operatorPrompt = page.getByLabel("Operator prompt");
     const quickPrompts = page.locator(".prompt-home-quick-prompts");
+    const currentPromptThread = promptCard.locator(".prompt-home-chat");
 
     await expect(promptCard).toContainText("Ask the desk assistant");
     await expect(promptCardToggle).toContainText("Hide card");
     await expect(promptCardBody).toBeVisible();
     await expect(operatorPrompt).toBeVisible();
     await expect(quickPrompts).toBeVisible();
+    await expect(currentPromptThread).toBeVisible();
 
     await promptCardToggle.click();
     await expect(promptCardToggle).toContainText("Show card");
     await expect(promptCardBody).toBeHidden();
     await expect(operatorPrompt).toBeHidden();
     await expect(quickPrompts).toBeHidden();
-    await expect(promptCard).toContainText(
-      "Ask what needs attention, where to go next, or how to handle a trade, queue, exposure, invoice, or report question.",
-    );
+    await expect(currentPromptThread).toBeHidden();
 
     await promptCardToggle.click();
     await expect(promptCardToggle).toContainText("Hide card");
     await expect(promptCardBody).toBeVisible();
     await expect(operatorPrompt).toBeVisible();
     await expect(quickPrompts).toBeVisible();
+    await expect(currentPromptThread).toBeVisible();
+
+    assertNoHarnessRequestFailures(harness);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("prompt home verbalize auto-reads assistant replies only when enabled", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness({ singleUserAuthEnabled: true });
+
+  try {
+    await installSpeechSynthesisRecorder(page);
+    await seedApiBaseOverride(page, harness);
+    await page.goto(harness.origin, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await signInFromPromptHome(page);
+
+    const operatorPrompt = page.getByLabel("Operator prompt");
+    const verbalizeToggle = page.getByRole("checkbox", { name: "Verbalize" });
+
+    await expect(verbalizeToggle).not.toBeChecked();
+
+    await operatorPrompt.fill("Where should I handle the confirmation blocker?");
+    await page.getByRole("button", { name: "Send Prompt" }).click();
+    await expect(
+      page.locator(".assistant-message-assistant").first(),
+    ).toContainText("Operations is the right place to continue");
+    await expect.poll(() => readPromptHomeSpeechLog(page)).toEqual([]);
+
+    await verbalizeToggle.check();
+    await operatorPrompt.fill("Where should I handle the invoice settlement item?");
+    await page.getByRole("button", { name: "Send Prompt" }).click();
+    await expect(
+      page.locator(".assistant-message-assistant").first(),
+    ).toContainText("Settlement is the right place to continue");
+    await expect
+      .poll(async () => (await readPromptHomeSpeechLog(page)).at(-1) ?? null)
+      .toBe(
+        "Settlement is the right place to continue because the open item is invoice and payment follow-through.",
+      );
 
     assertNoHarnessRequestFailures(harness);
   } finally {

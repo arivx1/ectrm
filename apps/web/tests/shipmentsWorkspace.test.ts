@@ -170,6 +170,16 @@ test('deliveries workspace applies map-sourced rail-route focus before local tex
         sourceActionRequestId: null,
       },
       globalFilter: '',
+      commodities: [
+        {
+          code: 'Gas',
+          name: 'Gas',
+          description: 'Test gas commodity',
+          is_active: true,
+          commodity_class: 'GAS',
+          allowed_transport_modes: ['RAIL', 'TRUCK'],
+        },
+      ],
       deliveries: [
         buildDelivery({ delivery_id: 'DLV-1001', trade_id: 'TRD-1001' }),
         buildDelivery({

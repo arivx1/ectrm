@@ -1271,6 +1271,175 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("Deal ticket", payload["rendered_system_prompt"])
         self.assertIn("Never imply approval was granted", payload["rendered_system_prompt"])
 
+    def test_admin_organization_context_definition_crud_publish_and_retire_flow(self) -> None:
+        token = self._create_session_token()
+
+        create_response = self.client.post(
+            "/admin/assistant/organization-context/definitions",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "definition_key": "company-profile",
+                "section_key": "organization",
+                "content_kind": "COMPANY_PROFILE",
+                "title": "Company Profile",
+                "summary": "Primary company descriptor for assistant grounding.",
+                "body": "Harbor Peak Energy is a cross-functional commodities operator serving traders, schedulers, and settlement teams.",
+                "display_order": 10,
+                "created_by": "assistant_user",
+            },
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        created_payload = create_response.json()
+        definition_id = created_payload["id"]
+        self.assertEqual(created_payload["status"], "DRAFT")
+        self.assertEqual(created_payload["version"], 1)
+        self.assertTrue(created_payload["is_editable"])
+        self.assertEqual(created_payload["scope"], "GLOBAL")
+        self.assertIsNone(created_payload["published_at"])
+
+        update_response = self.client.put(
+            f"/admin/assistant/organization-context/definitions/{definition_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "definition_key": "company-profile",
+                "section_key": "organization",
+                "content_kind": "COMPANY_PROFILE",
+                "title": "Company Profile",
+                "summary": "Published company descriptor for prompt grounding.",
+                "body": "Harbor Peak Energy coordinates trade capture, logistics, and settlement across North American commodity desks.",
+                "display_order": 5,
+                "updated_by": "assistant_user",
+            },
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        updated_payload = update_response.json()
+        self.assertEqual(updated_payload["status"], "DRAFT")
+        self.assertEqual(updated_payload["display_order"], 5)
+        self.assertIn("North American commodity desks", updated_payload["body"])
+
+        get_response = self.client.get(
+            f"/admin/assistant/organization-context/definitions/{definition_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(get_response.status_code, 200)
+        self.assertEqual(get_response.json()["summary"], "Published company descriptor for prompt grounding.")
+
+        publish_response = self.client.post(
+            f"/admin/assistant/organization-context/definitions/{definition_id}/publish",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(publish_response.status_code, 200)
+        published_payload = publish_response.json()
+        self.assertEqual(published_payload["status"], "PUBLISHED")
+        self.assertFalse(published_payload["is_editable"])
+        self.assertEqual(published_payload["published_by"], "assistant_user")
+
+        blocked_update_response = self.client.put(
+            f"/admin/assistant/organization-context/definitions/{definition_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "definition_key": "company-profile",
+                "section_key": "organization",
+                "content_kind": "COMPANY_PROFILE",
+                "title": "Company Profile",
+                "summary": "Should fail.",
+                "body": "Published records should be immutable.",
+                "display_order": 5,
+                "updated_by": "assistant_user",
+            },
+        )
+        self.assertEqual(blocked_update_response.status_code, 409)
+        self.assertIn("Only draft organization context definitions can be edited", blocked_update_response.json()["detail"])
+
+        preview_response = self.client.post(
+            "/assistant/context",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"workspace": "assistant"},
+        )
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = preview_response.json()
+        preview_sections = {section["key"]: section for section in preview_payload["sections"]}
+        self.assertEqual(preview_sections["organization"]["owner_reference"], "company-profile:v1")
+        self.assertFalse(preview_sections["organization"]["uses_fallback"])
+        self.assertEqual(
+            preview_payload["warnings"],
+            [
+                "Business Operating Model is using env-backed fallback values because no published operating-model definition is active.",
+            ],
+        )
+        self.assertIn("Harbor Peak Energy coordinates trade capture", preview_payload["rendered_system_prompt"])
+
+        second_create_response = self.client.post(
+            "/admin/assistant/organization-context/definitions",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "definition_key": "company-profile",
+                "section_key": "organization",
+                "content_kind": "COMPANY_PROFILE",
+                "title": "Company Profile",
+                "summary": "Second draft version.",
+                "body": "Harbor Peak Energy supports physical and financial commodities teams with shared operational controls.",
+                "display_order": 5,
+                "created_by": "assistant_user",
+            },
+        )
+        self.assertEqual(second_create_response.status_code, 201)
+        second_payload = second_create_response.json()
+        self.assertEqual(second_payload["version"], 2)
+        self.assertEqual(second_payload["status"], "DRAFT")
+
+        republish_old_response = self.client.post(
+            f"/admin/assistant/organization-context/definitions/{definition_id}/publish",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(republish_old_response.status_code, 409)
+        self.assertIn("Only the latest organization context definition version can be published", republish_old_response.json()["detail"])
+
+        publish_v2_response = self.client.post(
+            f"/admin/assistant/organization-context/definitions/{second_payload['id']}/publish",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(publish_v2_response.status_code, 200)
+        self.assertEqual(publish_v2_response.json()["status"], "PUBLISHED")
+        self.assertEqual(publish_v2_response.json()["version"], 2)
+
+        list_response = self.client.get(
+            "/admin/assistant/organization-context/definitions?definition_key=company-profile",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(list_response.status_code, 200)
+        list_payload = list_response.json()
+        self.assertEqual([row["version"] for row in list_payload], [2, 1])
+        self.assertEqual([row["status"] for row in list_payload], ["PUBLISHED", "RETIRED"])
+
+        retire_response = self.client.post(
+            f"/admin/assistant/organization-context/definitions/{second_payload['id']}/retire",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(retire_response.status_code, 200)
+        retired_payload = retire_response.json()
+        self.assertEqual(retired_payload["status"], "RETIRED")
+        self.assertFalse(retired_payload["is_editable"])
+        self.assertEqual(retired_payload["retired_by"], "assistant_user")
+
+        fallback_preview_response = self.client.post(
+            "/assistant/context",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"workspace": "assistant"},
+        )
+        self.assertEqual(fallback_preview_response.status_code, 200)
+        fallback_payload = fallback_preview_response.json()
+        self.assertEqual(
+            fallback_payload["warnings"],
+            [
+                "Organization Context is using env-backed fallback values because no published organization profile is active.",
+                "Business Operating Model is using env-backed fallback values because no published operating-model definition is active.",
+            ],
+        )
+        self.assertIn("Acme Energy", fallback_payload["rendered_system_prompt"])
+
     def test_assistant_prompt_context_preview_stays_pure_grounding_when_live_tools_enabled(self) -> None:
         token = self._create_session_token()
         self._create_trade_with_event(trade_id="T-1000")

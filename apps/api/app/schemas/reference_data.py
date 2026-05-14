@@ -464,10 +464,12 @@ class SpatialFeatureStandardsOut(BaseModel):
 
 class CommodityCreate(ReferenceDataCreate):
     commodity_class: str = Field(..., min_length=1, max_length=50)
+    allowed_transport_modes: list[str] = Field(default_factory=list)
 
 
 class CommodityUpdate(ReferenceDataUpdate):
     commodity_class: Optional[str] = Field(None, min_length=1, max_length=50)
+    allowed_transport_modes: Optional[list[str]] = None
 
 
 class CommodityStatusUpdate(ReferenceDataStatusUpdate):
@@ -476,6 +478,7 @@ class CommodityStatusUpdate(ReferenceDataStatusUpdate):
 
 class CommodityOut(ReferenceDataOut):
     commodity_class: str
+    allowed_transport_modes: list[str]
 
 
 class CurrencyCreate(ReferenceDataCreate):

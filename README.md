@@ -216,3 +216,5 @@ dependencies.
 - [Agent role catalog](docs/engineering/agent-role-catalog.md)
 - [Human-agent authority matrix](docs/engineering/human-agent-authority-matrix.md)
 - [Canonical work object inventory](docs/engineering/canonical-work-object-inventory.md)
+- [Truck tracking system architecture](docs/engineering/truck-tracking-system-architecture.md)
+- [Truck tracking system work packages](docs/engineering/truck-tracking-system-work-packages.md)

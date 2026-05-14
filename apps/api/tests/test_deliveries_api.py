@@ -443,6 +443,21 @@ class DeliveriesApiTests(unittest.TestCase):
             self.assertEqual(audit_event.payload["requested_changes"]["transport_mode"], "TRUCK")
             self.assertEqual(audit_event.payload["delivery"]["transport_mode"], "TRUCK")
 
+    def test_patch_delivery_rejects_transport_mode_outside_commodity_allowlist(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trades()
+        self._sync_deliveries(admin_token)
+
+        response = self.client.patch(
+            "/deliveries/DLV-T-LOG-1",
+            json={"transport_mode": "POWER_GRID"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("not allowed for WTI", response.json()["detail"])
+        self.assertIn("PIPELINE, TRUCK, RAIL, BARGE, VESSEL", response.json()["detail"])
+
     def test_operations_role_can_manage_deliveries(self) -> None:
         self._create_user(
             user_id="ops.delivery",
@@ -498,7 +513,7 @@ class DeliveriesApiTests(unittest.TestCase):
 
         self.client.patch(
             "/deliveries/DLV-T-GAS-1",
-            json={"transport_mode": "TRUCK"},
+            json={"transport_mode": "UNSPECIFIED"},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
 

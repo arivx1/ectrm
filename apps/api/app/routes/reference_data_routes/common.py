@@ -166,6 +166,7 @@ def to_out(record: ModelT, schema_cls):
     )
     if isinstance(record, ReferenceCommodity):
         payload["commodity_class"] = record.commodity_class
+        payload["allowed_transport_modes"] = record.allowed_transport_modes
     if isinstance(record, ReferenceCalendar):
         payload["calendar_type"] = record.calendar_type
         payload["market"] = record.market

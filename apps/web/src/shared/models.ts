@@ -181,6 +181,7 @@ export type DeliveryRecord = {
   mode_family: 'LOGISTICS' | 'NETWORK_FLOW' | 'POWER_SCHEDULE'
   transport_mode:
     | 'UNSPECIFIED'
+    | 'AIR'
     | 'TRUCK'
     | 'RAIL'
     | 'BARGE'
@@ -888,6 +889,7 @@ export type ReferenceRecord = {
   updated_by?: string
   version?: number
   commodity_class?: string
+  allowed_transport_modes?: Array<Exclude<DeliveryRecord['transport_mode'], 'UNSPECIFIED'>>
 }
 
 export type AssetRecord = ReferenceRecord & {
@@ -3683,6 +3685,7 @@ export type CommodityForm = {
   name: string
   description: string
   commodity_class: string
+  allowed_transport_modes: Array<Exclude<DeliveryRecord['transport_mode'], 'UNSPECIFIED'>>
 }
 
 export type PriceIndexForm = {

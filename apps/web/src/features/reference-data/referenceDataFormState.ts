@@ -47,6 +47,12 @@ function isValidNonNegativeInteger(value: string): boolean {
   return /^\d+$/.test(value)
 }
 
+function sameTextArray(left: string[], right: string[]): boolean {
+  const sortedLeft = [...left].sort()
+  const sortedRight = [...right].sort()
+  return sameText(sortedLeft.join('|'), sortedRight.join('|'))
+}
+
 export function parseAssetCoordinatePair(args: {
   latitudeText: string
   longitudeText: string
@@ -658,7 +664,8 @@ export function isCommodityFormDirty(
       !sameText(commodityForm.code, '') ||
       !sameText(commodityForm.name, '') ||
       !sameText(commodityForm.description, '') ||
-      commodityForm.commodity_class !== (selectedCommodity?.commodity_class ?? commodityClassOrder[0])
+      commodityForm.commodity_class !== (selectedCommodity?.commodity_class ?? commodityClassOrder[0]) ||
+      commodityForm.allowed_transport_modes.length > 0
     )
   }
 
@@ -670,7 +677,8 @@ export function isCommodityFormDirty(
     !sameText(commodityForm.code, selectedCommodity.code) ||
     !sameText(commodityForm.name, selectedCommodity.name) ||
     !sameText(commodityForm.description, selectedCommodity.description) ||
-    commodityForm.commodity_class !== (selectedCommodity.commodity_class ?? commodityClassOrder[0])
+    commodityForm.commodity_class !== (selectedCommodity.commodity_class ?? commodityClassOrder[0]) ||
+    !sameTextArray(commodityForm.allowed_transport_modes, selectedCommodity.allowed_transport_modes ?? [])
   )
 }
 

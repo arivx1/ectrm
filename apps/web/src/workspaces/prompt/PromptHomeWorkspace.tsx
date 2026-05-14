@@ -118,6 +118,7 @@ import {
   PROMPT_HOME_PROMPT_KITS,
   type PromptHomePromptKit,
 } from "./promptHomePromptKits";
+import { PromptHomeCommunicationCard } from "./PromptHomeCommunicationCard";
 import { PromptHomeDocumentUploadCard } from "./PromptHomeDocumentUploadCard";
 import { getPromptHomeNextClockTickDelay } from "./promptHomeClock";
 import {
@@ -192,6 +193,7 @@ const PROMPT_HOME_DAY_CALENDAR_MARKER_LIMIT = 3;
 const PROMPT_HOME_WEEK_CALENDAR_MARKER_LIMIT = 7;
 const PROMPT_HOME_MONTH_CALENDAR_MARKER_LIMIT = 6;
 const PROMPT_HOME_CALENDAR_AGENDA_LIST_LIMIT = 4;
+const PROMPT_HOME_CALENDAR_MARKER_DETAIL_ITEM_LIMIT = 3;
 const PROMPT_HOME_DAY_HOURS = 24;
 const PROMPT_HOME_DAY_MINUTES = PROMPT_HOME_DAY_HOURS * 60;
 const PROMPT_HOME_WEEK_DAYS = 7;
@@ -223,6 +225,7 @@ const PROMPT_HOME_CALENDAR_CARD_STATE_STORAGE_KEY =
 const PROMPT_HOME_CALENDAR_CARD_STATE_STORAGE_EVENT =
   "ectrm:prompt-home-calendar-card-state-change";
 const PROMPT_HOME_CALENDAR_CARD_KEYS = ["day", "week", "month"] as const;
+const PROMPT_HOME_VERBALIZE_STORAGE_KEY = "ectrm.prompt-home.verbalize";
 
 type PromptHomeMeterTick = {
   key: string;
@@ -238,6 +241,7 @@ type PromptHomeMeterMarker = {
   percent: number;
   align?: "start" | "end";
   tone?: "trading" | "calendar";
+  hoverDetail?: string;
 };
 
 type PromptHomeCalendarAgendaItem = {
@@ -246,6 +250,8 @@ type PromptHomeCalendarAgendaItem = {
   primary: string;
   secondary: string;
   supportingText: string | null;
+  description: string | null;
+  status: string | null;
   htmlLink: string | null;
   year: number;
   month: number;
@@ -403,6 +409,25 @@ function subscribeToPromptHomeCalendarCardState(
   };
 }
 
+function getPromptHomeVerbalizePreference(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.localStorage.getItem(PROMPT_HOME_VERBALIZE_STORAGE_KEY) === "true";
+}
+
+function savePromptHomeVerbalizePreference(enabled: boolean): boolean {
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(
+      PROMPT_HOME_VERBALIZE_STORAGE_KEY,
+      enabled ? "true" : "false",
+    );
+  }
+
+  return enabled;
+}
+
 function usePersistentPromptHomeCalendarCardState(
   cardKey: PromptHomeCalendarCardKey,
   defaultEnabled: boolean,
@@ -452,28 +477,28 @@ function formatPromptHomeMapSummary(params: {
   } = params;
 
   if (!assetLayerVisible) {
-    return "Assets layer is hidden. 0 records are currently shown on the map.";
+    return "Assets hidden · 0 shown on map";
   }
 
   if (filteredRecordCount === 0) {
-    return "No records fit the current filters.";
+    return "No records match the current filters.";
   }
 
-  const filteredRecordLabel = `${filteredRecordCount.toLocaleString()} record${filteredRecordCount === 1 ? "" : "s"}`;
+  const filteredRecordLabel = `${filteredRecordCount.toLocaleString()} filtered`;
   if (mapReadyRecordCount === 0) {
-    return `${filteredRecordLabel} ${filteredRecordCount === 1 ? "fits" : "fit"} the current filters. None are map-ready yet.`;
+    return `${filteredRecordLabel} · 0 map-ready`;
   }
 
   const shownSummary =
     shownRecordCount === mapReadyRecordCount
-      ? `Showing all ${shownRecordCount.toLocaleString()}`
-      : `Showing ${shownRecordCount.toLocaleString()} of ${mapReadyRecordCount.toLocaleString()}`;
+      ? `all ${shownRecordCount.toLocaleString()} shown`
+      : `${shownRecordCount.toLocaleString()} of ${mapReadyRecordCount.toLocaleString()} shown`;
 
   if (filteredRecordCount === mapReadyRecordCount) {
-    return `${shownSummary} records on the map.`;
+    return `${shownSummary} on map`;
   }
 
-  return `${filteredRecordLabel} ${filteredRecordCount === 1 ? "fits" : "fit"} the current filters. ${shownSummary} map-ready records on the map.`;
+  return `${filteredRecordLabel} · ${shownSummary} map-ready`;
 }
 
 type PromptHomeExchangeSessionLane = PromptHomeExchangeSessionDefinition & {
@@ -760,6 +785,85 @@ function formatCalendarEventCountLabel(count: number): string {
   return `${count} ${count === 1 ? "event" : "events"}`;
 }
 
+function normalizePromptHomeCalendarDetailText(
+  value: string | null | undefined,
+): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalizedValue = value.replace(/\s+/g, " ").trim();
+  if (!normalizedValue) {
+    return null;
+  }
+
+  return normalizedValue.length <= 160
+    ? normalizedValue
+    : `${normalizedValue.slice(0, 157).trimEnd()}...`;
+}
+
+function buildPromptHomeCalendarAgendaItemHoverLines(
+  item: PromptHomeCalendarAgendaItem,
+): string[] {
+  const lines = [`${item.title} - ${item.primary} · ${item.secondary}`];
+  const supportingLines: string[] = [];
+  const supportingText = normalizePromptHomeCalendarDetailText(
+    item.supportingText,
+  );
+  if (supportingText) {
+    supportingLines.push(supportingText);
+  }
+
+  const normalizedStatus = normalizePromptHomeCalendarDetailText(item.status);
+  if (
+    normalizedStatus &&
+    normalizedStatus.toLowerCase() !== "confirmed"
+  ) {
+    supportingLines.push(`Status: ${normalizedStatus}`);
+  }
+
+  if (supportingLines.length > 0) {
+    lines.push(supportingLines.join(" · "));
+  }
+
+  const description = normalizePromptHomeCalendarDetailText(item.description);
+  if (description) {
+    lines.push(description);
+  }
+
+  return lines;
+}
+
+function buildPromptHomeCalendarAgendaItemHoverDetail(
+  item: PromptHomeCalendarAgendaItem,
+): string {
+  return buildPromptHomeCalendarAgendaItemHoverLines(item).join("\n");
+}
+
+function buildPromptHomeCalendarMarkerHoverDetail(args: {
+  summary: string;
+  items: PromptHomeCalendarAgendaItem[];
+}): string {
+  const visibleItems = args.items.slice(
+    0,
+    PROMPT_HOME_CALENDAR_MARKER_DETAIL_ITEM_LIMIT,
+  );
+  const lines = [args.summary];
+
+  for (const item of visibleItems) {
+    lines.push(...buildPromptHomeCalendarAgendaItemHoverLines(item));
+  }
+
+  const hiddenCount = Math.max(0, args.items.length - visibleItems.length);
+  if (hiddenCount > 0) {
+    lines.push(
+      `+${hiddenCount} more ${hiddenCount === 1 ? "event" : "events"}`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
 function truncatePromptHomeCalendarMarkerLabel(value: string): string {
   const normalizedValue = value.trim();
   if (normalizedValue.length <= 18) {
@@ -801,6 +905,8 @@ function buildPromptHomeCalendarAgendaItems(args: {
         primary: eventWindow.primary,
         secondary: eventWindow.secondary,
         supportingText: event.location ?? event.organizerEmail ?? null,
+        description: event.description,
+        status: event.status,
         htmlLink: event.htmlLink,
         year: parts.year,
         month: parts.month,
@@ -822,6 +928,8 @@ function buildPromptHomeCalendarAgendaItems(args: {
       primary: eventWindow.primary,
       secondary: eventWindow.secondary,
       supportingText: event.location ?? event.organizerEmail ?? null,
+      description: event.description,
+      status: event.status,
       htmlLink: event.htmlLink,
       year: start.getFullYear(),
       month: start.getMonth() + 1,
@@ -868,6 +976,7 @@ function buildPromptHomeCalendarDayMarkers(
         percent,
         align: calendarMarkerAlignForPercent(percent),
         tone: "calendar",
+        hoverDetail: buildPromptHomeCalendarAgendaItemHoverDetail(item),
       };
     });
 }
@@ -875,19 +984,19 @@ function buildPromptHomeCalendarDayMarkers(
 function buildPromptHomeCalendarWeekMarkers(
   items: PromptHomeCalendarAgendaItem[],
 ): PromptHomeMeterMarker[] {
-  const countsByWeekdayIndex = new Map<number, number>();
+  const itemsByWeekdayIndex = new Map<number, PromptHomeCalendarAgendaItem[]>();
 
   for (const item of items) {
-    countsByWeekdayIndex.set(
-      item.weekdayIndex,
-      (countsByWeekdayIndex.get(item.weekdayIndex) ?? 0) + 1,
-    );
+    const weekdayItems = itemsByWeekdayIndex.get(item.weekdayIndex) ?? [];
+    weekdayItems.push(item);
+    itemsByWeekdayIndex.set(item.weekdayIndex, weekdayItems);
   }
 
-  return Array.from(countsByWeekdayIndex.entries())
+  return Array.from(itemsByWeekdayIndex.entries())
     .sort((left, right) => left[0] - right[0])
     .slice(0, PROMPT_HOME_WEEK_CALENDAR_MARKER_LIMIT)
-    .map(([weekdayIndex, count]) => {
+    .map(([weekdayIndex, weekdayItems]) => {
+      const count = weekdayItems.length;
       const percent = meterPercentForRatio(
         weekdayIndex * PROMPT_HOME_DAY_MINUTES + PROMPT_HOME_DAY_MINUTES / 2,
         PROMPT_HOME_WEEK_MINUTES,
@@ -900,6 +1009,10 @@ function buildPromptHomeCalendarWeekMarkers(
         align:
           weekdayIndex === PROMPT_HOME_WEEK_DAYS - 1 ? "end" : "start",
         tone: "calendar",
+        hoverDetail: buildPromptHomeCalendarMarkerHoverDetail({
+          summary: `${PROMPT_HOME_WEEKDAY_FULL_LABELS[weekdayIndex] ?? "Day"} · ${formatCalendarEventCountLabel(count)}`,
+          items: weekdayItems,
+        }),
       };
     });
 }
@@ -908,16 +1021,19 @@ function buildPromptHomeCalendarMonthMarkers(args: {
   items: PromptHomeCalendarAgendaItem[];
   monthDayTotal: number;
 }): PromptHomeMeterMarker[] {
-  const countsByDay = new Map<number, number>();
+  const itemsByDay = new Map<number, PromptHomeCalendarAgendaItem[]>();
 
   for (const item of args.items) {
-    countsByDay.set(item.day, (countsByDay.get(item.day) ?? 0) + 1);
+    const dayItems = itemsByDay.get(item.day) ?? [];
+    dayItems.push(item);
+    itemsByDay.set(item.day, dayItems);
   }
 
-  return Array.from(countsByDay.entries())
+  return Array.from(itemsByDay.entries())
     .sort((left, right) => left[0] - right[0])
     .slice(0, PROMPT_HOME_MONTH_CALENDAR_MARKER_LIMIT)
-    .map(([day, count]) => {
+    .map(([day, dayItems]) => {
+      const count = dayItems.length;
       const percent = meterPercentForRatio(
         (day - 1) * PROMPT_HOME_DAY_MINUTES +
           PROMPT_HOME_DAY_MINUTES / 2,
@@ -930,6 +1046,10 @@ function buildPromptHomeCalendarMonthMarkers(args: {
         percent,
         align: calendarMarkerAlignForPercent(percent),
         tone: "calendar",
+        hoverDetail: buildPromptHomeCalendarMarkerHoverDetail({
+          summary: `Day ${day} · ${formatCalendarEventCountLabel(count)}`,
+          items: dayItems,
+        }),
       };
     });
 }
@@ -1470,8 +1590,9 @@ function PromptHomeTimeMeterCard({
             {markers.map((marker) => (
               <div
                 key={marker.key}
-                className={`prompt-home-time-meter-marker ${marker.align === "end" ? "is-end" : "is-start"} ${marker.tone === "calendar" ? "is-calendar" : "is-trading"}`}
+                className={`prompt-home-time-meter-marker ${marker.align === "end" ? "is-end" : "is-start"} ${marker.tone === "calendar" ? "is-calendar" : "is-trading"} ${marker.hoverDetail ? "has-detail" : ""}`.trim()}
                 style={{ left: `${marker.percent}%` }}
+                title={marker.hoverDetail ?? undefined}
               >
                 <span>{marker.label}</span>
                 <strong>{marker.detail}</strong>
@@ -1494,9 +1615,14 @@ function PromptHomeTimeMeterCard({
           {markers.map((marker) => (
             <span
               key={`${marker.key}-boundary`}
-              className={`prompt-home-time-meter-boundary ${marker.tone === "calendar" ? "is-calendar" : "is-trading"}`}
+              className={`prompt-home-time-meter-boundary-hit-area ${marker.hoverDetail ? "has-detail" : ""}`.trim()}
               style={{ left: `${marker.percent}%` }}
-            />
+              title={marker.hoverDetail ?? undefined}
+            >
+              <span
+                className={`prompt-home-time-meter-boundary ${marker.tone === "calendar" ? "is-calendar" : "is-trading"}`}
+              />
+            </span>
           ))}
           <span
             className="prompt-home-time-meter-now"
@@ -2485,28 +2611,13 @@ function PromptHomeTimeframePanel({
         <div className="prompt-home-timeframe-panel-toggle">
           <div className="prompt-home-timeframe-panel-copy">
             <span className="eyebrow">Desk Time</span>
-            <strong>Desk clocks and calendars</strong>
-            {timeframeExpandedState.expanded ? null : (
-              <p>{timeframeCollapsedSummary}</p>
-            )}
+            <strong className="prompt-home-timeframe-panel-summary">
+              {timeframeCollapsedSummary}
+            </strong>
           </div>
         </div>
 
         <div className="prompt-home-timeframe-panel-side">
-          <a
-            href={customEventsHref}
-            className="button button-secondary prompt-home-timeframe-panel-link"
-            onClick={(event) => {
-              if (!onOpenCustomEvents) {
-                return;
-              }
-              event.preventDefault();
-              onOpenCustomEvents();
-            }}
-          >
-            Add Event
-          </a>
-
           <button
             type="button"
             className="prompt-home-timeframe-panel-toggle-action"
@@ -2554,6 +2665,21 @@ function PromptHomeTimeframePanel({
         className="prompt-home-timeframe-panel-body"
         hidden={!timeframeExpandedState.expanded}
       >
+        <div className="prompt-home-timeframe-panel-actions">
+          <a
+            href={customEventsHref}
+            className="button button-secondary prompt-home-timeframe-panel-link"
+            onClick={(event) => {
+              if (!onOpenCustomEvents) {
+                return;
+              }
+              event.preventDefault();
+              onOpenCustomEvents();
+            }}
+          >
+            Add Event
+          </a>
+        </div>
         <div className="prompt-home-timeframe-grid">
           <PromptHomeTimeMeterCard
             panelId={PROMPT_HOME_DAY_PANEL_ID}
@@ -2780,10 +2906,18 @@ export function PromptHomeWorkspace({
     useState<AssistantRuntimeSettings | null>(null);
   const [runtimeError, setRuntimeError] = useState("");
   const [draft, setDraft] = useState("");
+  const [verbalizeResponses, setVerbalizeResponses] = useState(() =>
+    getPromptHomeVerbalizePreference(),
+  );
   const [draftApplicationContext, setDraftApplicationContext] = useState("");
   const [draftSummaryTargets, setDraftSummaryTargets] = useState<
     AssistantWorkspaceSummaryTarget[]
   >([]);
+  const [pendingVoicePlaybackMessage, setPendingVoicePlaybackMessage] =
+    useState<{
+      id: string;
+      content: string;
+    } | null>(null);
   const [messages, setMessages] = useState<PromptHomeMessage[]>(
     () => initialMessages,
   );
@@ -3150,6 +3284,37 @@ export function PromptHomeWorkspace({
   }, [displayedMessages, voicePlayback]);
 
   useEffect(() => {
+    if (!pendingVoicePlaybackMessage) {
+      return;
+    }
+
+    if (!messages.some((message) => message.id === pendingVoicePlaybackMessage.id)) {
+      return;
+    }
+
+    setPendingVoicePlaybackMessage(null);
+    if (
+      !verbalizeResponses ||
+      !voicePlayback.supported ||
+      !voicePlayback.canPlay(pendingVoicePlaybackMessage.content)
+    ) {
+      return;
+    }
+
+    voiceComposer.cancelListening();
+    voicePlayback.togglePlayback(
+      pendingVoicePlaybackMessage.id,
+      pendingVoicePlaybackMessage.content,
+    );
+  }, [
+    messages,
+    pendingVoicePlaybackMessage,
+    verbalizeResponses,
+    voiceComposer,
+    voicePlayback,
+  ]);
+
+  useEffect(() => {
     if (!authSession || runtimeSettings) {
       return;
     }
@@ -3236,24 +3401,27 @@ export function PromptHomeWorkspace({
         });
       }
 
+      const assistantMessage: PromptHomeMessage = {
+        id: createPromptMessageId(),
+        role: "assistant",
+        content: responseContent,
+        provider: response.provider,
+        model: response.model,
+        runId: response.run_id,
+        warnings: [...response.warnings, ...parsedResponse.warnings],
+        actionRequests: response.action_requests,
+        navigationIntents: parsedResponse.intents,
+      };
+
       setConversationId(responseConversationId);
       setDraftApplicationContext("");
       setDraftSummaryTargets([]);
-      setMessages((current) => [
-        ...current,
-        {
-          id: createPromptMessageId(),
-          role: "assistant",
-          content: responseContent,
-          provider: response.provider,
-          model: response.model,
-          runId: response.run_id,
-          warnings: [...response.warnings, ...parsedResponse.warnings],
-          actionRequests: response.action_requests,
-          navigationIntents: parsedResponse.intents,
-        },
-      ]);
+      setMessages((current) => [...current, assistantMessage]);
+      setPendingVoicePlaybackMessage(
+        verbalizeResponses ? assistantMessage : null,
+      );
     } catch (error) {
+      setPendingVoicePlaybackMessage(null);
       setSubmitError(
         error instanceof Error ? error.message : "Assistant request failed.",
       );
@@ -3479,23 +3647,6 @@ export function PromptHomeWorkspace({
     : runtimeSettings
       ? `Using ${runtimeSettings.effective_default_provider ?? "the first enabled provider"} when you send.`
       : "Assistant runtime will be checked when you send the first prompt.";
-  const promptCardCollapsedSummary = (() => {
-    const trimmedDraft = draft.trim();
-    if (submitting) {
-      return "Sending the current prompt.";
-    }
-    if (trimmedDraft) {
-      return trimmedDraft.length > 120
-        ? `${trimmedDraft.slice(0, 117).trimEnd()}...`
-        : trimmedDraft;
-    }
-    return authSession
-      ? "Ask what needs attention, where to go next, or how to handle a trade, queue, exposure, invoice, or report question."
-      : "Draft a request here, then sign in when you're ready to send it.";
-  })();
-  const promptCardDescription = promptCardExpandedState.expanded
-    ? "Route work from intent, start from a suggested prompt, and keep the governed assistant flow close at hand."
-    : promptCardCollapsedSummary;
   const promptRouteRecommendationNote = !authSession
     ? "Sign in to load promoted routes from accepted Home handoffs."
     : promptRouteRecommendationsLoading
@@ -3557,6 +3708,14 @@ export function PromptHomeWorkspace({
           onOpenOperationsWorkspace={() => onOpenView("operations")}
           onSignIn={handleSignIn}
         />
+        <PromptHomeCommunicationCard
+          authSession={authSession}
+          counts={counts}
+          onOpenAssistantWorkspace={() => onOpenView("assistant")}
+          onOpenOperationsWorkspace={() => onOpenView("operations")}
+          onOpenDashboardWorkspace={() => onOpenView("dashboard")}
+          onSignIn={handleSignIn}
+        />
 
         <section
           className={`prompt-home-prompt-card ${promptCardExpandedState.expanded ? "is-expanded" : "is-collapsed"}`}
@@ -3565,7 +3724,6 @@ export function PromptHomeWorkspace({
             <div className="prompt-home-prompt-card-copy">
               <span className="eyebrow">Prompt</span>
               <strong>Ask the desk assistant</strong>
-              <p>{promptCardDescription}</p>
             </div>
 
             <div className="prompt-home-prompt-card-side">
@@ -3644,6 +3802,24 @@ export function PromptHomeWorkspace({
                           ? "Send Prompt"
                           : "Sign In to Send Prompt"}
                     </button>
+                  </div>
+
+                  <div className="prompt-home-composer-preferences">
+                    <label className="prompt-home-verbalize-toggle">
+                      <input
+                        type="checkbox"
+                        checked={verbalizeResponses}
+                        onChange={(event) =>
+                          setVerbalizeResponses(
+                            savePromptHomeVerbalizePreference(
+                              event.target.checked,
+                            ),
+                          )
+                        }
+                      />
+                      <span>Verbalize</span>
+                    </label>
+                    <small>Automatically read assistant responses aloud.</small>
                   </div>
 
                   <p
@@ -3881,186 +4057,198 @@ export function PromptHomeWorkspace({
                     </div>
                   ) : null}
                 </section>
+
+                <section className="prompt-home-chat" aria-label="Current prompt thread">
+                  <div className="section-head">
+                    <div>
+                      <span className="eyebrow">Conversation</span>
+                      <h3>Current prompt thread</h3>
+                    </div>
+                    <p>
+                      Responses can explain, route, draft, or stage governed
+                      actions. They do not directly mutate records.
+                    </p>
+                  </div>
+
+                  <div className="prompt-home-chat-log">
+                    {displayedMessages.length === 0 ? (
+                      <div className="empty-state prompt-home-empty">
+                        <strong>No prompt yet</strong>
+                        <p>
+                          Use the composer above or pick a quick prompt to start
+                          from intent instead of choosing a screen first.
+                        </p>
+                      </div>
+                    ) : (
+                      displayedMessages.map((message) => {
+                        const canReadAloud =
+                          message.role === "assistant" &&
+                          voicePlayback.canPlay(message.content);
+                        const readingMessage = voicePlayback.isPlaying(
+                          message.id,
+                        );
+
+                        return (
+                          <article
+                            key={message.id}
+                            className={`assistant-message assistant-message-${message.role}`}
+                          >
+                            <div className="assistant-message-head">
+                              <strong>
+                                {message.role === "assistant"
+                                  ? "Assistant"
+                                  : "You"}
+                              </strong>
+                              {message.provider && message.model ? (
+                                <span>
+                                  {message.provider} · {message.model}
+                                </span>
+                              ) : null}
+                            </div>
+                            {message.content ? <p>{message.content}</p> : null}
+                            {canReadAloud ? (
+                              <div className="assistant-message-meta">
+                                <button
+                                  type="button"
+                                  className={`assistant-run-link ${readingMessage ? "is-selected" : ""}`}
+                                  aria-pressed={readingMessage}
+                                  disabled={!voicePlayback.supported}
+                                  title={
+                                    voicePlayback.supported
+                                      ? readingMessage
+                                        ? "Stop reading this assistant response aloud."
+                                        : "Read this assistant response aloud."
+                                      : "Read aloud is not supported in this browser."
+                                  }
+                                  onClick={() => {
+                                    voiceComposer.cancelListening();
+                                    voicePlayback.togglePlayback(
+                                      message.id,
+                                      message.content,
+                                    );
+                                  }}
+                                >
+                                  {resolveVoicePlaybackButtonLabel(
+                                    readingMessage,
+                                  )}
+                                </button>
+                              </div>
+                            ) : null}
+                            {message.runId ? (
+                              <div className="assistant-message-meta">
+                                <span>Run #{message.runId}</span>
+                                <button
+                                  type="button"
+                                  className="assistant-run-link"
+                                  onClick={() => onOpenView("assistant")}
+                                >
+                                  Open diagnostics
+                                </button>
+                              </div>
+                            ) : null}
+                            {message.actionRequests &&
+                            message.actionRequests.length > 0 ? (
+                              <div className="prompt-home-action-review">
+                                <div className="feedback-banner prompt-home-action-banner">
+                                  <strong>
+                                    {message.actionRequests.length.toLocaleString()}{" "}
+                                    governed action request
+                                    {message.actionRequests.length === 1
+                                      ? ""
+                                      : "s"}{" "}
+                                    staged
+                                  </strong>
+                                  <p>
+                                    Nothing changes until the typed review path
+                                    approves and executes it.
+                                  </p>
+                                </div>
+                                <AssistantActionRequestList
+                                  actionRequests={message.actionRequests}
+                                  actionRequestIdsInFlight={
+                                    actionRequestIdsInFlight
+                                  }
+                                  formatDate={formatPromptTimestamp}
+                                  onDecision={handleActionRequestDecision}
+                                  onOpenRun={() => onOpenView("assistant")}
+                                  showUserId
+                                />
+                                <div className="assistant-message-meta prompt-home-action-path">
+                                  <span>
+                                    Need the old review inbox or full run trace?
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="button button-secondary"
+                                    onClick={() => onOpenView("assistant")}
+                                  >
+                                    Open Assistant Console
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
+                            {message.navigationIntents &&
+                            message.navigationIntents.length > 0 ? (
+                              <div
+                                className="prompt-home-handoff-list"
+                                aria-label="Assistant workspace handoffs"
+                              >
+                                {message.navigationIntents.map((intent) => (
+                                  <div
+                                    key={buildPromptNavigationIntentKey(intent)}
+                                    className="prompt-home-handoff-item"
+                                  >
+                                    <button
+                                      type="button"
+                                      className="prompt-home-handoff"
+                                      onClick={() =>
+                                        openNavigationIntent(intent, {
+                                          includeHandoff: true,
+                                          recordOutcome: true,
+                                        })
+                                      }
+                                    >
+                                      <strong>
+                                        {promptNavigationIntentLabel(intent)}
+                                      </strong>
+                                      <span>
+                                        {promptNavigationIntentDetail(intent)}
+                                      </span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="button button-ghost prompt-home-handoff-dismiss"
+                                      aria-label={`Dismiss ${promptNavigationIntentLabel(intent)}`}
+                                      onClick={() =>
+                                        handleDismissNavigationIntent(
+                                          message.id,
+                                          intent,
+                                        )
+                                      }
+                                    >
+                                      Dismiss
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                            {message.warnings && message.warnings.length > 0 ? (
+                              <div className="assistant-message-meta">
+                                {message.warnings.map((warning) => (
+                                  <span key={warning}>{warning}</span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </article>
+                        );
+                      })
+                    )}
+                  </div>
+                </section>
               </>
             ) : null}
           </div>
         </section>
-      </section>
-
-      <section className="prompt-home-grid">
-        <article className="surface prompt-home-chat">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Conversation</span>
-              <h3>Current prompt thread</h3>
-            </div>
-            <p>
-              Responses can explain, route, draft, or stage governed actions.
-              They do not directly mutate records.
-            </p>
-          </div>
-
-          <div className="prompt-home-chat-log">
-            {displayedMessages.length === 0 ? (
-              <div className="empty-state prompt-home-empty">
-                <strong>No prompt yet</strong>
-                <p>
-                  Use the composer above or pick a quick prompt to start from
-                  intent instead of choosing a screen first.
-                </p>
-              </div>
-            ) : (
-              displayedMessages.map((message) => {
-                const canReadAloud =
-                  message.role === "assistant" &&
-                  voicePlayback.canPlay(message.content);
-                const readingMessage = voicePlayback.isPlaying(message.id);
-
-                return (
-                  <article
-                    key={message.id}
-                    className={`assistant-message assistant-message-${message.role}`}
-                  >
-                    <div className="assistant-message-head">
-                      <strong>
-                        {message.role === "assistant" ? "Assistant" : "You"}
-                      </strong>
-                      {message.provider && message.model ? (
-                        <span>
-                          {message.provider} · {message.model}
-                        </span>
-                      ) : null}
-                    </div>
-                    {message.content ? <p>{message.content}</p> : null}
-                    {canReadAloud ? (
-                      <div className="assistant-message-meta">
-                        <button
-                          type="button"
-                          className={`assistant-run-link ${readingMessage ? "is-selected" : ""}`}
-                          aria-pressed={readingMessage}
-                          disabled={!voicePlayback.supported}
-                          title={
-                            voicePlayback.supported
-                              ? readingMessage
-                                ? "Stop reading this assistant response aloud."
-                                : "Read this assistant response aloud."
-                              : "Read aloud is not supported in this browser."
-                          }
-                          onClick={() => {
-                            voiceComposer.cancelListening();
-                            voicePlayback.togglePlayback(
-                              message.id,
-                              message.content,
-                            );
-                          }}
-                        >
-                          {resolveVoicePlaybackButtonLabel(readingMessage)}
-                        </button>
-                      </div>
-                    ) : null}
-                    {message.runId ? (
-                      <div className="assistant-message-meta">
-                        <span>Run #{message.runId}</span>
-                        <button
-                          type="button"
-                          className="assistant-run-link"
-                          onClick={() => onOpenView("assistant")}
-                        >
-                          Open diagnostics
-                        </button>
-                      </div>
-                    ) : null}
-                    {message.actionRequests &&
-                    message.actionRequests.length > 0 ? (
-                      <div className="prompt-home-action-review">
-                        <div className="feedback-banner prompt-home-action-banner">
-                          <strong>
-                            {message.actionRequests.length.toLocaleString()}{" "}
-                            governed action request
-                            {message.actionRequests.length === 1 ? "" : "s"}{" "}
-                            staged
-                          </strong>
-                          <p>
-                            Nothing changes until the typed review path approves
-                            and executes it.
-                          </p>
-                        </div>
-                        <AssistantActionRequestList
-                          actionRequests={message.actionRequests}
-                          actionRequestIdsInFlight={actionRequestIdsInFlight}
-                          formatDate={formatPromptTimestamp}
-                          onDecision={handleActionRequestDecision}
-                          onOpenRun={() => onOpenView("assistant")}
-                          showUserId
-                        />
-                        <div className="assistant-message-meta prompt-home-action-path">
-                          <span>
-                            Need the old review inbox or full run trace?
-                          </span>
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            onClick={() => onOpenView("assistant")}
-                          >
-                            Open Assistant Console
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
-                    {message.navigationIntents &&
-                    message.navigationIntents.length > 0 ? (
-                      <div
-                        className="prompt-home-handoff-list"
-                        aria-label="Assistant workspace handoffs"
-                      >
-                        {message.navigationIntents.map((intent) => (
-                          <div
-                            key={buildPromptNavigationIntentKey(intent)}
-                            className="prompt-home-handoff-item"
-                          >
-                            <button
-                              type="button"
-                              className="prompt-home-handoff"
-                              onClick={() =>
-                                openNavigationIntent(intent, {
-                                  includeHandoff: true,
-                                  recordOutcome: true,
-                                })
-                              }
-                            >
-                              <strong>
-                                {promptNavigationIntentLabel(intent)}
-                              </strong>
-                              <span>{promptNavigationIntentDetail(intent)}</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="button button-ghost prompt-home-handoff-dismiss"
-                              aria-label={`Dismiss ${promptNavigationIntentLabel(intent)}`}
-                              onClick={() =>
-                                handleDismissNavigationIntent(message.id, intent)
-                              }
-                            >
-                              Dismiss
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                    {message.warnings && message.warnings.length > 0 ? (
-                      <div className="assistant-message-meta">
-                        {message.warnings.map((warning) => (
-                          <span key={warning}>{warning}</span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </article>
-                );
-              })
-            )}
-          </div>
-        </article>
-
       </section>
     </div>
   );

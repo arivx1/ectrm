@@ -1310,6 +1310,7 @@ export const WORKSPACE_RENDERERS: Record<
         authSession={context.workspaceData.authSession}
         routeHandoff={context.routeHandoff}
         globalFilter={GLOBAL_FILTER_DISABLED}
+        commodities={context.workspaceData.commodities}
         deliveries={context.workspaceData.deliveries}
         operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}
         formatCommodityClass={formatCommodityClass}
@@ -1339,6 +1340,7 @@ export const WORKSPACE_RENDERERS: Record<
         authSession={context.workspaceData.authSession}
         routeHandoff={context.routeHandoff}
         globalFilter={GLOBAL_FILTER_DISABLED}
+        commodities={context.workspaceData.commodities}
         deliveries={context.workspaceData.deliveries}
         railRoutes={context.workspaceData.railRoutes}
         operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}

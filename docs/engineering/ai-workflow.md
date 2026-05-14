@@ -51,6 +51,21 @@ context definitions from the backend registry when they exist. Until those
 records are populated, the assistant still falls back to the env-backed
 bootstrap values and marks that fallback explicitly in prompt preview metadata.
 
+Admin-managed organization context now has a first backend workflow:
+
+- list or inspect definitions:
+  `GET /admin/assistant/organization-context/definitions`
+- create or update draft definitions:
+  `POST` or `PUT /admin/assistant/organization-context/definitions/*`
+- publish or retire definitions explicitly:
+  `POST /admin/assistant/organization-context/definitions/{definition_id}/publish`
+  and
+  `POST /admin/assistant/organization-context/definitions/{definition_id}/retire`
+
+Published definitions are immutable. To supersede a published organization
+entry, create a new draft with the same `definition_key`, let the backend bump
+the version, and publish the latest draft explicitly.
+
 The rendered system prompt is then passed to the configured model provider.
 
 When `use_live_tools` is enabled on `/assistant/respond`, the API can expose

@@ -54,20 +54,20 @@ BOOK_ROWS = [
 ]
 
 COMMODITY_ROWS = [
-    {"code": "CRUDE_OIL", "name": "Crude Oil", "commodity_class": "CRUDE_OIL", "description": "Generic crude oil family reference used for infrastructure, logistics, and operations."},
-    {"code": "WTI", "name": "WTI", "commodity_class": "CRUDE_OIL", "description": "West Texas Intermediate crude benchmark."},
-    {"code": "BRENT", "name": "Brent", "commodity_class": "CRUDE_OIL", "description": "North Sea crude benchmark."},
-    {"code": "NATURAL_GAS", "name": "Natural Gas", "commodity_class": "NATURAL_GAS", "description": "Pipeline natural gas exposure."},
-    {"code": "LNG", "name": "LNG", "commodity_class": "NATURAL_GAS", "description": "Liquefied natural gas exposure."},
-    {"code": "REFINED_PRODUCTS", "name": "Refined Products", "commodity_class": "REFINED_PRODUCTS", "description": "Generic refined products family reference used for pipelines, terminals, and logistics."},
-    {"code": "GASOLINE", "name": "Gasoline", "commodity_class": "REFINED_PRODUCTS", "description": "Refined gasoline products."},
-    {"code": "DIESEL", "name": "Diesel", "commodity_class": "REFINED_PRODUCTS", "description": "Diesel and gasoil products."},
-    {"code": "JET_FUEL", "name": "Jet Fuel", "commodity_class": "REFINED_PRODUCTS", "description": "Jet fuel and aviation distillates."},
-    {"code": "FUEL_OIL", "name": "Fuel Oil", "commodity_class": "REFINED_PRODUCTS", "description": "Residual and bunker fuel oils."},
-    {"code": "NGL", "name": "Natural Gas Liquids", "commodity_class": "NGL", "description": "Natural gas liquids family reference used for fractionation, storage, and transportation."},
-    {"code": "POWER", "name": "Power", "commodity_class": "POWER", "description": "Power market exposure."},
-    {"code": "REC", "name": "Renewable Energy Credit", "commodity_class": "ENVIRONMENTAL", "description": "Renewable attribute exposure."},
-    {"code": "CARBON", "name": "Carbon", "commodity_class": "ENVIRONMENTAL", "description": "Carbon allowance and offset exposure."},
+    {"code": "CRUDE_OIL", "name": "Crude Oil", "commodity_class": "CRUDE_OIL", "allowed_transport_modes": ["PIPELINE", "TRUCK", "RAIL", "BARGE", "VESSEL"], "description": "Generic crude oil family reference used for infrastructure, logistics, and operations."},
+    {"code": "WTI", "name": "WTI", "commodity_class": "CRUDE_OIL", "allowed_transport_modes": ["PIPELINE", "TRUCK", "RAIL", "BARGE", "VESSEL"], "description": "West Texas Intermediate crude benchmark."},
+    {"code": "BRENT", "name": "Brent", "commodity_class": "CRUDE_OIL", "allowed_transport_modes": ["PIPELINE", "TRUCK", "RAIL", "BARGE", "VESSEL"], "description": "North Sea crude benchmark."},
+    {"code": "NATURAL_GAS", "name": "Natural Gas", "commodity_class": "NATURAL_GAS", "allowed_transport_modes": ["PIPELINE"], "description": "Pipeline natural gas exposure."},
+    {"code": "LNG", "name": "LNG", "commodity_class": "NATURAL_GAS", "allowed_transport_modes": ["TRUCK", "RAIL", "BARGE", "VESSEL"], "description": "Liquefied natural gas exposure."},
+    {"code": "REFINED_PRODUCTS", "name": "Refined Products", "commodity_class": "REFINED_PRODUCTS", "allowed_transport_modes": ["PIPELINE", "TRUCK", "RAIL", "BARGE", "VESSEL"], "description": "Generic refined products family reference used for pipelines, terminals, and logistics."},
+    {"code": "GASOLINE", "name": "Gasoline", "commodity_class": "REFINED_PRODUCTS", "allowed_transport_modes": ["PIPELINE", "TRUCK", "RAIL", "BARGE", "VESSEL"], "description": "Refined gasoline products."},
+    {"code": "DIESEL", "name": "Diesel", "commodity_class": "REFINED_PRODUCTS", "allowed_transport_modes": ["PIPELINE", "TRUCK", "RAIL", "BARGE", "VESSEL"], "description": "Diesel and gasoil products."},
+    {"code": "JET_FUEL", "name": "Jet Fuel", "commodity_class": "REFINED_PRODUCTS", "allowed_transport_modes": ["PIPELINE", "TRUCK", "RAIL", "BARGE", "VESSEL"], "description": "Jet fuel and aviation distillates."},
+    {"code": "FUEL_OIL", "name": "Fuel Oil", "commodity_class": "REFINED_PRODUCTS", "allowed_transport_modes": ["PIPELINE", "TRUCK", "RAIL", "BARGE", "VESSEL"], "description": "Residual and bunker fuel oils."},
+    {"code": "NGL", "name": "Natural Gas Liquids", "commodity_class": "NGL", "allowed_transport_modes": ["PIPELINE", "TRUCK", "RAIL", "BARGE", "VESSEL"], "description": "Natural gas liquids family reference used for fractionation, storage, and transportation."},
+    {"code": "POWER", "name": "Power", "commodity_class": "POWER", "allowed_transport_modes": ["POWER_GRID"], "description": "Power market exposure."},
+    {"code": "REC", "name": "Renewable Energy Credit", "commodity_class": "ENVIRONMENTAL", "allowed_transport_modes": ["POWER_GRID"], "description": "Renewable attribute exposure."},
+    {"code": "CARBON", "name": "Carbon", "commodity_class": "ENVIRONMENTAL", "allowed_transport_modes": ["STORAGE"], "description": "Carbon allowance and offset exposure."},
 ]
 
 CURRENCY_ROWS = [

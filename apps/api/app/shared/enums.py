@@ -143,6 +143,7 @@ class TradeWorkflowType(StrEnum):
 
 class TransportMode(StrEnum):
     UNSPECIFIED = "UNSPECIFIED"
+    AIR = "AIR"
     TRUCK = "TRUCK"
     RAIL = "RAIL"
     BARGE = "BARGE"

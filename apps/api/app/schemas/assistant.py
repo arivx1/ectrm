@@ -166,6 +166,21 @@ AssistantPromptNavigationFocusType = Literal[
     "report",
 ]
 AssistantPromptNavigationSignal = Literal["OBSERVE", "CANDIDATE_FOR_RULE", "NARROW", "RETIRE"]
+AssistantOrganizationContextSectionKey = Literal[
+    "organization",
+    "business-model",
+    "organization-glossary",
+    "organization-guardrails",
+]
+AssistantOrganizationContextContentKind = Literal[
+    "COMPANY_PROFILE",
+    "OPERATING_MODEL",
+    "GLOSSARY",
+    "GUARDRAIL",
+    "PRINCIPLE",
+    "PRODUCT_SURFACE",
+]
+AssistantOrganizationContextStatus = Literal["DRAFT", "PUBLISHED", "RETIRED"]
 AssistantControlTowerTrustSignalType = Literal[
     "MISSING_EVAL_COVERAGE",
     "POLICY_WARNING",
@@ -178,6 +193,13 @@ AssistantControlTowerTrustSignalSeverity = Literal["info", "warning", "danger"]
 ALL_ASSISTANT_ACTION_TYPES: tuple[str, ...] = get_args(AssistantActionType)
 
 AGENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
+ORGANIZATION_CONTEXT_DEFINITION_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,79}$")
+ORGANIZATION_CONTEXT_SECTION_KIND_RULES: dict[str, tuple[str, ...]] = {
+    "organization": ("COMPANY_PROFILE", "PRODUCT_SURFACE"),
+    "business-model": ("OPERATING_MODEL",),
+    "organization-glossary": ("GLOSSARY",),
+    "organization-guardrails": ("GUARDRAIL", "PRINCIPLE"),
+}
 
 
 class AssistantProviderStatusOut(BaseModel):
@@ -1150,6 +1172,93 @@ class AssistantPromptContextOut(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     sections: list[AssistantPromptSectionOut]
     rendered_system_prompt: str
+
+
+class AssistantOrganizationContextDefinitionBase(BaseModel):
+    definition_key: str = Field(..., min_length=2, max_length=80)
+    section_key: AssistantOrganizationContextSectionKey
+    content_kind: AssistantOrganizationContextContentKind
+    title: str = Field(..., min_length=1, max_length=160)
+    summary: Optional[str] = Field(default=None, max_length=500)
+    body: str = Field(..., min_length=1, max_length=20_000)
+    display_order: int = Field(default=100, ge=0, le=10_000)
+
+    @field_validator("definition_key")
+    @classmethod
+    def normalize_organization_context_definition_key(cls, value: str) -> str:
+        normalized = normalize_required_text(value, field_name="definition_key", lowercase=True)
+        if not ORGANIZATION_CONTEXT_DEFINITION_KEY_PATTERN.fullmatch(normalized):
+            raise ValueError(
+                "definition_key must use lowercase letters, numbers, hyphens, or underscores"
+            )
+        return normalized
+
+    @field_validator("title")
+    @classmethod
+    def normalize_organization_context_title(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="title")
+
+    @field_validator("summary")
+    @classmethod
+    def normalize_organization_context_summary(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="summary")
+
+    @field_validator("body")
+    @classmethod
+    def normalize_organization_context_body(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="body")
+
+    @model_validator(mode="after")
+    def validate_organization_context_section_kind_alignment(
+        self,
+    ) -> "AssistantOrganizationContextDefinitionBase":
+        allowed_kinds = ORGANIZATION_CONTEXT_SECTION_KIND_RULES.get(self.section_key, ())
+        if self.content_kind not in allowed_kinds:
+            raise ValueError(
+                f"content_kind {self.content_kind} is not allowed for section_key {self.section_key}"
+            )
+        return self
+
+
+class AssistantOrganizationContextDefinitionCreate(AssistantOrganizationContextDefinitionBase):
+    created_by: str = Field(..., min_length=1, max_length=128)
+
+    @field_validator("created_by")
+    @classmethod
+    def normalize_organization_context_created_by(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="created_by")
+
+
+class AssistantOrganizationContextDefinitionUpdate(AssistantOrganizationContextDefinitionBase):
+    updated_by: str = Field(..., min_length=1, max_length=128)
+
+    @field_validator("updated_by")
+    @classmethod
+    def normalize_organization_context_updated_by(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="updated_by")
+
+
+class AssistantOrganizationContextDefinitionOut(BaseModel):
+    id: int
+    definition_key: str
+    section_key: AssistantOrganizationContextSectionKey
+    content_kind: AssistantOrganizationContextContentKind
+    title: str
+    summary: Optional[str] = None
+    body: str
+    scope: Literal["GLOBAL"] = "GLOBAL"
+    status: AssistantOrganizationContextStatus
+    version: int
+    display_order: int
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    published_at: Optional[datetime] = None
+    published_by: Optional[str] = None
+    retired_at: Optional[datetime] = None
+    retired_by: Optional[str] = None
+    is_editable: bool = False
 
 
 def _ensure_distinct_values(values: list[str], *, field_name: str) -> list[str]:

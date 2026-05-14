@@ -64,6 +64,7 @@ from apps.api.app.routes.reference_data import (
     BookStatusUpdate,
     BookUpdate,
     CommodityCreate,
+    CommodityUpdate,
     CommodityStatusUpdate,
     CounterpartyCreate,
     CounterpartyStatusUpdate,
@@ -146,6 +147,7 @@ from apps.api.app.routes.reference_data import (
     list_counterparties,
     list_counterparty_standards,
     get_book,
+    get_commodity,
     get_calendar,
     get_calendar_business_day_status,
     get_calendar_holiday,
@@ -157,6 +159,7 @@ from apps.api.app.routes.reference_data import (
     get_rail_line,
     get_rail_route,
     list_books,
+    list_commodities,
     list_calendar_holidays,
     list_calendar_overlays,
     list_calendar_rules,
@@ -186,6 +189,7 @@ from apps.api.app.routes.reference_data import (
     list_spatial_feature_standards,
     list_spatial_features,
     update_book,
+    update_commodity,
     update_asset,
     update_calendar,
     update_calendar_holiday,
@@ -398,6 +402,73 @@ class ReferenceDataApiTests(unittest.TestCase):
         self.assertTrue(reactivated.is_active)
         self.assertEqual(reactivated.version, 4)
         self.assertEqual([book.code for book in listed], ["CRUDE_PHYS"])
+
+    def test_commodity_crud_tracks_allowed_transport_modes(self) -> None:
+        with self.SessionLocal() as session:
+            created = create_commodity(
+                CommodityCreate(
+                    code=" wti ",
+                    name=" WTI ",
+                    commodity_class=" crude_oil ",
+                    description="test commodity",
+                    allowed_transport_modes=[" vessel ", "truck", "truck"],
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+
+        self.assertEqual(created.code, "WTI")
+        self.assertEqual(created.commodity_class, "CRUDE_OIL")
+        self.assertEqual(created.allowed_transport_modes, ["VESSEL", "TRUCK"])
+
+        with self.SessionLocal() as session:
+            fetched = get_commodity(" wti ", db=session)
+            updated = update_commodity(
+                "WTI",
+                CommodityUpdate(
+                    allowed_transport_modes=["pipeline", "rail"],
+                    updated_by="test-user",
+                ),
+                db=session,
+            )
+            listed = list_commodities(
+                q="WTI",
+                is_active=True,
+                limit=50,
+                offset=0,
+                db=session,
+            )
+
+        self.assertEqual(fetched.allowed_transport_modes, ["VESSEL", "TRUCK"])
+        self.assertEqual(updated.allowed_transport_modes, ["PIPELINE", "RAIL"])
+        self.assertEqual([commodity.code for commodity in listed], ["WTI"])
+        self.assertEqual(listed[0].allowed_transport_modes, ["PIPELINE", "RAIL"])
+
+    def test_commodity_crud_defaults_allowed_transport_modes_from_product_rules(self) -> None:
+        with self.SessionLocal() as session:
+            gold = create_commodity(
+                CommodityCreate(
+                    code=" gold ",
+                    name=" Gold Bars ",
+                    commodity_class=" precious_metals ",
+                    description="precious metals test commodity",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+            coal = create_commodity(
+                CommodityCreate(
+                    code=" thermal_coal ",
+                    name=" Thermal Coal ",
+                    commodity_class=" coal ",
+                    description="coal test commodity",
+                    created_by="test-user",
+                ),
+                db=session,
+            )
+
+        self.assertEqual(gold.allowed_transport_modes, ["AIR", "TRUCK", "RAIL"])
+        self.assertEqual(coal.allowed_transport_modes, ["TRUCK", "RAIL", "BARGE", "VESSEL"])
 
     def test_calendar_crud_and_holiday_records_round_trip(self) -> None:
         with self.SessionLocal() as session:

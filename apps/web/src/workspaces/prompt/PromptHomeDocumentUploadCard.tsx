@@ -288,9 +288,6 @@ export function PromptHomeDocumentUploadCard({
     'prompt-home.document-upload-card',
     false,
   )
-  const collapsedSummary = authSession
-    ? 'Upload PDFs from your machine or Gmail without leaving Home.'
-    : 'Protected intake card. Sign in to upload and review PDFs.'
 
   return (
     <section className="prompt-home-document-upload-card">
@@ -298,11 +295,6 @@ export function PromptHomeDocumentUploadCard({
         <div className="prompt-home-document-upload-card-copy">
           <span className="eyebrow">Documents</span>
           <strong>Upload documents</strong>
-          <p>
-            {expandedState.expanded
-              ? 'Store source PDFs, queue page analysis, and hand off full review to the work queue when needed.'
-              : collapsedSummary}
-          </p>
         </div>
 
         <div className="prompt-home-document-upload-card-side">

@@ -90,6 +90,15 @@ from apps.api.app.domains.assistant.services.eval_gates import (
 from apps.api.app.domains.assistant.services.outcome_metrics import (
     summarize_assistant_outcome_metrics,
 )
+from apps.api.app.domains.assistant.services.organization_context_registry import (
+    OrganizationContextRegistryError,
+    create_organization_context_definition,
+    get_organization_context_definition,
+    list_organization_context_definitions,
+    publish_organization_context_definition,
+    retire_organization_context_definition,
+    update_organization_context_definition,
+)
 from apps.api.app.domains.assistant.services.execution import (
     approve_assistant_action_request_for_user,
     execute_assistant_execution,
@@ -167,6 +176,11 @@ from apps.api.app.schemas.assistant import (
     AssistantAgentBuildSuggestionOut,
     AssistantAgentCreate,
     AssistantControlTowerSummaryOut,
+    AssistantOrganizationContextDefinitionCreate,
+    AssistantOrganizationContextDefinitionOut,
+    AssistantOrganizationContextDefinitionUpdate,
+    AssistantOrganizationContextSectionKey,
+    AssistantOrganizationContextStatus,
     AssistantAgentEvalCreate,
     AssistantAgentEvalOut,
     AssistantAgentEvalRunOut,
@@ -966,6 +980,200 @@ def publish_admin_assistant_agent_revision(
     )
 
 
+@admin_router.get(
+    "/organization-context/definitions",
+    response_model=list[AssistantOrganizationContextDefinitionOut],
+)
+def list_admin_organization_context_definitions(
+    request: Request,
+    section_key: AssistantOrganizationContextSectionKey | None = None,
+    status: AssistantOrganizationContextStatus | None = None,
+    definition_key: str | None = None,
+    db: Session = Depends(get_db),
+) -> list[AssistantOrganizationContextDefinitionOut]:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    return [
+        _to_organization_context_definition_out(record)
+        for record in list_organization_context_definitions(
+            db,
+            section_key=section_key,
+            status=status,
+            definition_key=definition_key.strip().lower() if definition_key is not None else None,
+        )
+    ]
+
+
+@admin_router.get(
+    "/organization-context/definitions/{definition_id}",
+    response_model=AssistantOrganizationContextDefinitionOut,
+)
+def get_admin_organization_context_definition(
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantOrganizationContextDefinitionOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    record = get_organization_context_definition(db, definition_id=definition_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Organization context definition not found")
+    return _to_organization_context_definition_out(record)
+
+
+@admin_router.post(
+    "/organization-context/definitions",
+    response_model=AssistantOrganizationContextDefinitionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_admin_organization_context_definition(
+    payload: AssistantOrganizationContextDefinitionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantOrganizationContextDefinitionOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    try:
+        record = create_organization_context_definition(
+            db,
+            definition_key=payload.definition_key,
+            section_key=payload.section_key,
+            content_kind=payload.content_kind,
+            title=payload.title,
+            summary=payload.summary,
+            body=payload.body,
+            display_order=payload.display_order,
+            created_by=resolve_audit_actor_id(payload.created_by),
+        )
+        db.commit()
+    except OrganizationContextRegistryError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    db.refresh(record)
+    return _to_organization_context_definition_out(record)
+
+
+@admin_router.put(
+    "/organization-context/definitions/{definition_id}",
+    response_model=AssistantOrganizationContextDefinitionOut,
+)
+def update_admin_organization_context_definition(
+    definition_id: int,
+    payload: AssistantOrganizationContextDefinitionUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantOrganizationContextDefinitionOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    record = get_organization_context_definition(db, definition_id=definition_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Organization context definition not found")
+
+    try:
+        updated_record = update_organization_context_definition(
+            db,
+            record=record,
+            definition_key=payload.definition_key,
+            section_key=payload.section_key,
+            content_kind=payload.content_kind,
+            title=payload.title,
+            summary=payload.summary,
+            body=payload.body,
+            display_order=payload.display_order,
+            updated_by=resolve_audit_actor_id(payload.updated_by),
+        )
+        db.commit()
+    except OrganizationContextRegistryError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    db.refresh(updated_record)
+    return _to_organization_context_definition_out(updated_record)
+
+
+@admin_router.post(
+    "/organization-context/definitions/{definition_id}/publish",
+    response_model=AssistantOrganizationContextDefinitionOut,
+)
+def publish_admin_organization_context_definition(
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantOrganizationContextDefinitionOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    record = get_organization_context_definition(db, definition_id=definition_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Organization context definition not found")
+
+    try:
+        published_record = publish_organization_context_definition(
+            db,
+            record=record,
+            actor_id=resolve_audit_actor_id(user.user_id),
+        )
+        db.commit()
+    except OrganizationContextRegistryError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    db.refresh(published_record)
+    return _to_organization_context_definition_out(published_record)
+
+
+@admin_router.post(
+    "/organization-context/definitions/{definition_id}/retire",
+    response_model=AssistantOrganizationContextDefinitionOut,
+)
+def retire_admin_organization_context_definition(
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantOrganizationContextDefinitionOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    record = get_organization_context_definition(db, definition_id=definition_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Organization context definition not found")
+
+    retired_record = retire_organization_context_definition(
+        db,
+        record=record,
+        actor_id=resolve_audit_actor_id(user.user_id),
+    )
+    db.commit()
+    db.refresh(retired_record)
+    return _to_organization_context_definition_out(retired_record)
+
+
 @admin_router.get("/runs", response_model=list[AssistantRunSummaryOut])
 def list_admin_assistant_runs(
     role_key: str | None = None,
@@ -1534,6 +1742,33 @@ def _to_prompt_section_out(section: AssistantPromptSection) -> AssistantPromptSe
         merge_strategy=section.merge_strategy,
         uses_fallback=section.uses_fallback,
         content=section.content,
+    )
+
+
+def _to_organization_context_definition_out(
+    record,
+) -> AssistantOrganizationContextDefinitionOut:
+    return AssistantOrganizationContextDefinitionOut(
+        id=record.id,
+        definition_key=record.definition_key,
+        section_key=record.section_key,
+        content_kind=record.content_kind,
+        title=record.title,
+        summary=record.summary,
+        body=record.body,
+        scope=record.scope,
+        status=record.status,
+        version=record.version,
+        display_order=record.display_order,
+        created_at=record.created_at,
+        created_by=record.created_by,
+        updated_at=record.updated_at,
+        updated_by=record.updated_by,
+        published_at=record.published_at,
+        published_by=record.published_by,
+        retired_at=record.retired_at,
+        retired_by=record.retired_by,
+        is_editable=record.status == "DRAFT",
     )
 
 
