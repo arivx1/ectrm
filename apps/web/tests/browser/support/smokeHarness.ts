@@ -108,6 +108,8 @@ export type SmokeHarness = {
   close: () => Promise<void>
 }
 
+const MAX_WIKI_RECENT_REVISIONS = 12
+
 const webRoot = fileURLToPath(new URL('../../..', import.meta.url))
 
 function normalizeOptionalText(value: unknown): string | null {

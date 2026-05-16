@@ -89,6 +89,7 @@ AUTHENTICATED_READ_PATH_PREFIXES = (
     "/reports",
     "/settlement",
     "/shipments",
+    "/truck-movements",
     "/trades",
     "/user-events",
     "/wiki",
