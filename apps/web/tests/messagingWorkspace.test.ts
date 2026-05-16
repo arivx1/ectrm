@@ -8,6 +8,7 @@ import { MessagingWorkspace } from "../src/workspaces/messages/MessagingWorkspac
 import { shouldSendMessageOnKeyDown } from "../src/workspaces/messages/messagingComposerKeybindings";
 import {
   appendMessagingWorkspacePost,
+  buildMessagingWorkspacePostFromRecord,
   buildMessagingWorkspaceChannels,
 } from "../src/workspaces/messages/messagingInboxData";
 
@@ -119,4 +120,36 @@ test("plain Enter sends while Shift+Enter keeps multiline drafting", () => {
     }),
     false,
   );
+});
+
+test("buildMessagingWorkspacePostFromRecord preserves durable author metadata for thread rendering", () => {
+  const post = buildMessagingWorkspacePostFromRecord(
+    {
+      message_id: "msg-7",
+      conversation_id: "ectrm-assistant",
+      source: "assistant",
+      body: "Drafting a governed reply.",
+      author: {
+        name: "ECTRM Assistant",
+        title: "Managed agent · Assistant Console",
+        presence: "Responding in thread",
+        initials: "EA",
+        tone: "system",
+      },
+      assistant_run_id: 77,
+      assistant_agent_id: "desk-ops-agent",
+      assistant_agent_name: "Desk Ops Agent",
+      created_by_user_id: "ops.admin",
+      created_by_session_id: "session-1",
+      created_by_role: "OPS_ADMIN",
+      created_at: "2026-05-16T20:00:00Z",
+    },
+    "4:00 PM",
+  );
+
+  assert.equal(post.id, "msg-7");
+  assert.equal(post.author.name, "ECTRM Assistant");
+  assert.equal(post.author.tone, "system");
+  assert.equal(post.timestamp, "4:00 PM");
+  assert.equal(post.body, "Drafting a governed reply.");
 });

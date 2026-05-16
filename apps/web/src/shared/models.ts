@@ -594,6 +594,109 @@ export type DocumentTableBlockRecord = {
   source: string
 }
 
+export type DocumentUnderstandingSourceCountsRecord = {
+  none: number
+  pdf_text: number
+  ocr: number
+}
+
+export type DocumentUnderstandingTextStatsRecord = {
+  source: 'none' | 'pdf_text' | 'ocr'
+  text_available: boolean
+  character_count: number
+  line_count: number
+  token_count: number
+  numeric_token_count: number
+  date_like_value_count: number
+  currency_marker_count: number
+}
+
+export type DocumentUnderstandingDocumentTextStatsRecord = {
+  pages_with_text: number
+  source_counts: DocumentUnderstandingSourceCountsRecord
+  total_character_count: number
+  total_line_count: number
+  total_token_count: number
+  total_numeric_token_count: number
+  total_date_like_value_count: number
+  total_currency_marker_count: number
+}
+
+export type DocumentUnderstandingLayoutHintsRecord = {
+  non_empty_line_count: number
+  short_line_count: number
+  uppercase_line_count: number
+  key_value_line_count: number
+  table_like_line_count: number
+}
+
+export type DocumentUnderstandingStructureSignalsRecord = {
+  header_candidate_count: number
+  header_candidate_keys: string[]
+  table_candidate_count: number
+  table_template_keys: string[]
+  table_column_count: number
+  table_column_keys: string[]
+  table_row_count: number
+}
+
+export type DocumentUnderstandingVisualSignalsRecord = {
+  preview_generated: boolean
+  preview_available: boolean
+  image_has_visible_content: boolean
+  ocr_used: boolean
+}
+
+export type DocumentUnderstandingDocumentVisualSummaryRecord = {
+  preview_generated_page_count: number
+  preview_available_page_count: number
+  visible_content_page_count: number
+}
+
+export type DocumentUnderstandingContentFingerprintRecord = {
+  filename_signature: string | null
+  content_features: string[]
+  content_feature_count: number
+  learning_version: string | null
+}
+
+export type DocumentUnderstandingClassificationEvidenceRecord = {
+  system_document_kind: string | null
+  system_document_subtype: string | null
+  system_classification_source: string | null
+  system_classification_confidence: number | null
+  matched_by: string | null
+  corrected: boolean
+  correction_count: number
+  corrected_document_kind: string | null
+  corrected_document_subtype: string | null
+  learning_applied: boolean
+  learning_source: string | null
+  learning_similarity: number | null
+  learning_example_count: number
+  automated_document_kind: string | null
+  automated_document_subtype: string | null
+}
+
+export type DocumentIngestionPageUnderstandingRecord = {
+  bundle_version: string
+  text_stats: DocumentUnderstandingTextStatsRecord
+  layout_hints: DocumentUnderstandingLayoutHintsRecord
+  structure_signals: DocumentUnderstandingStructureSignalsRecord
+  visual_signals: DocumentUnderstandingVisualSignalsRecord
+  content_fingerprint: DocumentUnderstandingContentFingerprintRecord
+  classification_evidence: DocumentUnderstandingClassificationEvidenceRecord
+}
+
+export type DocumentIngestionUnderstandingRecord = {
+  bundle_version: string
+  page_count: number
+  text_stats: DocumentUnderstandingDocumentTextStatsRecord
+  structure_signals: DocumentUnderstandingStructureSignalsRecord
+  visual_signals: DocumentUnderstandingDocumentVisualSummaryRecord
+  content_fingerprint: DocumentUnderstandingContentFingerprintRecord
+}
+
 export type DocumentRoutingCandidateRecord = {
   record_type: string
   label: string
@@ -717,6 +820,7 @@ export type DocumentIngestionPageRecord = {
   processed_at: string | null
   processor_trace: DocumentProcessorPageTraceRecord | null
   routing_assessment: DocumentRoutingAssessmentRecord | null
+  understanding: DocumentIngestionPageUnderstandingRecord
 }
 
 export type DocumentIngestionRecord = {
@@ -751,6 +855,7 @@ export type DocumentIngestionRecord = {
   action_plan: DocumentActionPlanRecord | null
   record_links: DocumentRecordLinkRecord[]
   pages: DocumentIngestionPageRecord[]
+  understanding: DocumentIngestionUnderstandingRecord
 }
 
 export type DocumentFieldSchemaRecord = {

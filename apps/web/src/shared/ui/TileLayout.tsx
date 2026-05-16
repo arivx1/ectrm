@@ -32,10 +32,19 @@ import {
 } from '../../entities/layouts/api'
 import { TileLayoutSectionContext, type TileLayoutSectionContextValue } from './tileLayoutSections'
 import { appConfig } from '../config'
-import type { PersonalizableWorkspaceId, WorkspaceLayoutState, WorkspaceTileSpan } from '../layouts'
+import type { PersonalizableWorkspaceId, WorkspaceLayoutState } from '../layouts'
 import type { StoredAuthSession } from '../mutation'
-
-export type TileSpan = WorkspaceTileSpan
+import {
+  availableSpansForTile,
+  createDefaultLayout,
+  defaultSpanForTile,
+  layoutsMatch,
+  sanitizeLayout,
+  sanitizeSectionOrder,
+  type TileSpan,
+  type WorkspaceTileLayoutSpec,
+} from '../tileLayoutState'
+import { resolveWorkspaceLayoutPresets } from '../workspaceLayoutPresets'
 
 export type WorkspaceTile = {
   id: string
@@ -63,7 +72,6 @@ type TileLayoutProps = {
 }
 
 type TileLayoutState = WorkspaceLayoutState
-type WorkspaceTileLayoutSpec = Pick<WorkspaceTile, 'id' | 'span' | 'availableSpans'>
 type WorkspaceTileSectionLayoutSpec = WorkspaceTileSection
 
 const STORAGE_VERSION = 'v1'
@@ -76,156 +84,6 @@ const TILE_SPAN_LABELS: Record<TileSpan, string> = {
 
 function uniqueValues<T extends string>(values: T[]): T[] {
   return [...new Set(values)]
-}
-
-function defaultSpanForTile(tile: Pick<WorkspaceTile, 'span'>): TileSpan {
-  return tile.span ?? 'full'
-}
-
-function availableSpansForTile(tile: Pick<WorkspaceTile, 'span' | 'availableSpans'>): TileSpan[] {
-  const defaultSpan = defaultSpanForTile(tile)
-  const configuredSpans = tile.availableSpans?.length ? uniqueValues(tile.availableSpans) : []
-  return configuredSpans.includes(defaultSpan) ? configuredSpans : uniqueValues([defaultSpan, ...configuredSpans])
-}
-
-function sanitizeSectionOrder(itemIds: string[], candidate: unknown): string[] {
-  const knownIds = new Set(itemIds)
-  const candidateOrder = Array.isArray(candidate) ? candidate.filter((value): value is string => typeof value === 'string') : []
-  const knownOrder = uniqueValues(candidateOrder.filter((value) => knownIds.has(value)))
-
-  return [...knownOrder, ...itemIds.filter((itemId) => !knownOrder.includes(itemId))]
-}
-
-function normalizeSectionOrders(
-  sections: WorkspaceTileSectionLayoutSpec[],
-  candidate: unknown,
-): Record<string, string[]> {
-  const defaultSections = Object.fromEntries(sections.map((section) => [section.id, [...section.itemIds]]))
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    return defaultSections
-  }
-
-  const candidateRecord = candidate as Record<string, unknown>
-  return Object.fromEntries(
-    sections.map((section) => [section.id, sanitizeSectionOrder(section.itemIds, candidateRecord[section.id])]),
-  )
-}
-
-function createDefaultLayout(
-  tileIds: string[],
-  sections: WorkspaceTileSectionLayoutSpec[] = [],
-): TileLayoutState {
-  return {
-    order: [...tileIds],
-    hidden: [],
-    spans: {},
-    sections: Object.fromEntries(sections.map((section) => [section.id, [...section.itemIds]])),
-  }
-}
-
-function normalizeSpanOverrides(
-  tiles: WorkspaceTileLayoutSpec[],
-  candidate: unknown,
-): Record<string, TileSpan> {
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    return {}
-  }
-
-  const spansById: Record<string, TileSpan> = {}
-  const tilesById = new Map(tiles.map((tile) => [tile.id, tile]))
-
-  for (const [tileId, rawSpan] of Object.entries(candidate as Record<string, unknown>)) {
-    if (typeof rawSpan !== 'string') {
-      continue
-    }
-
-    const tile = tilesById.get(tileId)
-    if (!tile) {
-      continue
-    }
-
-    const normalizedSpan = rawSpan.toLowerCase() as TileSpan
-    const allowedSpans = availableSpansForTile(tile)
-    const defaultSpan = defaultSpanForTile(tile)
-    if (allowedSpans.includes(normalizedSpan) && normalizedSpan !== defaultSpan) {
-      spansById[tileId] = normalizedSpan
-    }
-  }
-
-  return spansById
-}
-
-function sanitizeLayout(
-  tiles: WorkspaceTileLayoutSpec[],
-  sections: WorkspaceTileSectionLayoutSpec[],
-  candidate: unknown,
-): TileLayoutState {
-  const tileIds = tiles.map((tile) => tile.id)
-  const defaultLayout = createDefaultLayout(tileIds, sections)
-  if (!candidate || typeof candidate !== 'object') {
-    return defaultLayout
-  }
-
-  const candidateRecord = candidate as Record<string, unknown>
-  const knownIds = new Set(tileIds)
-  const candidateOrder = Array.isArray(candidateRecord.order)
-    ? candidateRecord.order.filter((value): value is string => typeof value === 'string')
-    : []
-  const candidateHidden = Array.isArray(candidateRecord.hidden)
-    ? candidateRecord.hidden.filter((value): value is string => typeof value === 'string')
-    : []
-  const knownOrder = uniqueValues(candidateOrder.filter((value) => knownIds.has(value)))
-  const fullOrder = [...knownOrder, ...tileIds.filter((tileId) => !knownOrder.includes(tileId))]
-
-  return {
-    order: fullOrder,
-    hidden: uniqueValues(candidateHidden.filter((value) => knownIds.has(value))),
-    spans: normalizeSpanOverrides(tiles, candidateRecord.spans),
-    sections: normalizeSectionOrders(sections, candidateRecord.sections),
-  }
-}
-
-function layoutsMatch(left: TileLayoutState, right: TileLayoutState): boolean {
-  if (left.order.length !== right.order.length || left.hidden.length !== right.hidden.length) {
-    return false
-  }
-
-  if (left.order.some((tileId, index) => tileId !== right.order[index])) {
-    return false
-  }
-
-  if (left.hidden.some((tileId, index) => tileId !== right.hidden[index])) {
-    return false
-  }
-
-  const leftSections = Object.entries(left.sections).sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
-  const rightSections = Object.entries(right.sections).sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
-  if (leftSections.length !== rightSections.length) {
-    return false
-  }
-
-  if (
-    leftSections.some(([sectionId, itemIds], index) => {
-      const matchingSection = rightSections[index]
-      if (!matchingSection || sectionId !== matchingSection[0] || itemIds.length !== matchingSection[1].length) {
-        return true
-      }
-
-      return itemIds.some((itemId, itemIndex) => itemId !== matchingSection[1][itemIndex])
-    })
-  ) {
-    return false
-  }
-
-  const leftSpans = Object.entries(left.spans).sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
-  const rightSpans = Object.entries(right.spans).sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
-  if (leftSpans.length !== rightSpans.length) {
-    return false
-  }
-
-  return leftSpans.every(
-    ([tileId, span], index) => tileId === rightSpans[index]?.[0] && span === rightSpans[index]?.[1],
-  )
 }
 
 function storageKey(workspaceId: string): string {
@@ -366,6 +224,8 @@ export function TileLayout({
   headerContent,
   toolbarDescription,
 }: TileLayoutProps) {
+  const toolbarDescriptionId = useId()
+  const presetSelectId = useId()
   const tileDefinitionSignature = JSON.stringify(
     tiles.map((tile) => ({
       id: tile.id,
@@ -389,10 +249,17 @@ export function TileLayout({
   )
   const tileIds = tileLayoutSpec.map((tile) => tile.id)
   const [layout, setLayout] = useState<TileLayoutState>(() => readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec))
-  const toolbarDescriptionId = useId()
   const remoteHydrationInFlightRef = useRef(false)
   const remoteSnapshotRef = useRef<string | null>(null)
   const accessToken = authSession?.accessToken ?? null
+  const layoutPresets = useMemo(
+    () => resolveWorkspaceLayoutPresets(workspaceId, tileLayoutSpec, sectionLayoutSpec),
+    [sectionLayoutSpec, tileLayoutSpec, workspaceId],
+  )
+  const activePreset = useMemo(
+    () => layoutPresets.find((preset) => layoutsMatch(layout, preset.layout)) ?? null,
+    [layout, layoutPresets],
+  )
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -516,6 +383,10 @@ export function TileLayout({
   }
   const visibleTiles = orderedTiles.filter((tile) => !hiddenSet.has(tile.id))
   const hiddenTiles = orderedTiles.filter((tile) => hiddenSet.has(tile.id))
+  const presetSelectValue = activePreset?.id ?? 'custom'
+  const presetStatus = activePreset
+    ? activePreset.description
+    : 'A saved personal variation is active. Choose a monitor preset to reapply a terminal-friendly starting layout.'
 
   function handleDragEnd(event: DragEndEvent) {
     const activeId = String(event.active.id)
@@ -597,6 +468,15 @@ export function TileLayout({
     })
   }
 
+  function handleApplyPreset(presetId: string) {
+    const preset = layoutPresets.find((candidate) => candidate.id === presetId)
+    if (!preset) {
+      return
+    }
+
+    setLayout(preset.layout)
+  }
+
   function handleMoveSectionItem(sectionId: string, itemIds: string[], activeId: string, overId: string) {
     if (activeId === overId) {
       return
@@ -657,6 +537,31 @@ export function TileLayout({
             </span>
           </div>
           <p id={toolbarDescriptionId}>{resolvedToolbarDescription}</p>
+          {layoutPresets.length > 0 ? (
+            <div className="tile-layout-preset-bar">
+              <label className="tile-layout-preset-picker" htmlFor={presetSelectId}>
+                <span className="eyebrow">Monitor preset</span>
+                <select
+                  id={presetSelectId}
+                  className="control"
+                  value={presetSelectValue}
+                  onChange={(event) => {
+                    if (event.target.value !== 'custom') {
+                      handleApplyPreset(event.target.value)
+                    }
+                  }}
+                >
+                  <option value="custom">Personal layout</option>
+                  {layoutPresets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="tile-layout-preset-note">{presetStatus}</p>
+            </div>
+          ) : null}
           <div className="tile-layout-toolbar-actions">
             {hiddenTiles.length > 0 ? (
               hiddenTiles.map((tile) => (

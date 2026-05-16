@@ -977,10 +977,6 @@
     align-items: flex-start;
   }
 
-  .auth-gate-step {
-    grid-template-columns: 1fr;
-  }
-
   .hero-heading-row {
     flex-direction: column;
     align-items: flex-start;

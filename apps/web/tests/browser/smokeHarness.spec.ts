@@ -1753,6 +1753,186 @@ test("signed-out start-here routes trade capture intent into the auth gate", asy
   }
 });
 
+test("signed-in start-here stays hidden after the user's first-login session", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness();
+
+  try {
+    await seedApiBaseOverride(page, harness);
+    await page.goto(`${harness.origin}/?view=dashboard`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const startHereOverlay = page.locator(".start-here-dialog");
+    await expect(startHereOverlay).toBeVisible();
+    await startHereOverlay
+      .getByRole("button", { name: "Open How It Works" })
+      .click();
+
+    await expect(page).toHaveURL(/view=guide/);
+    await expect(startHereOverlay).toBeHidden();
+
+    await page.evaluate(() => {
+      window.localStorage.setItem(
+        "ectrm.auth-session",
+        JSON.stringify({
+          sessionId: "smoke-session-1",
+          accessToken: "smoke-access-token",
+          expiresAt: "2099-01-01T00:00:00Z",
+          showStartHere: true,
+          user: {
+            user_id: "ops_admin",
+            email: "ops@example.com",
+            display_name: "Ops Admin",
+            role: "OPS_ADMIN",
+          },
+        }),
+      );
+    });
+
+    await page.goto(`${harness.origin}/?view=dashboard`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await expect(startHereOverlay).toBeVisible();
+    await startHereOverlay
+      .getByRole("button", { name: "Open Exposure" })
+      .click();
+
+    await expect(page).toHaveURL(/view=risk/);
+    await expect(startHereOverlay).toBeHidden();
+
+    await page.evaluate(() => {
+      window.localStorage.setItem(
+        "ectrm.auth-session",
+        JSON.stringify({
+          sessionId: "smoke-session-2",
+          accessToken: "smoke-access-token",
+          expiresAt: "2099-01-01T00:00:00Z",
+          showStartHere: false,
+          user: {
+            user_id: "ops_admin",
+            email: "ops@example.com",
+            display_name: "Ops Admin",
+            role: "OPS_ADMIN",
+          },
+        }),
+      );
+    });
+
+    await page.goto(`${harness.origin}/?view=dashboard`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await expect(startHereOverlay).toBeHidden();
+    assertNoHarnessRequestFailures(harness);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("documentation wiki smoke supports seeded pages and revision restore", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness();
+
+  try {
+    await seedSignedInSession(page, harness);
+    await page.goto(`${harness.origin}/?view=guide`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await dismissStartHereOverlay(page);
+
+    await page.getByRole("tab", { name: "Wiki" }).click();
+    await expect(page).toHaveURL(/view=guide/);
+    await expect(page).toHaveURL(/doc=wiki/);
+    await expect(page.getByRole("heading", { name: "Desk Wiki" }).first()).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Desk Handbook/ }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Confirmations/ }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "New Child Page" }).click();
+
+    const titleField = page.getByLabel("Page Title");
+    const markdownField = page.getByLabel("Markdown");
+    await expect(titleField).toHaveValue("Untitled Page");
+
+    await titleField.fill("Broker Escalations");
+    await markdownField.fill(
+      [
+        "# Broker Escalations",
+        "",
+        "- Start in Operations.",
+        "- Capture the blocker owner.",
+        "- Escalate with trade and counterparty context.",
+      ].join("\n"),
+    );
+
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect(page.getByText("Saved wiki changes.")).toBeVisible();
+    await expect(titleField).toHaveValue("Broker Escalations");
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const startHereOverlay = page.locator(".start-here-dialog");
+    if (await startHereOverlay.isVisible()) {
+      await startHereOverlay.getByRole("button", { name: "Not Now" }).click();
+      await startHereOverlay.waitFor({ state: "hidden" });
+    }
+
+    await expect(page).toHaveURL(/doc=wiki/);
+
+    const searchPagesField = page.getByLabel("Search Pages");
+    await searchPagesField.fill("Broker Escalations");
+
+    const createdPageTreeButton = page.getByRole("button", {
+      name: /Broker Escalations/,
+    });
+    await expect(createdPageTreeButton).toBeVisible();
+    await createdPageTreeButton.click();
+    await searchPagesField.fill("");
+
+    const versionOneCard = page
+      .locator(".wiki-revision-card")
+      .filter({ hasText: "Version 1" });
+    await expect(versionOneCard).toBeVisible();
+    await versionOneCard.getByRole("button", { name: "Restore" }).click();
+
+    await expect(page.getByText("Restored revision 6.")).toBeVisible();
+    await expect(page.getByLabel("Page Title")).toHaveValue("Untitled Page");
+    await expect(page.getByLabel("Markdown")).toHaveValue("");
+
+    expect(harness.mutationRequests).toHaveLength(3);
+    expect(harness.mutationRequests[0]).toEqual({
+      method: "POST",
+      path: "/wiki/pages",
+      search: "",
+    });
+    expect(harness.mutationRequests[1]?.method).toBe("PATCH");
+    expect(harness.mutationRequests[1]?.path).toMatch(
+      /^\/wiki\/pages\/wiki-page-\d{4}$/,
+    );
+    expect(harness.mutationRequests[1]?.search).toBe("");
+    expect(harness.mutationRequests[2]?.method).toBe("POST");
+    expect(harness.mutationRequests[2]?.path).toMatch(
+      /^\/wiki\/pages\/wiki-page-\d{4}\/revisions\/6\/restore$/,
+    );
+    expect(harness.mutationRequests[2]?.search).toBe("");
+    expect(
+      harness.unexpectedRequests,
+      `Unhandled mock API requests:\n${formatRecordedRequests(
+        harness.unexpectedRequests,
+      )}`,
+    ).toHaveLength(0);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("prompt home fails closed for invalid workspace handoff payloads", async ({
   page,
 }) => {

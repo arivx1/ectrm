@@ -20,6 +20,8 @@ the platform.
 - [Scheduling UI Design Review](./scheduling-ui-design-review.md)
 - [Trading And Shipping Document Taxonomy](./document-taxonomy-trading-shipping.md)
 - [Truck Tracking System Work Packages](./truck-tracking-system-work-packages.md)
+- [Truck Tracking WP-01: Truck Run And Stop Model](./truck-tracking-wp-01-run-stop-model.md)
+- [Truck Tracking TTS-02: Schema And API Scaffolding](./truck-tracking-tts-02-schema-api-scaffolding.md)
 - [Human-Agent Authority Matrix](./human-agent-authority-matrix.md)
 
 ## Why Truck Tracking Needs A Dedicated Slice
@@ -263,18 +265,17 @@ Recommended truck movement status model:
 
 - `PLANNED`
 - `ASSIGNED`
-- `AT_ORIGIN`
-- `LOADED`
+- `EN_ROUTE_TO_STOP`
+- `AT_STOP`
 - `IN_TRANSIT`
-- `AT_DESTINATION`
-- `UNLOADED`
 - `COMPLETED`
 - `ON_HOLD`
 - `CANCELLED`
 
-This movement status is more granular than the current delivery-level
-`DeliveryExecutionStatus`. The delivery obligation should roll up from movement
-state, not lose that higher-level summary.
+This stop-aware status model is refined in
+[Truck Tracking WP-01: Truck Run And Stop Model](./truck-tracking-wp-01-run-stop-model.md).
+The delivery obligation should roll up from movement state, not lose that
+higher-level summary.
 
 ### 3. `delivery_truck_stops`
 

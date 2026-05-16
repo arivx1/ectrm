@@ -66,7 +66,13 @@ mount_mcp_http_app(app)
 
 PROTECTED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 PUBLIC_WRITE_PATHS = frozenset(
-    {"/auth/session", "/auth/bootstrap-admin", "/auth/single-user-session", "/auth/google-session"}
+    {
+        "/auth/session",
+        "/auth/bootstrap-admin",
+        "/auth/single-user-session",
+        "/auth/google-session",
+        "/messages/workspace/posts",
+    }
 )
 ADMIN_PATH_PREFIXES = ("/admin", "/users")
 AUTHENTICATED_READ_PATH_PREFIXES = (
@@ -85,6 +91,7 @@ AUTHENTICATED_READ_PATH_PREFIXES = (
     "/shipments",
     "/trades",
     "/user-events",
+    "/wiki",
 )
 
 

@@ -49,9 +49,17 @@ export function humanizeKey(value: string): string {
   return value.replaceAll('_', ' ').replace(/\b\w/g, (character) => character.toUpperCase())
 }
 
-export function dominantDocumentKind(document: DocumentIngestionRecord): string {
+export function dominantDocumentKindCode(document: DocumentIngestionRecord): string {
   const candidate = document.analysis_summary.dominant_document_kind
-  return typeof candidate === 'string' && candidate.trim() ? candidate.replaceAll('_', ' ') : 'UNKNOWN'
+  if (typeof candidate === 'string' && candidate.trim()) {
+    return candidate
+  }
+  const pageCandidate = document.pages.find((page) => page.document_kind?.trim())?.document_kind
+  return pageCandidate?.trim() ? pageCandidate : 'UNKNOWN'
+}
+
+export function dominantDocumentKind(document: DocumentIngestionRecord): string {
+  return formatDocumentKindLabel(dominantDocumentKindCode(document))
 }
 
 export function reviewedPageCount(document: DocumentIngestionRecord): number {

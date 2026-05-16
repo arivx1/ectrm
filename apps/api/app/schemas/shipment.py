@@ -75,6 +75,102 @@ class DeliveryEventOut(BaseModel):
     version: int
 
 
+class DeliveryTruckDetailOut(BaseModel):
+    delivery_id: str
+    target_run_count: Optional[int]
+    dispatcher_owner: Optional[str]
+    tracking_provider: Optional[str]
+    tracking_policy: Optional[str]
+    default_carrier_name: Optional[str]
+    default_carrier_name_source: str
+    default_external_carrier_reference: Optional[str]
+    default_external_carrier_reference_source: str
+    equipment_type: Optional[str]
+    equipment_type_source: str
+    origin_geofence_code: Optional[str]
+    origin_geofence_code_source: str
+    destination_geofence_code: Optional[str]
+    destination_geofence_code_source: str
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
+class DeliveryTruckStopOut(BaseModel):
+    stop_id: str
+    movement_id: str
+    stop_sequence: int
+    stop_type: str
+    status: str
+    status_reason: Optional[str]
+    location_code: Optional[str]
+    location_code_source: str
+    planned_arrival_start: Optional[datetime]
+    planned_arrival_end: Optional[datetime]
+    planned_departure_start: Optional[datetime]
+    planned_departure_end: Optional[datetime]
+    appointment_reference: Optional[str]
+    appointment_reference_source: str
+    planned_quantity: Optional[float]
+    actual_quantity: Optional[float]
+    actual_arrived_at: Optional[datetime]
+    actual_departed_at: Optional[datetime]
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
+class DeliveryTruckMovementSummaryOut(BaseModel):
+    movement_id: str
+    delivery_id: str
+    sequence_no: int
+    status: str
+    status_reason: Optional[str]
+    planned_quantity: Optional[float]
+    planned_unit_of_measure: Optional[str]
+    carrier_name: Optional[str]
+    carrier_name_source: str
+    external_carrier_reference: Optional[str]
+    external_carrier_reference_source: str
+    dispatcher_owner: Optional[str]
+    dispatcher_owner_source: str
+    current_stop_sequence: Optional[int]
+    current_location_code: Optional[str]
+    last_signal_at: Optional[datetime]
+    current_eta_at_destination: Optional[datetime]
+    hold_reason_code: Optional[str]
+    hold_reason_code_source: str
+    stop_count: int
+    active_stop_count: int
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
+class DeliveryTruckMovementOut(DeliveryTruckMovementSummaryOut):
+    driver_name: Optional[str]
+    driver_name_source: str
+    driver_phone: Optional[str]
+    driver_phone_source: str
+    tractor_reference: Optional[str]
+    tractor_reference_source: str
+    trailer_reference: Optional[str]
+    trailer_reference_source: str
+    external_load_reference: Optional[str]
+    external_load_reference_source: str
+    bill_of_lading_number: Optional[str]
+    bill_of_lading_number_source: str
+    truck_ticket_number: Optional[str]
+    truck_ticket_number_source: str
+    stops: list[DeliveryTruckStopOut]
+
+
 class DeliveryObligationOut(BaseModel):
     delivery_id: str
     trade_id: str
@@ -121,6 +217,9 @@ class DeliveryObligationOut(BaseModel):
     load_reference_source: Optional[str] = None
     discharge_reference: Optional[str] = None
     discharge_reference_source: Optional[str] = None
+    truck_detail: Optional[DeliveryTruckDetailOut] = None
+    truck_movement_count: int = 0
+    active_truck_movement_count: int = 0
     rail_route_code: Optional[str] = None
     rail_route_code_source: Optional[str] = None
     rail_line_code: Optional[str] = None
@@ -252,6 +351,18 @@ class DeliveryLogisticsDetailUpdate(BaseModel):
     reset_fields: Optional[list[str]] = None
 
 
+class DeliveryTruckDetailUpdate(BaseModel):
+    target_run_count: Optional[int] = None
+    dispatcher_owner: Optional[str] = None
+    tracking_provider: Optional[str] = None
+    tracking_policy: Optional[str] = None
+    default_carrier_name: Optional[str] = None
+    default_external_carrier_reference: Optional[str] = None
+    equipment_type: Optional[str] = None
+    origin_geofence_code: Optional[str] = None
+    destination_geofence_code: Optional[str] = None
+
+
 class DeliveryPipelineDetailUpdate(BaseModel):
     pipeline_system: Optional[str] = None
     pipeline_path: Optional[str] = None
@@ -299,6 +410,86 @@ class DeliveryEventReverseWrite(BaseModel):
     reversed_at: Optional[datetime] = None
     source: Optional[str] = None
     notes: Optional[str] = None
+
+
+class DeliveryTruckStopCreate(BaseModel):
+    stop_sequence: Optional[int] = None
+    stop_type: str
+    location_code: Optional[str] = None
+    planned_arrival_start: Optional[datetime] = None
+    planned_arrival_end: Optional[datetime] = None
+    planned_departure_start: Optional[datetime] = None
+    planned_departure_end: Optional[datetime] = None
+    appointment_reference: Optional[str] = None
+    planned_quantity: Optional[float] = None
+    status: Optional[str] = None
+
+
+class DeliveryTruckMovementCreate(BaseModel):
+    sequence_no: int
+    planned_quantity: Optional[float] = None
+    planned_unit_of_measure: Optional[str] = None
+    carrier_name: Optional[str] = None
+    external_carrier_reference: Optional[str] = None
+    dispatcher_owner: Optional[str] = None
+    driver_name: Optional[str] = None
+    driver_phone: Optional[str] = None
+    tractor_reference: Optional[str] = None
+    trailer_reference: Optional[str] = None
+    external_load_reference: Optional[str] = None
+    bill_of_lading_number: Optional[str] = None
+    truck_ticket_number: Optional[str] = None
+    hold_reason_code: Optional[str] = None
+    status: Optional[str] = None
+    stops: list[DeliveryTruckStopCreate]
+
+
+class DeliveryTruckMovementUpdate(BaseModel):
+    sequence_no: Optional[int] = None
+    planned_quantity: Optional[float] = None
+    planned_unit_of_measure: Optional[str] = None
+    carrier_name: Optional[str] = None
+    external_carrier_reference: Optional[str] = None
+    dispatcher_owner: Optional[str] = None
+    driver_name: Optional[str] = None
+    driver_phone: Optional[str] = None
+    tractor_reference: Optional[str] = None
+    trailer_reference: Optional[str] = None
+    external_load_reference: Optional[str] = None
+    bill_of_lading_number: Optional[str] = None
+    truck_ticket_number: Optional[str] = None
+    hold_reason_code: Optional[str] = None
+    status: Optional[str] = None
+    status_reason: Optional[str] = None
+
+
+class DeliveryTruckMovementCancelWrite(BaseModel):
+    cancel_reason: str
+
+
+class DeliveryTruckStopUpdate(BaseModel):
+    stop_sequence: Optional[int] = None
+    stop_type: Optional[str] = None
+    location_code: Optional[str] = None
+    planned_arrival_start: Optional[datetime] = None
+    planned_arrival_end: Optional[datetime] = None
+    planned_departure_start: Optional[datetime] = None
+    planned_departure_end: Optional[datetime] = None
+    appointment_reference: Optional[str] = None
+    planned_quantity: Optional[float] = None
+    actual_quantity: Optional[float] = None
+    actual_arrived_at: Optional[datetime] = None
+    actual_departed_at: Optional[datetime] = None
+    status: Optional[str] = None
+    status_reason: Optional[str] = None
+
+
+class DeliveryTruckStopSkipWrite(BaseModel):
+    skip_reason: str
+
+
+class DeliveryTruckStopCancelWrite(BaseModel):
+    cancel_reason: str
 
 
 ShipmentOut = DeliveryObligationOut

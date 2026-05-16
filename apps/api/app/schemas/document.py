@@ -276,6 +276,121 @@ class DocumentTableBlockOut(BaseModel):
     source: str
 
 
+class DocumentUnderstandingSourceCountsOut(BaseModel):
+    none: int = 0
+    pdf_text: int = 0
+    ocr: int = 0
+
+
+class DocumentUnderstandingTextStatsOut(BaseModel):
+    source: DocumentPageTextSource = "none"
+    text_available: bool = False
+    character_count: int = 0
+    line_count: int = 0
+    token_count: int = 0
+    numeric_token_count: int = 0
+    date_like_value_count: int = 0
+    currency_marker_count: int = 0
+
+
+class DocumentUnderstandingDocumentTextStatsOut(BaseModel):
+    pages_with_text: int = 0
+    source_counts: DocumentUnderstandingSourceCountsOut = Field(default_factory=DocumentUnderstandingSourceCountsOut)
+    total_character_count: int = 0
+    total_line_count: int = 0
+    total_token_count: int = 0
+    total_numeric_token_count: int = 0
+    total_date_like_value_count: int = 0
+    total_currency_marker_count: int = 0
+
+
+class DocumentUnderstandingLayoutHintsOut(BaseModel):
+    non_empty_line_count: int = 0
+    short_line_count: int = 0
+    uppercase_line_count: int = 0
+    key_value_line_count: int = 0
+    table_like_line_count: int = 0
+
+
+class DocumentUnderstandingStructureSignalsOut(BaseModel):
+    header_candidate_count: int = 0
+    header_candidate_keys: list[str] = Field(default_factory=list)
+    table_candidate_count: int = 0
+    table_template_keys: list[str] = Field(default_factory=list)
+    table_column_count: int = 0
+    table_column_keys: list[str] = Field(default_factory=list)
+    table_row_count: int = 0
+
+
+class DocumentUnderstandingVisualSignalsOut(BaseModel):
+    preview_generated: bool = False
+    preview_available: bool = False
+    image_has_visible_content: bool = False
+    ocr_used: bool = False
+
+
+class DocumentUnderstandingDocumentVisualSummaryOut(BaseModel):
+    preview_generated_page_count: int = 0
+    preview_available_page_count: int = 0
+    visible_content_page_count: int = 0
+
+
+class DocumentUnderstandingContentFingerprintOut(BaseModel):
+    filename_signature: Optional[str] = None
+    content_features: list[str] = Field(default_factory=list)
+    content_feature_count: int = 0
+    learning_version: Optional[str] = None
+
+
+class DocumentUnderstandingClassificationEvidenceOut(BaseModel):
+    system_document_kind: Optional[str] = None
+    system_document_subtype: Optional[str] = None
+    system_classification_source: Optional[str] = None
+    system_classification_confidence: Optional[float] = Field(default=None, ge=0, le=1)
+    matched_by: Optional[str] = None
+    corrected: bool = False
+    correction_count: int = 0
+    corrected_document_kind: Optional[str] = None
+    corrected_document_subtype: Optional[str] = None
+    learning_applied: bool = False
+    learning_source: Optional[str] = None
+    learning_similarity: Optional[float] = Field(default=None, ge=0, le=1)
+    learning_example_count: int = 0
+    automated_document_kind: Optional[str] = None
+    automated_document_subtype: Optional[str] = None
+
+
+class DocumentIngestionPageUnderstandingOut(BaseModel):
+    bundle_version: str = "document-understanding-v1"
+    text_stats: DocumentUnderstandingTextStatsOut = Field(default_factory=DocumentUnderstandingTextStatsOut)
+    layout_hints: DocumentUnderstandingLayoutHintsOut = Field(default_factory=DocumentUnderstandingLayoutHintsOut)
+    structure_signals: DocumentUnderstandingStructureSignalsOut = Field(
+        default_factory=DocumentUnderstandingStructureSignalsOut
+    )
+    visual_signals: DocumentUnderstandingVisualSignalsOut = Field(default_factory=DocumentUnderstandingVisualSignalsOut)
+    content_fingerprint: DocumentUnderstandingContentFingerprintOut = Field(
+        default_factory=DocumentUnderstandingContentFingerprintOut
+    )
+    classification_evidence: DocumentUnderstandingClassificationEvidenceOut = Field(
+        default_factory=DocumentUnderstandingClassificationEvidenceOut
+    )
+
+
+class DocumentIngestionUnderstandingOut(BaseModel):
+    bundle_version: str = "document-understanding-v1"
+    page_count: int = 0
+    text_stats: DocumentUnderstandingDocumentTextStatsOut = Field(default_factory=DocumentUnderstandingDocumentTextStatsOut)
+    structure_signals: DocumentUnderstandingStructureSignalsOut = Field(
+        default_factory=DocumentUnderstandingStructureSignalsOut
+    )
+    visual_signals: DocumentUnderstandingDocumentVisualSummaryOut = Field(
+        default_factory=DocumentUnderstandingDocumentVisualSummaryOut
+    )
+    content_fingerprint: DocumentUnderstandingContentFingerprintOut = Field(
+        default_factory=DocumentUnderstandingContentFingerprintOut
+    )
+
+
 class DocumentIngestionPageOut(BaseModel):
     page_id: int
     page_number: int
@@ -299,6 +414,7 @@ class DocumentIngestionPageOut(BaseModel):
     processed_at: Optional[datetime] = None
     processor_trace: Optional[DocumentProcessorPageTraceOut] = None
     routing_assessment: Optional[DocumentRoutingAssessmentOut] = None
+    understanding: DocumentIngestionPageUnderstandingOut = Field(default_factory=DocumentIngestionPageUnderstandingOut)
 
 
 class DocumentIngestionOut(BaseModel):
@@ -333,6 +449,7 @@ class DocumentIngestionOut(BaseModel):
     action_plan: Optional[DocumentActionPlanOut] = None
     record_links: list[DocumentRecordLinkOut] = Field(default_factory=list)
     pages: list[DocumentIngestionPageOut] = Field(default_factory=list)
+    understanding: DocumentIngestionUnderstandingOut = Field(default_factory=DocumentIngestionUnderstandingOut)
 
 
 class DocumentExtractedFieldInput(BaseModel):
@@ -519,6 +636,7 @@ class DocumentGmailInboxImportResultOut(BaseModel):
 
 class DocumentIngestionUpdate(BaseModel):
     display_name: Optional[str] = Field(default=None, max_length=255)
+    document_kind: Optional[str] = Field(default=None, max_length=64)
     review_status: Optional[DocumentReviewStatus] = None
     review_notes: Optional[str] = Field(default=None, max_length=4_000)
 
@@ -526,6 +644,11 @@ class DocumentIngestionUpdate(BaseModel):
     @classmethod
     def normalize_display_name(cls, value: Optional[str]) -> Optional[str]:
         return normalize_optional_text(value, field_name="display_name")
+
+    @field_validator("document_kind")
+    @classmethod
+    def normalize_document_kind(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="document_kind", uppercase=True)
 
     @field_validator("review_notes")
     @classmethod

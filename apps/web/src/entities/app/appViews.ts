@@ -18,5 +18,5 @@ export function isViewKey(value: string | null): value is ViewKey {
 }
 
 export function isDocumentationDocumentKey(value: string | null): value is DocumentationDocumentKey {
-  return value === 'guide' || value === 'roadmap'
+  return value === 'guide' || value === 'wiki' || value === 'roadmap'
 }

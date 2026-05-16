@@ -272,7 +272,7 @@ def authenticate_google_user(
     db: Session,
     *,
     id_token: str,
-) -> UserAccount:
+) -> tuple[UserAccount, bool]:
     identity = verify_google_identity(id_token)
     config = google_auth_config()
     if config is None:
@@ -317,7 +317,7 @@ def authenticate_google_user(
         db.add(user)
         db.commit()
         db.refresh(user)
-        return user
+        return user, True
 
     if not user.is_active:
         raise HTTPException(
@@ -331,6 +331,7 @@ def authenticate_google_user(
             detail="User account is already linked to another Google identity.",
         )
 
+    show_start_here = user.last_login_at is None
     user.google_subject = identity.subject
     if user.email != identity.email:
         user.email = identity.email
@@ -340,7 +341,7 @@ def authenticate_google_user(
     user.version += 1
     db.commit()
     db.refresh(user)
-    return user
+    return user, show_start_here
 
 
 def resolve_session_principal(db: Session, authorization_header: Optional[str]) -> Optional[SessionPrincipal]:
@@ -454,7 +455,7 @@ def single_user_auth_config() -> SingleUserAuthConfig | None:
         ) from exc
 
 
-def provision_single_user_auth_user(db: Session) -> UserAccount:
+def provision_single_user_auth_user(db: Session) -> tuple[UserAccount, bool]:
     config = single_user_auth_config()
     if config is None:
         raise HTTPException(
@@ -464,6 +465,7 @@ def provision_single_user_auth_user(db: Session) -> UserAccount:
 
     now = datetime.now(timezone.utc)
     user = db.get(UserAccount, config.user_id)
+    show_start_here = user is None or user.last_login_at is None
 
     if user is None:
         email_owner = db.execute(select(UserAccount).where(UserAccount.email == config.email)).scalars().first()
@@ -500,7 +502,7 @@ def provision_single_user_auth_user(db: Session) -> UserAccount:
 
     db.commit()
     db.refresh(user)
-    return user
+    return user, show_start_here
 
 
 def google_auth_config() -> GoogleAuthConfig | None:

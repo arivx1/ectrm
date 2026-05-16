@@ -1,7 +1,10 @@
-.PHONY: db-up db-down api-install api-dev api-test api-mcp-test api-assistant-evals api-codex-smoke api-contract-refresh api-contract-check web-install web-build web-lint web-test web-smoke-install web-smoke-install-ci web-smoke-test verify verify-wave0 rebuild-trades rebuild-positions rebuild-all audit-trade-projections clean-trade-projections
+.PHONY: dev db-up db-down api-install api-dev api-test api-mcp-test api-assistant-evals api-codex-smoke api-contract-refresh api-contract-check web-install web-build web-lint web-test web-smoke-install web-smoke-install-ci web-smoke-test verify verify-wave0 rebuild-trades rebuild-positions rebuild-all audit-trade-projections clean-trade-projections
 
 VENV_PYTHON := ./.venv/bin/python
 WEB_DIR := apps/web
+
+dev:
+	./scripts/dev.sh
 
 db-up:
 	docker compose up -d

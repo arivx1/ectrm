@@ -61,7 +61,7 @@ export function isAuthenticationRequiredMessage(message: string): boolean {
   return /authentication is required|session expired|unauthorized/i.test(message)
 }
 
-function isApiReachabilityMessage(message: string): boolean {
+export function isApiReachabilityMessage(message: string): boolean {
   return /could not reach api/i.test(message)
 }
 
@@ -170,6 +170,7 @@ type StartHereOverlayArgs = {
   hasStartHereReturnIntent: boolean
   authInterruptionReason: string | null
   hasAuthInterruptionResume: boolean
+  usesTerminalMode: boolean
 }
 
 export function shouldPresentStartHereOverlay({
@@ -179,10 +180,11 @@ export function shouldPresentStartHereOverlay({
   hasStartHereReturnIntent,
   authInterruptionReason,
   hasAuthInterruptionResume,
+  usesTerminalMode,
 }: StartHereOverlayArgs): boolean {
   return (
     hasStartHereOnboarding &&
-    !(hasAuthSession && hasStartHereReturnIntent) &&
+    !(hasAuthSession && (hasStartHereReturnIntent || usesTerminalMode)) &&
     currentView !== 'prompt' &&
     currentView !== 'settings' &&
     currentView !== 'messages' &&

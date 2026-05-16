@@ -68,6 +68,17 @@ should still accept loopback browser origins such as `http://localhost:5174`
 and `http://127.0.0.1:5174` as long as loopback origins remain part of the
 configured CORS allowlist.
 
+### One-command local start
+
+From the repo root:
+
+```bash
+make dev
+```
+
+This starts Docker Compose for PostgreSQL, then launches the API and web app
+in one foreground process so `Ctrl+C` stops both together.
+
 ### Rebuild trades projection
 
 ```bash

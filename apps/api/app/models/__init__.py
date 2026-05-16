@@ -17,6 +17,10 @@ from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.delivery_power_detail import DeliveryPowerDetail
 from apps.api.app.models.delivery_rail_detail import DeliveryRailDetail
+from apps.api.app.models.delivery_tracking_signal import DeliveryTrackingSignal
+from apps.api.app.models.delivery_truck_detail import DeliveryTruckDetail
+from apps.api.app.models.delivery_truck_movement import DeliveryTruckMovement
+from apps.api.app.models.delivery_truck_stop import DeliveryTruckStop
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.document_action_approval_request import DocumentActionApprovalRequest
@@ -28,6 +32,8 @@ from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
 from apps.api.app.models.external_series_observation import ExternalSeriesObservation
 from apps.api.app.models.layout_definition import LayoutDefinition
+from apps.api.app.models.messaging_workspace_conversation import MessagingWorkspaceConversation
+from apps.api.app.models.messaging_workspace_message import MessagingWorkspaceMessage
 from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
 from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.models.position import Position
@@ -80,6 +86,8 @@ from apps.api.app.models.user_session import UserSession
 from apps.api.app.models.weather_forecast_period import WeatherForecastPeriod
 from apps.api.app.models.weather_location import WeatherLocation
 from apps.api.app.models.weather_observation import WeatherObservation
+from apps.api.app.models.wiki_page import WikiPage
+from apps.api.app.models.wiki_page_revision import WikiPageRevision
 
 __all__ = [
     "AssistantActionRequest",
@@ -102,6 +110,10 @@ __all__ = [
     "DeliveryPipelineDetail",
     "DeliveryPowerDetail",
     "DeliveryRailDetail",
+    "DeliveryTrackingSignal",
+    "DeliveryTruckDetail",
+    "DeliveryTruckMovement",
+    "DeliveryTruckStop",
     "DocumentIngestion",
     "DocumentIngestionPage",
     "DocumentActionApprovalRequest",
@@ -113,6 +125,8 @@ __all__ = [
     "ExternalSeriesDefinition",
     "ExternalSeriesObservation",
     "LayoutDefinition",
+    "MessagingWorkspaceConversation",
+    "MessagingWorkspaceMessage",
     "MutationProvenanceRecord",
     "OptionExposure",
     "Position",
@@ -163,4 +177,6 @@ __all__ = [
     "WeatherForecastPeriod",
     "WeatherLocation",
     "WeatherObservation",
+    "WikiPage",
+    "WikiPageRevision",
 ]

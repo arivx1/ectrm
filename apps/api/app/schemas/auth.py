@@ -78,6 +78,7 @@ class SessionOut(BaseModel):
     session_id: str
     access_token: str
     expires_at: datetime
+    show_start_here: bool
     user: AuthenticatedUserOut
 
 

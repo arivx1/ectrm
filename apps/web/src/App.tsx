@@ -29,6 +29,7 @@ import { useAppWorkspaceData } from './entities/app/useAppWorkspaceData'
 import { useAppWorkspaceSummary } from './entities/app/useAppWorkspaceSummary'
 import {
   deriveWorkspaceStatus,
+  isApiReachabilityMessage,
   isAuthenticationRequiredMessage,
   shouldPresentStartHereOverlay,
   shouldPresentSignedOutAuthGate,
@@ -79,19 +80,47 @@ function WorkspaceErrorState({
   title,
   message,
   onRetry,
+  retryPending = false,
 }: {
   title: string
   message: string
   onRetry: () => void
+  retryPending?: boolean
 }) {
   return (
     <section className="surface empty-state">
       <strong>{title}</strong>
       <p>{message}</p>
-      <button type="button" className="button button-secondary" onClick={onRetry}>
-        Retry workspace load
+      <button type="button" className="button button-secondary" onClick={onRetry} disabled={retryPending}>
+        {retryPending ? 'Reconnecting...' : 'Retry workspace load'}
       </button>
     </section>
+  )
+}
+
+function WorkspaceErrorBanner({
+  message,
+  onReconnect,
+  reconnectPending = false,
+}: {
+  message: string
+  onReconnect?: (() => void) | null
+  reconnectPending?: boolean
+}) {
+  return (
+    <div className={`error-banner workspace-error-banner ${onReconnect ? 'workspace-error-banner-actionable' : ''}`}>
+      <span className="workspace-error-banner-copy">{message}</span>
+      {onReconnect ? (
+        <button
+          type="button"
+          className="button button-secondary workspace-error-banner-action"
+          onClick={onReconnect}
+          disabled={reconnectPending}
+        >
+          {reconnectPending ? 'Reconnecting...' : 'Reconnect'}
+        </button>
+      ) : null}
+    </div>
   )
 }
 
@@ -297,9 +326,28 @@ function AuthenticatedWorkspaceShell({
     : ''
   const selectedTrade = summary.selectedTrade
   const currentWorkspaceLabel = APP_VIEWS.find((view) => view.key === route.currentView)?.label ?? workspaceLabel(route.currentView)
+  const shellModeClassName = appearance.isTerminalMode ? 'app-shell-terminal-mode' : ''
+  const workspaceReconnectPending =
+    workspaceData.groupLoading.core ||
+    VIEW_DATA_GROUPS[currentView].some((group) => workspaceData.groupLoading[group])
+  const workspaceShellReconnectAvailable = isApiReachabilityMessage(workspaceData.error)
+  const workspaceWarningReconnectAvailable = workspaceWarning
+    ? isApiReachabilityMessage(workspaceData.groupErrors[workspaceWarning])
+    : false
+
+  function handleReconnectWorkspace() {
+    void workspaceData
+      .loadData({
+        groups: VIEW_DATA_GROUPS[currentView],
+        force: true,
+      })
+      .catch(() => {
+        // The workspace hook already records the failure state for the shell banners.
+      })
+  }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${shellModeClassName}`.trim()}>
       <div className="app-aura app-aura-left" />
       <div className="app-aura app-aura-right" />
 
@@ -529,10 +577,18 @@ function AuthenticatedWorkspaceShell({
         )}
 
         {!showingNavigationSectionLanding && workspaceData.error ? (
-          <div className="error-banner">{workspaceShellErrorMessage}</div>
+          <WorkspaceErrorBanner
+            message={workspaceShellErrorMessage}
+            onReconnect={workspaceShellReconnectAvailable ? handleReconnectWorkspace : null}
+            reconnectPending={workspaceReconnectPending}
+          />
         ) : null}
         {!showingNavigationSectionLanding && workspaceWarning ? (
-          <div className="error-banner">{workspaceWarningMessage}</div>
+          <WorkspaceErrorBanner
+            message={workspaceWarningMessage}
+            onReconnect={workspaceWarningReconnectAvailable ? handleReconnectWorkspace : null}
+            reconnectPending={workspaceReconnectPending}
+          />
         ) : null}
         {!showingNavigationSectionLanding && routeHandoffBanner && !currentWorkspaceOwnsHandoffBanner ? (
           <section className="feedback-banner workspace-handoff-banner" aria-live="polite">
@@ -589,12 +645,8 @@ function AuthenticatedWorkspaceShell({
           <WorkspaceErrorState
             title={`${workspaceLabel(route.currentView)} needs attention`}
             message={blockingWorkspaceMessage}
-            onRetry={() => {
-              void workspaceData.loadData({
-                groups: VIEW_DATA_GROUPS[route.currentView],
-                force: true,
-              })
-            }}
+            onRetry={handleReconnectWorkspace}
+            retryPending={workspaceReconnectPending}
           />
         ) : workspaceLoading ? (
           <WorkspaceLoadState
@@ -824,6 +876,7 @@ export default function App() {
     hasStartHereReturnIntent: Boolean(startHereRouting.startHereReturnIntent),
     authInterruptionReason: workspaceData.authInterruptionReason,
     hasAuthInterruptionResume: authInterruption.authInterruptionResume !== null,
+    usesTerminalMode: appearance.isTerminalMode,
   })
   const signedOutNeedsAuthGate = shouldPresentSignedOutAuthGate({
     currentView,
@@ -832,7 +885,7 @@ export default function App() {
 
   if (signedOutNeedsAuthGate) {
     return (
-      <div className="app-shell auth-gate-shell">
+      <div className={`app-shell ${appearance.isTerminalMode ? 'app-shell-terminal-mode ' : ''}auth-gate-shell`}>
         <div className="app-aura app-aura-left" />
         <div className="app-aura app-aura-right" />
         <AuthGate

@@ -5,12 +5,14 @@ import {
   type CSSProperties,
   type DragEvent as ReactDragEvent,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 
 import {
   documentNeedsProcessing,
   documentStatusTone,
   dominantDocumentKind,
+  dominantDocumentKindCode,
   formatBytes,
   reviewReady,
 } from '../../features/documents/documentIngestionUtils'
@@ -113,7 +115,41 @@ export function LibraryWorkspace({
   formatDate,
   onOpenOperationsWorkspace,
 }: LibraryWorkspaceProps) {
-  const controller = useDocumentIngestionController({ authSession })
+  const {
+    documents,
+    processorSettings,
+    schemaRegistry,
+    loading,
+    loadError,
+    uploading,
+    uploadError,
+    gmailImporting,
+    gmailImportError,
+    gmailImportSummary,
+    displayName,
+    selectedProcessorProvider,
+    selectedProcessorModel,
+    selectedFile,
+    isDragActive,
+    lastUploadedDocumentId,
+    lastImportedDocumentIds,
+    fileInputRef,
+    setDisplayName,
+    setSelectedProcessorProvider,
+    setSelectedProcessorModel,
+    updateSelectedFile,
+    openFilePicker,
+    handleDropzoneKeyDown,
+    handleDropzoneDragEnter,
+    handleDropzoneDragOver,
+    handleDropzoneDragLeave,
+    handleDropzoneDrop,
+    handleSubmit,
+    handleImportGmailInbox: importGmailInbox,
+    handleSetDocumentKind,
+    saveErrors,
+    savingTarget,
+  } = useDocumentIngestionController({ authSession })
   const [activeLocation, setActiveLocation] = useState<LibraryLocation>({
     scope: 'collection',
     key: 'all',
@@ -139,6 +175,7 @@ export function LibraryWorkspace({
   const [draggingFolderId, setDraggingFolderId] = useState<string | null>(null)
   const [documentDragOverTargetKey, setDocumentDragOverTargetKey] = useState<string | null>(null)
   const [folderDragOverTargetKey, setFolderDragOverTargetKey] = useState<string | null>(null)
+  const [kindDraftByDocumentId, setKindDraftByDocumentId] = useState<Record<string, string>>({})
   const uploadCardState = usePersistentCollapsibleCardState('library.upload-card', false)
   const setUploadCardExpanded = uploadCardState.setExpanded
   const showUploadComposer = uploadCardState.expanded
@@ -153,7 +190,6 @@ export function LibraryWorkspace({
     assignDocumentsToFolder,
   } = useDocumentLibraryFolderState()
 
-  const documents = controller.documents
   const collectionCounts = buildDocumentLibraryCollectionCounts(documents)
   const folderTree = buildDocumentLibraryFolderTree(customFolders)
   const folderNodeById = Object.fromEntries(
@@ -162,14 +198,21 @@ export function LibraryWorkspace({
   const folderCounts = buildDocumentLibraryFolderCounts(documents, folderAssignments, customFolders)
   const rootCollection = DOCUMENT_LIBRARY_COLLECTIONS[0]
   const workflowCollections = DOCUMENT_LIBRARY_COLLECTIONS.slice(1)
+  const resolvedActiveLocation =
+    activeLocation.scope === 'folder' && !folderNodeById[activeLocation.key]
+      ? {
+          scope: 'collection',
+          key: rootCollection.key,
+        }
+      : activeLocation
   const activeCollection =
-    activeLocation.scope === 'collection'
-      ? DOCUMENT_LIBRARY_COLLECTIONS.find((collection) => collection.key === activeLocation.key) ??
+    resolvedActiveLocation.scope === 'collection'
+      ? DOCUMENT_LIBRARY_COLLECTIONS.find((collection) => collection.key === resolvedActiveLocation.key) ??
         rootCollection
       : null
   const activeCustomFolder =
-    activeLocation.scope === 'folder'
-      ? folderNodeById[activeLocation.key] ?? null
+    resolvedActiveLocation.scope === 'folder'
+      ? folderNodeById[resolvedActiveLocation.key] ?? null
       : null
   const activeFolderMatchIds = activeCustomFolder
     ? buildDocumentLibraryFolderDescendantIds(activeCustomFolder.id, customFolders)
@@ -184,6 +227,10 @@ export function LibraryWorkspace({
   })
   const scopedCollectionCounts = buildDocumentLibraryCollectionCounts(scopedDocuments)
   const kindFolders = buildLibraryKindFolders(scopedDocuments)
+  const activeKindFilter =
+    selectedKindFilter === 'all' || kindFolders.some((folder) => folder.label === selectedKindFilter)
+      ? selectedKindFilter
+      : 'all'
   const searchedDocuments = filterDocumentLibraryDocuments({
     documents,
     collectionKey: activeCollection?.key ?? null,
@@ -193,18 +240,18 @@ export function LibraryWorkspace({
     sortMode,
   })
   const visibleDocuments = searchedDocuments.filter(
-    (document) => selectedKindFilter === 'all' || dominantDocumentKind(document) === selectedKindFilter,
+    (document) => activeKindFilter === 'all' || dominantDocumentKind(document) === activeKindFilter,
   )
   const totalStoredBytes = documents.reduce((sum, document) => sum + document.size_bytes, 0)
   const visibleStoredBytes = visibleDocuments.reduce((sum, document) => sum + document.size_bytes, 0)
   const aiAssistedCount = documents.filter(documentHasAiAssist).length
   const verifiedCount = documents.filter((document) => document.review_status === 'VERIFIED').length
   const processingCount = documents.filter(documentNeedsProcessing).length
-  const availableProviders = controller.processorSettings?.providers ?? []
+  const availableProviders = processorSettings?.providers ?? []
   const shouldShowProviderSelector = availableProviders.length > 0
   const unconfiguredProviders = availableProviders.filter((provider) => !provider.configured)
   const selectedProvider =
-    availableProviders.find((provider) => provider.provider === controller.selectedProcessorProvider) ?? null
+    availableProviders.find((provider) => provider.provider === selectedProcessorProvider) ?? null
   const selectedProviderModels =
     selectedProvider?.available_models?.length
       ? selectedProvider.available_models
@@ -218,16 +265,28 @@ export function LibraryWorkspace({
         ? `${unconfiguredProviders[0]?.label ?? ''} and ${unconfiguredProviders[1]?.label ?? ''}`
         : `${unconfiguredProviders.slice(0, -1).map((provider) => provider.label).join(', ')}, and ${unconfiguredProviders[unconfiguredProviders.length - 1]?.label ?? ''}`
   const gmailConfigured = Boolean(
-    controller.processorSettings?.gmail_inbox?.enabled && controller.processorSettings?.gmail_inbox?.configured,
+    processorSettings?.gmail_inbox?.enabled && processorSettings?.gmail_inbox?.configured,
   )
   const uploadProviderLabel = selectedProvider ? selectedProvider.label : 'Built-in Parser'
+  const resolvedSelectedDocumentId =
+    visibleDocuments.length === 0
+      ? null
+      : selectedDocumentId && visibleDocuments.some((document) => document.document_id === selectedDocumentId)
+        ? selectedDocumentId
+        : visibleDocuments[0]?.document_id ?? null
   const selectedDocument =
-    visibleDocuments.find((document) => document.document_id === selectedDocumentId) ?? null
+    visibleDocuments.find((document) => document.document_id === resolvedSelectedDocumentId) ?? null
   const selectedDocumentFolderId = selectedDocument
     ? folderAssignments[selectedDocument.document_id] ?? ''
     : ''
   const activeLocationLabel = activeCustomFolder?.pathLabel ?? activeCollection?.label ?? rootCollection.label
-  const uploadFolder = uploadFolderId ? folderNodeById[uploadFolderId] ?? null : null
+  const resolvedUploadFolderId =
+    resolvedActiveLocation.scope === 'folder'
+      ? resolvedActiveLocation.key
+      : uploadFolderId && customFolders.some((folder) => folder.id === uploadFolderId)
+        ? uploadFolderId
+        : ''
+  const uploadFolder = resolvedUploadFolderId ? folderNodeById[resolvedUploadFolderId] ?? null : null
   const folderNameById = Object.fromEntries(
     folderTree.map((folder) => [folder.id, folder.pathLabel]),
   ) as Record<string, string>
@@ -243,112 +302,70 @@ export function LibraryWorkspace({
     folderClipboard && customFolders.some((folder) => folder.id === folderClipboard.folderId)
       ? folderNodeById[folderClipboard.folderId] ?? null
       : null
-  const folderPasteTargetId = activeLocation.scope === 'folder' ? activeLocation.key : null
+  const effectiveFolderActionNotice = folderClipboard && !clipboardFolder ? '' : folderActionNotice
+  const folderPasteTargetId = resolvedActiveLocation.scope === 'folder' ? resolvedActiveLocation.key : null
   const folderPasteActionLabel = activeCustomFolder ? 'Paste Here' : 'Paste to Root'
   const folderShortcutModifierLabel =
     typeof navigator !== 'undefined' && navigator.platform.includes('Mac') ? 'Cmd' : 'Ctrl'
 
   useEffect(() => {
-    if (selectedKindFilter === 'all') {
-      return
-    }
-
-    if (!kindFolders.some((folder) => folder.label === selectedKindFilter)) {
-      setSelectedKindFilter('all')
-    }
-  }, [kindFolders, selectedKindFilter])
-
-  useEffect(() => {
     if (
-      controller.selectedFile ||
-      controller.uploading ||
-      Boolean(controller.uploadError) ||
-      Boolean(controller.gmailImportError) ||
-      Boolean(controller.gmailImportSummary)
+      selectedFile ||
+      uploading ||
+      Boolean(uploadError) ||
+      Boolean(gmailImportError) ||
+      Boolean(gmailImportSummary)
     ) {
       setUploadCardExpanded(true)
     }
   }, [
-    controller.gmailImportError,
-    controller.gmailImportSummary,
-    controller.selectedFile,
-    controller.uploadError,
-    controller.uploading,
+    gmailImportError,
+    gmailImportSummary,
+    selectedFile,
     setUploadCardExpanded,
+    uploadError,
+    uploading,
   ])
 
   useEffect(() => {
-    if (activeLocation.scope === 'folder' && !activeCustomFolder) {
-      setActiveLocation({
-        scope: 'collection',
-        key: rootCollection.key,
-      })
+    if (pendingUploadFolderId === undefined || uploading) {
+      return
     }
-  }, [activeCustomFolder, activeLocation, rootCollection.key])
 
-  useEffect(() => {
-    if (activeLocation.scope === 'folder') {
-      setUploadFolderId(activeLocation.key)
-    }
-  }, [activeLocation])
-
-  useEffect(() => {
-    if (uploadFolderId && !customFolders.some((folder) => folder.id === uploadFolderId)) {
-      setUploadFolderId('')
-    }
-  }, [customFolders, uploadFolderId])
-
-  useEffect(() => {
-    if (folderClipboard && !customFolders.some((folder) => folder.id === folderClipboard.folderId)) {
-      setFolderClipboard(null)
-      setFolderActionNotice('')
-    }
-  }, [customFolders, folderClipboard])
-
-  useEffect(() => {
-    if (visibleDocuments.length === 0) {
-      if (selectedDocumentId !== null) {
-        setSelectedDocumentId(null)
+    const timeoutId = window.setTimeout(() => {
+      if (lastUploadedDocumentId) {
+        assignDocumentToFolder(lastUploadedDocumentId, pendingUploadFolderId)
+        setSelectedDocumentId(lastUploadedDocumentId)
       }
-      return
-    }
+      setPendingUploadFolderId(undefined)
+    }, 0)
 
-    if (!selectedDocumentId || !visibleDocuments.some((document) => document.document_id === selectedDocumentId)) {
-      setSelectedDocumentId(visibleDocuments[0].document_id)
-    }
-  }, [selectedDocumentId, visibleDocuments])
-
-  useEffect(() => {
-    if (pendingUploadFolderId === undefined || controller.uploading) {
-      return
-    }
-
-    if (controller.lastUploadedDocumentId) {
-      assignDocumentToFolder(controller.lastUploadedDocumentId, pendingUploadFolderId)
-      setSelectedDocumentId(controller.lastUploadedDocumentId)
-    }
-    setPendingUploadFolderId(undefined)
+    return () => window.clearTimeout(timeoutId)
   }, [
     assignDocumentToFolder,
-    controller.lastUploadedDocumentId,
-    controller.uploading,
+    lastUploadedDocumentId,
     pendingUploadFolderId,
+    uploading,
   ])
 
   useEffect(() => {
-    if (pendingImportFolderId === undefined || controller.gmailImporting) {
+    if (pendingImportFolderId === undefined || gmailImporting) {
       return
     }
 
-    if (controller.lastImportedDocumentIds.length > 0) {
-      assignDocumentsToFolder(controller.lastImportedDocumentIds, pendingImportFolderId)
-      setSelectedDocumentId(controller.lastImportedDocumentIds[0])
-    }
-    setPendingImportFolderId(undefined)
+    const timeoutId = window.setTimeout(() => {
+      if (lastImportedDocumentIds.length > 0) {
+        assignDocumentsToFolder(lastImportedDocumentIds, pendingImportFolderId)
+        setSelectedDocumentId(lastImportedDocumentIds[0])
+      }
+      setPendingImportFolderId(undefined)
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
   }, [
     assignDocumentsToFolder,
-    controller.gmailImporting,
-    controller.lastImportedDocumentIds,
+    gmailImporting,
+    lastImportedDocumentIds,
     pendingImportFolderId,
   ])
 
@@ -412,6 +429,47 @@ export function LibraryWorkspace({
     setSelectedDocumentId(documentId)
   }
 
+  function handleDocumentRowKeyDown(event: ReactKeyboardEvent<HTMLElement>, documentId: string) {
+    if (isEditableKeyboardTarget(event.target)) {
+      return
+    }
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return
+    }
+    event.preventDefault()
+    handleSelectDocument(documentId)
+  }
+
+  async function handleLibraryDocumentKindChange(document: DocumentIngestionRecord, nextDocumentKind: string) {
+    const currentDocumentKind = dominantDocumentKindCode(document)
+    if (!nextDocumentKind || nextDocumentKind === currentDocumentKind) {
+      setKindDraftByDocumentId((current) => {
+        if (!(document.document_id in current)) {
+          return current
+        }
+        const nextDrafts = { ...current }
+        delete nextDrafts[document.document_id]
+        return nextDrafts
+      })
+      return
+    }
+
+    setSelectedDocumentId(document.document_id)
+    setKindDraftByDocumentId((current) => ({ ...current, [document.document_id]: nextDocumentKind }))
+    try {
+      await handleSetDocumentKind(document, nextDocumentKind)
+    } finally {
+      setKindDraftByDocumentId((current) => {
+        if (!(document.document_id in current)) {
+          return current
+        }
+        const nextDrafts = { ...current }
+        delete nextDrafts[document.document_id]
+        return nextDrafts
+      })
+    }
+  }
+
   function handleSelectCollection(collectionKey: DocumentLibraryCollectionKey) {
     setActiveLocation({
       scope: 'collection',
@@ -444,13 +502,13 @@ export function LibraryWorkspace({
   }
 
   async function handleUploadSubmit(event: FormEvent<HTMLFormElement>) {
-    setPendingUploadFolderId(uploadFolderId || null)
-    await controller.handleSubmit(event)
+    setPendingUploadFolderId(resolvedUploadFolderId || null)
+    await handleSubmit(event)
   }
 
-  async function handleImportGmailInbox() {
-    setPendingImportFolderId(uploadFolderId || null)
-    await controller.handleImportGmailInbox()
+  async function handleImportGmailInboxClick() {
+    setPendingImportFolderId(resolvedUploadFolderId || null)
+    await importGmailInbox()
   }
 
   function folderDropTargetKey(folderId: string | null): string {
@@ -636,7 +694,7 @@ export function LibraryWorkspace({
             <button
               type="button"
               className={`library-folder-button${
-                activeLocation.scope === 'collection' && activeLocation.key === rootCollection.key
+                resolvedActiveLocation.scope === 'collection' && resolvedActiveLocation.key === rootCollection.key
                   ? ' is-active'
                   : ''
               }${
@@ -700,8 +758,8 @@ export function LibraryWorkspace({
               </button>
             </div>
 
-            {folderActionNotice ? (
-              <p className="form-note">{folderActionNotice}</p>
+            {effectiveFolderActionNotice ? (
+              <p className="form-note">{effectiveFolderActionNotice}</p>
             ) : clipboardFolder ? (
               <p className="form-note">
                 Clipboard: {clipboardFolder.pathLabel}. Use {folderPasteActionLabel.toLowerCase()} or
@@ -804,7 +862,8 @@ export function LibraryWorkspace({
                 key={collection.key}
                 type="button"
                 className={`library-folder-button${
-                  activeLocation.scope === 'collection' && activeLocation.key === collection.key
+                  resolvedActiveLocation.scope === 'collection' &&
+                  resolvedActiveLocation.key === collection.key
                     ? ' is-active'
                     : ''
                 }`}
@@ -829,7 +888,7 @@ export function LibraryWorkspace({
           <div className="library-folder-list">
             <button
               type="button"
-              className={`library-folder-button${selectedKindFilter === 'all' ? ' is-active' : ''}`}
+              className={`library-folder-button${activeKindFilter === 'all' ? ' is-active' : ''}`}
               onClick={() => setSelectedKindFilter('all')}
             >
               <span className="library-folder-icon library-folder-icon-outline" aria-hidden="true" />
@@ -843,7 +902,7 @@ export function LibraryWorkspace({
               <button
                 key={folder.label}
                 type="button"
-                className={`library-folder-button${selectedKindFilter === folder.label ? ' is-active' : ''}`}
+                className={`library-folder-button${activeKindFilter === folder.label ? ' is-active' : ''}`}
                 onClick={() => setSelectedKindFilter(folder.label)}
               >
                 <span className="library-folder-icon library-folder-icon-type" aria-hidden="true" />
@@ -882,7 +941,7 @@ export function LibraryWorkspace({
               >
                 Uploaded documents
               </button>
-              {activeLocation.scope === 'folder'
+              {resolvedActiveLocation.scope === 'folder'
                 ? activeFolderPath.map((folder) => (
                     <span key={folder.id} className="library-breadcrumb-cluster">
                       <span className="library-breadcrumb-separator">/</span>
@@ -903,10 +962,10 @@ export function LibraryWorkspace({
                       <span>{activeLocationLabel}</span>
                     </>
                   )}
-              {selectedKindFilter !== 'all' ? (
+              {activeKindFilter !== 'all' ? (
                 <>
                   <span className="library-breadcrumb-separator">/</span>
-                  <strong>{selectedKindFilter}</strong>
+                  <strong>{activeKindFilter}</strong>
                 </>
               ) : null}
             </div>
@@ -996,8 +1055,8 @@ export function LibraryWorkspace({
             <span>{formatBytes(visibleStoredBytes)} in this folder</span>
             <span>{scopedCollectionCounts.ready} ready to verify</span>
             <span>{scopedCollectionCounts.errors} need attention</span>
-            {controller.loading ? <span>Syncing library…</span> : null}
-            {controller.loadError ? <span className="field-error">{controller.loadError}</span> : null}
+            {loading ? <span>Syncing library…</span> : null}
+            {loadError ? <span className="field-error">{loadError}</span> : null}
           </div>
         </section>
 
@@ -1054,36 +1113,36 @@ export function LibraryWorkspace({
                     <div
                       className={[
                         'library-upload-dropzone',
-                        controller.isDragActive ? 'is-active' : '',
-                        controller.selectedFile ? 'has-file' : '',
-                        controller.uploading ? 'is-disabled' : '',
+                        isDragActive ? 'is-active' : '',
+                        selectedFile ? 'has-file' : '',
+                        uploading ? 'is-disabled' : '',
                       ]
                         .filter(Boolean)
                         .join(' ')}
                       role="button"
-                      tabIndex={controller.uploading ? -1 : 0}
-                      aria-disabled={controller.uploading}
+                      tabIndex={uploading ? -1 : 0}
+                      aria-disabled={uploading}
                       aria-label="Drop a PDF here or click to browse"
-                      onClick={controller.openFilePicker}
-                      onKeyDown={controller.handleDropzoneKeyDown}
-                      onDragEnter={controller.handleDropzoneDragEnter}
-                      onDragOver={controller.handleDropzoneDragOver}
-                      onDragLeave={controller.handleDropzoneDragLeave}
-                      onDrop={controller.handleDropzoneDrop}
+                      onClick={openFilePicker}
+                      onKeyDown={handleDropzoneKeyDown}
+                      onDragEnter={handleDropzoneDragEnter}
+                      onDragOver={handleDropzoneDragOver}
+                      onDragLeave={handleDropzoneDragLeave}
+                      onDrop={handleDropzoneDrop}
                     >
                       <input
-                        ref={controller.fileInputRef}
+                        ref={fileInputRef}
                         className="document-dropzone-input"
                         type="file"
                         accept="application/pdf,.pdf"
-                        onChange={(event) => controller.updateSelectedFile(event.target.files?.[0] ?? null)}
-                        disabled={controller.uploading}
+                        onChange={(event) => updateSelectedFile(event.target.files?.[0] ?? null)}
+                        disabled={uploading}
                       />
                       <span className="eyebrow">PDF</span>
-                      <strong>{controller.selectedFile ? controller.selectedFile.name : 'Drop PDF or Choose File'}</strong>
+                      <strong>{selectedFile ? selectedFile.name : 'Drop PDF or Choose File'}</strong>
                       <p>
-                        {controller.selectedFile
-                          ? `${formatBytes(controller.selectedFile.size)} ready for upload`
+                        {selectedFile
+                          ? `${formatBytes(selectedFile.size)} ready for upload`
                           : 'Add one document at a time to the uploaded documents library.'}
                       </p>
                     </div>
@@ -1093,10 +1152,10 @@ export function LibraryWorkspace({
                       <input
                         className="control"
                         type="text"
-                        value={controller.displayName}
+                        value={displayName}
                         placeholder="Optional desk-friendly label"
-                        onChange={(event) => controller.setDisplayName(event.target.value)}
-                        disabled={controller.uploading}
+                        onChange={(event) => setDisplayName(event.target.value)}
+                        disabled={uploading}
                       />
                     </label>
 
@@ -1105,13 +1164,13 @@ export function LibraryWorkspace({
                         <span>Processing API</span>
                         <select
                           className="control"
-                          value={controller.selectedProcessorProvider}
+                          value={selectedProcessorProvider}
                           onChange={(event) =>
-                            controller.setSelectedProcessorProvider(
+                            setSelectedProcessorProvider(
                               event.target.value as 'builtin' | 'openai' | 'anthropic' | 'google' | '',
                             )
                           }
-                          disabled={controller.uploading}
+                          disabled={uploading}
                         >
                           <option value="builtin">Built-in Parser Only</option>
                           {availableProviders.map((provider) => (
@@ -1128,14 +1187,14 @@ export function LibraryWorkspace({
                       </div>
                     )}
 
-                    {controller.selectedProcessorProvider !== 'builtin' && selectedProviderModels.length > 0 ? (
+                    {selectedProcessorProvider !== 'builtin' && selectedProviderModels.length > 0 ? (
                       <label className="library-upload-field">
                         <span>Processing Model</span>
                         <select
                           className="control"
-                          value={controller.selectedProcessorModel}
-                          onChange={(event) => controller.setSelectedProcessorModel(event.target.value)}
-                          disabled={controller.uploading}
+                          value={selectedProcessorModel}
+                          onChange={(event) => setSelectedProcessorModel(event.target.value)}
+                          disabled={uploading}
                         >
                           {selectedProviderModels.map((modelOption) => (
                             <option key={modelOption} value={modelOption}>
@@ -1150,9 +1209,9 @@ export function LibraryWorkspace({
                       <span>Destination Folder</span>
                       <select
                         className="control"
-                        value={uploadFolderId}
+                        value={resolvedUploadFolderId}
                         onChange={(event) => setUploadFolderId(event.target.value)}
-                        disabled={controller.uploading || controller.gmailImporting}
+                        disabled={uploading || gmailImporting}
                       >
                         <option value="">Unfiled in Library</option>
                         {folderTree.map((folder) => (
@@ -1169,24 +1228,24 @@ export function LibraryWorkspace({
                       <button
                         type="submit"
                         className="button button-primary"
-                        disabled={controller.uploading || !controller.selectedFile}
+                        disabled={uploading || !selectedFile}
                       >
-                        {controller.uploading ? 'Uploading…' : 'Upload PDF'}
+                        {uploading ? 'Uploading…' : 'Upload PDF'}
                       </button>
                       <button
                         type="button"
                         className="button button-secondary"
-                        onClick={() => void handleImportGmailInbox()}
-                        disabled={controller.uploading || controller.gmailImporting || !gmailConfigured}
+                        onClick={() => void handleImportGmailInboxClick()}
+                        disabled={uploading || gmailImporting || !gmailConfigured}
                       >
-                        {controller.gmailImporting ? 'Importing Gmail…' : 'Import Gmail PDFs'}
+                        {gmailImporting ? 'Importing Gmail…' : 'Import Gmail PDFs'}
                       </button>
-                      {controller.selectedFile ? (
+                      {selectedFile ? (
                         <button
                           type="button"
                           className="button button-ghost"
-                          onClick={() => controller.updateSelectedFile(null)}
-                          disabled={controller.uploading}
+                          onClick={() => updateSelectedFile(null)}
+                          disabled={uploading}
                         >
                           Clear File
                         </button>
@@ -1194,10 +1253,10 @@ export function LibraryWorkspace({
                     </div>
 
                     <p className="library-upload-note">
-                      {controller.selectedProcessorProvider === 'builtin'
+                      {selectedProcessorProvider === 'builtin'
                         ? 'Built-in parsing only will run for this upload.'
                         : selectedProvider
-                          ? `${selectedProvider.label}${controller.selectedProcessorModel ? ` (${controller.selectedProcessorModel})` : ''} will handle document analysis.`
+                          ? `${selectedProvider.label}${selectedProcessorModel ? ` (${selectedProcessorModel})` : ''} will handle document analysis.`
                           : 'The built-in parser will be used until an external provider is configured.'}
                       {unconfiguredProviders.length > 0
                         ? ` ${placeholderProviderLabels} placeholder${unconfiguredProviders.length === 1 ? ' is' : 's are'} visible here and will unlock once those API providers are configured.`
@@ -1205,9 +1264,9 @@ export function LibraryWorkspace({
                     </p>
                   </div>
 
-                  {controller.uploadError ? <p className="field-error">{controller.uploadError}</p> : null}
-                  {controller.gmailImportError ? <p className="field-error">{controller.gmailImportError}</p> : null}
-                  {controller.gmailImportSummary ? <p className="form-note">{controller.gmailImportSummary}</p> : null}
+                  {uploadError ? <p className="field-error">{uploadError}</p> : null}
+                  {gmailImportError ? <p className="field-error">{gmailImportError}</p> : null}
+                  {gmailImportSummary ? <p className="form-note">{gmailImportSummary}</p> : null}
                 </form>
               </>
             ) : null}
@@ -1221,7 +1280,7 @@ export function LibraryWorkspace({
                 <p>
                   {documents.length === 0
                     ? 'Open the uploader card to add the first PDF into the library.'
-                    : activeLocation.scope === 'folder'
+                    : resolvedActiveLocation.scope === 'folder'
                       ? 'Move a file into this folder or open the uploader card to add one here.'
                       : 'Try another folder, clear the search box, or change the type filter.'}
                 </p>
@@ -1239,17 +1298,19 @@ export function LibraryWorkspace({
                 </div>
                 <div className="library-file-table-body">
                   {visibleDocuments.map((document) => (
-                    <button
+                    <div
                       key={document.document_id}
-                      type="button"
                       role="listitem"
-                      className={`library-file-row${selectedDocumentId === document.document_id ? ' is-selected' : ''}${
+                      tabIndex={0}
+                      className={`library-file-row${resolvedSelectedDocumentId === document.document_id ? ' is-selected' : ''}${
                         draggingDocumentId === document.document_id ? ' is-dragging' : ''
                       }`}
+                      aria-label={`Open ${document.display_name || document.original_filename}`}
                       draggable
                       onDragStart={(event) => handleFileDragStart(event, document.document_id)}
                       onDragEnd={handleFileDragEnd}
                       onClick={() => handleSelectDocument(document.document_id)}
+                      onKeyDown={(event) => handleDocumentRowKeyDown(event, document.document_id)}
                     >
                       <div className="library-file-name">
                         <span className="library-file-icon" aria-hidden="true">
@@ -1260,7 +1321,41 @@ export function LibraryWorkspace({
                           <span>{document.original_filename}</span>
                         </div>
                       </div>
-                      <span>{dominantDocumentKind(document)}</span>
+                      <div
+                        className="library-file-kind-cell"
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      >
+                        {schemaRegistry ? (
+                          <select
+                            className="control library-file-kind-select"
+                            aria-label={`Set document type for ${document.display_name || document.original_filename}`}
+                            value={kindDraftByDocumentId[document.document_id] ?? dominantDocumentKindCode(document)}
+                            disabled={documentNeedsProcessing(document) || savingTarget === `document-kind:${document.document_id}`}
+                            title={
+                              document.page_count > 1
+                                ? `Changing the type here applies the selected classification to all ${document.page_count} pages in the file.`
+                                : 'Change the classified document type.'
+                            }
+                            onChange={(event) =>
+                              void handleLibraryDocumentKindChange(document, event.target.value)
+                            }
+                          >
+                            {schemaRegistry.document_kinds.map((entry) => (
+                              <option key={entry.document_kind} value={entry.document_kind}>
+                                {entry.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span>{dominantDocumentKind(document)}</span>
+                        )}
+                        {savingTarget === `document-kind:${document.document_id}` ? (
+                          <small className="library-file-kind-note">Saving type…</small>
+                        ) : saveErrors[`document-kind:${document.document_id}`] ? (
+                          <small className="field-error">{saveErrors[`document-kind:${document.document_id}`]}</small>
+                        ) : null}
+                      </div>
                       <span>{folderNameById[folderAssignments[document.document_id] ?? ''] ?? '—'}</span>
                       <span>
                         <span className={`status-pill status-pill-${documentStatusTone(document.status)}`}>
@@ -1270,7 +1365,7 @@ export function LibraryWorkspace({
                       <span>{ownerLabel(document)}</span>
                       <span>{formatDate(document.updated_at)}</span>
                       <span>{formatBytes(document.size_bytes)}</span>
-                    </button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -1280,7 +1375,7 @@ export function LibraryWorkspace({
                   <button
                     key={document.document_id}
                     type="button"
-                    className={`library-document-card${selectedDocumentId === document.document_id ? ' is-selected' : ''}${
+                    className={`library-document-card${resolvedSelectedDocumentId === document.document_id ? ' is-selected' : ''}${
                       draggingDocumentId === document.document_id ? ' is-dragging' : ''
                     }`}
                     draggable

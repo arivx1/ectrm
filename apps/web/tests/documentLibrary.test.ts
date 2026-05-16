@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { DocumentIngestionRecord } from '../src/shared/models'
+import type { DocumentIngestionRecord, DocumentIngestionUnderstandingRecord } from '../src/shared/models'
 import {
   buildDocumentLibraryCollectionCounts,
   buildDocumentLibraryFolderDescendantIds,
@@ -8,6 +8,46 @@ import {
   buildDocumentLibraryFolderTree,
   filterDocumentLibraryDocuments,
 } from '../src/workspaces/library/libraryWorkspaceSupport'
+
+function buildDocumentUnderstanding(
+  overrides: Partial<DocumentIngestionUnderstandingRecord> = {},
+): DocumentIngestionUnderstandingRecord {
+  return {
+    bundle_version: 'document-understanding-v1',
+    page_count: 2,
+    text_stats: {
+      pages_with_text: 2,
+      source_counts: { none: 0, pdf_text: 2, ocr: 0 },
+      total_character_count: 64,
+      total_line_count: 4,
+      total_token_count: 12,
+      total_numeric_token_count: 2,
+      total_date_like_value_count: 0,
+      total_currency_marker_count: 0,
+    },
+    structure_signals: {
+      header_candidate_count: 0,
+      header_candidate_keys: [],
+      table_candidate_count: 0,
+      table_template_keys: [],
+      table_column_count: 0,
+      table_column_keys: [],
+      table_row_count: 0,
+    },
+    visual_signals: {
+      preview_generated_page_count: 0,
+      preview_available_page_count: 0,
+      visible_content_page_count: 0,
+    },
+    content_fingerprint: {
+      filename_signature: 'trade confirmation',
+      content_features: ['trade', 'confirmation'],
+      content_feature_count: 2,
+      learning_version: 'content-similarity-v1',
+    },
+    ...overrides,
+  }
+}
 
 function buildDocument(overrides: Partial<DocumentIngestionRecord> = {}): DocumentIngestionRecord {
   return {
@@ -46,6 +86,7 @@ function buildDocument(overrides: Partial<DocumentIngestionRecord> = {}): Docume
     action_plan: null,
     record_links: [],
     pages: [],
+    understanding: buildDocumentUnderstanding(),
     ...overrides,
   }
 }

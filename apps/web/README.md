@@ -30,6 +30,9 @@ npm install
 npm run dev
 ```
 
+From the repo root, `make dev` starts PostgreSQL, the API, and this Vite app
+together and shuts them all down on `Ctrl+C`.
+
 Useful companion commands:
 
 ```bash

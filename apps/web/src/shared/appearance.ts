@@ -2,6 +2,7 @@ const APPEARANCE_SETTINGS_STORAGE_KEY = 'ectrm.appearance-settings'
 
 export type ColorModePreference = 'system' | 'light' | 'dark'
 export type ResolvedColorMode = 'light' | 'dark'
+export type WorkspaceModePreference = 'default' | 'terminal'
 
 export type AppearancePalette = {
   accent: string
@@ -10,12 +11,14 @@ export type AppearancePalette = {
 
 export type AppearanceSettings = {
   colorMode: ColorModePreference
+  workspaceMode: WorkspaceModePreference
   lightMode: AppearancePalette
   darkMode: AppearancePalette
 }
 
 const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = Object.freeze({
   colorMode: 'system',
+  workspaceMode: 'default',
   lightMode: {
     accent: '#127c6c',
     highlight: '#4c78b6',
@@ -67,6 +70,7 @@ function normalizePalette(
 export function getDefaultAppearanceSettings(): AppearanceSettings {
   return {
     colorMode: DEFAULT_APPEARANCE_SETTINGS.colorMode,
+    workspaceMode: DEFAULT_APPEARANCE_SETTINGS.workspaceMode,
     lightMode: { ...DEFAULT_APPEARANCE_SETTINGS.lightMode },
     darkMode: { ...DEFAULT_APPEARANCE_SETTINGS.darkMode },
   }
@@ -83,6 +87,10 @@ export function normalizeAppearanceSettings(
       nextColorMode === 'light' || nextColorMode === 'dark' || nextColorMode === 'system'
         ? nextColorMode
         : defaults.colorMode,
+    workspaceMode:
+      value?.workspaceMode === 'terminal' || value?.workspaceMode === 'default'
+        ? value.workspaceMode
+        : defaults.workspaceMode,
     lightMode: normalizePalette(value?.lightMode, defaults.lightMode),
     darkMode: normalizePalette(value?.darkMode, defaults.darkMode),
   }
@@ -149,6 +157,10 @@ export function resolveAppearancePalette(
   return colorMode === 'light' ? settings.lightMode : settings.darkMode
 }
 
+export function resolvePreferredHomeView(settings: Pick<AppearanceSettings, 'workspaceMode'>): 'prompt' | 'dashboard' {
+  return settings.workspaceMode === 'terminal' ? 'dashboard' : 'prompt'
+}
+
 export function hexToRgbChannels(value: string): string {
   const normalizedValue = normalizeHexColor(value, '#000000')
   const red = Number.parseInt(normalizedValue.slice(1, 3), 16)
@@ -198,6 +210,7 @@ export function applyAppearanceSettingsToDocument(
 
   const root = document.documentElement
   root.dataset.colorMode = resolvedColorMode
+  root.dataset.workspaceMode = settings.workspaceMode
   root.style.setProperty('--theme-accent', palette.accent)
   root.style.setProperty('--theme-accent-rgb', hexToRgbChannels(palette.accent))
   root.style.setProperty('--theme-highlight', palette.highlight)

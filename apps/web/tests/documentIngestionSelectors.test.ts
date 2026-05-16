@@ -7,6 +7,8 @@ import { DocumentIngestionDocumentCard } from '../src/features/documents/Documen
 import { DocumentIngestionUploadForm } from '../src/features/documents/DocumentIngestionUploadForm'
 import type { DocumentIngestionController } from '../src/features/documents/useDocumentIngestionController'
 import type {
+  DocumentIngestionPageUnderstandingRecord,
+  DocumentIngestionUnderstandingRecord,
   DocumentIngestionPageRecord,
   DocumentIngestionRecord,
   DocumentProcessorRuntimeSettingsRecord,
@@ -63,6 +65,110 @@ const PROCESSOR_SETTINGS = {
   ],
 } satisfies DocumentProcessorRuntimeSettingsRecord
 
+function buildDocumentUnderstanding(
+  overrides: Partial<DocumentIngestionUnderstandingRecord> = {},
+): DocumentIngestionUnderstandingRecord {
+  return {
+    bundle_version: 'document-understanding-v1',
+    page_count: 1,
+    text_stats: {
+      pages_with_text: 1,
+      source_counts: { none: 0, pdf_text: 1, ocr: 0 },
+      total_character_count: 24,
+      total_line_count: 1,
+      total_token_count: 3,
+      total_numeric_token_count: 1,
+      total_date_like_value_count: 0,
+      total_currency_marker_count: 0,
+    },
+    structure_signals: {
+      header_candidate_count: 0,
+      header_candidate_keys: [],
+      table_candidate_count: 0,
+      table_template_keys: [],
+      table_column_count: 0,
+      table_column_keys: [],
+      table_row_count: 0,
+    },
+    visual_signals: {
+      preview_generated_page_count: 0,
+      preview_available_page_count: 0,
+      visible_content_page_count: 0,
+    },
+    content_fingerprint: {
+      filename_signature: 'trade confirmation',
+      content_features: ['invoice', 'number'],
+      content_feature_count: 2,
+      learning_version: 'content-similarity-v1',
+    },
+    ...overrides,
+  }
+}
+
+function buildPageUnderstanding(
+  overrides: Partial<DocumentIngestionPageUnderstandingRecord> = {},
+): DocumentIngestionPageUnderstandingRecord {
+  return {
+    bundle_version: 'document-understanding-v1',
+    text_stats: {
+      source: 'pdf_text',
+      text_available: true,
+      character_count: 24,
+      line_count: 1,
+      token_count: 3,
+      numeric_token_count: 1,
+      date_like_value_count: 0,
+      currency_marker_count: 0,
+    },
+    layout_hints: {
+      non_empty_line_count: 1,
+      short_line_count: 1,
+      uppercase_line_count: 0,
+      key_value_line_count: 1,
+      table_like_line_count: 0,
+    },
+    structure_signals: {
+      header_candidate_count: 0,
+      header_candidate_keys: [],
+      table_candidate_count: 0,
+      table_template_keys: [],
+      table_column_count: 0,
+      table_column_keys: [],
+      table_row_count: 0,
+    },
+    visual_signals: {
+      preview_generated: false,
+      preview_available: false,
+      image_has_visible_content: false,
+      ocr_used: false,
+    },
+    content_fingerprint: {
+      filename_signature: 'invoice',
+      content_features: ['invoice', 'number'],
+      content_feature_count: 2,
+      learning_version: 'content-similarity-v1',
+    },
+    classification_evidence: {
+      system_document_kind: 'INVOICE',
+      system_document_subtype: null,
+      system_classification_source: 'heuristic',
+      system_classification_confidence: 0.72,
+      matched_by: 'filename:invoice',
+      corrected: false,
+      correction_count: 0,
+      corrected_document_kind: null,
+      corrected_document_subtype: null,
+      learning_applied: false,
+      learning_source: null,
+      learning_similarity: null,
+      learning_example_count: 0,
+      automated_document_kind: null,
+      automated_document_subtype: null,
+    },
+    ...overrides,
+  }
+}
+
 function buildDocument(overrides: Partial<DocumentIngestionRecord> = {}): DocumentIngestionRecord {
   return {
     document_id: 'DOC-9001',
@@ -101,6 +207,7 @@ function buildDocument(overrides: Partial<DocumentIngestionRecord> = {}): Docume
     action_decision_history: [],
     record_links: [],
     pages: [],
+    understanding: buildDocumentUnderstanding(),
     ...overrides,
   }
 }
@@ -138,6 +245,7 @@ function buildPage(overrides: Partial<DocumentIngestionPageRecord> = {}): Docume
     processed_at: '2026-04-14T12:00:00Z',
     processor_trace: null,
     routing_assessment: null,
+    understanding: buildPageUnderstanding(),
     ...overrides,
   }
 }
@@ -201,6 +309,7 @@ function buildController(
     updateDocumentDraft: () => undefined,
     updatePageDraft: () => undefined,
     handleSaveDocument: async () => undefined,
+    handleSetDocumentKind: async () => undefined,
     handleSavePage: async () => undefined,
     handleReprocessDocument: async () => undefined,
     handleExecuteActionPlan: async () => undefined,

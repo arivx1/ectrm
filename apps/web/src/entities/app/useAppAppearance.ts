@@ -5,6 +5,7 @@ import {
   clearAppearanceSettingsSnapshot,
   detectSystemPrefersDark,
   getAppearanceSettingsSnapshot,
+  resolvePreferredHomeView,
   resolveColorMode,
   saveAppearanceSettingsSnapshot,
 } from '../../shared/appearance'
@@ -72,6 +73,8 @@ export function useAppAppearance() {
     handleAppearanceSettingsChange,
     handleAppearanceSettingsReset,
     handleToggleColorMode,
+    isTerminalMode: appearanceSettings.workspaceMode === 'terminal',
+    preferredHomeView: resolvePreferredHomeView(appearanceSettings),
     resolvedColorMode,
     systemPrefersDark,
     themeToggleActionLabel:

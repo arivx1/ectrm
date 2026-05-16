@@ -1,18 +1,30 @@
-import { type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useMemo, useState } from 'react'
+import {
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
 
 import { shouldHandleClientSideNavigation } from '../../app/navigation'
 import { loadRoadmapDocument, type RoadmapDocumentData } from '../../entities/roadmap/api'
 import type { ViewKey } from '../../shared/models'
 import { appConfig } from '../../shared/config'
+import type { StoredAuthSession } from '../../shared/mutation'
 import userManualMarkdown from '../../../../../docs/user-manual.md?raw'
 import { filterGuideSections, parseMarkdownDocument } from './guideDocument'
 import { RoadmapDocument, RoadmapSidebar } from './RoadmapDocument'
+import { renderWikiMarkdownHtml } from './wikiMarkdown'
+import { useWikiDocumentController } from './useWikiDocumentController'
+import type { WikiPageTreeItem } from './wikiTree'
 
-export type DocumentationDocumentKey = 'guide' | 'roadmap'
+export type DocumentationDocumentKey = 'guide' | 'wiki' | 'roadmap'
 export const DEFAULT_DOCUMENTATION_DOCUMENT_KEY: DocumentationDocumentKey = 'guide'
 
 type DocumentationWorkspaceProps = {
   activeDocumentKey: DocumentationDocumentKey
+  authSession: StoredAuthSession | null
   getViewHref: (view: Exclude<ViewKey, 'guide'>) => string
   onDocumentKeyChange: (key: DocumentationDocumentKey) => void
   onOpenView: (view: Exclude<ViewKey, 'guide'>) => void
@@ -203,7 +215,7 @@ const MANUAL_SEARCH_SUGGESTIONS = [
   'pricing mismatch',
 ] as const
 
-const DOCUMENT_ORDER: DocumentationDocumentKey[] = ['guide', 'roadmap']
+const DOCUMENT_ORDER: DocumentationDocumentKey[] = ['guide', 'wiki', 'roadmap']
 
 const DOCUMENT_DEFINITIONS: Record<
   DocumentationDocumentKey,
@@ -222,6 +234,13 @@ const DOCUMENT_DEFINITIONS: Record<
     heroDetail: 'Use this as the dedicated in-product manual for onboarding, workflow questions, and choosing the right workspace for the job in front of you.',
     sidebarDetail: 'Start with the job cards, then search or browse the manual for deeper workflow context.',
   },
+  wiki: {
+    label: 'Wiki',
+    eyebrow: 'Team Knowledge',
+    title: 'Desk Wiki',
+    heroDetail: 'Capture living desk knowledge in nested pages with markdown editing, fast search, and revision history that stays reviewable inside the app.',
+    sidebarDetail: 'Create pages, browse the hierarchy, and jump straight into the page you need to update or reference.',
+  },
   roadmap: {
     label: 'Implementation Roadmap',
     eyebrow: 'Roadmap',
@@ -233,6 +252,7 @@ const DOCUMENT_DEFINITIONS: Record<
 
 export function DocumentationWorkspace({
   activeDocumentKey,
+  authSession,
   getViewHref,
   onDocumentKeyChange,
   onOpenView,
@@ -258,6 +278,11 @@ export function DocumentationWorkspace({
   const manualStatusLabel = hasManualQuery
     ? `${visibleGuideSections.length.toLocaleString()} of ${guide.sections.length.toLocaleString()} sections match`
     : `All ${guide.sections.length.toLocaleString()} manual sections in view`
+  const wiki = useWikiDocumentController({
+    apiBase: appConfig.apiBase,
+    authSession,
+    enabled: activeDocumentKey === 'wiki',
+  })
 
   function handleWorkspaceLinkClick(
     event: ReactMouseEvent<HTMLAnchorElement>,
@@ -562,7 +587,7 @@ export function DocumentationWorkspace({
               </p>
             </article>
           )
-        ) : (
+        ) : activeDocumentKey === 'roadmap' ? (
           renderRoadmapContent({
             getViewHref,
             roadmap,
@@ -570,6 +595,8 @@ export function DocumentationWorkspace({
             error: roadmapError,
             onOpenView,
           })
+        ) : (
+          renderWikiContent({ wiki })
         )}
       </section>
 
@@ -600,8 +627,10 @@ export function DocumentationWorkspace({
               ))}
             </nav>
           </>
-        ) : (
+        ) : activeDocumentKey === 'roadmap' ? (
           <RoadmapSidebar roadmap={roadmap} loading={roadmapLoading} error={roadmapError} />
+        ) : (
+          renderWikiSidebar({ wiki })
         )}
 
         <div className="docs-actions">
@@ -633,6 +662,339 @@ export function DocumentationWorkspace({
       </aside>
     </div>
   )
+}
+
+function renderWikiContent({
+  wiki,
+}: {
+  wiki: ReturnType<typeof useWikiDocumentController>
+}) {
+  if (!wiki.hasAuth) {
+    return (
+      <article className="surface docs-section empty-state">
+        <strong>Sign in to open the collaborative wiki.</strong>
+        <p>The desk wiki is authenticated so page edits, moves, and restores always keep a user-level audit trail.</p>
+      </article>
+    )
+  }
+
+  if (wiki.loading && wiki.pages.length === 0 && wiki.selectedPage === null) {
+    return (
+      <article className="surface docs-section">
+        <div className="section-head">
+          <div>
+            <span className="eyebrow">Wiki</span>
+            <h3>Loading desk knowledge...</h3>
+          </div>
+          <p>Fetching the current page tree and latest revision history from the API.</p>
+        </div>
+      </article>
+    )
+  }
+
+  if (wiki.pages.length === 0) {
+    return (
+      <article className="surface docs-section empty-state">
+        <strong>No wiki pages exist yet.</strong>
+        <p>Start with a root page for your desk handbook, process notes, or handoff runbooks.</p>
+        <button
+          type="button"
+          className="button button-secondary"
+          disabled={wiki.creatingParentId === 'root'}
+          onClick={() => void wiki.handleCreatePage(null)}
+        >
+          {wiki.creatingParentId === 'root' ? 'Creating Page...' : 'Create First Page'}
+        </button>
+      </article>
+    )
+  }
+
+  if (!wiki.selectedPage) {
+    return (
+      <article className="surface docs-section empty-state">
+        <strong>Select a wiki page from the sidebar.</strong>
+        <p>Choose an existing page or create a new one to start editing desk knowledge.</p>
+      </article>
+    )
+  }
+
+  return (
+    <>
+      {wiki.notice ? <div className="feedback-banner feedback-banner-success">{wiki.notice}</div> : null}
+      {wiki.error ? <div className="feedback-banner feedback-banner-error">{wiki.error}</div> : null}
+
+      <article className="surface docs-section wiki-editor-surface">
+        <div className="section-head">
+          <div>
+            <span className="eyebrow">Wiki Page</span>
+            <h3>{wiki.selectedPage.title}</h3>
+          </div>
+          <p>Edit markdown on the left, review the rendered result on the right, and keep the page nested under the right parent.</p>
+        </div>
+
+        <div className="wiki-meta-row">
+          <span className="entity-chip entity-chip-soft">Version {wiki.selectedPage.version}</span>
+          <span className="entity-chip entity-chip-soft">{wiki.selectedPage.word_count.toLocaleString()} words</span>
+          <span className="entity-chip entity-chip-soft">Updated {formatWikiTimestamp(wiki.selectedPage.updated_at)}</span>
+          {wiki.dirty ? <span className="entity-chip">Unsaved Changes</span> : null}
+        </div>
+
+        <div className="wiki-editor-toolbar">
+          <button
+            type="button"
+            className="button button-ghost"
+            disabled={wiki.creatingParentId === 'root'}
+            onClick={() => void wiki.handleCreatePage(null)}
+          >
+            {wiki.creatingParentId === 'root' ? 'Creating Root Page...' : 'New Root Page'}
+          </button>
+          <button
+            type="button"
+            className="button button-ghost"
+            disabled={wiki.creatingParentId === wiki.selectedPage.page_id}
+            onClick={() => void wiki.handleCreatePage(wiki.selectedPage?.page_id ?? null)}
+          >
+            {wiki.creatingParentId === wiki.selectedPage.page_id ? 'Creating Child Page...' : 'New Child Page'}
+          </button>
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={!wiki.dirty || wiki.saving}
+            onClick={() => void wiki.handleSavePage()}
+          >
+            {wiki.saving ? 'Saving...' : 'Save Changes'}
+          </button>
+          <button
+            type="button"
+            className="button button-ghost"
+            disabled={!wiki.dirty}
+            onClick={() => wiki.handleResetDraft()}
+          >
+            Reset Draft
+          </button>
+        </div>
+
+        <div className="wiki-editor-grid">
+          <section className="wiki-editor-panel">
+            <label className="field">
+              <span>Page Title</span>
+              <input
+                className="control"
+                type="text"
+                value={wiki.titleDraft}
+                onChange={(event) => wiki.setTitleDraft(event.target.value)}
+                placeholder="Desk Handbook"
+              />
+            </label>
+
+            <label className="field">
+              <span>Parent Page</span>
+              <select
+                className="control"
+                value={wiki.parentDraft}
+                onChange={(event) => wiki.setParentDraft(event.target.value)}
+              >
+                <option value="">Top level page</option>
+                {wiki.parentOptions.map((page) => (
+                  <option key={page.page_id} value={page.page_id}>
+                    {page.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field wiki-editor-field">
+              <span>Markdown</span>
+              <textarea
+                className="control wiki-editor-textarea"
+                value={wiki.contentDraft}
+                onChange={(event) => wiki.setContentDraft(event.target.value)}
+                rows={22}
+                placeholder="# Confirmations&#10;&#10;- Review the incoming PDF&#10;- Compare economics to the booked trade&#10;- Log every mismatch before escalating"
+              />
+            </label>
+          </section>
+
+          <section className="wiki-editor-panel wiki-preview-panel">
+            <div className="section-head wiki-preview-head">
+              <div>
+                <span className="eyebrow">Preview</span>
+                <h4>Rendered Page</h4>
+              </div>
+              <p>Use this side to catch structure, readability, and link formatting before you save.</p>
+            </div>
+
+            <div
+              className="docs-prose wiki-preview"
+              dangerouslySetInnerHTML={{ __html: renderWikiMarkdownHtml(wiki.contentDraft) }}
+            />
+          </section>
+        </div>
+      </article>
+
+      <article className="surface docs-section">
+        <div className="section-head">
+          <div>
+            <span className="eyebrow">Revision History</span>
+            <h3>Recent Restores And Saves</h3>
+          </div>
+          <p>Restore an earlier version when a note drifts or a runbook update should be rolled back without deleting the page outright.</p>
+        </div>
+
+        <div className="wiki-revision-list">
+          {wiki.selectedPage.recent_revisions.map((revision) => (
+            <article key={revision.revision_id} className="wiki-revision-card">
+              <div className="wiki-revision-head">
+                <div>
+                  <strong>Version {revision.version}</strong>
+                  <p>
+                    Saved by {revision.created_by} on {formatWikiTimestamp(revision.created_at)}.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="button button-ghost"
+                  disabled={
+                    revision.version === wiki.selectedPage?.version ||
+                    wiki.restoringRevisionId === revision.revision_id
+                  }
+                  onClick={() => void wiki.handleRestoreRevision(revision.revision_id)}
+                >
+                  {wiki.restoringRevisionId === revision.revision_id ? 'Restoring...' : 'Restore'}
+                </button>
+              </div>
+
+              <div className="chip-row">
+                {revision.change_summary.map((entry) => (
+                  <span key={`${revision.revision_id}-${entry}`} className="entity-chip entity-chip-soft">
+                    {entry}
+                  </span>
+                ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      </article>
+    </>
+  )
+}
+
+function renderWikiSidebar({
+  wiki,
+}: {
+  wiki: ReturnType<typeof useWikiDocumentController>
+}) {
+  if (!wiki.hasAuth) {
+    return (
+      <div className="section-head">
+        <div>
+          <span className="eyebrow">Wiki</span>
+          <h3>Desk Wiki</h3>
+        </div>
+        <p>Sign in to browse nested pages, update markdown, or restore earlier knowledge snapshots.</p>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="section-head">
+        <div>
+          <span className="eyebrow">Page Tree</span>
+          <h3>Desk Wiki</h3>
+        </div>
+        <p>Create, search, and open nested wiki pages without leaving the documentation workspace.</p>
+      </div>
+
+      <label className="field wiki-search-field">
+        <span>Search Pages</span>
+        <input
+          className="control"
+          type="search"
+          value={wiki.searchQuery}
+          onChange={(event) => wiki.setSearchQuery(event.target.value)}
+          placeholder="Confirmations, settlement, mismatch..."
+        />
+      </label>
+
+      <button
+        type="button"
+        className="button button-secondary"
+        disabled={wiki.creatingParentId === 'root'}
+        onClick={() => void wiki.handleCreatePage(null)}
+      >
+        {wiki.creatingParentId === 'root' ? 'Creating Root Page...' : 'Create Root Page'}
+      </button>
+
+      <div className="docs-toc wiki-tree" aria-label="Wiki page tree">
+        {wiki.filteredTree.length > 0 ? (
+          wiki.filteredTree.map((item) =>
+            renderWikiTreeItem({
+              activePageId: wiki.selectedPageId,
+              depth: 0,
+              item,
+              onSelectPage: wiki.handleSelectPage,
+            }),
+          )
+        ) : (
+          <div className="feedback-banner feedback-banner-error">
+            No wiki pages matched that search. Try a broader page title or summary term.
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
+function renderWikiTreeItem({
+  activePageId,
+  depth,
+  item,
+  onSelectPage,
+}: {
+  activePageId: string | null
+  depth: number
+  item: WikiPageTreeItem
+  onSelectPage: (pageId: string) => Promise<void>
+}) {
+  const style = {
+    marginLeft: `${depth * 0.85}rem`,
+  } satisfies CSSProperties
+
+  return (
+    <div key={item.page_id} className="wiki-tree-node" style={style}>
+      <button
+        type="button"
+        className={`docs-toc-link wiki-tree-button ${activePageId === item.page_id ? 'is-active' : ''}`}
+        onClick={() => void onSelectPage(item.page_id)}
+      >
+        <span>{item.child_count > 0 ? `${item.child_count} child` : 'Page'}</span>
+        <strong>{item.title}</strong>
+        <small>{item.summary}</small>
+      </button>
+
+      {item.children.length > 0 ? (
+        <div className="wiki-tree-children">
+          {item.children.map((child) =>
+            renderWikiTreeItem({
+              activePageId,
+              depth: depth + 1,
+              item: child,
+              onSelectPage,
+            }),
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function formatWikiTimestamp(value: string): string {
+  const parsed = Date.parse(value)
+  if (Number.isNaN(parsed)) {
+    return value
+  }
+  return new Date(parsed).toLocaleString()
 }
 
 function renderGuideSectionEnhancement({

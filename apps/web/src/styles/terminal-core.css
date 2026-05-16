@@ -636,6 +636,11 @@
     linear-gradient(180deg, rgba(11, 20, 31, 0.96), rgba(8, 15, 24, 0.98));
 }
 
+.tile-layout-preset-bar {
+  border-color: rgba(126, 154, 184, 0.16);
+  background: rgba(8, 15, 24, 0.88);
+}
+
 .tile-layout-toolbar h3,
 .workspace-tile-copy h3 {
   color: var(--terminal-text);

@@ -403,3 +403,115 @@
 .workspace-topbar-signout {
   white-space: nowrap;
 }
+
+.app-shell.app-shell-terminal-mode {
+  grid-template-columns: 16.5rem minmax(0, 1fr);
+}
+
+.app-shell-terminal-mode .app-aura {
+  filter: blur(92px);
+}
+
+.app-shell-terminal-mode .side-rail {
+  gap: 0.8rem;
+  padding: 1rem 0.85rem 0.95rem;
+}
+
+.app-shell-terminal-mode .side-rail-prompt {
+  gap: 0.68rem;
+}
+
+.app-shell-terminal-mode .brand-lockup h1 {
+  margin-top: 0.55rem;
+  font-size: clamp(1.7rem, 3vw, 2.2rem);
+}
+
+.app-shell-terminal-mode .brand-lockup p {
+  display: none;
+}
+
+.app-shell-terminal-mode .nav-stack,
+.app-shell-terminal-mode .stack,
+.app-shell-terminal-mode .detail-list,
+.app-shell-terminal-mode .timeline,
+.app-shell-terminal-mode .reference-groups,
+.app-shell-terminal-mode .reference-list,
+.app-shell-terminal-mode .position-list,
+.app-shell-terminal-mode .stack-form,
+.app-shell-terminal-mode .skeleton-stack {
+  gap: 0.72rem;
+}
+
+.app-shell-terminal-mode .nav-item {
+  padding: 0.78rem 0.82rem;
+  border-radius: 0.98rem;
+}
+
+.app-shell-terminal-mode .nav-item strong {
+  font-size: 0.92rem;
+}
+
+.app-shell-terminal-mode .nav-item span {
+  font-size: 0.63rem;
+}
+
+.app-shell-terminal-mode .main-stage {
+  padding: 1.2rem 1.5rem 2rem;
+}
+
+.app-shell-terminal-mode .main-stage-prompt {
+  padding-top: 0.95rem;
+}
+
+.app-shell-terminal-mode .workspace-topbar {
+  margin-bottom: 0.7rem;
+}
+
+.app-shell-terminal-mode .workspace-topbar-prompt {
+  padding-bottom: 0.55rem;
+}
+
+.app-shell-terminal-mode .workspace-topbar-copy strong {
+  font-size: 0.92rem;
+}
+
+.app-shell-terminal-mode .workspace-topbar-actions {
+  gap: 0.55rem;
+}
+
+.app-shell-terminal-mode .workspace-topbar-token {
+  min-width: min(100%, 14rem);
+  padding: 0.62rem 0.72rem;
+}
+
+.app-shell-terminal-mode .hero {
+  margin-bottom: 0.7rem;
+  padding: 0.95rem 1.05rem;
+  border-radius: 1.1rem;
+}
+
+.app-shell-terminal-mode .hero h2 {
+  max-width: 18ch;
+  font-size: clamp(2rem, 3vw, 2.8rem);
+}
+
+.app-shell-terminal-mode .hero p {
+  margin-top: 0.65rem;
+  font-size: 0.94rem;
+  line-height: 1.5;
+}
+
+.app-shell-terminal-mode .hero-badge {
+  min-width: 13rem;
+  padding: 0.82rem 0.95rem;
+  border-radius: 1rem;
+}
+
+.app-shell-terminal-mode .hero-badge strong {
+  font-size: 1.45rem;
+}
+
+.app-shell-terminal-mode .surface,
+.app-shell-terminal-mode .side-card {
+  border-radius: 1.05rem;
+}

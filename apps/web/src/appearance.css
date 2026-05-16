@@ -407,27 +407,24 @@
 }
 
 :root[data-color-mode='light'] .auth-gate-title-block p,
-:root[data-color-mode='light'] .auth-gate-signal-card p,
-:root[data-color-mode='light'] .auth-gate-step p {
+:root[data-color-mode='light'] .auth-gate-summary-item p,
+:root[data-color-mode='light'] .auth-gate-summary-foot,
+:root[data-color-mode='light'] .auth-gate-primary-note,
+:root[data-color-mode='light'] .auth-gate-method-card p,
+:root[data-color-mode='light'] .auth-gate-method-note,
+:root[data-color-mode='light'] .auth-gate-bootstrap-copy p,
+:root[data-color-mode='light'] .auth-gate-panel-head p {
   color: #5c6975;
 }
 
 :root[data-color-mode='light'] .auth-gate-title-block h1,
-:root[data-color-mode='light'] .auth-gate-signal-card strong,
-:root[data-color-mode='light'] .auth-gate-step strong {
+:root[data-color-mode='light'] .auth-gate-summary-item strong {
   color: #13293d;
 }
 
-:root[data-color-mode='light'] .auth-gate-chip {
+:root[data-color-mode='light'] .auth-gate-summary-item {
   border-color: rgba(18, 42, 56, 0.08);
-  background: rgba(255, 255, 255, 0.74);
-  color: #13293d;
-}
-
-:root[data-color-mode='light'] .auth-gate-signal-card,
-:root[data-color-mode='light'] .auth-gate-step {
-  border-color: rgba(18, 42, 56, 0.08);
-  background: rgba(255, 255, 255, 0.68);
+  background: rgba(255, 255, 255, 0.7);
 }
 
 :root[data-color-mode='light'] .hero-badge {
@@ -471,7 +468,9 @@
 :root[data-color-mode='dark'] .auth-gate-method-card p,
 :root[data-color-mode='dark'] .auth-gate-method-note,
 :root[data-color-mode='dark'] .auth-gate-bootstrap-copy p,
-:root[data-color-mode='dark'] .auth-gate-panel-head p {
+:root[data-color-mode='dark'] .auth-gate-panel-head p,
+:root[data-color-mode='dark'] .auth-gate-summary-item p,
+:root[data-color-mode='dark'] .auth-gate-summary-foot {
   color: rgba(205, 221, 236, 0.74);
 }
 
@@ -483,6 +482,10 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.03),
     0 18px 44px rgba(7, 16, 24, 0.24);
+}
+
+:root[data-color-mode='dark'] .auth-gate-panel-section {
+  border-top-color: rgba(126, 154, 184, 0.12);
 }
 
 :root[data-color-mode='dark'] .auth-gate-bootstrap-indicator {
@@ -569,15 +572,7 @@
   color: rgba(215, 229, 242, 0.8);
 }
 
-:root[data-color-mode='dark'] .auth-gate-chip {
-  border-color: rgba(126, 154, 184, 0.16);
-  background: linear-gradient(180deg, rgba(12, 22, 34, 0.84), rgba(8, 15, 24, 0.92));
-  color: rgba(236, 245, 255, 0.9);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-}
-
-:root[data-color-mode='dark'] .auth-gate-signal-card,
-:root[data-color-mode='dark'] .auth-gate-step {
+:root[data-color-mode='dark'] .auth-gate-summary-item {
   border-color: rgba(126, 154, 184, 0.16);
   background:
     linear-gradient(180deg, rgba(10, 18, 28, 0.82), rgba(6, 12, 20, 0.94)),
@@ -585,12 +580,14 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
-:root[data-color-mode='dark'] .auth-gate-signal-card span {
+:root[data-color-mode='dark'] .auth-gate-summary-item span,
+:root[data-color-mode='dark'] .auth-gate-section-label,
+:root[data-color-mode='dark'] .auth-gate-method-card span,
+:root[data-color-mode='dark'] .auth-gate-bootstrap-copy span {
   color: rgba(153, 196, 230, 0.76);
 }
 
-:root[data-color-mode='dark'] .auth-gate-signal-card strong,
-:root[data-color-mode='dark'] .auth-gate-step strong {
+:root[data-color-mode='dark'] .auth-gate-summary-item strong {
   color: #eff7ff;
 }
 
@@ -600,17 +597,6 @@
 
 :root[data-color-mode='dark'] .workspace-topbar-session {
   color: rgba(196, 213, 228, 0.76);
-}
-
-:root[data-color-mode='dark'] .auth-gate-signal-card p,
-:root[data-color-mode='dark'] .auth-gate-step p {
-  color: rgba(196, 213, 228, 0.76);
-}
-
-:root[data-color-mode='dark'] .auth-gate-step-index {
-  box-shadow:
-    0 0 0 4px rgb(var(--theme-accent-rgb) / 0.12),
-    0 10px 28px rgba(0, 0, 0, 0.28);
 }
 
 :root[data-color-mode='dark'] .auth-gate-entry-form {
@@ -632,11 +618,6 @@
 
 :root[data-color-mode='dark'] .auth-gate-control::placeholder {
   color: rgba(143, 163, 186, 0.68);
-}
-
-:root[data-color-mode='dark'] .auth-gate-method-card span,
-:root[data-color-mode='dark'] .auth-gate-bootstrap-copy span {
-  color: rgb(var(--theme-accent-rgb) / 0.92);
 }
 
 :root[data-color-mode='dark'] .auth-gate-panel .feedback-banner-success {

@@ -25,10 +25,8 @@ import { AssistantToolCallList } from '../../entities/assistant/AssistantToolCal
 import { AssistantEvidenceList } from '../../entities/assistant/AssistantEvidenceList'
 import {
   assistantBudgetSignalClass,
-  assistantBudgetSignalLabel,
   budgetMeterWidth,
   describeAssistantTokenBudget,
-  formatBudgetPercent,
   formatTokenCount,
   isAgentBudgetDepleted,
   isAgentBudgetNearLimit,
@@ -62,6 +60,9 @@ import {
 } from '../../shared/voicePlayback'
 import { useVoiceComposer } from '../../shared/voiceComposer'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
+import { AssistantAgentDirectoryPanel } from './AssistantAgentDirectoryPanel'
+import { AssistantConstructionExplainerPanel } from './AssistantConstructionExplainerPanel'
+import { buildAssistantAgentAccessSummary } from './assistantWorkspaceAccessSummary'
 
 type AssistantWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -431,19 +432,6 @@ function summarizeConversationCard(conversation: AssistantConversationSummary): 
     pieces.push(conversation.agent_name)
   }
   return pieces.join(' · ')
-}
-
-function budgetCardToneClass(budgetClass: string): string {
-  if (budgetClass === 'is-red') {
-    return 'is-budget-red'
-  }
-  if (budgetClass === 'is-amber') {
-    return 'is-budget-amber'
-  }
-  if (budgetClass === 'is-green') {
-    return 'is-budget-green'
-  }
-  return 'is-budget-pending'
 }
 
 function toChatMessagesFromConversation(conversation: AssistantConversation): ChatMessage[] {
@@ -1423,6 +1411,16 @@ export function AssistantWorkspace({
   const selectedProviderDetails =
     runtimeSettings?.providers.find((provider) => provider.provider === selectedProvider) ?? null
   const selectedAgent = agents.find((agent) => agent.agent_id === selectedAgentId) ?? null
+  const activeConstructionAgent = useMemo(() => {
+    if (selectedRun?.agent_id) {
+      return agents.find((agent) => agent.agent_id === selectedRun.agent_id) ?? null
+    }
+    return selectedAgent
+  }, [agents, selectedAgent, selectedRun])
+  const selectedAgentAccessSummary = buildAssistantAgentAccessSummary(
+    activeConstructionAgent,
+    runtimeSettings,
+  )
   const selectedAgentBudgetDepleted = isAgentBudgetDepleted(selectedAgent)
   const depletedAgentCount = agents.filter((agent) => isAgentBudgetDepleted(agent)).length
   const watchAgentCount = agents.filter((agent) => isAgentBudgetNearLimit(agent)).length
@@ -1601,59 +1599,12 @@ export function AssistantWorkspace({
                 })}
               </div>
 
-              <div className="assistant-agent-grid">
-                <button
-                  type="button"
-                  className={`assistant-agent-card ${selectedAgentId ? '' : 'is-selected'}`}
-                  onClick={() => setSelectedAgentId('')}
-                >
-                  <div className="assistant-provider-head">
-                    <strong>Platform Foundation</strong>
-                    <span className="status-pill status-pill-active">Default</span>
-                  </div>
-                  <p>Use the shared org, user, data, and world context without a named agent override.</p>
-                  <small>Good for general operator questions and prompt review.</small>
-                </button>
-
-                {agents.map((agent) => {
-                  const budgetClass = assistantBudgetSignalClass(agent.token_budget)
-                  return (
-                    <button
-                      key={agent.agent_id}
-                      type="button"
-                      className={[
-                        'assistant-agent-card',
-                        selectedAgentId === agent.agent_id ? 'is-selected' : '',
-                        budgetCardToneClass(budgetClass),
-                      ].join(' ')}
-                      onClick={() => setSelectedAgentId(agent.agent_id)}
-                    >
-                      <div className="assistant-provider-head">
-                        <strong>{agent.name}</strong>
-                        <span className={`assistant-budget-signal ${budgetClass}`}>
-                          {assistantBudgetSignalLabel(agent.token_budget)}
-                        </span>
-                      </div>
-                      <p>{agent.description}</p>
-                      <div className="assistant-agent-budget-row">
-                        <span>{agent.scope}</span>
-                        <span>{formatBudgetPercent(agent.token_budget)} used</span>
-                      </div>
-                      <div className={`assistant-budget-meter ${budgetClass}`} aria-hidden="true">
-                        <span style={{ width: budgetMeterWidth(agent.token_budget) }} />
-                      </div>
-                      <small>{describeAssistantTokenBudget(agent.token_budget)}</small>
-                      <small>
-                        {agent.role_key ? `${agent.role_key} · ` : ''}
-                        {agent.provider ?? 'inherits provider'} {agent.model ? `· ${agent.model}` : ''}{' '}
-                        {agent.skills.length > 0 ? `· ${agent.skills.length} skills ` : ''}
-                        {agent.allowed_tools.length > 0 ? `· ${agent.allowed_tools.length} live tools` : ''}
-                        {agent.allowed_action_types.length > 0 ? ` · ${agent.allowed_action_types.length} actions` : ''}
-                      </small>
-                    </button>
-                  )
-                })}
-              </div>
+              <AssistantAgentDirectoryPanel
+                agents={agents}
+                runtimeSettings={runtimeSettings}
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={setSelectedAgentId}
+              />
             </>
           ) : (
             <div className="empty-state assistant-empty-state">
@@ -2025,32 +1976,56 @@ export function AssistantWorkspace({
         <div className="assistant-sidebar-block">
           <strong>Current mode</strong>
           <p>
-            {includeContext
-              ? 'App context is attached to the prompt preview.'
-              : 'Only server-owned org and user context is attached to the prompt preview.'}
+            {selectedRun
+              ? 'A stored run trace is selected. The explainer below reflects that trace, while the composer still controls your next request.'
+              : includeContext
+                ? 'App context is attached to the prompt preview.'
+                : 'Only server-owned org and user context is attached to the prompt preview.'}
           </p>
-          <small>{useLiveTools ? 'Live tools are enabled for the next request.' : 'Live tools are disabled for the next request.'}</small>
+          <small>
+            {selectedRun
+              ? selectedRun.use_live_tools
+                ? 'That stored run used live tools.'
+                : 'That stored run did not use live tools.'
+              : useLiveTools
+                ? 'Live tools are enabled for the next request.'
+                : 'Live tools are disabled for the next request.'}
+          </small>
         </div>
 
         <div className="assistant-sidebar-block">
-          <strong>Published tools</strong>
-          <p>
-            {runtimeSettings?.available_tools.length
-              ? runtimeSettings.available_tools.map((tool) => tool.name).join(' · ')
-              : 'No tools published'}
-          </p>
+          <strong>{selectedAgentAccessSummary.heading}</strong>
+          <p>{selectedAgentAccessSummary.summary}</p>
+          <small>{selectedAgentAccessSummary.detail}</small>
         </div>
+
+        <details className="assistant-trace-details" open>
+          <summary>Construction explainer</summary>
+          <AssistantConstructionExplainerPanel
+            activeAgent={activeConstructionAgent}
+            activeGroundingSections={activeGroundingSections}
+            agents={agents}
+            promptPreview={promptPreview}
+            runtimeSettings={runtimeSettings}
+            selectedRun={selectedRun}
+            includeContext={includeContext}
+            useLiveTools={useLiveTools}
+            onSelectAgent={setSelectedAgentId}
+          />
+        </details>
 
         <div className="assistant-sidebar-block">
           <strong>Prompt status</strong>
           <p>
-            {previewLoading
-              ? 'Refreshing preview...'
-              : previewError
-                ? previewError
-                : promptPreview
-                  ? `${promptPreview.sections.length} sections are currently grounding the prompt.`
-                  : 'Preview not available'}
+            {selectedRun
+              ? `${selectedRun.prompt_sections.length} stored sections grounded run #${selectedRun.run_id}.`
+              : previewLoading
+                ? 'Refreshing preview...'
+                : previewError
+                  ? previewError
+                  : promptPreview
+                    ? `${promptPreview.sections.length} sections are currently grounding the prompt.`
+                    : 'Preview not available'}
           </p>
         </div>
 

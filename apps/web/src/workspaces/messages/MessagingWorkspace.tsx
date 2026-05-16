@@ -14,12 +14,18 @@ import {
   streamAssistantResponse,
   type AssistantStreamEvent,
 } from '../../entities/assistant/api'
+import {
+  createMessagingWorkspacePost,
+  loadMessagingWorkspaceState,
+  type MessagingWorkspaceMessageRecord,
+} from '../../entities/messages/api'
 import { appConfig } from '../../shared/config'
 import type { AssistantPromptRequest, AssistantProvider } from '../../shared/models'
 import { shouldSendMessageOnKeyDown } from './messagingComposerKeybindings'
 import { resolveMessagingAgentSession } from './messagingAgentSession'
 import {
   appendMessagingWorkspacePost,
+  buildMessagingWorkspacePostFromRecord,
   buildMessagingWorkspaceChannels,
   type MessagingWorkspaceChannel,
   type MessagingWorkspaceMember,
@@ -62,28 +68,23 @@ function formatMessageTimestamp(date: Date): string {
   }).format(date)
 }
 
-function buildComposerAuthor(authSession: StoredAuthSession | null): MessagingWorkspaceMember {
-  if (authSession) {
-    return {
-      name: authSession.user.display_name,
-      title: 'Desk operator',
-      presence: 'You',
-      initials: buildMemberInitials(authSession.user.display_name),
-      tone: 'human',
-    }
-  }
-
-  return {
-    name: 'Guest Operator',
-    title: 'Prototype author',
-    presence: 'Signed-out preview',
-    initials: 'GO',
-    tone: 'human',
-  }
-}
-
 function createLocalPostId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function buildPostsByChannelId(
+  records: MessagingWorkspaceMessageRecord[],
+): Record<string, MessagingWorkspacePost[]> {
+  return records.reduce<Record<string, MessagingWorkspacePost[]>>((current, record) => {
+    const timestamp = formatMessageTimestamp(new Date(record.created_at))
+    return {
+      ...current,
+      [record.conversation_id]: [
+        ...(current[record.conversation_id] ?? []),
+        buildMessagingWorkspacePostFromRecord(record, timestamp),
+      ],
+    }
+  }, {})
 }
 
 function buildAssistantAuthor(
@@ -131,7 +132,6 @@ function buildThreadContext(selectedChannel: MessagingWorkspaceChannel): string 
 export function MessagingWorkspace({
   authSession,
   counts,
-  onSessionSync,
   onOpenPrompt,
   onOpenAssistant,
   onOpenOperations,
@@ -146,6 +146,7 @@ export function MessagingWorkspace({
     Record<string, string>
   >({})
   const [assistantReplyChannelId, setAssistantReplyChannelId] = useState<string | null>(null)
+  const [workspaceLoadError, setWorkspaceLoadError] = useState<string>('')
   const feedRef = useRef<HTMLDivElement | null>(null)
   const composerFormRef = useRef<HTMLFormElement | null>(null)
 
@@ -177,6 +178,36 @@ export function MessagingWorkspace({
 
     feedNode.scrollTop = feedNode.scrollHeight
   }, [selectedChannel, selectedChannel?.id, selectedChannel?.timeline.length])
+
+  useEffect(() => {
+    let active = true
+
+    void loadMessagingWorkspaceState(appConfig.apiBase, {
+      accessToken: authSession?.accessToken,
+    })
+      .then((state) => {
+        if (!active) {
+          return
+        }
+
+        setPostedMessagesByChannelId(buildPostsByChannelId(state.messages))
+        setWorkspaceLoadError('')
+      })
+      .catch((error) => {
+        if (!active) {
+          return
+        }
+        setWorkspaceLoadError(
+          error instanceof Error
+            ? error.message
+            : 'Could not load persisted message history for this workspace.',
+        )
+      })
+
+    return () => {
+      active = false
+    }
+  }, [authSession?.accessToken])
 
   function handleDraftChange(event: ChangeEvent<HTMLTextAreaElement>) {
     if (!selectedChannel) {
@@ -258,16 +289,24 @@ export function MessagingWorkspace({
     }))
   }
 
-  function postDraftToThread(channel: MessagingWorkspaceChannel, body: string): string {
+  async function postDraftToThread(channel: MessagingWorkspaceChannel, body: string): Promise<string> {
     const trimmedBody = body.trim()
-    const timestamp = formatMessageTimestamp(new Date())
+    const persistedPost = await createMessagingWorkspacePost(
+      appConfig.apiBase,
+      {
+        conversation_id: channel.id,
+        body: trimmedBody,
+      },
+      {
+        accessToken: authSession?.accessToken,
+      },
+    )
+    const timestamp = formatMessageTimestamp(new Date(persistedPost.created_at))
 
-    appendPostToChannel(channel.id, {
-      id: createLocalPostId(`${channel.id}-post`),
-      author: buildComposerAuthor(authSession),
-      timestamp,
-      body: trimmedBody,
-    })
+    appendPostToChannel(
+      channel.id,
+      buildMessagingWorkspacePostFromRecord(persistedPost, timestamp),
+    )
 
     setDraftsByChannelId((current) => ({
       ...current,
@@ -277,7 +316,7 @@ export function MessagingWorkspace({
     return timestamp
   }
 
-  function handleSendMessage(event: FormEvent<HTMLFormElement>) {
+  async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
     if (!selectedChannel) {
@@ -289,11 +328,19 @@ export function MessagingWorkspace({
       return
     }
 
-    const timestamp = postDraftToThread(selectedChannel, nextDraft)
-    setComposerStatusByChannelId((current) => ({
-      ...current,
-      [selectedChannel.id]: `Posted to ${selectedChannel.label} at ${timestamp}.`,
-    }))
+    try {
+      const timestamp = await postDraftToThread(selectedChannel, nextDraft)
+      setComposerStatusByChannelId((current) => ({
+        ...current,
+        [selectedChannel.id]: `Posted to ${selectedChannel.label} at ${timestamp}.`,
+      }))
+    } catch (error) {
+      setComposerStatusByChannelId((current) => ({
+        ...current,
+        [selectedChannel.id]:
+          error instanceof Error ? error.message : `Could not post to ${selectedChannel.label}.`,
+      }))
+    }
   }
 
   async function handleAskAssistant() {
@@ -312,7 +359,17 @@ export function MessagingWorkspace({
       agents: [],
     })
 
-    const userTimestamp = postDraftToThread(selectedChannel, nextDraft)
+    let userTimestamp = ''
+    try {
+      userTimestamp = await postDraftToThread(selectedChannel, nextDraft)
+    } catch (error) {
+      setComposerStatusByChannelId((current) => ({
+        ...current,
+        [selectedChannel.id]:
+          error instanceof Error ? error.message : `Could not post to ${selectedChannel.label}.`,
+      }))
+      return
+    }
     if (!previewRoutingDecision.shouldReply) {
       setComposerStatusByChannelId((current) => ({
         ...current,
@@ -322,9 +379,7 @@ export function MessagingWorkspace({
     }
 
     const sessionResolution = await resolveMessagingAgentSession({
-      apiBase: appConfig.apiBase,
       authSession,
-      onSessionSync,
     })
 
     if (!sessionResolution.session) {
@@ -339,16 +394,17 @@ export function MessagingWorkspace({
     setAssistantReplyChannelId(selectedChannel.id)
     setComposerStatusByChannelId((current) => ({
       ...current,
-      [selectedChannel.id]:
-        sessionResolution.source === 'single_user_session'
-          ? `Posted to ${selectedChannel.label} at ${userTimestamp}. Messaging agent claimed the local OPS_ADMIN session and is drafting a reply...`
-          : `Posted to ${selectedChannel.label} at ${userTimestamp}. Agent is drafting a reply...`,
+      [selectedChannel.id]: `Posted to ${selectedChannel.label} at ${userTimestamp}. Agent is drafting a reply...`,
     }))
 
     try {
       const assistantPostId = createLocalPostId(`${selectedChannel.id}-assistant`)
       let assistantMessageStarted = false
       let stagedActionRequestCount = 0
+      let assistantRunId: number | null = null
+      let assistantAgentId: string | null = null
+      let assistantAgentName: string | null = null
+      let assistantReplyBody = ''
       const [runtimeSettings, agents] = await Promise.all([
         loadAssistantRuntimeSettings(appConfig.apiBase),
         listAssistantAgents(appConfig.apiBase),
@@ -404,6 +460,12 @@ export function MessagingWorkspace({
             stagedActionRequestCount = Array.isArray(metadata.action_requests)
               ? metadata.action_requests.length
               : 0
+            assistantRunId =
+              typeof metadata.run_id === 'number' ? metadata.run_id : assistantRunId
+            assistantAgentId =
+              typeof metadata.agent_id === 'string' ? metadata.agent_id : assistantAgentId
+            assistantAgentName =
+              typeof metadata.agent_name === 'string' ? metadata.agent_name : assistantAgentName
 
             appendPostToChannel(selectedChannel.id, {
               id: assistantPostId,
@@ -442,10 +504,63 @@ export function MessagingWorkspace({
               ...post,
               body: post.body === 'Drafting a reply...' ? delta : `${post.body}${delta}`,
             }))
+            assistantReplyBody += delta
             return
           }
 
           if (streamEvent.event === 'assistant.complete') {
+            const completeAgentId =
+              typeof streamEvent.data.agent_id === 'string'
+                ? streamEvent.data.agent_id
+                : assistantAgentId
+            const completeAgentName =
+              typeof streamEvent.data.agent_name === 'string'
+                ? streamEvent.data.agent_name
+                : assistantAgentName
+            const completeRunId =
+              typeof streamEvent.data.run_id === 'number'
+                ? streamEvent.data.run_id
+                : assistantRunId
+            const finalBody = assistantReplyBody.trim()
+
+            if (finalBody) {
+              void createMessagingWorkspacePost(
+                appConfig.apiBase,
+                {
+                  conversation_id: selectedChannel.id,
+                  body: finalBody,
+                  source: 'assistant',
+                  assistant_run_id: completeRunId,
+                  assistant_agent_id: completeAgentId,
+                  assistant_agent_name: completeAgentName,
+                },
+                {
+                  accessToken: replySession.accessToken,
+                },
+              )
+                .then((persistedAssistantPost) => {
+                  const persistedTimestamp = formatMessageTimestamp(
+                    new Date(persistedAssistantPost.created_at),
+                  )
+                  setPostedMessagesByChannelId((current) => ({
+                    ...current,
+                    [selectedChannel.id]: (current[selectedChannel.id] ?? []).map((post) =>
+                      post.id === assistantPostId
+                        ? buildMessagingWorkspacePostFromRecord(
+                            persistedAssistantPost,
+                            persistedTimestamp,
+                          )
+                        : post,
+                    ),
+                  }))
+                })
+                .catch(() => {
+                  // Keep the visible in-thread assistant draft even if the
+                  // persistence follow-up fails, and surface the failure in the
+                  // composer status below.
+                })
+            }
+
             setComposerStatusByChannelId((current) => ({
               ...current,
               [selectedChannel.id]:
@@ -596,7 +711,9 @@ export function MessagingWorkspace({
                   </div>
                 </div>
                 <p className="messaging-desk-composer-status">
-                  {selectedChannelStatus || 'Messages posted here stay in the visible thread instead of routing away.'}
+                  {selectedChannelStatus ||
+                    workspaceLoadError ||
+                    'Messages posted here stay in the visible thread instead of routing away.'}
                 </p>
               </form>
             </section>

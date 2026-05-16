@@ -550,6 +550,7 @@ class AuthHttpTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
+        self.assertEqual(payload["show_start_here"], True)
         self.assertEqual(payload["user"]["user_id"], "admin")
         self.assertEqual(payload["user"]["role"], "OPS_ADMIN")
 
@@ -568,6 +569,41 @@ class AuthHttpTests(unittest.TestCase):
             self.assertTrue(created.email.endswith("@local.invalid"))
             self.assertIsNotNone(created.password_hash)
 
+    def test_password_session_only_requests_start_here_for_first_login(self) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                UserAccount(
+                    user_id="ops_admin",
+                    email="ops@example.com",
+                    display_name="Ops Admin",
+                    role="OPS_ADMIN",
+                    password_hash=hash_password("supersecret1"),
+                    is_active=True,
+                    last_login_at=None,
+                    created_at=now,
+                    created_by="seed",
+                    updated_at=now,
+                    updated_by="seed",
+                    version=1,
+                )
+            )
+            session.commit()
+
+        first_response = self.client.post(
+            "/auth/session",
+            json={"identifier": "ops_admin", "password": "supersecret1"},
+        )
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(first_response.json()["show_start_here"], True)
+
+        second_response = self.client.post(
+            "/auth/session",
+            json={"identifier": "ops_admin", "password": "supersecret1"},
+        )
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.json()["show_start_here"], False)
+
     def test_single_user_session_creates_ops_admin_when_enabled(self) -> None:
         settings.SINGLE_USER_AUTH_ENABLED = True
         settings.SINGLE_USER_AUTH_USER_ID = "solo_admin"
@@ -578,6 +614,7 @@ class AuthHttpTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
+        self.assertEqual(payload["show_start_here"], True)
         self.assertEqual(payload["user"]["user_id"], "solo_admin")
         self.assertEqual(payload["user"]["email"], "solo@example.com")
         self.assertEqual(payload["user"]["display_name"], "Solo Admin")
@@ -607,7 +644,7 @@ class AuthHttpTests(unittest.TestCase):
                     role="TRADER",
                     password_hash=hash_password("supersecret1"),
                     is_active=False,
-                    last_login_at=None,
+                    last_login_at=now,
                     created_at=now,
                     created_by="seed",
                     updated_at=now,
@@ -621,6 +658,7 @@ class AuthHttpTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
+        self.assertEqual(payload["show_start_here"], False)
         self.assertEqual(payload["user"]["user_id"], "solo_admin")
         self.assertEqual(payload["user"]["role"], "OPS_ADMIN")
 
@@ -683,6 +721,7 @@ class AuthHttpTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
+        self.assertEqual(payload["show_start_here"], True)
         self.assertEqual(payload["user"]["user_id"], "ops_admin")
         self.assertEqual(payload["user"]["email"], "ops@example.com")
         self.assertEqual(payload["user"]["role"], "OPS_ADMIN")
@@ -712,6 +751,7 @@ class AuthHttpTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
+        self.assertEqual(payload["show_start_here"], True)
         self.assertEqual(payload["user"]["user_id"], "google_1234567890")
         self.assertEqual(payload["user"]["email"], "new.user@example.com")
         self.assertEqual(payload["user"]["display_name"], "New User")

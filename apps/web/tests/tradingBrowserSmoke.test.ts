@@ -50,6 +50,7 @@ const smokeSession = {
   // Keep this comfortably in the future so the browser harness does not
   // accidentally boot into a signed-out state as wall-clock time moves on.
   expiresAt: '2099-01-01T00:00:00Z',
+  showStartHere: true,
   user: {
     user_id: 'ops_admin',
     email: 'ops@example.com',
@@ -553,6 +554,7 @@ async function startMockApiServer(
         session_id: smokeSession.sessionId,
         access_token: smokeSession.accessToken,
         expires_at: smokeSession.expiresAt,
+        show_start_here: smokeSession.showStartHere,
         user: smokeSession.user,
       })
       return
@@ -564,6 +566,7 @@ async function startMockApiServer(
         session_id: smokeSession.sessionId,
         access_token: smokeSession.accessToken,
         expires_at: smokeSession.expiresAt,
+        show_start_here: smokeSession.showStartHere,
         user: smokeSession.user,
       })
       return
@@ -1756,7 +1759,7 @@ test(
 )
 
 test(
-  'start-here onboarding appears once while signed out and once per authenticated session',
+  'start-here onboarding appears once while signed out and only on a user first authenticated login',
   { timeout: 120_000 },
   async () => {
     const mockApi = await startMockApiServer()
@@ -1803,6 +1806,23 @@ test(
       await signedInOverlay.waitFor({ state: 'hidden' })
 
       await page.reload({ waitUntil: 'domcontentloaded' })
+      await page.waitForFunction(() => !document.querySelector('.start-here-dialog'))
+
+      await page.evaluate((session) => {
+        window.localStorage.setItem(
+          'ectrm.auth-session',
+          JSON.stringify({
+            ...session,
+            sessionId: 'smoke-session-2',
+            showStartHere: false,
+          }),
+        )
+      }, smokeSession)
+
+      await page.goto(`${appServer.origin}/?view=dashboard`, {
+        waitUntil: 'domcontentloaded',
+      })
+
       await page.waitForFunction(() => !document.querySelector('.start-here-dialog'))
 
       assert.match(page.url(), /\?view=risk(?:&|$)/)
@@ -2143,7 +2163,7 @@ test(
 
       const authGate = page.locator('.auth-gate-stage')
       await authGate.waitFor()
-      await authGate.getByText('Password · Single-user').waitFor()
+      await authGate.getByRole('button', { name: 'Use local OPS_ADMIN session' }).waitFor()
 
       await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
 

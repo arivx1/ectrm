@@ -905,6 +905,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         sessionId: current.session_id,
         accessToken: storedSession.accessToken,
         expiresAt: current.expires_at,
+        showStartHere: storedSession.showStartHere ?? false,
         user: current.user,
       }
       saveStoredAuthSession(nextSession)

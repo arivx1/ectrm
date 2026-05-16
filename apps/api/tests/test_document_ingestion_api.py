@@ -1853,6 +1853,132 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertGreater(learned_payload["learning_similarity"], 0.5)
         self.assertEqual(learned_document["analysis_summary"]["learning_applied_page_count"], 1)
 
+    def test_document_update_can_manually_set_document_kind_for_the_whole_file(self) -> None:
+        admin_token = self._bootstrap_admin()
+        uploaded = self._upload_document(admin_token, page_count=2)
+        document = self._wait_for_document(admin_token, uploaded["document_id"])
+
+        self.assertTrue(all(page["document_kind"] == "INVOICE" for page in document["pages"]))
+
+        update_response = self.client.patch(
+            f"/documents/{document['document_id']}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={"document_kind": "DELIVERY_CONFIRMATION"},
+        )
+        self.assertEqual(update_response.status_code, 200)
+        updated = update_response.json()
+
+        self.assertEqual(updated["analysis_summary"]["dominant_document_kind"], "DELIVERY_CONFIRMATION")
+        self.assertEqual(updated["analysis_summary"]["corrected_page_count"], 2)
+        self.assertTrue(all(page["document_kind"] == "DELIVERY_CONFIRMATION" for page in updated["pages"]))
+        self.assertTrue(all(page["classification_confidence"] == 1.0 for page in updated["pages"]))
+        self.assertTrue(
+            all(page["classification_payload"]["classification_corrected"] is True for page in updated["pages"])
+        )
+        self.assertTrue(
+            all(
+                page["classification_payload"]["corrected_document_kind"] == "DELIVERY_CONFIRMATION"
+                for page in updated["pages"]
+            )
+        )
+
+    def test_document_response_includes_typed_understanding_bundle(self) -> None:
+        admin_token = self._bootstrap_admin()
+        raw_text = "\n".join(
+            [
+                "INVOICE NUMBER INV-9001",
+                "INVOICE DATE 2026-04-06",
+                "TOTAL AMOUNT USD 79250",
+                "DESCRIPTION    QUANTITY    LINE AMOUNT",
+                "WTI APRIL      1000        79250",
+            ]
+        )
+        header_fields = [
+            {
+                "field_key": "invoice_number",
+                "label": "Invoice Number",
+                "value": "INV-9001",
+                "confidence": 0.92,
+                "source": "heuristic",
+            },
+            {
+                "field_key": "total_amount",
+                "label": "Total Amount",
+                "value": "79250",
+                "confidence": 0.9,
+                "source": "heuristic",
+            },
+        ]
+        table_blocks = [
+            {
+                "table_index": 1,
+                "template_key": "line_items",
+                "title": "Charges",
+                "columns": ["description", "quantity", "line_amount"],
+                "rows": [
+                    {
+                        "description": "WTI APRIL",
+                        "quantity": "1000",
+                        "line_amount": "79250",
+                    }
+                ],
+                "header_row_detected": True,
+                "source": "heuristic",
+            }
+        ]
+
+        with patch(
+            "apps.api.app.domains.documents.services.ingestion._extract_page_text",
+            return_value=(raw_text, []),
+        ), patch(
+            "apps.api.app.domains.documents.services.ingestion.extract_document_header_fields",
+            return_value=header_fields,
+        ), patch(
+            "apps.api.app.domains.documents.services.ingestion.extract_document_table_blocks",
+            return_value=table_blocks,
+        ), patch(
+            "apps.api.app.domains.documents.services.ingestion.run_document_processor_analysis",
+            return_value=(None, []),
+        ):
+            uploaded = self._upload_document(
+                admin_token,
+                filename="invoice-packet.pdf",
+                page_count=1,
+            )
+
+        document = self._wait_for_document(admin_token, uploaded["document_id"])
+        page = document["pages"][0]
+        page_understanding = page["understanding"]
+        document_understanding = document["understanding"]
+
+        self.assertEqual(page_understanding["bundle_version"], "document-understanding-v1")
+        self.assertEqual(page_understanding["text_stats"]["source"], "pdf_text")
+        self.assertTrue(page_understanding["text_stats"]["text_available"])
+        self.assertGreater(page_understanding["text_stats"]["token_count"], 0)
+        self.assertGreater(page_understanding["text_stats"]["currency_marker_count"], 0)
+        self.assertIn("invoice_number", page_understanding["structure_signals"]["header_candidate_keys"])
+        self.assertEqual(page_understanding["structure_signals"]["table_candidate_count"], 1)
+        self.assertEqual(page_understanding["structure_signals"]["table_row_count"], 1)
+        self.assertEqual(page_understanding["visual_signals"]["preview_available"], page["preview_available"])
+        self.assertEqual(page_understanding["classification_evidence"]["system_document_kind"], "INVOICE")
+        self.assertEqual(page_understanding["content_fingerprint"]["filename_signature"], "invoice packet")
+        self.assertGreater(page_understanding["content_fingerprint"]["content_feature_count"], 0)
+
+        self.assertEqual(document_understanding["bundle_version"], "document-understanding-v1")
+        self.assertEqual(document_understanding["page_count"], 1)
+        self.assertEqual(document_understanding["text_stats"]["pages_with_text"], 1)
+        self.assertEqual(document_understanding["text_stats"]["source_counts"]["pdf_text"], 1)
+        self.assertGreater(document_understanding["text_stats"]["total_character_count"], 0)
+        self.assertEqual(document_understanding["structure_signals"]["table_candidate_count"], 1)
+        self.assertEqual(document_understanding["structure_signals"]["table_row_count"], 1)
+        self.assertIn("line_items", document_understanding["structure_signals"]["table_template_keys"])
+        self.assertEqual(
+            document_understanding["visual_signals"]["preview_available_page_count"],
+            1 if page["preview_available"] else 0,
+        )
+        self.assertGreater(document_understanding["content_fingerprint"]["content_feature_count"], 0)
+        self.assertEqual(document_understanding["content_fingerprint"]["filename_signature"], "invoice packet")
+
     def test_document_response_includes_existing_record_linkage_candidates(self) -> None:
         admin_token = self._bootstrap_admin()
         uploaded = self._upload_document(admin_token, page_count=1)

@@ -27,6 +27,7 @@ export type DocumentTableBlockInput = {
 
 export type UpdateDocumentIngestionInput = {
   display_name?: string | null
+  document_kind?: string | null
   review_status?: string | null
   review_notes?: string | null
 }

@@ -124,6 +124,154 @@
   grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
 }
 
+.wiki-meta-row,
+.wiki-editor-toolbar,
+.wiki-revision-list,
+.wiki-revision-card,
+.wiki-revision-head,
+.wiki-tree-node,
+.wiki-tree-children {
+  display: grid;
+}
+
+.wiki-meta-row,
+.wiki-editor-toolbar {
+  gap: 0.75rem;
+}
+
+.wiki-meta-row {
+  grid-template-columns: repeat(auto-fit, minmax(10rem, max-content));
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.wiki-editor-toolbar {
+  grid-template-columns: repeat(auto-fit, minmax(11rem, max-content));
+  margin-bottom: 1rem;
+}
+
+.wiki-editor-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr);
+}
+
+.wiki-editor-panel {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.wiki-preview-panel {
+  padding: 1rem 1.05rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.1rem;
+  background: rgba(246, 245, 240, 0.64);
+}
+
+.wiki-preview-head {
+  margin-bottom: 0.25rem;
+}
+
+.wiki-editor-field {
+  min-width: 0;
+}
+
+.wiki-editor-textarea {
+  min-height: 26rem;
+  resize: vertical;
+  font-family: "SFMono-Regular", "Menlo", "Monaco", monospace;
+  line-height: 1.6;
+}
+
+.wiki-preview {
+  min-height: 26rem;
+  align-content: start;
+}
+
+.wiki-preview blockquote,
+.wiki-quote {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border-left: 4px solid rgba(18, 124, 108, 0.28);
+  border-radius: 0.9rem;
+  background: rgba(235, 244, 241, 0.72);
+  color: #4e5a66;
+}
+
+.wiki-code-block {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  background: rgba(18, 29, 43, 0.95);
+  color: #f4f6f8;
+}
+
+.wiki-code-block span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(159, 201, 223, 0.94);
+}
+
+.wiki-code-block pre {
+  margin: 0;
+  overflow-x: auto;
+}
+
+.wiki-code-block code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.wiki-search-field {
+  margin-bottom: 0.2rem;
+}
+
+.wiki-tree {
+  gap: 0.75rem;
+}
+
+.wiki-tree-node,
+.wiki-tree-children,
+.wiki-revision-list,
+.wiki-revision-card {
+  gap: 0.75rem;
+}
+
+.wiki-revision-card {
+  padding: 1rem 1.05rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.05rem;
+  background: rgba(246, 245, 240, 0.72);
+}
+
+.wiki-revision-head {
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 1rem;
+  align-items: start;
+}
+
+.wiki-revision-head strong,
+.wiki-tree-button strong {
+  color: #13293d;
+}
+
+.wiki-revision-head p {
+  margin: 0.32rem 0 0;
+  color: #66717c;
+  line-height: 1.52;
+}
+
+@media (max-width: 960px) {
+  .wiki-editor-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .docs-role-card,
 .docs-tour-card {
   display: grid;
@@ -204,4 +352,3 @@
   flex-wrap: wrap;
   gap: 0.75rem;
 }
-

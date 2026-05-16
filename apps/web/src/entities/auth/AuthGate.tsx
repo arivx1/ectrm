@@ -36,6 +36,7 @@ function mapSession(session: SessionResponse): StoredAuthSession {
     sessionId: session.session_id,
     accessToken: session.access_token,
     expiresAt: session.expires_at,
+    showStartHere: session.show_start_here,
     user: session.user,
   }
 }
@@ -59,7 +60,6 @@ export function AuthGate({
   const [authAction, setAuthAction] = useState<AuthAction>(null)
   const [serverSettings, setServerSettings] = useState<PublicRuntimeSettings | null>(null)
   const [serverSettingsError, setServerSettingsError] = useState('')
-  const [serverSettingsLoading, setServerSettingsLoading] = useState(true)
   const [googleSignInReady, setGoogleSignInReady] = useState(false)
   const bootstrapAdminHashTargeted =
     typeof window !== 'undefined' &&
@@ -84,10 +84,6 @@ export function AuthGate({
         if (!cancelled) {
           setServerSettings(null)
           setServerSettingsError(error instanceof Error ? error.message : 'Could not load server settings.')
-        }
-      } finally {
-        if (!cancelled) {
-          setServerSettingsLoading(false)
         }
       }
     }
@@ -284,114 +280,17 @@ export function AuthGate({
     }
   }, [googleAuthEnabled, googleClientId])
 
-  const availableMethods = [
-    'Password',
-    ...(singleUserAuthEnabled ? ['Single-user'] : []),
-    ...(googleAuthEnabled ? ['Google'] : []),
-  ]
-  const sessionTtlLabel = serverSettings ? `${serverSettings.session_ttl_hours}h` : 'Unknown'
-  const mutationProtectionLabel = serverSettings?.mutation_protection_enabled ? 'Protected' : 'Open'
-  const bootstrapAvailabilityLabel = serverSettings?.bootstrap_admin_enabled ? 'Ready' : 'Closed'
-
   return (
     <main className="auth-gate-stage">
       <section className="auth-gate-frame">
-        <section className="auth-gate-hero">
-          <div className="auth-gate-hero-top">
-            <div className="auth-gate-brand-row">
-              <span className="brand-mark">E/CTRM</span>
-              <span className="auth-gate-status">Authentication Required</span>
-            </div>
-
-            <div className="auth-gate-title-block">
-              <span className="eyebrow">Desk Access Checkpoint</span>
-              <h1>Open the operator console with a live session.</h1>
-              <p>
-                Authenticate once, then continue into trading, operations, settlement, and admin
-                workspaces with role-aware access carried across every protected action.
-              </p>
-            </div>
-
-            <div className="auth-gate-chip-row" aria-label="Protected console areas">
-              <span className="auth-gate-chip">Trade capture</span>
-              <span className="auth-gate-chip">Risk and positions</span>
-              <span className="auth-gate-chip">Workflow queues</span>
-              <span className="auth-gate-chip">Admin controls</span>
-            </div>
-          </div>
-
-          {serverSettingsLoading ? (
-            <div className="auth-gate-signal-grid">
-              <div className="skeleton-block" />
-              <div className="skeleton-block" />
-              <div className="skeleton-block" />
-              <div className="skeleton-block" />
-            </div>
-          ) : (
-            <div className="auth-gate-signal-grid">
-              <article className="auth-gate-signal-card">
-                <span>Available methods</span>
-                <strong>{availableMethods.join(' · ')}</strong>
-                <p>The screen adapts to the API configuration instead of advertising unavailable flows.</p>
-              </article>
-              <article className="auth-gate-signal-card">
-                <span>Session TTL</span>
-                <strong>{sessionTtlLabel}</strong>
-                <p>Successful sign-in stores a local browser session for this configured lifetime.</p>
-              </article>
-              <article className="auth-gate-signal-card">
-                <span>Write protection</span>
-                <strong>{mutationProtectionLabel}</strong>
-                <p>
-                  {serverSettings?.mutation_protection_enabled
-                    ? 'Protected mutations require an authenticated actor.'
-                    : 'The API currently allows write calls without a token.'}
-                </p>
-              </article>
-              <article className="auth-gate-signal-card">
-                <span>Bootstrap admin</span>
-                <strong>{bootstrapAvailabilityLabel}</strong>
-                <p>
-                  {serverSettings?.bootstrap_admin_enabled
-                    ? 'First-run OPS_ADMIN setup can be opened from this screen.'
-                    : 'Bootstrap is hidden once the initial administrative account already exists.'}
-                </p>
-              </article>
-            </div>
-          )}
-
-          <div className="auth-gate-step-rail">
-            <article className="auth-gate-step">
-              <span className="auth-gate-step-index">1</span>
-              <div>
-                <strong>Authenticate</strong>
-                <p>Use password access first, or fall back to Google or single-user access when enabled.</p>
-              </div>
-            </article>
-            <article className="auth-gate-step">
-              <span className="auth-gate-step-index">2</span>
-              <div>
-                <strong>Hydrate the shell</strong>
-                <p>The console restores workspace data, navigation, and your role-scoped controls after sign-in.</p>
-              </div>
-            </article>
-            <article className="auth-gate-step">
-              <span className="auth-gate-step-index">3</span>
-              <div>
-                <strong>Resume work</strong>
-                <p>Trade capture, queues, settlement, and admin actions inherit the active actor identity.</p>
-              </div>
-            </article>
-          </div>
-        </section>
-
         <section className="surface auth-gate-panel">
           <div className="auth-gate-panel-head">
+            <span className="brand-mark">E/CTRM</span>
             <div>
               <span className="eyebrow">Sign In</span>
               <h3>Enter the console</h3>
             </div>
-            <p>Start with password access. Secondary methods appear only when the running API is ready for them.</p>
+            <p>Use your ECTRM credentials to continue. Other methods appear only when enabled.</p>
           </div>
 
           {serverSettingsError ? <div className="feedback-banner feedback-banner-error">{serverSettingsError}</div> : null}
@@ -414,6 +313,7 @@ export function AuthGate({
           ) : null}
 
           <form id="session-login" className="auth-gate-entry-form" onSubmit={handleLogin}>
+            <span className="auth-gate-section-label">Password access</span>
             <div className="auth-gate-entry-grid">
               <label className="field">
                 <span>User ID or Email</span>
@@ -441,53 +341,55 @@ export function AuthGate({
                 />
               </label>
             </div>
-
             <div className="auth-gate-primary-actions">
               <button type="submit" className="button button-primary" disabled={authLoading}>
                 {authAction === 'login' ? 'Signing In...' : 'Enter Console'}
               </button>
               <p className="auth-gate-primary-note">
-                Password access works with either user ID or email and issues the same local session token
-                used by the rest of the console.
+                Password access works with either user ID or email and issues the same local session
+                token used by the rest of the console.
               </p>
             </div>
           </form>
 
           {singleUserAuthEnabled || googleAuthEnabled ? (
-            <div className="auth-gate-method-grid">
-              {singleUserAuthEnabled ? (
-                <button
-                  id="single-user-sign-in"
-                  type="button"
-                  className="auth-gate-method-card"
-                  onClick={() => void handleSingleUserLogin()}
-                  disabled={authLoading}
-                >
-                  <span>Single-user access</span>
-                  <strong>{authAction === 'single-user' ? 'Signing In...' : 'Use local OPS_ADMIN session'}</strong>
-                  <p>Fast local entry when the API exposes the configured one-click operator account.</p>
-                </button>
-              ) : null}
+            <div className="auth-gate-panel-section">
+              <span className="auth-gate-section-label">Other available methods</span>
+              <div className="auth-gate-method-grid">
+                {singleUserAuthEnabled ? (
+                  <button
+                    id="single-user-sign-in"
+                    type="button"
+                    className="auth-gate-method-card"
+                    onClick={() => void handleSingleUserLogin()}
+                    disabled={authLoading}
+                  >
+                    <span>Single-user access</span>
+                    <strong>{authAction === 'single-user' ? 'Signing In...' : 'Use local OPS_ADMIN session'}</strong>
+                    <p>Fast local entry when the API exposes a one-click operator account.</p>
+                  </button>
+                ) : null}
 
-              {googleAuthEnabled ? (
-                <div className="auth-gate-method-card auth-gate-method-card-google">
-                  <span>Google sign-in</span>
-                  <strong>Continue with Google</strong>
-                  <p>
-                    {googleAutoCreateUsers
-                      ? 'New Google identities can create a local account automatically with the server default role.'
-                      : 'Your Google email must already map to a local account on the API.'}
-                  </p>
-                  <div ref={googleSignInContainerRef} className="google-sign-in-button auth-gate-google-slot" />
-                  <small className="auth-gate-method-note">
-                    {authAction === 'google'
-                      ? 'Completing Google sign-in...'
-                      : googleSignInReady
-                        ? 'Google returns an identity token in the browser, then the API exchanges it for the same session token used by password access.'
-                        : 'Loading Google sign-in...'}
-                  </small>
-                </div>
-              ) : null}
+                {googleAuthEnabled ? (
+                  <div className="auth-gate-method-card auth-gate-method-card-google">
+                    <span>Google sign-in</span>
+                    <strong>Continue with Google</strong>
+                    <p>
+                      {googleAutoCreateUsers
+                        ? 'New Google identities can create a local account automatically with the server default role.'
+                        : 'Your Google email must already map to a local account on the API.'}
+                    </p>
+                    <div ref={googleSignInContainerRef} className="google-sign-in-button auth-gate-google-slot" />
+                    <small className="auth-gate-method-note">
+                      {authAction === 'google'
+                        ? 'Completing Google sign-in...'
+                        : googleSignInReady
+                          ? 'Google returns an identity token in the browser, then the API exchanges it for the same session token used by password access.'
+                          : 'Loading Google sign-in...'}
+                    </small>
+                  </div>
+                ) : null}
+              </div>
             </div>
           ) : null}
 

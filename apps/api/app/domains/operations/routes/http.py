@@ -6,12 +6,14 @@ from .confirmations import router as confirmations_router
 from .deliveries import router as deliveries_router
 from .operations import router as operations_router
 from .shipments import router as shipments_router
+from .truck_tracking import router as truck_tracking_router
 
 router = APIRouter()
 router.include_router(confirmations_router)
 router.include_router(deliveries_router)
 router.include_router(operations_router)
 router.include_router(shipments_router)
+router.include_router(truck_tracking_router)
 
 __all__ = [
     "router",
@@ -19,4 +21,5 @@ __all__ = [
     "deliveries_router",
     "operations_router",
     "shipments_router",
+    "truck_tracking_router",
 ]

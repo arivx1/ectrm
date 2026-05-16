@@ -7,6 +7,7 @@ import {
   deriveRetryableWorkspaceGroups,
   EMPTY_GROUP_ERRORS,
   EMPTY_GROUP_FLAGS,
+  isApiReachabilityMessage,
   isAuthenticationRequiredMessage,
   shouldPresentSignedOutAuthGate,
   shouldPresentStartHereOverlay,
@@ -203,6 +204,15 @@ test('isAuthenticationRequiredMessage matches the startup auth failure banner', 
   assert.equal(isAuthenticationRequiredMessage('Could not reach API at http://127.0.0.1:8000.'), false)
 })
 
+test('isApiReachabilityMessage identifies reconnectable API failures', () => {
+  assert.equal(isApiReachabilityMessage('Could not reach API at http://127.0.0.1:8000.'), true)
+  assert.equal(
+    isApiReachabilityMessage('Could not reach API. Make sure backend is running on 127.0.0.1:8000 and CORS is enabled.'),
+    true,
+  )
+  assert.equal(isApiReachabilityMessage('Authentication is required for protected workspace data.'), false)
+})
+
 test('summarizeWorkspaceIssueMessage keeps correlation ids out of workspace copy', () => {
   assert.equal(
     summarizeWorkspaceIssueMessage(
@@ -327,6 +337,7 @@ test('shouldPresentStartHereOverlay keeps prompt-style public workspaces clear o
       hasStartHereReturnIntent: false,
       authInterruptionReason: null,
       hasAuthInterruptionResume: false,
+      usesTerminalMode: false,
     }),
     true,
   )
@@ -339,6 +350,7 @@ test('shouldPresentStartHereOverlay keeps prompt-style public workspaces clear o
       hasStartHereReturnIntent: false,
       authInterruptionReason: null,
       hasAuthInterruptionResume: false,
+      usesTerminalMode: false,
     }),
     false,
   )
@@ -351,6 +363,7 @@ test('shouldPresentStartHereOverlay keeps prompt-style public workspaces clear o
       hasStartHereReturnIntent: false,
       authInterruptionReason: null,
       hasAuthInterruptionResume: false,
+      usesTerminalMode: false,
     }),
     false,
   )
@@ -363,7 +376,36 @@ test('shouldPresentStartHereOverlay keeps prompt-style public workspaces clear o
       hasStartHereReturnIntent: true,
       authInterruptionReason: null,
       hasAuthInterruptionResume: false,
+      usesTerminalMode: false,
     }),
     false,
+  )
+})
+
+test('shouldPresentStartHereOverlay suppresses the signed-in onboarding overlay in terminal mode', () => {
+  assert.equal(
+    shouldPresentStartHereOverlay({
+      currentView: 'dashboard',
+      hasAuthSession: true,
+      hasStartHereOnboarding: true,
+      hasStartHereReturnIntent: false,
+      authInterruptionReason: null,
+      hasAuthInterruptionResume: false,
+      usesTerminalMode: true,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldPresentStartHereOverlay({
+      currentView: 'dashboard',
+      hasAuthSession: false,
+      hasStartHereOnboarding: true,
+      hasStartHereReturnIntent: false,
+      authInterruptionReason: null,
+      hasAuthInterruptionResume: false,
+      usesTerminalMode: true,
+    }),
+    true,
   )
 })

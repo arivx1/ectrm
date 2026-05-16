@@ -16,6 +16,26 @@
   margin-top: 1rem;
 }
 
+.assistant-agent-directory {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.assistant-agent-directory-head {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.assistant-agent-directory-head h4,
+.assistant-agent-directory-head p {
+  margin: 0;
+}
+
+.assistant-agent-directory-head h4 {
+  color: var(--terminal-text);
+}
+
 .assistant-agent-card,
 .assistant-provider-card {
   display: grid;
@@ -206,6 +226,7 @@
 
 .assistant-provider-card p,
 .assistant-agent-card p,
+.assistant-agent-directory-head p,
 .assistant-sidebar-block p,
 .assistant-run-card p,
 .assistant-tool-card p,
@@ -227,6 +248,135 @@
 .assistant-sidebar {
   display: grid;
   gap: 1rem;
+}
+
+.assistant-agent-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.9rem;
+}
+
+.assistant-agent-detail-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(126, 154, 184, 0.16);
+  background: linear-gradient(180deg, rgba(10, 18, 29, 0.96), rgba(13, 24, 37, 0.9));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.assistant-agent-detail-card p {
+  margin: 0;
+}
+
+.assistant-agent-field-list,
+.assistant-agent-detail-stack {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.assistant-agent-field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.75rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.assistant-agent-field span {
+  color: var(--terminal-dim);
+  font-size: 0.82rem;
+}
+
+.assistant-agent-field strong,
+.assistant-agent-detail-stack strong {
+  color: var(--terminal-text);
+}
+
+.assistant-agent-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.assistant-agent-chip-list span {
+  padding: 0.35rem 0.62rem;
+  border-radius: 999px;
+  border: 1px solid rgba(78, 167, 255, 0.16);
+  background: rgba(78, 167, 255, 0.08);
+  color: var(--terminal-blue);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.assistant-agent-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.assistant-construction-panel,
+.assistant-construction-card-list,
+.assistant-construction-detail-list,
+.assistant-construction-source-list,
+.assistant-construction-source-card {
+  display: grid;
+}
+
+.assistant-construction-panel,
+.assistant-construction-card-list {
+  gap: 0.8rem;
+}
+
+.assistant-construction-head {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.assistant-construction-head p,
+.assistant-construction-card p,
+.assistant-construction-card strong,
+.assistant-construction-source-card strong,
+.assistant-construction-source-card small {
+  margin: 0;
+}
+
+.assistant-construction-card {
+  gap: 0.55rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(126, 154, 184, 0.14);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.assistant-construction-head strong,
+.assistant-construction-card strong,
+.assistant-construction-source-card strong {
+  color: var(--terminal-text);
+}
+
+.assistant-construction-head p,
+.assistant-construction-card p {
+  color: var(--terminal-text-soft);
+}
+
+.assistant-construction-detail-list,
+.assistant-construction-source-list {
+  gap: 0.45rem;
+}
+
+.assistant-construction-detail-list small,
+.assistant-construction-source-card small {
+  color: var(--terminal-dim);
+}
+
+.assistant-construction-source-card {
+  gap: 0.35rem;
+  padding: 0.7rem 0.75rem;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(126, 154, 184, 0.12);
+  background: rgba(10, 18, 29, 0.58);
 }
 
 .assistant-conversation-banner {

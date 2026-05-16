@@ -34,6 +34,8 @@ from .document_ingestion_review import page_text_source
 from .document_ingestion_storage import document_page_preview_absolute_path
 from .document_ingestion_storage import document_page_preview_exists
 from .document_ingestion_storage import stored_pdf_absolute_path
+from .document_understanding import build_document_page_understanding
+from .document_understanding import build_document_understanding
 
 VALID_DOCUMENT_PROCESSOR_PROVIDERS = {"openai", "anthropic", "google"}
 
@@ -164,47 +166,56 @@ def serialize_documents(
                 "record_link_count": len(document_record_links),
             }
         )
-        serialized_pages = [
-            DocumentIngestionPageOut(
-                page_id=page.page_id or 0,
+        serialized_pages: list[DocumentIngestionPageOut] = []
+        page_understandings = []
+        for page_index, page in enumerate(document_pages):
+            preview_available = document_page_preview_exists(
+                document_id=page.document_id,
                 page_number=page.page_number,
-                classification_status=page.classification_status,
-                extraction_status=page.extraction_status,
-                document_kind=page.document_kind,
-                document_subtype=page.document_subtype,
-                classification_confidence=page.classification_confidence,
-                classification_payload=page.classification_payload or {},
-                header_fields=[
-                    DocumentExtractedFieldOut.model_validate(field)
-                    for field in (page.header_fields or [])
-                ],
-                table_blocks=[
-                    DocumentTableBlockOut.model_validate(block)
-                    for block in (page.table_blocks or [])
-                ],
-                raw_text_excerpt=build_raw_text_excerpt(page.raw_text),
-                text_source=page_text_source(page),
-                preview_available=document_page_preview_exists(
-                    document_id=page.document_id,
-                    page_number=page.page_number,
-                ),
-                processing_warnings=list(page.processing_warnings or []),
-                processing_errors=list(page.processing_errors or []),
-                review_status=page.review_status,
-                review_notes=page.review_notes,
-                reviewed_at=page.reviewed_at,
-                reviewed_by=page.reviewed_by,
-                processed_at=page.processed_at,
-                processor_trace=serialized_page_processor_traces[page_index],
-                routing_assessment=build_document_page_routing_assessment(
-                    document_kind=page.document_kind,
-                    header_fields=list(page.header_fields or []),
-                    table_blocks=list(page.table_blocks or []),
-                    review_status=page.review_status,
-                ),
             )
-            for page_index, page in enumerate(document_pages)
-        ]
+            page_understanding = build_document_page_understanding(
+                page,
+                preview_available=preview_available,
+            )
+            page_understandings.append(page_understanding)
+            serialized_pages.append(
+                DocumentIngestionPageOut(
+                    page_id=page.page_id or 0,
+                    page_number=page.page_number,
+                    classification_status=page.classification_status,
+                    extraction_status=page.extraction_status,
+                    document_kind=page.document_kind,
+                    document_subtype=page.document_subtype,
+                    classification_confidence=page.classification_confidence,
+                    classification_payload=page.classification_payload or {},
+                    header_fields=[
+                        DocumentExtractedFieldOut.model_validate(field)
+                        for field in (page.header_fields or [])
+                    ],
+                    table_blocks=[
+                        DocumentTableBlockOut.model_validate(block)
+                        for block in (page.table_blocks or [])
+                    ],
+                    raw_text_excerpt=build_raw_text_excerpt(page.raw_text),
+                    text_source=page_text_source(page),
+                    preview_available=preview_available,
+                    processing_warnings=list(page.processing_warnings or []),
+                    processing_errors=list(page.processing_errors or []),
+                    review_status=page.review_status,
+                    review_notes=page.review_notes,
+                    reviewed_at=page.reviewed_at,
+                    reviewed_by=page.reviewed_by,
+                    processed_at=page.processed_at,
+                    processor_trace=serialized_page_processor_traces[page_index],
+                    routing_assessment=build_document_page_routing_assessment(
+                        document_kind=page.document_kind,
+                        header_fields=list(page.header_fields or []),
+                        table_blocks=list(page.table_blocks or []),
+                        review_status=page.review_status,
+                    ),
+                    understanding=page_understanding,
+                )
+            )
         serialized.append(
             DocumentIngestionOut(
                 document_id=document.document_id,
@@ -241,6 +252,10 @@ def serialize_documents(
                     for link in document_record_links
                 ],
                 pages=serialized_pages,
+                understanding=build_document_understanding(
+                    original_filename=document.original_filename,
+                    page_understandings=page_understandings,
+                ),
             )
         )
     return serialized

@@ -13,12 +13,24 @@ import {
   isViewKey,
 } from './appViews'
 import {
+  getAppearanceSettingsSnapshot,
+  resolvePreferredHomeView,
+} from '../../shared/appearance'
+import {
   type AppRouteHandoff,
   readAppRouteHandoff,
   writeAppRouteHandoff,
 } from '../../shared/appRouteHandoff'
 
 export const DEFAULT_APP_VIEW_KEY: ViewKey = 'prompt'
+
+function defaultAppViewKey(): ViewKey {
+  if (typeof window === 'undefined') {
+    return DEFAULT_APP_VIEW_KEY
+  }
+
+  return resolvePreferredHomeView(getAppearanceSettingsSnapshot())
+}
 
 export type AppRouteState = {
   section: PrimaryNavigationSectionKey | null
@@ -48,7 +60,8 @@ function readAppRouteState(): AppRouteState {
   const sectionParam = params.get('section')
   const viewParam = params.get('view')
   const docsParam = params.get('doc')
-  const view: ViewKey = isViewKey(viewParam) ? viewParam : DEFAULT_APP_VIEW_KEY
+  const preferredDefaultView = defaultAppViewKey()
+  const view: ViewKey = isViewKey(viewParam) ? viewParam : preferredDefaultView
 
   return {
     section: isPrimaryNavigationSectionKey(sectionParam) ? sectionParam : null,
@@ -84,11 +97,12 @@ function normalizeHashFragment(value: string | null | undefined): string {
 }
 
 function buildAppRouteUrl(route: AppRouteState, hash: string): string {
+  const preferredDefaultView = defaultAppViewKey()
   const params = new URLSearchParams()
   if (route.section !== null) {
     params.set('section', route.section)
   } else {
-    if (route.view !== DEFAULT_APP_VIEW_KEY) {
+    if (route.view !== preferredDefaultView) {
       params.set('view', route.view)
     }
     if (route.view === 'guide' && route.docsDocumentKey !== DEFAULT_DOCUMENTATION_DOCUMENT_KEY) {

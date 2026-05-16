@@ -5,6 +5,7 @@ from .http import deliveries_router
 from .http import operations_router
 from .http import router
 from .http import shipments_router
+from .http import truck_tracking_router
 
 __all__ = [
     "router",
@@ -12,4 +13,5 @@ __all__ = [
     "deliveries_router",
     "operations_router",
     "shipments_router",
+    "truck_tracking_router",
 ]

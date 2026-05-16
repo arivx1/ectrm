@@ -93,13 +93,22 @@ make api-install
 alembic -c apps/api/alembic.ini upgrade head
 ```
 
-### 4. Run the API
+### 4. Start the local stack
+
+```bash
+make dev
+```
+
+This starts PostgreSQL with Docker Compose, then launches the API and the web
+app together. Press `Ctrl+C` to stop both services.
+
+### 5. Manual alternative: run the API and web app separately
 
 ```bash
 make api-dev
 ```
 
-### 5. Run the web app in a second terminal
+In a second terminal:
 
 ```bash
 make web-install
@@ -202,6 +211,7 @@ dependencies.
 - [Governed core platform work packages](docs/engineering/core-platform-work-packages.md)
 - [Trader/Risk MVP work packages](docs/engineering/trader-risk-mvp-work-packages.md)
 - [Trading UI familiarity reference](docs/engineering/trading-ui-familiarity-reference.md)
+- [Bloomberg-style market terminal work packages](docs/engineering/bloomberg-style-market-terminal-work-packages.md)
 - [Trading EOD work packages](docs/engineering/trading-eod-work-packages.md)
 - [Trading source register](docs/engineering/trading-source-register.csv)
 - [ETRM trading source register](docs/engineering/trading-source-register-etrm.csv)
@@ -213,9 +223,12 @@ dependencies.
 - [Future-ready Wave 0 tickets](docs/engineering/future-ready-wave-0-tickets.md)
 - [Agent platform Phase 1 tickets](docs/engineering/agent-platform-phase-1-tickets.md)
 - [Prompt-first operator experience work packages](docs/engineering/prompt-first-operator-experience-work-packages.md)
+- [Messaging workspace work packages](docs/engineering/messaging-workspace-work-packages.md)
 - [ChatGPT MCP work packages](docs/engineering/chatgpt-mcp-work-packages.md)
 - [Agent role catalog](docs/engineering/agent-role-catalog.md)
 - [Human-agent authority matrix](docs/engineering/human-agent-authority-matrix.md)
 - [Canonical work object inventory](docs/engineering/canonical-work-object-inventory.md)
 - [Truck tracking system architecture](docs/engineering/truck-tracking-system-architecture.md)
 - [Truck tracking system work packages](docs/engineering/truck-tracking-system-work-packages.md)
+- [Truck tracking WP-01: truck run and stop model](docs/engineering/truck-tracking-wp-01-run-stop-model.md)
+- [Truck tracking TTS-02: schema and API scaffolding](docs/engineering/truck-tracking-tts-02-schema-api-scaffolding.md)

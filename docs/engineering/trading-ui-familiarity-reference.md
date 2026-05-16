@@ -27,6 +27,36 @@ three different workflow families:
 If we eventually let users choose a familiar UI, the right abstraction is
 usually a workflow family first and a vendor-inspired preset second.
 
+## Quick Reference By User Shorthand
+
+When users say one of these names, they are often asking for the workflow
+pattern more than the exact vendor screen:
+
+- `Bloomberg`
+  - usually means an information-dense market terminal with search, monitors,
+    charts, alerts, and keyboard-driven navigation
+- `Eikon`
+  - usually means the LSEG Workspace style of research, watchlists, monitor
+    pages, and quote-chain workflows
+- `Trayport`
+  - usually means OTC power and gas execution, broker-style market views, and
+    RFQ or matching screens
+- `TT` or `CQG`
+  - usually means fast futures execution with ladders, DOM views, and minimal
+    navigation depth
+- `Endur` or `Openlink`
+  - usually means an enterprise commodity ETRM with front-to-back trade,
+    logistics, risk, and operations coverage
+- `RightAngle`
+  - usually means hydrocarbon-heavy logistics, scheduling, inventory, and
+    downstream accounting workflows
+- `Allegro`
+  - usually means power, gas, or renewables position and risk management with
+    operational follow-through
+- `SAP`
+  - usually means process-heavy, ERP-linked commodity operations with trading,
+    hedging, reconciliation, and settlement tied closely to finance
+
 ## Major Market-Data Terminals
 
 - [Bloomberg Terminal](https://www.bloomberg.com/professional/products/bloomberg-terminal/)

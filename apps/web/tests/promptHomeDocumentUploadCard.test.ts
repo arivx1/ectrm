@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, test, vi } from 'vitest'
 
 import type { DocumentIngestionController } from '../src/features/documents/useDocumentIngestionController'
-import type { DocumentIngestionRecord } from '../src/shared/models'
+import type { DocumentIngestionRecord, DocumentIngestionUnderstandingRecord } from '../src/shared/models'
 import { PromptHomeDocumentUploadCard } from '../src/workspaces/prompt/PromptHomeDocumentUploadCard'
 
 const { usePersistentCollapsibleCardStateMock, useDocumentIngestionControllerMock } = vi.hoisted(() => ({
@@ -62,6 +62,47 @@ function buildDocument(
     action_decision_history: [],
     record_links: [],
     pages: [],
+    understanding: buildDocumentUnderstanding(),
+    ...overrides,
+  }
+}
+
+function buildDocumentUnderstanding(
+  overrides: Partial<DocumentIngestionUnderstandingRecord> = {},
+): DocumentIngestionUnderstandingRecord {
+  return {
+    bundle_version: 'document-understanding-v1',
+    page_count: 2,
+    text_stats: {
+      pages_with_text: 2,
+      source_counts: { none: 0, pdf_text: 2, ocr: 0 },
+      total_character_count: 64,
+      total_line_count: 4,
+      total_token_count: 12,
+      total_numeric_token_count: 1,
+      total_date_like_value_count: 0,
+      total_currency_marker_count: 0,
+    },
+    structure_signals: {
+      header_candidate_count: 0,
+      header_candidate_keys: [],
+      table_candidate_count: 0,
+      table_template_keys: [],
+      table_column_count: 0,
+      table_column_keys: [],
+      table_row_count: 0,
+    },
+    visual_signals: {
+      preview_generated_page_count: 0,
+      preview_available_page_count: 0,
+      visible_content_page_count: 0,
+    },
+    content_fingerprint: {
+      filename_signature: 'trade confirmation',
+      content_features: ['trade', 'confirmation'],
+      content_feature_count: 2,
+      learning_version: 'content-similarity-v1',
+    },
     ...overrides,
   }
 }
@@ -124,6 +165,7 @@ function buildController(
     updateDocumentDraft: () => undefined,
     updatePageDraft: () => undefined,
     handleSaveDocument: async () => undefined,
+    handleSetDocumentKind: async () => undefined,
     handleSavePage: async () => undefined,
     handleReprocessDocument: async () => undefined,
     handleExecuteActionPlan: async () => undefined,

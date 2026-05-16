@@ -46,6 +46,7 @@ import {
   weatherLocations,
   weatherObservationsByCode,
   weatherSyncStatus,
+  wikiPages,
 } from './smokeFixtures'
 
 type SmokeTradeRow = (typeof trades)[number]
@@ -215,6 +216,293 @@ function buildCreatedTradeRow(args: {
   }
 }
 
+function cloneWikiPage(page: SmokeWikiPageRow): SmokeWikiPageRow {
+  return {
+    ...page,
+  }
+}
+
+function cloneWikiPageRevision(revision: SmokeWikiPageRevisionRow): SmokeWikiPageRevisionRow {
+  return {
+    ...revision,
+    change_summary: [...revision.change_summary],
+  }
+}
+
+function plainTextFromWikiMarkdown(markdown: string): string {
+  return markdown
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    .replace(/^\s*>\s?/gm, '')
+    .replace(/[*_]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function summarizeWikiMarkdown(markdown: string): string {
+  const plainText = plainTextFromWikiMarkdown(markdown)
+  if (!plainText) {
+    return 'No page summary yet.'
+  }
+
+  const words = plainText.split(' ')
+  if (words.length <= 24) {
+    return plainText
+  }
+
+  return `${words.slice(0, 24).join(' ')}...`
+}
+
+function countWikiWords(markdown: string): number {
+  const plainText = plainTextFromWikiMarkdown(markdown)
+  return plainText ? plainText.split(' ').filter(Boolean).length : 0
+}
+
+function buildWikiChildCount(rows: SmokeWikiPageRow[], pageId: string): number {
+  return rows.filter((page) => page.parent_page_id === pageId).length
+}
+
+function sortWikiPages(rows: SmokeWikiPageRow[]): SmokeWikiPageRow[] {
+  return [...rows].sort((left, right) => {
+    if (left.sort_order !== right.sort_order) {
+      return left.sort_order - right.sort_order
+    }
+    return left.title.localeCompare(right.title)
+  })
+}
+
+function serializeWikiRevision(revision: SmokeWikiPageRevisionRow) {
+  return {
+    revision_id: revision.revision_id,
+    version: revision.version,
+    parent_page_id: revision.parent_page_id,
+    title: revision.title,
+    sort_order: revision.sort_order,
+    change_summary: [...revision.change_summary],
+    created_at: revision.created_at,
+    created_by: revision.created_by,
+    restored_from_revision_id: revision.restored_from_revision_id,
+  }
+}
+
+function serializeWikiPageSummary(rows: SmokeWikiPageRow[], page: SmokeWikiPageRow) {
+  return {
+    page_id: page.page_id,
+    parent_page_id: page.parent_page_id,
+    title: page.title,
+    summary: summarizeWikiMarkdown(page.content_markdown),
+    child_count: buildWikiChildCount(rows, page.page_id),
+    word_count: countWikiWords(page.content_markdown),
+    sort_order: page.sort_order,
+    created_at: page.created_at,
+    created_by: page.created_by,
+    updated_at: page.updated_at,
+    updated_by: page.updated_by,
+    version: page.version,
+  }
+}
+
+function buildWikiDescendantIds(rows: SmokeWikiPageRow[], rootPageId: string): Set<string> {
+  const descendants = new Set<string>()
+  const queue = rows.filter((page) => page.parent_page_id === rootPageId).map((page) => page.page_id)
+
+  while (queue.length > 0) {
+    const nextPageId = queue.shift()
+    if (!nextPageId || descendants.has(nextPageId)) {
+      continue
+    }
+
+    descendants.add(nextPageId)
+    rows.forEach((page) => {
+      if (page.parent_page_id === nextPageId) {
+        queue.push(page.page_id)
+      }
+    })
+  }
+
+  return descendants
+}
+
+function nextWikiTimestamp(sequence: number): string {
+  const minute = String(5 + sequence).padStart(2, '0')
+  return `2026-05-16T16:${minute}:00Z`
+}
+
+function nextWikiSortOrder(rows: SmokeWikiPageRow[], parentPageId: string | null): number {
+  const siblingSortOrders = rows
+    .filter((page) => page.parent_page_id === parentPageId)
+    .map((page) => page.sort_order)
+
+  return (siblingSortOrders.length > 0 ? Math.max(...siblingSortOrders) : 0) + 100
+}
+
+function buildWikiChangeSummary(args: {
+  previousTitle: string
+  previousParentPageId: string | null
+  previousContentMarkdown: string
+  previousSortOrder: number
+  page: SmokeWikiPageRow
+  pagesById: Map<string, SmokeWikiPageRow>
+}): string[] {
+  const {
+    previousTitle,
+    previousParentPageId,
+    previousContentMarkdown,
+    previousSortOrder,
+    page,
+    pagesById,
+  } = args
+  const changeSummary: string[] = []
+
+  if (page.title !== previousTitle) {
+    changeSummary.push(`Renamed page to '${page.title}'.`)
+  }
+
+  if (page.parent_page_id !== previousParentPageId) {
+    if (page.parent_page_id === null) {
+      changeSummary.push('Moved page to the top level.')
+    } else {
+      const parentTitle = pagesById.get(page.parent_page_id)?.title ?? page.parent_page_id
+      changeSummary.push(`Moved page under '${parentTitle}'.`)
+    }
+  }
+
+  if (page.sort_order !== previousSortOrder) {
+    changeSummary.push('Adjusted page ordering.')
+  }
+
+  if (page.content_markdown !== previousContentMarkdown) {
+    if (!previousContentMarkdown.trim() && page.content_markdown.trim()) {
+      changeSummary.push('Added page content.')
+    } else if (previousContentMarkdown.trim() && !page.content_markdown.trim()) {
+      changeSummary.push('Cleared page content.')
+    } else {
+      changeSummary.push('Updated page content.')
+    }
+  }
+
+  return changeSummary.length > 0 ? changeSummary : ['Saved page changes.']
+}
+
+function recordWikiRevision(args: {
+  revisionsByPageId: Map<string, SmokeWikiPageRevisionRow[]>
+  nextRevisionId: number
+  page: SmokeWikiPageRow
+  createdAt: string
+  createdBy: string
+  changeSummary: string[]
+  restoredFromRevisionId?: number | null
+}): SmokeWikiPageRevisionRow {
+  const {
+    revisionsByPageId,
+    nextRevisionId,
+    page,
+    createdAt,
+    createdBy,
+    changeSummary,
+    restoredFromRevisionId = null,
+  } = args
+  const revision = {
+    revision_id: nextRevisionId,
+    page_id: page.page_id,
+    version: page.version,
+    parent_page_id: page.parent_page_id,
+    title: page.title,
+    content_markdown: page.content_markdown,
+    sort_order: page.sort_order,
+    change_summary: [...changeSummary],
+    created_at: createdAt,
+    created_by: createdBy,
+    restored_from_revision_id: restoredFromRevisionId,
+  } satisfies SmokeWikiPageRevisionRow
+
+  const currentRevisions = revisionsByPageId.get(page.page_id) ?? []
+  currentRevisions.unshift(revision)
+  revisionsByPageId.set(page.page_id, currentRevisions)
+
+  return revision
+}
+
+function serializeWikiPageDetail(
+  rows: SmokeWikiPageRow[],
+  revisionsByPageId: Map<string, SmokeWikiPageRevisionRow[]>,
+  page: SmokeWikiPageRow,
+) {
+  return {
+    ...serializeWikiPageSummary(rows, page),
+    content_markdown: page.content_markdown,
+    recent_revisions: (revisionsByPageId.get(page.page_id) ?? [])
+      .slice()
+      .sort((left, right) => {
+        if (left.version !== right.version) {
+          return right.version - left.version
+        }
+        return right.revision_id - left.revision_id
+      })
+      .slice(0, MAX_WIKI_RECENT_REVISIONS)
+      .map(serializeWikiRevision),
+  }
+}
+
+function validateWikiParentPage(
+  rows: SmokeWikiPageRow[],
+  pageId: string | null,
+  parentPageId: string | null,
+): string | null {
+  if (parentPageId === null) {
+    return null
+  }
+
+  const pagesById = new Map(rows.map((page) => [page.page_id, page] as const))
+  if (!pagesById.has(parentPageId)) {
+    return `Parent wiki page '${parentPageId}' was not found`
+  }
+
+  if (pageId !== null && parentPageId === pageId) {
+    return 'A wiki page cannot be its own parent'
+  }
+
+  const descendants = pageId === null ? new Set<string>() : buildWikiDescendantIds(rows, pageId)
+  if (pageId !== null && descendants.has(parentPageId)) {
+    return 'A wiki page cannot move underneath one of its descendants'
+  }
+
+  let currentParentId: string | null = parentPageId
+  const visited = new Set<string>()
+  while (currentParentId !== null) {
+    if (visited.has(currentParentId)) {
+      return 'Wiki page hierarchy contains a cycle'
+    }
+    visited.add(currentParentId)
+
+    if (pageId !== null && currentParentId === pageId) {
+      return 'A wiki page cannot move underneath one of its descendants'
+    }
+
+    currentParentId = pagesById.get(currentParentId)?.parent_page_id ?? null
+  }
+
+  return null
+}
+
+const wikiSmokeHelperCatalog = {
+  sortWikiPages,
+  nextWikiTimestamp,
+  nextWikiSortOrder,
+  buildWikiChangeSummary,
+  recordWikiRevision,
+  serializeWikiPageDetail,
+  validateWikiParentPage,
+}
+void wikiSmokeHelperCatalog
+
 function writeJson(response: ServerResponse, payload: unknown, status = 200): void {
   response.writeHead(status, {
     'Content-Type': 'application/json',
@@ -351,6 +639,27 @@ async function startMockApiServer(
   const promptNavigationOutcomeRequests: RecordedRequest[] = []
   const unexpectedRequests: RecordedRequest[] = []
   const tradeRows: SmokeTradeRow[] = trades.map((trade) => ({ ...trade }))
+  const wikiPageRows: SmokeWikiPageRow[] = wikiPages.map(cloneWikiPage)
+  const wikiPageRevisionsByPageId = new Map<string, SmokeWikiPageRevisionRow[]>(
+    wikiPageRows.map((page, index) => [
+      page.page_id,
+      [
+        {
+          revision_id: index + 1,
+          page_id: page.page_id,
+          version: page.version,
+          parent_page_id: page.parent_page_id,
+          title: page.title,
+          content_markdown: page.content_markdown,
+          sort_order: page.sort_order,
+          change_summary: ['Created starter wiki page.'],
+          created_at: page.updated_at,
+          created_by: page.updated_by,
+          restored_from_revision_id: null,
+        } satisfies SmokeWikiPageRevisionRow,
+      ].map(cloneWikiPageRevision),
+    ]),
+  )
   const tradeEventsByAggregateId = new Map<string, SmokeEventRow[]>(
     [['T-AMEND-100', selectedTradeEvents.map((event) => ({ ...event }))]],
   )
@@ -406,6 +715,11 @@ async function startMockApiServer(
   const assistantRunId = 8801
   const assistantRunRecordedAt = '2026-04-11T09:08:00Z'
   const assistantUserPrompt = 'Where should I handle the confirmation blocker?'
+  void wikiPageRevisionsByPageId
+  let nextWikiPageSequence = wikiPageRows.length + 1
+  let nextWikiRevisionId = wikiPageRows.length + 1
+  let wikiMutationSequence = 0
+  void [nextWikiPageSequence, nextWikiRevisionId, wikiMutationSequence]
   let sessionExpired = false
   const runtimeSettings = {
     ...publicRuntimeSettings,
@@ -962,6 +1276,7 @@ async function startMockApiServer(
         session_id: smokeSession.sessionId,
         access_token: smokeSession.accessToken,
         expires_at: smokeSession.expiresAt,
+        show_start_here: smokeSession.showStartHere,
         user: smokeSession.user,
       })
       return
@@ -974,6 +1289,7 @@ async function startMockApiServer(
         session_id: smokeSession.sessionId,
         access_token: smokeSession.accessToken,
         expires_at: smokeSession.expiresAt,
+        show_start_here: smokeSession.showStartHere,
         user: smokeSession.user,
       })
       return
@@ -2078,6 +2394,284 @@ async function startMockApiServer(
       }
 
       writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/wiki/pages' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, {
+        pages: sortWikiPages(wikiPageRows).map((page) => serializeWikiPageSummary(wikiPageRows, page)),
+      })
+      return
+    }
+
+    if (url.pathname === '/wiki/pages' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        writeJson(response, { detail: 'Invalid wiki page payload.' }, 422)
+        return
+      }
+
+      const pageRecord = payload as Record<string, unknown>
+      const title = normalizeOptionalText(pageRecord.title)
+      if (!title) {
+        writeJson(response, { detail: 'title is required.' }, 422)
+        return
+      }
+
+      const parentPageId =
+        pageRecord.parent_page_id === undefined || pageRecord.parent_page_id === null
+          ? null
+          : normalizeOptionalText(pageRecord.parent_page_id)
+      const parentValidationError = validateWikiParentPage(wikiPageRows, null, parentPageId)
+      if (parentValidationError) {
+        writeJson(
+          response,
+          { detail: parentValidationError },
+          parentValidationError.includes('not found') ? 404 : 422,
+        )
+        return
+      }
+
+      const contentMarkdown =
+        typeof pageRecord.content_markdown === 'string'
+          ? pageRecord.content_markdown.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+          : ''
+      const sortOrder =
+        typeof pageRecord.sort_order === 'number' && Number.isFinite(pageRecord.sort_order)
+          ? Math.trunc(pageRecord.sort_order)
+          : nextWikiSortOrder(wikiPageRows, parentPageId)
+
+      wikiMutationSequence += 1
+      const timestamp = nextWikiTimestamp(wikiMutationSequence)
+      const createdPage = {
+        page_id: `wiki-page-${String(nextWikiPageSequence).padStart(4, '0')}`,
+        parent_page_id: parentPageId,
+        title,
+        content_markdown: contentMarkdown,
+        sort_order: sortOrder,
+        created_at: timestamp,
+        created_by: smokeSession.user.user_id,
+        updated_at: timestamp,
+        updated_by: smokeSession.user.user_id,
+        version: 1,
+      } satisfies SmokeWikiPageRow
+      nextWikiPageSequence += 1
+      wikiPageRows.push(createdPage)
+      recordWikiRevision({
+        revisionsByPageId: wikiPageRevisionsByPageId,
+        nextRevisionId: nextWikiRevisionId,
+        page: createdPage,
+        createdAt: timestamp,
+        createdBy: smokeSession.user.user_id,
+        changeSummary: ['Created wiki page.'],
+      })
+      nextWikiRevisionId += 1
+
+      writeJson(response, serializeWikiPageDetail(wikiPageRows, wikiPageRevisionsByPageId, createdPage), 201)
+      return
+    }
+
+    const wikiPageRestoreMatch = url.pathname.match(/^\/wiki\/pages\/([^/]+)\/revisions\/(\d+)\/restore$/)
+    if (wikiPageRestoreMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const pageId = decodeURIComponent(wikiPageRestoreMatch[1] ?? '')
+      const revisionId = Number(wikiPageRestoreMatch[2])
+      const page = wikiPageRows.find((entry) => entry.page_id === pageId)
+      if (!page) {
+        writeJson(response, { detail: `Wiki page '${pageId}' was not found` }, 404)
+        return
+      }
+
+      const revision = (wikiPageRevisionsByPageId.get(pageId) ?? []).find(
+        (entry) => entry.revision_id === revisionId,
+      )
+      if (!revision) {
+        writeJson(response, { detail: `Wiki page revision '${revisionId}' was not found` }, 404)
+        return
+      }
+
+      const restorePayload = await readJsonBody(request)
+      if (!restorePayload || typeof restorePayload !== 'object' || Array.isArray(restorePayload)) {
+        writeJson(response, { detail: 'Invalid wiki revision restore payload.' }, 422)
+        return
+      }
+
+      const restoredBy = normalizeOptionalText((restorePayload as Record<string, unknown>).restored_by)
+      if (!restoredBy) {
+        writeJson(response, { detail: 'restored_by is required.' }, 422)
+        return
+      }
+
+      const parentValidationError = validateWikiParentPage(wikiPageRows, pageId, revision.parent_page_id)
+      if (parentValidationError) {
+        writeJson(
+          response,
+          { detail: parentValidationError },
+          parentValidationError.includes('not found') ? 404 : 422,
+        )
+        return
+      }
+
+      wikiMutationSequence += 1
+      const timestamp = nextWikiTimestamp(wikiMutationSequence)
+      page.parent_page_id = revision.parent_page_id
+      page.title = revision.title
+      page.content_markdown = revision.content_markdown
+      page.sort_order = revision.sort_order
+      page.updated_at = timestamp
+      page.updated_by = restoredBy
+      page.version += 1
+
+      recordWikiRevision({
+        revisionsByPageId: wikiPageRevisionsByPageId,
+        nextRevisionId: nextWikiRevisionId,
+        page,
+        createdAt: timestamp,
+        createdBy: restoredBy,
+        changeSummary: [`Restored from revision ${revisionId}.`],
+        restoredFromRevisionId: revisionId,
+      })
+      nextWikiRevisionId += 1
+
+      writeJson(response, serializeWikiPageDetail(wikiPageRows, wikiPageRevisionsByPageId, page))
+      return
+    }
+
+    const wikiPageMatch = url.pathname.match(/^\/wiki\/pages\/([^/]+)$/)
+    if (wikiPageMatch && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const pageId = decodeURIComponent(wikiPageMatch[1] ?? '')
+      const page = wikiPageRows.find((entry) => entry.page_id === pageId)
+      if (!page) {
+        writeJson(response, { detail: `Wiki page '${pageId}' was not found` }, 404)
+        return
+      }
+
+      writeJson(response, serializeWikiPageDetail(wikiPageRows, wikiPageRevisionsByPageId, page))
+      return
+    }
+
+    if (wikiPageMatch && method === 'PATCH') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const pageId = decodeURIComponent(wikiPageMatch[1] ?? '')
+      const page = wikiPageRows.find((entry) => entry.page_id === pageId)
+      if (!page) {
+        writeJson(response, { detail: `Wiki page '${pageId}' was not found` }, 404)
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        writeJson(response, { detail: 'Invalid wiki page payload.' }, 422)
+        return
+      }
+
+      const pageRecord = payload as Record<string, unknown>
+      const hasTitle = Object.prototype.hasOwnProperty.call(pageRecord, 'title')
+      const hasParentPageId = Object.prototype.hasOwnProperty.call(pageRecord, 'parent_page_id')
+      const hasContentMarkdown = Object.prototype.hasOwnProperty.call(pageRecord, 'content_markdown')
+      const hasSortOrder = Object.prototype.hasOwnProperty.call(pageRecord, 'sort_order')
+
+      if (!hasTitle && !hasParentPageId && !hasContentMarkdown && !hasSortOrder) {
+        writeJson(response, { detail: 'Provide at least one wiki page field to update.' }, 422)
+        return
+      }
+
+      const nextTitle = hasTitle ? normalizeOptionalText(pageRecord.title) : page.title
+      if (hasTitle && !nextTitle) {
+        writeJson(response, { detail: 'title is required.' }, 422)
+        return
+      }
+
+      const nextParentPageId = hasParentPageId
+        ? pageRecord.parent_page_id === null
+          ? null
+          : normalizeOptionalText(pageRecord.parent_page_id)
+        : page.parent_page_id
+      const parentValidationError = validateWikiParentPage(wikiPageRows, pageId, nextParentPageId)
+      if (parentValidationError) {
+        writeJson(
+          response,
+          { detail: parentValidationError },
+          parentValidationError.includes('not found') ? 404 : 422,
+        )
+        return
+      }
+
+      const nextContentMarkdown = hasContentMarkdown
+        ? typeof pageRecord.content_markdown === 'string'
+          ? pageRecord.content_markdown.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+          : ''
+        : page.content_markdown
+      const nextSortOrder = hasSortOrder
+        ? typeof pageRecord.sort_order === 'number' && Number.isFinite(pageRecord.sort_order)
+          ? Math.trunc(pageRecord.sort_order)
+          : page.sort_order
+        : page.sort_order
+
+      const previousTitle = page.title
+      const previousParentPageId = page.parent_page_id
+      const previousContentMarkdown = page.content_markdown
+      const previousSortOrder = page.sort_order
+
+      const effectiveChange =
+        nextTitle !== page.title ||
+        nextParentPageId !== page.parent_page_id ||
+        nextContentMarkdown !== page.content_markdown ||
+        nextSortOrder !== page.sort_order
+
+      if (!effectiveChange) {
+        writeJson(response, serializeWikiPageDetail(wikiPageRows, wikiPageRevisionsByPageId, page))
+        return
+      }
+
+      page.title = nextTitle ?? page.title
+      page.parent_page_id = nextParentPageId
+      page.content_markdown = nextContentMarkdown
+      page.sort_order = nextSortOrder
+      wikiMutationSequence += 1
+      const timestamp = nextWikiTimestamp(wikiMutationSequence)
+      page.updated_at = timestamp
+      page.updated_by = smokeSession.user.user_id
+      page.version += 1
+
+      const pagesById = new Map(wikiPageRows.map((entry) => [entry.page_id, entry] as const))
+      const changeSummary = buildWikiChangeSummary({
+        previousTitle,
+        previousParentPageId,
+        previousContentMarkdown,
+        previousSortOrder,
+        page,
+        pagesById,
+      })
+      recordWikiRevision({
+        revisionsByPageId: wikiPageRevisionsByPageId,
+        nextRevisionId: nextWikiRevisionId,
+        page,
+        createdAt: timestamp,
+        createdBy: smokeSession.user.user_id,
+        changeSummary,
+      })
+      nextWikiRevisionId += 1
+
+      writeJson(response, serializeWikiPageDetail(wikiPageRows, wikiPageRevisionsByPageId, page))
       return
     }
 

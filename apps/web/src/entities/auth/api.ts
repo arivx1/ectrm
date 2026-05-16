@@ -12,6 +12,7 @@ export type SessionResponse = {
   session_id: string
   access_token: string
   expires_at: string
+  show_start_here: boolean
   user: AuthenticatedUser
 }
 

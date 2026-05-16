@@ -143,6 +143,27 @@ test('settings workspace renders the custom event entry form when that card is e
   assert.match(markup, /Add Event/)
 })
 
+test('settings workspace exposes guided and market terminal shell modes in the appearance card', () => {
+  usePersistentCollapsibleCardStateMock.mockImplementation((cardKey: string) => ({
+    expanded: cardKey === 'settings.appearance-card',
+    hasPersistedValue: cardKey === 'settings.appearance-card',
+    setExpanded: () => undefined,
+  }))
+
+  const markup = renderSettingsWorkspace()
+
+  assert.match(
+    markup,
+    /aria-expanded="true" aria-controls="settings-appearance-card-panel"/,
+  )
+  assert.match(markup, /Workspace mode/)
+  assert.match(markup, /Guided workspace/)
+  assert.match(markup, /Market terminal/)
+  assert.match(markup, /Landing and density mode/)
+  assert.match(markup, /Theme and palette/)
+  assert.match(markup, />Reset Appearance</)
+})
+
 test('settings workspace renders home calendar overlay controls inside the Google Calendar card', () => {
   usePersistentCollapsibleCardStateMock.mockImplementation((cardKey: string) => ({
     expanded: cardKey === 'settings.google-calendar-card',

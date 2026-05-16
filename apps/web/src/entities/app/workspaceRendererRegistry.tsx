@@ -1042,6 +1042,7 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <DocumentationWorkspace
         activeDocumentKey={context.activeDocumentationDocumentKey}
+        authSession={context.workspaceData.authSession}
         getViewHref={context.hrefForView}
         onDocumentKeyChange={context.handleDocumentationDocumentChange}
         onOpenView={context.navigateToView}

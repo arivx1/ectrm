@@ -4,6 +4,7 @@ import { test } from 'vitest'
 import {
   getDefaultAppearanceSettings,
   normalizeAppearanceSettings,
+  resolvePreferredHomeView,
   resolveButtonInkColor,
   resolveColorMode,
 } from '../src/shared/appearance.ts'
@@ -25,6 +26,7 @@ test('normalizeAppearanceSettings falls back to defaults for invalid values', ()
 
   assert.deepEqual(normalized, {
     colorMode: defaults.colorMode,
+    workspaceMode: defaults.workspaceMode,
     lightMode: {
       accent: '#aabbcc',
       highlight: defaults.lightMode.highlight,
@@ -34,6 +36,17 @@ test('normalizeAppearanceSettings falls back to defaults for invalid values', ()
       highlight: '#77ff88',
     },
   })
+})
+
+test('resolvePreferredHomeView maps workspace modes to the signed-in root landing', () => {
+  assert.equal(resolvePreferredHomeView(getDefaultAppearanceSettings()), 'prompt')
+  assert.equal(
+    resolvePreferredHomeView({
+      ...getDefaultAppearanceSettings(),
+      workspaceMode: 'terminal',
+    }),
+    'dashboard',
+  )
 })
 
 test('resolveColorMode honors explicit selections and system fallback', () => {

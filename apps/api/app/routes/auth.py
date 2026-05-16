@@ -73,6 +73,7 @@ def bootstrap_admin_account(
         session_id=session_record.session_id,
         access_token=access_token,
         expires_at=session_record.expires_at,
+        show_start_here=True,
         user=_to_authenticated_user(user),
     )
 
@@ -87,6 +88,7 @@ def create_session(
         identifier=payload.identifier,
         password=payload.password,
     )
+    show_start_here = user.last_login_at is None
     user.last_login_at = datetime.now(timezone.utc)
     user.updated_at = datetime.now(timezone.utc)
     user.updated_by = user.user_id
@@ -99,18 +101,20 @@ def create_session(
         session_id=session_record.session_id,
         access_token=access_token,
         expires_at=session_record.expires_at,
+        show_start_here=show_start_here,
         user=_to_authenticated_user(user),
     )
 
 
 @router.post("/single-user-session", response_model=SessionOut)
 def create_single_user_session(db: Session = Depends(get_db)) -> SessionOut:
-    user = provision_single_user_auth_user(db)
+    user, show_start_here = provision_single_user_auth_user(db)
     session_record, access_token = create_user_session(db, user)
     return SessionOut(
         session_id=session_record.session_id,
         access_token=access_token,
         expires_at=session_record.expires_at,
+        show_start_here=show_start_here,
         user=_to_authenticated_user(user),
     )
 
@@ -120,7 +124,7 @@ def create_google_session(
     payload: GoogleSessionRequest,
     db: Session = Depends(get_db),
 ) -> SessionOut:
-    user = authenticate_google_user(
+    user, show_start_here = authenticate_google_user(
         db,
         id_token=payload.id_token,
     )
@@ -129,6 +133,7 @@ def create_google_session(
         session_id=session_record.session_id,
         access_token=access_token,
         expires_at=session_record.expires_at,
+        show_start_here=show_start_here,
         user=_to_authenticated_user(user),
     )
 

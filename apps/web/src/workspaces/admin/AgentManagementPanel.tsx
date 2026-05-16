@@ -764,6 +764,40 @@ type AgentHierarchyEditorProps = {
   agentRecords: AssistantAdminAgent[]
 }
 
+type AgentSkillSelectorProps = {
+  selectedSkills: AssistantAgentSkillKey[]
+  availableSkills: AssistantAgentSkillDefinition[]
+  onToggle: (skillName: AssistantAgentSkillKey) => void
+  description: string
+}
+
+function AgentSkillSelector({
+  selectedSkills,
+  availableSkills,
+  onToggle,
+  description,
+}: AgentSkillSelectorProps) {
+  return (
+    <div className="assistant-admin-option-group">
+      <strong>Skills</strong>
+      <p>{description}</p>
+      <div className="chip-row">
+        {availableSkills.map((skill) => (
+          <button
+            key={skill.name}
+            type="button"
+            className={`entity-chip ${selectedSkills.includes(skill.name) ? '' : 'entity-chip-soft'}`}
+            onClick={() => onToggle(skill.name)}
+            title={skill.description}
+          >
+            {skill.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function AgentHierarchyEditor({
   form,
   setForm,
@@ -4317,51 +4351,17 @@ export function AgentManagementPanel({
                     </div>
                   </div>
 
-                  <div className="assistant-admin-option-group">
-                    <strong>Skills</strong>
-                    <p>Make the agent's build recipe explicit: which reusable specialties should users expect?</p>
-                    <div className="chip-row">
-                      {availableSkills.map((skill) => (
-                        <button
-                          key={skill.name}
-                          type="button"
-                          className={`entity-chip ${createForm.skills.includes(skill.name) ? '' : 'entity-chip-soft'}`}
-                          onClick={() =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              skills: toggleSelection(current.skills, skill.name),
-                            }))
-                          }
-                          title={skill.description}
-                        >
-                          {skill.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="assistant-admin-option-group">
-                    <strong>Skills</strong>
-                    <p>Keep the specialization explicit so users can see how this agent is built.</p>
-                    <div className="chip-row">
-                      {availableSkills.map((skill) => (
-                        <button
-                          key={skill.name}
-                          type="button"
-                          className={`entity-chip ${editForm.skills.includes(skill.name) ? '' : 'entity-chip-soft'}`}
-                          onClick={() =>
-                            setEditForm((current) => ({
-                              ...current,
-                              skills: toggleSelection(current.skills, skill.name),
-                            }))
-                          }
-                          title={skill.description}
-                        >
-                          {skill.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <AgentSkillSelector
+                    selectedSkills={createForm.skills}
+                    availableSkills={availableSkills}
+                    description="Make the agent's build recipe explicit: which reusable specialties should users expect?"
+                    onToggle={(skillName) =>
+                      setCreateForm((current) => ({
+                        ...current,
+                        skills: toggleSelection(current.skills, skillName),
+                      }))
+                    }
+                  />
 
                   <div className="assistant-admin-option-group">
                     <strong>Allowed live tools</strong>
@@ -5886,6 +5886,18 @@ export function AgentManagementPanel({
                       ))}
                     </div>
                   </div>
+
+                  <AgentSkillSelector
+                    selectedSkills={editForm.skills}
+                    availableSkills={availableSkills}
+                    description="Keep the specialization explicit so users can see how this agent is built."
+                    onToggle={(skillName) =>
+                      setEditForm((current) => ({
+                        ...current,
+                        skills: toggleSelection(current.skills, skillName),
+                      }))
+                    }
+                  />
 
                   <div className="assistant-admin-option-group">
                     <strong>Allowed live tools</strong>

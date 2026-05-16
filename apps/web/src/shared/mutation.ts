@@ -11,6 +11,7 @@ export type StoredAuthSession = {
   sessionId: string
   accessToken: string
   expiresAt: string
+  showStartHere?: boolean
   user: StoredAuthUser
 }
 

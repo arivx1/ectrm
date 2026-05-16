@@ -196,3 +196,38 @@ class DeliveryFieldSource(StrEnum):
     TRADE_DERIVED = "TRADE_DERIVED"
     MANUAL = "MANUAL"
     SYSTEM_GENERATED = "SYSTEM_GENERATED"
+
+
+class TruckMovementStatus(StrEnum):
+    PLANNED = "PLANNED"
+    ASSIGNED = "ASSIGNED"
+    EN_ROUTE_TO_STOP = "EN_ROUTE_TO_STOP"
+    AT_STOP = "AT_STOP"
+    IN_TRANSIT = "IN_TRANSIT"
+    ON_HOLD = "ON_HOLD"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+class TruckStopStatus(StrEnum):
+    PLANNED = "PLANNED"
+    EN_ROUTE = "EN_ROUTE"
+    ARRIVED = "ARRIVED"
+    WORKING = "WORKING"
+    DEPARTED = "DEPARTED"
+    SKIPPED = "SKIPPED"
+    CANCELLED = "CANCELLED"
+
+
+class TruckStopType(StrEnum):
+    PICKUP = "PICKUP"
+    DROPOFF = "DROPOFF"
+    WAYPOINT = "WAYPOINT"
+
+
+class TrackingSignalProcessingStatus(StrEnum):
+    RECEIVED = "RECEIVED"
+    MATCHED = "MATCHED"
+    UNRESOLVED = "UNRESOLVED"
+    REJECTED = "REJECTED"
+    ERROR = "ERROR"

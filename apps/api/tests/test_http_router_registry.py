@@ -20,6 +20,7 @@ class HttpRouterRegistryTests(unittest.TestCase):
         self.assertIn(("mcp", "mcp-status"), registrations)
         self.assertIn(("codex", "codex-admin"), registrations)
         self.assertIn(("codex", "codex-callback"), registrations)
+        self.assertIn(("wiki", "wiki"), registrations)
 
     def test_include_http_routers_mounts_expected_paths(self) -> None:
         app = FastAPI()
@@ -48,6 +49,8 @@ class HttpRouterRegistryTests(unittest.TestCase):
         self.assertIn("/assistant/action-requests", paths)
         self.assertIn("/assistant/prompt-navigation-outcomes", paths)
         self.assertIn("/assistant/prompt-route-recommendations", paths)
+        self.assertIn("/wiki/pages", paths)
+        self.assertIn("/wiki/pages/{page_id}/revisions/{revision_id}/restore", paths)
         self.assertIn("/mcp/login", paths)
         self.assertIn("/mcp-status", paths)
         self.assertIn("/mcp/whoami", paths)

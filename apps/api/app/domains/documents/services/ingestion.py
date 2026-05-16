@@ -531,6 +531,36 @@ def update_document_ingestion(
     if "review_notes" in changes:
         document.review_notes = _clean_optional_text(changes.get("review_notes"))
 
+    document_kind_changed = False
+    if "document_kind" in changes:
+        next_document_kind = str(changes.get("document_kind") or "").upper()
+        if next_document_kind not in list_supported_document_kinds():
+            raise ValueError(f"Document kind '{next_document_kind}' is not supported")
+
+        for page in pages:
+            previous_document_kind = page.document_kind
+            previous_document_subtype = page.document_subtype
+            if page.document_kind != next_document_kind:
+                document_kind_changed = True
+                page.document_kind = next_document_kind
+                page.classification_confidence = 1.0
+                page.header_fields = extract_document_header_fields(page.document_kind, page.raw_text)
+            record_page_classification_correction(
+                page,
+                actor_id=actor_id,
+                changed_at=now,
+                previous_document_kind=previous_document_kind,
+                previous_document_subtype=previous_document_subtype,
+            )
+            if previous_document_kind != page.document_kind:
+                page.updated_at = now
+
+        if document_kind_changed:
+            document.review_status = derive_document_review_status_after_page_change(document.review_status, pages)
+            if document.review_status != "VERIFIED":
+                document.reviewed_at = None
+                document.reviewed_by = None
+
     if "review_status" in changes:
         next_review_status = str(changes["review_status"]).upper()
         validate_document_review_status_transition(next_review_status, pages)
@@ -688,6 +718,7 @@ def _populate_page_analysis(
         raw_text=raw_text,
         matched_by=classification.matched_by,
         preview_generated=preview_generated,
+        image_has_visible_content=image_has_visible_content,
         text_source=text_source,
         document_kind=classification.document_kind,
         document_subtype=classification.document_subtype,

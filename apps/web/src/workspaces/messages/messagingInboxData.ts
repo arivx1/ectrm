@@ -1,4 +1,5 @@
 import type { PromptHomeCounts } from '../prompt/promptHomeStarters'
+import type { MessagingWorkspaceMessageRecord } from '../../entities/messages/api'
 
 export type MessagingInboxMessageType =
   | 'Email'
@@ -192,6 +193,24 @@ export function appendMessagingWorkspacePost(
         body: paragraphs,
       },
     ],
+  }
+}
+
+export function buildMessagingWorkspacePostFromRecord(
+  record: MessagingWorkspaceMessageRecord,
+  timestamp: string,
+): MessagingWorkspacePost {
+  return {
+    id: record.message_id,
+    author: {
+      name: record.author.name,
+      title: record.author.title,
+      presence: record.author.presence,
+      initials: record.author.initials,
+      tone: record.author.tone,
+    },
+    timestamp,
+    body: record.body,
   }
 }
 

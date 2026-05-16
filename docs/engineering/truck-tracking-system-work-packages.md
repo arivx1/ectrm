@@ -23,6 +23,8 @@ or fleet-procurement system.
 - [Scheduling UI Design Review](./scheduling-ui-design-review.md)
 - [Rail Delivery Schema](./rail-delivery-schema.md)
 - [Trading And Shipping Document Taxonomy](./document-taxonomy-trading-shipping.md)
+- [Truck Tracking WP-01: Truck Run And Stop Model](./truck-tracking-wp-01-run-stop-model.md)
+- [Truck Tracking TTS-02: Schema And API Scaffolding](./truck-tracking-tts-02-schema-api-scaffolding.md)
 - [Canonical Work Object Inventory](./canonical-work-object-inventory.md)
 - [Human-Agent Authority Matrix](./human-agent-authority-matrix.md)
 - [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
@@ -109,7 +111,7 @@ Each work package is done only when:
   applicable
 - docs are updated when work-object, event, or authority boundaries change
 
-## TTS-01: Truck Work Object And Status Contract
+## TTS-01 / WP-01: Truck Run And Stop Model
 
 ### Priority
 
@@ -124,6 +126,11 @@ M
 ECTRM has a clear operational model for truck tracking that fits beneath
 `DeliveryObligation` and does not overload delivery header rows with per-load
 execution detail.
+
+### Status
+
+Drafted in
+[Truck Tracking WP-01: Truck Run And Stop Model](./truck-tracking-wp-01-run-stop-model.md).
 
 ### Scope
 
@@ -174,6 +181,11 @@ M
 
 The team has a clear additive schema and route direction for truck tracking
 that fits the existing operations domain.
+
+### Status
+
+Drafted in
+[Truck Tracking TTS-02: Schema And API Scaffolding](./truck-tracking-tts-02-schema-api-scaffolding.md).
 
 ### Scope
 

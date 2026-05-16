@@ -83,6 +83,109 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-16 - Distributed Execution Should Use Centralized Control And Untrusted Node Defaults
+
+- Type: lesson
+- Domain: agent runtime topology, engineering automation, and future
+  execution-node governance
+- Applies to: Codex-style dispatch, browser automation, document-processing
+  jobs, future recurring jobs, and any "assign this work to a server" product
+  surface
+- Status: accepted
+- Source:
+  [ADR 0004: Centralized Control Plane With Assignable Execution Nodes](../adr/0004-control-plane-and-execution-nodes.md),
+  [Execution Node Platform Work Packages](./execution-node-platform-work-packages.md),
+  and [AI Workflow](./ai-workflow.md)
+- Lesson: if ECTRM later lets operators assign work to cloud workers,
+  customer-managed hosts, or personal machines, keep the control plane
+  centralized. The backend should continue to own auth, policy, audit, job
+  state, typed action execution, and artifact lineage. Execution nodes should
+  be treated as compute locations with explicit capability and trust metadata,
+  not as peers that directly own business truth or write into the primary
+  database.
+- Deterministic opportunity: promote existing callback-driven task flows such
+  as Codex dispatch into a shared execution-job contract with typed statuses,
+  node registry, trust tiers, lease expiry, heartbeat handling, and governed
+  return paths into staged actions or typed services.
+- Agent autonomy impact: distributed execution can widen where compute runs
+  without widening what agents may do. Personal or remote nodes still should
+  not directly book trades, mutate settlement, change policy, or bypass staged
+  and typed control seams.
+- Tests or evidence: future implementation should add API coverage for node
+  enrollment, lease expiry, heartbeat loss, duplicate callbacks, routing-policy
+  blocks, and staged-action return paths from node-produced outputs.
+- Follow-up: pilot the model first on low-risk reviewable workloads before any
+  attempt to route broader operational actions through assignable nodes.
+
+### 2026-05-16 - Slack-Style Messaging Should Graduate Into Durable Work Objects Before Feature Polish
+
+- Type: lesson
+- Domain: messaging collaboration surfaces, assistant messaging UX, and
+  governed work-object design
+- Applies to: `Messages` workspace evolution, in-thread assistant replies,
+  channel or DM navigation, thread persistence, and post-send message actions
+- Status: accepted
+- Source:
+  `apps/web/src/workspaces/messages/MessagingWorkspace.tsx`,
+  `apps/web/src/workspaces/messages/messagingInboxData.ts`,
+  `apps/web/src/workspaces/messages/messagingAgentSession.ts`, and
+  `docs/engineering/messaging-workspace-work-packages.md`
+- Lesson: once a chat surface starts behaving like Slack or Teams, the next
+  maturity step should be durable conversation, message, and thread records
+  rather than more demo-only UI polish. Conversation switching, reply-to-
+  message behavior, composer richness, message lifecycle actions, and agent
+  identity all depend on typed work objects and explicit provenance. Do not let
+  a seeded thread with local-only state become the long-term collaboration
+  model.
+- Deterministic opportunity: create a typed messaging domain with durable
+  conversation, message, participant, thread, and provenance contracts so
+  routing, unread state, agent reply storage, and message audit are product
+  behavior rather than prompt or component conventions.
+- Agent autonomy impact: agents may keep replying in-thread, but their messages
+  should remain linked to explicit user or service identity, governed
+  assistant-run provenance, and draft or stage authority ceilings instead of
+  silently borrowing shared local-dev identity in production behavior.
+- Tests or evidence: the messaging review findings were promoted into
+  `MWP-01` through `MWP-06` in
+  `docs/engineering/messaging-workspace-work-packages.md`.
+- Follow-up: implement MWP-01 through MWP-03 before spending heavily on richer
+  composer chrome or post-send polish.
+
+### 2026-05-16 - Seeded Messaging Lanes Can Adopt Durable Posts Before Full Channel Navigation Ships
+
+- Type: lesson
+- Domain: messaging workspace persistence, governed collaboration surfaces, and
+  incremental work-object adoption
+- Applies to: first messaging persistence slices, seeded conversation lanes,
+  durable human posts, and in-thread assistant reply storage
+- Status: implemented
+- Source:
+  `apps/api/app/routes/messages.py`,
+  `apps/api/app/domains/messages/services/workspace.py`,
+  `apps/api/app/models/messaging_workspace_conversation.py`,
+  `apps/api/app/models/messaging_workspace_message.py`,
+  `apps/web/src/entities/messages/api.ts`, and
+  `apps/web/src/workspaces/messages/MessagingWorkspace.tsx`
+- Lesson: the first durable messaging slice does not need to solve every
+  Slack-like capability at once. It is valid to keep seeded conversation lanes
+  and existing thread chrome, add backend-owned conversation and message
+  records underneath them, and move normal human sends plus completed assistant
+  replies onto typed API writes. That gives refresh-safe history and provenance
+  without blocking on full channel switching or per-message thread models.
+- Deterministic opportunity: keep seeded lane identity, assistant-workspace
+  mapping, and assistant provenance in a typed messages service so future
+  channel navigation, unread state, and thread models can reuse the same
+  durable records.
+- Agent autonomy impact: in-thread assistant replies stay in the draft or stage
+  lanes and become more auditable once linked to persisted message records and
+  assistant run IDs.
+- Tests or evidence:
+  `apps/api/tests/test_messaging_workspace_api.py`,
+  `apps/web/tests/messagesApi.test.ts`, and
+  `apps/web/tests/messagingWorkspace.test.ts`
+- Follow-up: add explicit channel selection and per-message thread records on
+  top of the same durable conversation and message contract.
+
 ### 2026-05-15 - Agent Replies In Messaging Surfaces Should Stay In-Thread And Use The Governed Assistant Runtime
 
 - Type: lesson
@@ -104,11 +207,11 @@ proposal form until a human owner approves the domain rule.
   the assistant prompt context rather than inventing a parallel ad hoc agent
   path. When no dedicated backend messaging-router profile exists yet, use a
   deterministic front-end routing layer to decide whether a thread needs an
-  agent reply and which managed agent or workspace context to target. On public
-  messaging surfaces in local-dev mode, let the messaging agent auto-claim the
-  existing single-user OPS_ADMIN session when a reply is warranted instead of
-  blocking on a manual sign-in click. Preserve familiar chat composer behavior
-  too: `Enter` sends and `Shift+Enter` inserts a newline.
+  agent reply and which managed agent or workspace context to target. Preserve
+  familiar chat composer behavior too: `Enter` sends and `Shift+Enter` inserts
+  a newline. When a thread needs a governed assistant reply, require an
+  explicit signed-in session instead of silently borrowing a shared local admin
+  identity, so authorship and bot activity stay attributable.
 - Deterministic opportunity: promote recurring thread scaffolding such as
   channel-to-workspace mapping, thread context shaping, and governed action
   request callouts into shared messaging helpers as more communication surfaces
@@ -3458,3 +3561,41 @@ independently"`.
 - Follow-up: add conflict handling, reviewer thresholds, or admin-facing rule
   visibility before using these corrections for higher-trust downstream routing
   or record-creation automation.
+
+### 2026-05-16 - Document Understanding Should Be A Typed Backend Bundle, Not Loose Client Reconstruction
+
+- Type: lesson
+- Domain: document ingestion understanding, classification substrate, and
+  future document-learning promotion work
+- Applies to: page analysis responses, document review surfaces, downstream
+  routing or linkage preparation, and future smart-classification packages
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_understanding.py`,
+  `apps/api/app/domains/documents/services/document_ingestion_serialization.py`,
+  `apps/api/app/schemas/document.py`,
+  `apps/web/src/shared/models.ts`, and
+  `apps/api/tests/test_document_ingestion_api.py`
+- Lesson: once document understanding depends on extracted text, content
+  fingerprints, header candidates, table candidates, and visual or OCR
+  signals, the platform should expose a typed server-owned understanding bundle
+  instead of making clients reverse-engineer those signals from
+  `classification_payload`, raw text excerpts, and other loose fields. ECTRM
+  now emits a deterministic page-level and document-level `understanding`
+  contract that summarizes text stats, line-shape hints, structure signals,
+  preview markers, and classification evidence while keeping the underlying
+  extracted fields and tables intact.
+- Deterministic opportunity: extend the same bundle with richer OCR provenance,
+  layout geometry, and promoted schema-aware evidence scoring as DCL-02 and
+  later packages mature, rather than inventing new response-only fragments per
+  feature.
+- Agent autonomy impact: agents can explain or compare document understanding
+  signals, but the durable interpretation surface stays inside typed backend
+  serialization instead of drifting into prompt prose or client-only logic.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api`
+  and
+  `./node_modules/.bin/vitest run tests/documentIngestionSelectors.test.ts tests/documentLibrary.test.ts tests/promptHomeDocumentUploadCard.test.ts`
+- Follow-up: surface the understanding bundle in operator review UX when DCL-04
+  starts, and decide which additional geometry or model-evidence fields belong
+  in the stable contract before DCL-02 adds ensemble scoring on top.

@@ -154,6 +154,7 @@ export type DocumentIngestionController = {
   updateDocumentDraft: (documentId: string, updater: DocumentDraftUpdater) => void
   updatePageDraft: (documentId: string, pageId: number, updater: PageDraftUpdater) => void
   handleSaveDocument: (document: DocumentIngestionRecord) => Promise<void>
+  handleSetDocumentKind: (document: DocumentIngestionRecord, documentKind: string) => Promise<void>
   handleSavePage: (document: DocumentIngestionRecord, page: DocumentIngestionPageRecord) => Promise<void>
   handleReprocessDocument: (document: DocumentIngestionRecord) => Promise<void>
   handleExecuteActionPlan: (document: DocumentIngestionRecord) => Promise<void>
@@ -847,6 +848,28 @@ export function useDocumentIngestionController({
     }
   }
 
+  async function handleSetDocumentKind(document: DocumentIngestionRecord, documentKind: string) {
+    if (!authSession) {
+      return
+    }
+    const target = `document-kind:${document.document_id}`
+    clearSaveError(target)
+    setSavingTarget(target)
+    try {
+      const updated = await updateDocumentIngestion(
+        appConfig.apiBase,
+        authSession,
+        document.document_id,
+        { document_kind: documentKind },
+      )
+      replaceDocument(updated)
+    } catch (error) {
+      setSaveError(target, error instanceof Error ? error.message : 'Unable to save the document type.')
+    } finally {
+      setSavingTarget(null)
+    }
+  }
+
   async function handleSavePage(document: DocumentIngestionRecord, page: DocumentIngestionPageRecord) {
     if (!authSession) {
       return
@@ -1247,6 +1270,7 @@ export function useDocumentIngestionController({
     updateDocumentDraft,
     updatePageDraft,
     handleSaveDocument,
+    handleSetDocumentKind,
     handleSavePage,
     handleReprocessDocument,
     handleExecuteActionPlan,

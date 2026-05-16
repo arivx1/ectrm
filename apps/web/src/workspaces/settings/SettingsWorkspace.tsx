@@ -8,6 +8,7 @@ import {
   type AppearanceSettings,
   type ColorModePreference,
   type ResolvedColorMode,
+  type WorkspaceModePreference,
 } from '../../shared/appearance'
 import {
   appConfig,
@@ -99,6 +100,23 @@ const COLOR_MODE_OPTIONS: Array<{
   },
 ]
 
+const WORKSPACE_MODE_OPTIONS: Array<{
+  value: WorkspaceModePreference
+  label: string
+  detail: string
+}> = [
+  {
+    value: 'default',
+    label: 'Guided workspace',
+    detail: 'Keep Prompt Home and the broader onboarding shell as the default signed-in path.',
+  },
+  {
+    value: 'terminal',
+    label: 'Market terminal',
+    detail: 'Prefer the live desk, a denser shell, and less signed-in onboarding chrome.',
+  },
+]
+
 function SettingsValueRow({
   label,
   value,
@@ -121,6 +139,10 @@ function SettingsValueRow({
 
 function formatModeLabel(value: ColorModePreference | ResolvedColorMode): string {
   return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+function formatWorkspaceModeLabel(value: WorkspaceModePreference): string {
+  return value === 'terminal' ? 'Market terminal' : 'Guided workspace'
 }
 
 function formatVisibilityModeLabel(value: TradeCaptureVisibilityMode): string {
@@ -393,7 +415,10 @@ export function SettingsWorkspace({
     setAppearanceForm(savedSettings)
     setAppearanceFlash({
       tone: 'success',
-      message: 'Appearance saved locally for this browser. A profile-backed API can replace this storage later without changing the UI.',
+      message:
+        savedSettings.workspaceMode === 'terminal'
+          ? 'Appearance saved locally for this browser. Market terminal mode now uses the denser shell and makes the live desk the default signed-in root landing.'
+          : 'Appearance saved locally for this browser. Guided workspace mode keeps Prompt Home as the default signed-in root landing.',
     })
   }
 
@@ -402,7 +427,7 @@ export function SettingsWorkspace({
     setAppearanceForm(defaultSettings)
     setAppearanceFlash({
       tone: 'success',
-      message: 'Appearance reset to the default console palette for this browser.',
+      message: 'Appearance reset to the default guided workspace mode and console palette for this browser.',
     })
   }
 
@@ -505,7 +530,7 @@ export function SettingsWorkspace({
   const activeSessionSummary = authSession
     ? `${authSession.user.role} session for ${authSession.user.user_id}`
     : 'Signed out in this browser'
-  const appearanceSummary = `${formatModeLabel(appearanceForm.colorMode)} preference · ${formatModeLabel(appearancePreviewMode)} preview`
+  const appearanceSummary = `${formatWorkspaceModeLabel(appearanceForm.workspaceMode)} · ${formatModeLabel(appearanceForm.colorMode)} preference · ${formatModeLabel(appearancePreviewMode)} preview`
   const timeDisplaySummary = `${timeZonePreferenceLabel} saved · ${resolvedTimeZoneLabel} in effect`
   const tradeDefaultsSummary =
     `${enabledTradeCaptureRuleCount} of ${tradeCaptureForm.rules.length} rules enabled · ${tradeCaptureForm.defaults.instrumentType} baseline`
@@ -599,6 +624,15 @@ export function SettingsWorkspace({
         >
           <div className="settings-summary-grid">
             <article className="settings-summary-card">
+              <span>Workspace mode</span>
+              <strong>{formatWorkspaceModeLabel(appearanceSettings.workspaceMode)}</strong>
+              <p>
+                {appearanceSettings.workspaceMode === 'terminal'
+                  ? 'Signed-in root opens the live desk and hides the signed-in Start Here overlay.'
+                  : 'Signed-in root stays prompt-first and keeps the broader onboarding shell available.'}
+              </p>
+            </article>
+            <article className="settings-summary-card">
               <span>Mode preference</span>
               <strong>{formatModeLabel(appearanceSettings.colorMode)}</strong>
               <p>{appearanceSettings.colorMode === 'system' ? 'Following the operating system preference.' : 'Pinned locally in this browser.'}</p>
@@ -613,6 +647,40 @@ export function SettingsWorkspace({
           </div>
 
           <form className="stack-form settings-form" onSubmit={handleSaveAppearance}>
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Workspace shell</span>
+                <h3>Landing and density mode</h3>
+              </div>
+              <p>Choose whether this browser should open into the guided prompt flow or a denser monitor-first shell.</p>
+            </div>
+
+            <div className="appearance-mode-options" aria-label="Workspace mode preference">
+              {WORKSPACE_MODE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`appearance-mode-option ${appearanceForm.workspaceMode === option.value ? 'is-active' : ''}`}
+                  aria-pressed={appearanceForm.workspaceMode === option.value}
+                  onClick={() => {
+                    setAppearanceFlash(null)
+                    setAppearanceForm((current) => ({ ...current, workspaceMode: option.value }))
+                  }}
+                >
+                  <span>{option.label}</span>
+                  <strong>{option.detail}</strong>
+                </button>
+              ))}
+            </div>
+
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Color treatment</span>
+                <h3>Theme and palette</h3>
+              </div>
+              <p>Keep the broader console palette in sync with the desk environment while preserving the shell mode above.</p>
+            </div>
+
             <div className="appearance-mode-options" aria-label="Color mode preference">
               {COLOR_MODE_OPTIONS.map((option) => (
                 <button
@@ -730,13 +798,13 @@ export function SettingsWorkspace({
                 Apply Appearance
               </button>
               <button type="button" className="button button-ghost" onClick={handleResetAppearance}>
-                Reset Palette
+                Reset Appearance
               </button>
             </div>
 
             <p className={`form-note ${appearanceFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
               {appearanceFlash?.message ??
-                'Appearance settings are stored in this browser today. That gives us a solid first slice while we prepare user-profile persistence on the API.'}
+                'Appearance settings are stored in this browser today. That includes the shell mode, landing preference, and palette while we prepare user-profile persistence on the API.'}
             </p>
           </form>
         </SettingsDisclosureCard>
