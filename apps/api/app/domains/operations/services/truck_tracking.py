@@ -40,10 +40,6 @@ STOP_PROGRESS_STATUSES = {
     TruckStopStatus.ARRIVED.value,
     TruckStopStatus.WORKING.value,
 }
-MOVEMENT_TERMINAL_STATUSES = {
-    TruckMovementStatus.COMPLETED.value,
-    TruckMovementStatus.CANCELLED.value,
-}
 
 
 def _normalize_optional_datetime(value: object | None, *, label: str) -> datetime | None:
@@ -147,10 +143,6 @@ def _load_active_truck_delivery(
         db.get(DeliveryTruckDetail, delivery_id),
         db.get(DeliveryLogisticsDetail, delivery_id),
     )
-
-
-def _movement_sort_key(movement: DeliveryTruckMovement) -> tuple[int, str]:
-    return (movement.sequence_no, movement.movement_id)
 
 
 def _stop_sort_key(stop: DeliveryTruckStop) -> tuple[int, str]:
@@ -535,7 +527,7 @@ def create_delivery_truck_movement(
     now: datetime | None = None,
 ) -> DeliveryTruckMovementOut:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
-    delivery, trade, truck_detail, logistics_detail = _load_active_truck_delivery(db, delivery_id=delivery_id)
+    delivery, trade, truck_detail, _logistics_detail = _load_active_truck_delivery(db, delivery_id=delivery_id)
     sequence_no = _normalize_required_positive_int(getattr(payload, "sequence_no", None), label="Movement sequence")
     existing_sequence = db.execute(
         select(DeliveryTruckMovement)
@@ -738,6 +730,8 @@ def create_delivery_truck_movement(
     if movement_status == TruckMovementStatus.ON_HOLD:
         movement.status = TruckMovementStatus.ON_HOLD.value
         movement.status_reason = _normalize_required_text(getattr(payload, "hold_reason_code", None), label="Hold reason")
+    elif movement_status == TruckMovementStatus.ASSIGNED:
+        movement.status = TruckMovementStatus.ASSIGNED.value
 
     db.flush()
     movement_out = _movement_to_out(movement, stops=sorted(stops, key=_stop_sort_key))
@@ -1216,4 +1210,3 @@ def cancel_delivery_truck_stop(
         request_payload={"cancel_reason": normalized_reason},
     )
     return movement_out
-

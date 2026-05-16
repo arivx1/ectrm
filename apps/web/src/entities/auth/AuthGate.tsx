@@ -7,6 +7,7 @@ import {
   createSingleUserAuthSession,
   type SessionResponse,
 } from './api'
+import { formatAuthErrorMessage } from './errorMessage'
 import { loadGoogleIdentityScript } from './googleIdentity'
 import { loadPublicRuntimeSettings, type PublicRuntimeSettings } from '../app/api'
 import {
@@ -83,7 +84,7 @@ export function AuthGate({
       } catch (error) {
         if (!cancelled) {
           setServerSettings(null)
-          setServerSettingsError(error instanceof Error ? error.message : 'Could not load server settings.')
+          setServerSettingsError(formatAuthErrorMessage(error, 'Could not load server settings.'))
         }
       }
     }
@@ -139,7 +140,7 @@ export function AuthGate({
     } catch (error) {
       setAuthFlash({
         tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not sign in.',
+        message: formatAuthErrorMessage(error, 'Could not sign in.'),
       })
     } finally {
       setAuthAction(null)
@@ -156,7 +157,7 @@ export function AuthGate({
     } catch (error) {
       setAuthFlash({
         tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not sign in with single-user access.',
+        message: formatAuthErrorMessage(error, 'Could not sign in with single-user access.'),
       })
     } finally {
       setAuthAction(null)
@@ -173,7 +174,7 @@ export function AuthGate({
     } catch (error) {
       setAuthFlash({
         tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not sign in with Google.',
+        message: formatAuthErrorMessage(error, 'Could not sign in with Google.'),
       })
     } finally {
       setAuthAction(null)
@@ -196,7 +197,7 @@ export function AuthGate({
     } catch (error) {
       setAuthFlash({
         tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not bootstrap the initial admin account.',
+        message: formatAuthErrorMessage(error, 'Could not bootstrap the initial admin account.'),
       })
     } finally {
       setAuthAction(null)
@@ -266,7 +267,7 @@ export function AuthGate({
         setAuthFlash((current) =>
           current ?? {
             tone: 'error',
-            message: error instanceof Error ? error.message : 'Could not initialize Google sign-in.',
+            message: formatAuthErrorMessage(error, 'Could not initialize Google sign-in.'),
           },
         )
       }

@@ -3599,3 +3599,36 @@ independently"`.
 - Follow-up: surface the understanding bundle in operator review UX when DCL-04
   starts, and decide which additional geometry or model-evidence fields belong
   in the stable contract before DCL-02 adds ensemble scoring on top.
+
+### 2026-05-16 - Library Type Overrides Should Use A Typed Document-Level Patch
+
+- Type: lesson
+- Domain: document library UX, manual classification correction, and document
+  review controls
+- Applies to: uploaded document list surfaces, quick type overrides, and
+  future document-level review affordances
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/ingestion.py`,
+  `apps/api/app/schemas/document.py`,
+  `apps/web/src/workspaces/library/LibraryWorkspace.tsx`, and
+  `apps/api/tests/test_document_ingestion_api.py`
+- Lesson: when operators need to fix a document's displayed type directly from
+  the library, the control should save through a typed document-level patch
+  instead of inventing a client-only override or forcing the library UI to
+  impersonate a page editor. ECTRM now lets `PATCH /documents/{id}` accept a
+  manual `document_kind`, applies that kind across the document's pages,
+  records the same correction metadata used by page review, and exposes the
+  action through the library `Type` column.
+- Deterministic opportunity: if future UX needs document-level subtype or
+  mixed-page classification handling, keep that behavior behind explicit typed
+  document review contracts instead of adding ad hoc client merge logic.
+- Agent autonomy impact: agents can point users to the quick library override,
+  but the actual classification correction still lands through governed typed
+  ingestion services and auditable correction metadata.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api`
+  and
+  `./node_modules/.bin/vitest run tests/libraryWorkspace.test.ts tests/documentLibrary.test.ts tests/documentIngestionSelectors.test.ts tests/promptHomeDocumentUploadCard.test.ts`
+- Follow-up: decide whether grid-card and multi-page subtype editing should get
+  the same quick-control treatment or remain in the deeper review editor.
