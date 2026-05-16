@@ -11,6 +11,16 @@ from apps.api.app.domains.operations.services.shipments import update_delivery_o
 from apps.api.app.domains.operations.services.shipments import update_delivery_pipeline_detail
 from apps.api.app.domains.operations.services.shipments import update_delivery_power_detail
 from apps.api.app.domains.operations.services.shipments import update_delivery_rail_detail
+from apps.api.app.domains.operations.services.shipments import update_delivery_truck_detail
+from apps.api.app.domains.operations.services.truck_tracking import cancel_delivery_truck_movement
+from apps.api.app.domains.operations.services.truck_tracking import cancel_delivery_truck_stop
+from apps.api.app.domains.operations.services.truck_tracking import create_delivery_truck_movement
+from apps.api.app.domains.operations.services.truck_tracking import create_delivery_truck_stop
+from apps.api.app.domains.operations.services.truck_tracking import get_delivery_truck_movement
+from apps.api.app.domains.operations.services.truck_tracking import list_delivery_truck_movements
+from apps.api.app.domains.operations.services.truck_tracking import skip_delivery_truck_stop
+from apps.api.app.domains.operations.services.truck_tracking import update_delivery_truck_movement
+from apps.api.app.domains.operations.services.truck_tracking import update_delivery_truck_stop
 from apps.api.app.domains.operations.services.workspace_bootstrap_summary import (
     build_workspace_bootstrap_summary,
 )
@@ -27,5 +37,15 @@ __all__ = [
     "update_delivery_pipeline_detail",
     "update_delivery_power_detail",
     "update_delivery_rail_detail",
+    "update_delivery_truck_detail",
+    "list_delivery_truck_movements",
+    "get_delivery_truck_movement",
+    "create_delivery_truck_movement",
+    "update_delivery_truck_movement",
+    "cancel_delivery_truck_movement",
+    "create_delivery_truck_stop",
+    "update_delivery_truck_stop",
+    "skip_delivery_truck_stop",
+    "cancel_delivery_truck_stop",
     "build_workspace_bootstrap_summary",
 ]
