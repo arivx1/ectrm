@@ -35,6 +35,7 @@ import {
 } from './workspaceRefresh'
 import {
   buildRequestedGroups,
+  deriveRetryableWorkspaceGroups,
   EMPTY_GROUP_ERRORS,
   EMPTY_GROUP_FLAGS,
   VIEW_DATA_GROUPS,
@@ -925,6 +926,17 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const refreshAuthSessionRef = useRef(refreshAuthSession)
   refreshAuthSessionRef.current = refreshAuthSession
 
+  async function handleSessionSync(nextSession: StoredAuthSession | null) {
+    if (nextSession) {
+      saveStoredAuthSession(nextSession)
+    } else {
+      clearStoredAuthSession()
+    }
+
+    setAuthSession(nextSession)
+    setAuthInterruptionReason(null)
+  }
+
   async function handleSessionChange(nextSession: StoredAuthSession | null) {
     if (nextSession) {
       saveStoredAuthSession(nextSession)
@@ -976,6 +988,46 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
       force: false,
     })
   }, [appLoading, authSession, currentView, error])
+
+  const autoRetriedWorkspaceErrorRef = useRef('')
+
+  useEffect(() => {
+    if (appLoading || error || !authSession) {
+      return
+    }
+
+    const retryableGroups = deriveRetryableWorkspaceGroups({
+      currentView,
+      groupErrors,
+      groupLoaded,
+    })
+
+    if (retryableGroups.length === 0) {
+      autoRetriedWorkspaceErrorRef.current = ''
+      return
+    }
+
+    const retrySignature = `${currentView}:${retryableGroups
+      .map((group) => `${group}:${groupErrors[group]}`)
+      .join('|')}`
+
+    if (autoRetriedWorkspaceErrorRef.current === retrySignature) {
+      return
+    }
+
+    autoRetriedWorkspaceErrorRef.current = retrySignature
+
+    const timeoutId = window.setTimeout(() => {
+      void loadDataRef.current({
+        groups: retryableGroups,
+        force: true,
+      })
+    }, 300)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [appLoading, authSession, currentView, error, groupErrors, groupLoaded])
 
   useEffect(() => {
     if (!authSession) {
@@ -1046,6 +1098,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     groupLoaded,
     groupLoading,
     handleSessionChange,
+    handleSessionSync,
     handleLoadMoreWorkspaceCollection,
     health,
     loadData,

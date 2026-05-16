@@ -12,6 +12,8 @@ and runtime settings.
 - `Trades`: capture, inspect, amend, or cancel an individual trade
 - `Events`: review the event timeline
 - `Positions`: inspect net commodity exposure
+- `Library`: browse uploaded PDFs with search, preview, and review status in
+  one place
 - `Reference Data`: maintain controlled master data
 - `Admin`: user management, external-data visibility, and governance-oriented
   system views
@@ -152,7 +154,8 @@ workspaces now expect an authenticated session before they can load their data.
 
 The Settings workspace includes a browser-side Google Calendar panel for
 pulling the next few events into the app without routing calendar traffic
-through the ECTRM API.
+through the ECTRM API. That same panel now owns the Home timeline overlay
+preferences for the day, week, and month cards.
 
 To enable that UI locally:
 
@@ -176,6 +179,8 @@ Behavior notes:
 
 - `src/App.tsx`: top-level state, data loading, and workspace routing
 - `src/workspaces`: page-level workspace UIs
+- `src/workspaces/library`: dedicated uploaded-document browser and review
+  surface
 - `src/features`: workflow-specific logic, especially trade and reference-data
   flows
 - `src/entities`: API-facing data loaders and mutations

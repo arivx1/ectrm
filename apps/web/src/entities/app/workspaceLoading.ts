@@ -148,6 +148,49 @@ export function shouldPresentSettingsSignInState({
   )
 }
 
+export function shouldPresentSignedOutAuthGate(args: {
+  currentView: ViewKey
+  hasAuthSession: boolean
+}): boolean {
+  if (args.hasAuthSession) {
+    return false
+  }
+
+  return (
+    args.currentView !== 'guide' &&
+    args.currentView !== 'prompt' &&
+    args.currentView !== 'messages'
+  )
+}
+
+type StartHereOverlayArgs = {
+  currentView: ViewKey
+  hasAuthSession: boolean
+  hasStartHereOnboarding: boolean
+  hasStartHereReturnIntent: boolean
+  authInterruptionReason: string | null
+  hasAuthInterruptionResume: boolean
+}
+
+export function shouldPresentStartHereOverlay({
+  currentView,
+  hasAuthSession,
+  hasStartHereOnboarding,
+  hasStartHereReturnIntent,
+  authInterruptionReason,
+  hasAuthInterruptionResume,
+}: StartHereOverlayArgs): boolean {
+  return (
+    hasStartHereOnboarding &&
+    !(hasAuthSession && hasStartHereReturnIntent) &&
+    currentView !== 'prompt' &&
+    currentView !== 'settings' &&
+    currentView !== 'messages' &&
+    authInterruptionReason !== 'session_expired' &&
+    !hasAuthInterruptionResume
+  )
+}
+
 type BuildRequestedGroupsArgs = {
   currentView: ViewKey
   force?: boolean
@@ -175,6 +218,22 @@ export function buildRequestedGroups({
         ]),
     ]),
   ).filter((group) => force || (!groupLoaded[group] && !groupLoading[group]))
+}
+
+type DeriveRetryableWorkspaceGroupsArgs = {
+  currentView: ViewKey
+  groupErrors: AppDataGroupErrors
+  groupLoaded: AppDataGroupFlags
+}
+
+export function deriveRetryableWorkspaceGroups({
+  currentView,
+  groupErrors,
+  groupLoaded,
+}: DeriveRetryableWorkspaceGroupsArgs): AppDataGroup[] {
+  return VIEW_DATA_GROUPS[currentView].filter(
+    (group) => !groupLoaded[group] && groupErrors[group].trim().length > 0,
+  )
 }
 
 type DeriveWorkspaceStatusArgs = {

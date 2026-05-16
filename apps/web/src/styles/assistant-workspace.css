@@ -244,47 +244,145 @@
 
 .assistant-chat-log {
   display: grid;
-  gap: 0.85rem;
+  gap: 0.7rem;
   min-height: 20rem;
   max-height: 34rem;
   overflow: auto;
-  padding-right: 0.25rem;
+  padding: 0.65rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(126, 154, 184, 0.14);
+  background:
+    linear-gradient(180deg, rgba(78, 167, 255, 0.06), transparent),
+    rgba(6, 12, 19, 0.34);
+}
+
+.assistant-message-stack {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.assistant-message-divider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.2rem;
+  text-align: center;
+}
+
+.assistant-message-divider::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(126, 154, 184, 0.22), transparent);
+}
+
+.assistant-message-divider span {
+  position: relative;
+  z-index: 1;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  background: rgba(9, 18, 28, 0.92);
+  color: var(--terminal-dim);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .assistant-message {
   display: grid;
-  gap: 0.55rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.8rem;
   align-content: start;
   min-height: min-content;
   overflow: visible;
-  padding: 1rem 1.05rem;
-  border-radius: 1rem;
-  border: 1px solid rgba(126, 154, 184, 0.16);
-  background: linear-gradient(180deg, rgba(12, 21, 32, 0.98), rgba(8, 15, 24, 0.98));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  padding: 0.15rem 0.1rem;
 }
 
 .assistant-message-user {
-  background: linear-gradient(180deg, rgba(12, 39, 57, 0.98), rgba(8, 16, 25, 0.98));
 }
 
 .assistant-message-assistant {
-  background: linear-gradient(180deg, rgba(16, 29, 42, 0.98), rgba(8, 15, 24, 0.98));
 }
 
-.assistant-message-head,
+.assistant-message-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.45rem;
+  height: 2.45rem;
+  border-radius: 0.9rem;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #f7fbff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 10px 18px rgba(0, 0, 0, 0.16);
+}
+
+.assistant-message-user .assistant-message-avatar {
+  background: linear-gradient(180deg, rgba(78, 167, 255, 0.95), rgba(45, 113, 187, 0.82));
+}
+
+.assistant-message-assistant .assistant-message-avatar {
+  background: linear-gradient(180deg, rgba(61, 214, 160, 0.92), rgba(18, 128, 108, 0.82));
+}
+
+.assistant-message-body {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.assistant-message-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.assistant-message-head-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.7rem;
+  align-items: baseline;
+}
+
 .assistant-message-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 0.65rem;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
 }
 
 .assistant-message-head span,
 .assistant-message-meta span {
   color: var(--terminal-dim);
   font-size: 0.82rem;
+}
+
+.assistant-message-bubble {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(126, 154, 184, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.assistant-message-user .assistant-message-bubble {
+  background: linear-gradient(180deg, rgba(12, 39, 57, 0.98), rgba(8, 16, 25, 0.98));
+  border-color: rgba(78, 167, 255, 0.18);
+}
+
+.assistant-message-assistant .assistant-message-bubble {
+  background: linear-gradient(180deg, rgba(16, 29, 42, 0.98), rgba(8, 15, 24, 0.98));
 }
 
 .assistant-message p {
@@ -819,4 +917,25 @@
 
 .form-note-error {
   color: #9a4338;
+}
+
+@media (max-width: 720px) {
+  .assistant-chat-log {
+    padding: 0.5rem;
+  }
+
+  .assistant-message {
+    gap: 0.65rem;
+  }
+
+  .assistant-message-avatar {
+    width: 2.1rem;
+    height: 2.1rem;
+    border-radius: 0.75rem;
+    font-size: 0.72rem;
+  }
+
+  .assistant-message-bubble {
+    padding: 0.85rem 0.9rem;
+  }
 }

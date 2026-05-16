@@ -5,8 +5,13 @@ import type {
   DocumentSchemaRegistryRecord,
 } from '../../shared/models'
 import {
+  formatDocumentKindLabel,
   pageProcessorTrace,
+  pageClassificationCorrected,
+  pageLearningApplied,
+  pageLearningExampleCount,
   PAGE_REVIEW_STATUS_OPTIONS,
+  pageSystemClassification,
   processorLabel,
   processorTraceTone,
   pageRoutingAssessment,
@@ -42,6 +47,10 @@ export function DocumentIngestionPageEditor({
   const pagePreviewIsLoading = controller.pagePreviewLoading[page.page_id] === true
   const routingAssessment = pageRoutingAssessment(page)
   const processorTrace = pageProcessorTrace(page)
+  const systemClassification = pageSystemClassification(page)
+  const classificationCorrected = pageClassificationCorrected(page)
+  const learningApplied = pageLearningApplied(page)
+  const learningExampleCount = pageLearningExampleCount(page)
   const nonProcessorWarnings = page.processing_warnings.filter((warning) => !processorTrace?.warnings.includes(warning))
 
   return (
@@ -104,6 +113,45 @@ export function DocumentIngestionPageEditor({
             ))}
           </select>
         </label>
+      </div>
+
+      <div className="document-schema-note">
+        <div className="document-ingestion-chip-row">
+          <span className={`status-pill status-pill-${learningApplied ? 'active' : 'planned'}`}>
+            {learningApplied ? 'LEARNED' : 'SYSTEM'}
+          </span>
+          <span className="entity-chip entity-chip-soft">
+            {formatDocumentKindLabel(systemClassification.documentKind)}
+            {systemClassification.documentSubtype ? ` • ${systemClassification.documentSubtype}` : ''}
+          </span>
+          {systemClassification.confidence !== null ? (
+            <span className="entity-chip entity-chip-soft">
+              {Math.round(systemClassification.confidence * 100)}% confidence
+            </span>
+          ) : null}
+        </div>
+        {classificationCorrected ? (
+          <p>
+            Corrected from {formatDocumentKindLabel(systemClassification.documentKind)}
+            {systemClassification.documentSubtype ? ` • ${systemClassification.documentSubtype}` : ''}
+            {' to '}
+            {formatDocumentKindLabel(page.document_kind)}
+            {page.document_subtype ? ` • ${page.document_subtype}` : ''}. Future uploads with similar extracted
+            content can reuse this saved classification.
+          </p>
+        ) : (
+          <p>
+            Change the kind or subtype if the upload was classified incorrectly. Saved corrections become a deterministic
+            learning signal for future uploads with similar document content.
+          </p>
+        )}
+        {learningApplied ? (
+          <p>
+            This page reused {learningExampleCount} prior correction{learningExampleCount === 1 ? '' : 's'} before the
+            review step.
+          </p>
+        ) : null}
+        {systemClassification.matchedBy ? <p>System evidence: {systemClassification.matchedBy.replaceAll('_', ' ')}.</p> : null}
       </div>
 
       <div className="document-page-evidence">

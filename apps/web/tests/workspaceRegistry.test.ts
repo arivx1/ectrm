@@ -20,6 +20,8 @@ describe('workspace registry', () => {
 
   it('preserves representative workspace loading contracts', () => {
     expect(VIEW_DATA_GROUPS.prompt).toEqual([])
+    expect(VIEW_DATA_GROUPS.messages).toEqual([])
+    expect(VIEW_DATA_GROUPS.library).toEqual([])
     expect(VIEW_DATA_GROUPS.dashboard).toEqual(['trades', 'events', 'positions', 'reference'])
     expect(VIEW_DATA_GROUPS.map).toEqual(['reference', 'weather'])
     expect(VIEW_DATA_GROUPS.operations).toEqual(['trades', 'deliveries', 'operations', 'admin'])
@@ -29,9 +31,13 @@ describe('workspace registry', () => {
 
   it('preserves labels and hero copy through the registry', () => {
     expect(workspaceLabel('prompt')).toBe('Home')
+    expect(workspaceLabel('messages')).toBe('Messages')
+    expect(workspaceLabel('library')).toBe('Library')
     expect(workspaceLabel('map')).toBe('Map')
     expect(workspaceLabel('assistant')).toBe('Assistant Console')
     expect(HERO_TITLE_BY_VIEW.prompt).toBe('Start from the prompt')
+    expect(HERO_TITLE_BY_VIEW.messages).toBe('Unified messaging and desk follow-up')
+    expect(HERO_TITLE_BY_VIEW.library).toBe('Uploaded document library and review surface')
     expect(HERO_TITLE_BY_VIEW.dashboard).toBe('Live desk overview and market pulse')
     expect(HERO_TITLE_BY_VIEW.map).toBe('Physical footprint and governed overlays')
     expect(HERO_BODY_BY_VIEW.reference).toContain('books')

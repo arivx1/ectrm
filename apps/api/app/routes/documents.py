@@ -257,6 +257,7 @@ async def post_document_upload(
     file: UploadFile = File(...),
     display_name: str | None = Form(default=None),
     processor_provider: DocumentProcessorSelection | None = Form(default=None),
+    processor_model: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ) -> DocumentIngestionOut:
     actor_id = require_authenticated_actor(request)
@@ -271,6 +272,7 @@ async def post_document_upload(
             payload=payload,
             display_name=display_name,
             processor_provider=processor_provider,
+            processor_model=processor_model,
         )
 
     document = execute_http_action(
@@ -304,7 +306,9 @@ def post_document_reprocess(
             document_id=document_id,
             actor_id=actor_id,
             processor_provider=changes.get("processor_provider"),
+            processor_model=changes.get("processor_model"),
             processor_provider_specified="processor_provider" in changes,
+            processor_model_specified="processor_model" in changes,
         )
 
     document = execute_http_action(

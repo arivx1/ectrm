@@ -4,9 +4,12 @@ import { test } from 'vitest'
 import {
   buildRequestedGroups,
   deriveWorkspaceStatus,
+  deriveRetryableWorkspaceGroups,
   EMPTY_GROUP_ERRORS,
   EMPTY_GROUP_FLAGS,
   isAuthenticationRequiredMessage,
+  shouldPresentSignedOutAuthGate,
+  shouldPresentStartHereOverlay,
   summarizeWorkspaceIssueMessage,
   shouldPresentSettingsSignInState,
 } from '../src/entities/app/workspaceLoading.ts'
@@ -66,6 +69,25 @@ test('buildRequestedGroups includes previously loaded groups during a forced ref
   })
 
   assert.deepEqual(requestedGroups, ['core', 'trades', 'events', 'positions', 'reference', 'reports'])
+})
+
+test('deriveRetryableWorkspaceGroups only retries current-view groups that failed before loading', () => {
+  const retryableGroups = deriveRetryableWorkspaceGroups({
+    currentView: 'trades',
+    groupErrors: {
+      ...EMPTY_GROUP_ERRORS,
+      reference: 'Reference bootstrap failed.',
+      operations: 'Workflow queue failed.',
+      admin: 'Admin warmup failed.',
+    },
+    groupLoaded: {
+      ...EMPTY_GROUP_FLAGS,
+      core: true,
+      operations: true,
+    },
+  })
+
+  assert.deepEqual(retryableGroups, ['reference'])
 })
 
 test('deriveWorkspaceStatus reports blocking workspace errors before rendering the workspace', () => {
@@ -241,6 +263,106 @@ test('shouldPresentSettingsSignInState treats auth redirects into Settings as a 
       error: 'Could not reach API at http://127.0.0.1:8000.',
       hasAuthSession: false,
       showingNavigationSectionLanding: false,
+    }),
+    false,
+  )
+})
+
+test('shouldPresentSignedOutAuthGate keeps the public prompt surfaces reachable while protecting signed-out workspaces', () => {
+  assert.equal(
+    shouldPresentSignedOutAuthGate({
+      currentView: 'guide',
+      hasAuthSession: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldPresentSignedOutAuthGate({
+      currentView: 'prompt',
+      hasAuthSession: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldPresentSignedOutAuthGate({
+      currentView: 'messages',
+      hasAuthSession: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldPresentSignedOutAuthGate({
+      currentView: 'assistant',
+      hasAuthSession: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldPresentSignedOutAuthGate({
+      currentView: 'operations',
+      hasAuthSession: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldPresentSignedOutAuthGate({
+      currentView: 'messages',
+      hasAuthSession: true,
+    }),
+    false,
+  )
+})
+
+test('shouldPresentStartHereOverlay keeps prompt-style public workspaces clear of the signed-out onboarding overlay', () => {
+  assert.equal(
+    shouldPresentStartHereOverlay({
+      currentView: 'dashboard',
+      hasAuthSession: false,
+      hasStartHereOnboarding: true,
+      hasStartHereReturnIntent: false,
+      authInterruptionReason: null,
+      hasAuthInterruptionResume: false,
+    }),
+    true,
+  )
+
+  assert.equal(
+    shouldPresentStartHereOverlay({
+      currentView: 'messages',
+      hasAuthSession: false,
+      hasStartHereOnboarding: true,
+      hasStartHereReturnIntent: false,
+      authInterruptionReason: null,
+      hasAuthInterruptionResume: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldPresentStartHereOverlay({
+      currentView: 'prompt',
+      hasAuthSession: false,
+      hasStartHereOnboarding: true,
+      hasStartHereReturnIntent: false,
+      authInterruptionReason: null,
+      hasAuthInterruptionResume: false,
+    }),
+    false,
+  )
+
+  assert.equal(
+    shouldPresentStartHereOverlay({
+      currentView: 'messages',
+      hasAuthSession: true,
+      hasStartHereOnboarding: true,
+      hasStartHereReturnIntent: true,
+      authInterruptionReason: null,
+      hasAuthInterruptionResume: false,
     }),
     false,
   )

@@ -29,6 +29,16 @@ def build_document_summary(
             break
 
     reviewed_page_count = sum(1 for page in pages if page.review_status == "REVIEWED")
+    corrected_page_count = sum(
+        1
+        for page in pages
+        if dict(page.classification_payload or {}).get("classification_corrected") is True
+    )
+    learning_applied_page_count = sum(
+        1
+        for page in pages
+        if dict(page.classification_payload or {}).get("learning_applied") is True
+    )
     review_blockers = sum(
         1
         for page in pages
@@ -49,6 +59,8 @@ def build_document_summary(
         "review_status": review_status,
         "reviewed_page_count": reviewed_page_count,
         "unreviewed_page_count": max(len(pages) - reviewed_page_count, 0),
+        "corrected_page_count": corrected_page_count,
+        "learning_applied_page_count": learning_applied_page_count,
         "review_ready": bool(pages) and reviewed_page_count == len(pages) and review_blockers == 0,
         "review_blocker_count": review_blockers,
         "routing_strategy": routing_assessment.routing_strategy,

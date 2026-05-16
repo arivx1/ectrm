@@ -198,12 +198,10 @@ test("prompt home timeline cards render cached Google Calendar agenda items", ()
     markup,
     /Prepare weekend pipeline nomination changes for the remote team\./,
   );
-  assert.match(markup, /Pull Google Calendar into the day timeline card/);
-  assert.match(markup, /Pull Google Calendar into the week timeline card/);
-  assert.match(markup, /Pull Google Calendar into the month timeline card/);
   assert.match(markup, /2 events today/);
   assert.match(markup, /3 events this week/);
   assert.match(markup, /3 events this month/);
+  assert.doesNotMatch(markup, /Pull Google Calendar/);
   assert.doesNotMatch(
     markup,
     /Connect Google Calendar in Settings to overlay schedule events here\./,
@@ -272,7 +270,7 @@ test("prompt home timeline cards hide calendar sections when a card is unchecked
   assert.doesNotMatch(markup, /Calendar agenda/);
   assert.doesNotMatch(markup, /This week/);
   assert.match(markup, /This month/);
-  assert.match(markup, /Google Calendar off for this card/);
-  assert.match(markup, /Google Calendar off/);
+  assert.match(markup, /Google Calendar hidden in Settings for this card/);
+  assert.match(markup, /Google Calendar hidden in Settings/);
   assert.match(markup, /Weekend nominations/);
 });

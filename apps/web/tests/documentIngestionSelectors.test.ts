@@ -6,7 +6,11 @@ import { DocumentGmailInboxBrowser } from '../src/features/documents/DocumentGma
 import { DocumentIngestionDocumentCard } from '../src/features/documents/DocumentIngestionDocumentCard'
 import { DocumentIngestionUploadForm } from '../src/features/documents/DocumentIngestionUploadForm'
 import type { DocumentIngestionController } from '../src/features/documents/useDocumentIngestionController'
-import type { DocumentIngestionRecord, DocumentProcessorRuntimeSettingsRecord } from '../src/shared/models'
+import type {
+  DocumentIngestionPageRecord,
+  DocumentIngestionRecord,
+  DocumentProcessorRuntimeSettingsRecord,
+} from '../src/shared/models'
 
 const PROCESSOR_SETTINGS = {
   enabled: true,
@@ -30,8 +34,31 @@ const PROCESSOR_SETTINGS = {
       configured: true,
       is_default: true,
       default_model: 'gpt-5-mini',
+      available_models: ['gpt-5-mini', 'gpt-5', 'gpt-5-nano'],
       base_url: 'https://api.openai.com/v1',
       setup_env_var: 'OPENAI_API_KEY',
+    },
+    {
+      provider: 'anthropic',
+      label: 'Claude',
+      enabled: false,
+      configured: false,
+      is_default: false,
+      default_model: '',
+      available_models: ['claude-sonnet-4-0', 'claude-opus-4-0'],
+      base_url: 'https://api.anthropic.com',
+      setup_env_var: 'ANTHROPIC_API_KEY',
+    },
+    {
+      provider: 'google',
+      label: 'Gemini',
+      enabled: false,
+      configured: false,
+      is_default: false,
+      default_model: '',
+      available_models: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+      base_url: 'https://generativelanguage.googleapis.com',
+      setup_env_var: 'GOOGLE_API_KEY',
     },
   ],
 } satisfies DocumentProcessorRuntimeSettingsRecord
@@ -78,6 +105,43 @@ function buildDocument(overrides: Partial<DocumentIngestionRecord> = {}): Docume
   }
 }
 
+function buildPage(overrides: Partial<DocumentIngestionPageRecord> = {}): DocumentIngestionPageRecord {
+  return {
+    page_id: 1,
+    page_number: 1,
+    classification_status: 'ANALYZED',
+    extraction_status: 'ANALYZED',
+    document_kind: 'INVOICE',
+    document_subtype: null,
+    classification_confidence: 0.72,
+    classification_payload: {
+      system_document_kind: 'INVOICE',
+      system_document_subtype: null,
+      system_classification_confidence: 0.72,
+      system_classification_source: 'heuristic',
+      system_matched_by: 'filename:invoice',
+      classification_corrected: false,
+      learning_applied: false,
+      learning_example_count: 0,
+    },
+    header_fields: [],
+    table_blocks: [],
+    raw_text_excerpt: 'Invoice number INV-9001',
+    text_source: 'pdf_text',
+    preview_available: false,
+    processing_warnings: [],
+    processing_errors: [],
+    review_status: 'UNREVIEWED',
+    review_notes: null,
+    reviewed_at: null,
+    reviewed_by: null,
+    processed_at: '2026-04-14T12:00:00Z',
+    processor_trace: null,
+    routing_assessment: null,
+    ...overrides,
+  }
+}
+
 function buildController(
   document: DocumentIngestionRecord,
   overrides: Partial<DocumentIngestionController> = {},
@@ -106,6 +170,7 @@ function buildController(
     selectedGmailMessageError: '',
     displayName: '',
     selectedProcessorProvider: '',
+    selectedProcessorModel: '',
     selectedFile: null,
     isDragActive: false,
     expandedDocumentIds: {},
@@ -117,6 +182,7 @@ function buildController(
     fileInputRef: { current: null },
     setDisplayName: () => undefined,
     setSelectedProcessorProvider: () => undefined,
+    setSelectedProcessorModel: () => undefined,
     setDocumentReprocessProvider: () => undefined,
     toggleDocumentExpanded: () => undefined,
     updateSelectedFile: () => undefined,
@@ -164,6 +230,7 @@ describe('document ingestion selectors', () => {
         displayName: '',
         processorSettings: PROCESSOR_SETTINGS,
         selectedProcessorProvider: 'builtin',
+        selectedProcessorModel: '',
         selectedFile: null,
         schemaRegistry: null,
         uploading: false,
@@ -176,6 +243,7 @@ describe('document ingestion selectors', () => {
         fileInputRef: { current: null },
         onDisplayNameChange: () => undefined,
         onProcessorProviderChange: () => undefined,
+        onProcessorModelChange: () => undefined,
         onFileChange: () => undefined,
         onOpenFilePicker: () => undefined,
         onDropzoneKeyDown: () => undefined,
@@ -190,9 +258,97 @@ describe('document ingestion selectors', () => {
 
     expect(markup).toContain('Built-in Parser Only')
     expect(markup).toContain('OpenAI API (gpt-5-mini)')
+    expect(markup).toContain('Claude (claude-sonnet-4-0 placeholder)')
+    expect(markup).toContain('Gemini (gemini-2.5-pro placeholder)')
+    expect(markup).not.toContain('Processing Model')
     expect(markup).toContain('Built-in parsing only will run for this upload.')
+    expect(markup).toContain('Claude and Gemini placeholders are visible here and will unlock once those API providers are configured.')
     expect(markup).toContain('Import Gmail PDFs')
     expect(markup).toContain('Gmail inbox import is ready for ops-inbox@example.com')
+  })
+
+  it('renders processor model choices when an AI provider is selected', () => {
+    const markup = renderToStaticMarkup(
+      createElement(DocumentIngestionUploadForm, {
+        compact: false,
+        displayName: '',
+        processorSettings: PROCESSOR_SETTINGS,
+        selectedProcessorProvider: 'openai',
+        selectedProcessorModel: 'gpt-5',
+        selectedFile: null,
+        schemaRegistry: null,
+        uploading: false,
+        uploadError: '',
+        gmailInboxSettings: PROCESSOR_SETTINGS.gmail_inbox,
+        gmailImporting: false,
+        gmailImportError: '',
+        gmailImportSummary: '',
+        isDragActive: false,
+        fileInputRef: { current: null },
+        onDisplayNameChange: () => undefined,
+        onProcessorProviderChange: () => undefined,
+        onProcessorModelChange: () => undefined,
+        onFileChange: () => undefined,
+        onOpenFilePicker: () => undefined,
+        onDropzoneKeyDown: () => undefined,
+        onDropzoneDragEnter: () => undefined,
+        onDropzoneDragOver: () => undefined,
+        onDropzoneDragLeave: () => undefined,
+        onDropzoneDrop: () => undefined,
+        onSubmit: async () => undefined,
+        onImportGmailInbox: async () => undefined,
+      }),
+    )
+
+    expect(markup).toContain('Processing Model')
+    expect(markup).toContain('<option value="gpt-5" selected="">gpt-5</option>')
+    expect(markup).toContain('gpt-5-nano')
+    expect(markup).toContain('OpenAI API (gpt-5) will be used for document processing when the background job runs.')
+  })
+
+  it('renders classification correction and learning guidance in the review editor', () => {
+    const document = buildDocument({
+      analysis_summary: {
+        dominant_document_kind: 'TRADE_CONFIRMATION',
+        reviewed_page_count: 0,
+        review_ready: false,
+        corrected_page_count: 1,
+        learning_applied_page_count: 0,
+      },
+      pages: [
+        buildPage({
+          document_kind: 'TRADE_CONFIRMATION',
+          document_subtype: 'DESK_REVIEWED',
+          classification_payload: {
+            system_document_kind: 'INVOICE',
+            system_document_subtype: null,
+            system_classification_confidence: 0.72,
+            system_classification_source: 'heuristic',
+            system_matched_by: 'filename:invoice',
+            classification_corrected: true,
+            corrected_document_kind: 'TRADE_CONFIRMATION',
+            corrected_document_subtype: 'DESK_REVIEWED',
+            learning_applied: false,
+            learning_example_count: 0,
+          },
+        }),
+      ],
+    })
+    const controller = buildController(document, {
+      expandedDocumentIds: { [document.document_id]: true },
+    })
+
+    const markup = renderToStaticMarkup(
+      createElement(DocumentIngestionDocumentCard, {
+        controller,
+        document,
+        formatDate: () => 'Apr 14, 2026',
+      }),
+    )
+
+    expect(markup).toContain('1 corrected page')
+    expect(markup).toContain('Corrected from INVOICE to TRADE CONFIRMATION')
+    expect(markup).toContain('Future uploads with similar extracted content can reuse this saved classification.')
   })
 
   it('renders the Gmail inbox browser with message detail and attachment status', () => {

@@ -36,6 +36,12 @@ PROVIDER_SETUP_ENV_VARS: dict[DocumentProcessorProvider, str] = {
     "google": "GOOGLE_API_KEY",
 }
 
+DEFAULT_DOCUMENT_PROCESSOR_MODEL_OPTIONS: dict[DocumentProcessorProvider, tuple[str, ...]] = {
+    "openai": ("gpt-5", "gpt-5-mini", "gpt-5-nano"),
+    "anthropic": ("claude-sonnet-4-0", "claude-opus-4-0"),
+    "google": ("gemini-2.5-pro", "gemini-2.5-flash"),
+}
+
 VALID_DOCUMENT_PROCESSOR_PROVIDERS: tuple[DocumentProcessorProvider, ...] = (
     "openai",
     "anthropic",
@@ -60,6 +66,7 @@ class DocumentProcessorProviderConfig:
     label: str
     api_key: str
     model: str
+    model_options: tuple[str, ...]
     base_url: str
     configured: bool
     enabled: bool
@@ -146,6 +153,7 @@ def build_document_processor_runtime_settings() -> DocumentProcessorRuntimeSetti
                 configured=config.configured,
                 is_default=config.is_default,
                 default_model=config.model,
+                available_models=list(config.model_options),
                 base_url=config.base_url,
                 setup_env_var=config.setup_env_var,
             )
@@ -162,6 +170,7 @@ def list_document_processor_configs() -> list[DocumentProcessorProviderConfig]:
             default_provider=default_provider,
             api_key=settings.OPENAI_API_KEY,
             model=(settings.DOCUMENT_AI_OPENAI_MODEL or settings.OPENAI_MODEL),
+            model_options=settings.DOCUMENT_AI_OPENAI_MODEL_OPTIONS,
             base_url=settings.OPENAI_BASE_URL,
         ),
         _build_provider_config(
@@ -169,6 +178,7 @@ def list_document_processor_configs() -> list[DocumentProcessorProviderConfig]:
             default_provider=default_provider,
             api_key=settings.ANTHROPIC_API_KEY,
             model=(settings.DOCUMENT_AI_ANTHROPIC_MODEL or settings.ANTHROPIC_MODEL),
+            model_options=settings.DOCUMENT_AI_ANTHROPIC_MODEL_OPTIONS,
             base_url=settings.ANTHROPIC_BASE_URL,
         ),
         _build_provider_config(
@@ -176,6 +186,7 @@ def list_document_processor_configs() -> list[DocumentProcessorProviderConfig]:
             default_provider=default_provider,
             api_key=settings.GOOGLE_API_KEY,
             model=(settings.DOCUMENT_AI_GOOGLE_MODEL or settings.GOOGLE_MODEL),
+            model_options=settings.DOCUMENT_AI_GOOGLE_MODEL_OPTIONS,
             base_url=settings.GOOGLE_BASE_URL,
         ),
     ]
@@ -226,9 +237,12 @@ def normalize_document_processor_selection(value: str | None) -> DocumentProcess
 
 def resolve_requested_document_processor(
     requested_provider: str | None = None,
+    requested_model: str | None = None,
 ) -> tuple[DocumentProcessorSelection | None, str | None]:
     normalized_selection = normalize_document_processor_selection(requested_provider)
     if normalized_selection == "builtin":
+        if clean_optional_text(requested_model) is not None:
+            raise ValueError("Built-in parsing does not accept a processing model selection.")
         return "builtin", None
 
     normalized_provider = normalize_document_processor_provider(normalized_selection)
@@ -240,12 +254,27 @@ def resolve_requested_document_processor(
         )
         if not config.configured:
             raise ValueError(f"{config.label} is not configured for document processing on this API.")
-        return config.provider, config.model
+        return config.provider, resolve_requested_document_processor_model(config, requested_model)
 
     config = _resolve_runtime_document_processor_config(None)
     if config is None:
         return None, None
-    return config.provider, config.model
+    return config.provider, resolve_requested_document_processor_model(config, requested_model)
+
+
+def resolve_requested_document_processor_model(
+    config: DocumentProcessorProviderConfig,
+    requested_model: str | None,
+) -> str:
+    normalized_model = clean_optional_text(requested_model)
+    if normalized_model is None:
+        return config.model
+
+    if normalized_model not in config.model_options:
+        raise ValueError(
+            f"{config.label} model '{normalized_model}' is not available for document processing on this API."
+        )
+    return normalized_model
 
 
 def run_document_processor_analysis(
@@ -356,20 +385,52 @@ def _build_provider_config(
     default_provider: DocumentProcessorProvider,
     api_key: str,
     model: str,
+    model_options: str,
     base_url: str,
 ) -> DocumentProcessorProviderConfig:
-    configured = bool(api_key.strip() and model.strip())
+    normalized_model = model.strip()
+    configured = bool(api_key.strip() and normalized_model)
     return DocumentProcessorProviderConfig(
         provider=provider,
         label=PROVIDER_LABELS[provider],
         api_key=api_key.strip(),
-        model=model.strip(),
+        model=normalized_model,
+        model_options=build_document_processor_model_options(
+            provider=provider,
+            default_model=normalized_model,
+            configured_model_options=model_options,
+        ),
         base_url=base_url.strip(),
         configured=configured,
         enabled=bool(settings.DOCUMENT_AI_ENABLED and configured),
         is_default=provider == default_provider,
         setup_env_var=PROVIDER_SETUP_ENV_VARS[provider],
     )
+
+
+def build_document_processor_model_options(
+    *,
+    provider: DocumentProcessorProvider,
+    default_model: str,
+    configured_model_options: str,
+) -> tuple[str, ...]:
+    seen_models: set[str] = set()
+    normalized_models: list[str] = []
+
+    def include(value: str | None) -> None:
+        normalized_value = clean_optional_text(value)
+        if not normalized_value or normalized_value in seen_models:
+            return
+        seen_models.add(normalized_value)
+        normalized_models.append(normalized_value)
+
+    include(default_model)
+    for value in configured_model_options.split(","):
+        include(value)
+    for value in DEFAULT_DOCUMENT_PROCESSOR_MODEL_OPTIONS[provider]:
+        include(value)
+
+    return tuple(normalized_models)
 
 
 def _generate_openai_document_analysis(

@@ -109,7 +109,10 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     markup,
     /All currently loaded assets meet the map-ready rules\./,
   );
-  assert.match(markup, /<strong>Map<\/strong>/);
+  assert.match(
+    markup,
+    /<span class="eyebrow">Map<\/span><strong>Asset map<\/strong>/,
+  );
   assert.match(markup, /class="prompt-home-map-card-toggle"/);
   assert.match(
     markup,
@@ -199,7 +202,7 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.match(markup, /Communication center/);
   assert.match(
     markup,
-    /Incoming messages, integrated email, to-do items, and issues stay grouped here before you jump into the owning workspace\./,
+    /Incoming messages, integrated email, to-do items, and issues now read like one inbox\. This first pass uses typed sample rows for Email, To-Do, Issue, and App Message\./,
   );
   assert.match(
     markup,
@@ -209,15 +212,42 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     markup,
     /id="prompt-home-communication-panel" class="prompt-home-communication-card-body"/,
   );
-  assert.match(markup, /Incoming messages/);
-  assert.match(markup, /Integrated email/);
-  assert.match(markup, /To-do items/);
-  assert.match(markup, /Issues and attention/);
-  assert.match(markup, /Assistant inbox and governed follow-through/);
-  assert.match(markup, /Gmail intake and document follow-through/);
+  assert.match(markup, /aria-label="Communication inbox"/);
+  assert.match(markup, /Email/);
+  assert.match(markup, /To-Do/);
+  assert.match(markup, /Issue/);
+  assert.match(markup, /App Message/);
+  assert.match(markup, /#counterparty-email/);
+  assert.match(markup, /#ops-follow-through/);
+  assert.match(markup, /#desk-attention/);
+  assert.match(markup, /#ectrm-assistant/);
+  assert.match(markup, /Northshore sent a revised delivery window/);
+  assert.match(markup, /contracts@northshorelng\.example/);
+  assert.match(markup, /Unread/);
+  assert.match(markup, /7 open work items waiting for follow-through/);
+  assert.match(markup, /5 attention items surfaced for review/);
   assert.match(markup, /7 open work items/);
   assert.match(markup, /5 attention items/);
-  assert.match(markup, /Sign In to Review Communication/);
+  assert.match(markup, /aria-label="Selected communication thread"/);
+  assert.match(markup, /Counterparty email · Example inbox row/);
+  assert.match(
+    markup,
+    /Northshore updated the delivery window on the attached note and asked for confirmation before 3 PM\./,
+  );
+  assert.match(markup, /Reply lane/);
+  assert.match(
+    markup,
+    /This keeps inbox review and thread context in one place so the app reads more like Slack than a reporting table\./,
+  );
+  assert.match(
+    markup,
+    /After sign-in, the same inbox shape can be filled with live communication records\./,
+  );
+  assert.match(markup, /Open Messages Workspace/);
+  assert.doesNotMatch(markup, /Open Assistant Console/);
+  assert.doesNotMatch(markup, /Open Work Queue/);
+  assert.doesNotMatch(markup, /Open Operations/);
+  assert.doesNotMatch(markup, /Sign In to Review Communication/);
   assert.match(
     markup,
     /<div class="prompt-home-prompt-card-copy"><span class="eyebrow">Prompt<\/span><strong>Ask the desk assistant<\/strong><\/div>/,
@@ -324,6 +354,22 @@ test("prompt home renders read aloud controls for assistant messages", () => {
 
   assert.equal((markup.match(/Read Aloud/g) ?? []).length, 1);
   assert.match(markup, /Summarize the open operations queue\./);
+});
+
+test("prompt home map card uses the shared eyebrow and title structure", () => {
+  const markup = renderToStaticMarkup(
+    createElement(PromptHomeWorkspace, {
+      authSession: null,
+      health: "ok",
+      counts: defaultCounts,
+      onOpenView: () => undefined,
+    }),
+  );
+
+  assert.match(
+    markup,
+    /<div class="prompt-home-map-card-copy"><span class="eyebrow">Map<\/span><strong>Asset map<\/strong>/,
+  );
 });
 
 test("prompt home map summarizes filtered records and caps the visible map directory at 1000 rows", () => {
@@ -436,7 +482,7 @@ test("prompt home topbar token badge renders a loading state before budgets reso
   assert.match(markup, /Checking published assistant budgets\./);
 });
 
-test("prompt home shows the newest prompt thread messages first", () => {
+test("prompt home shows prompt thread messages in chronological order", () => {
   const markup = renderToStaticMarkup(
     createElement(PromptHomeWorkspace, {
       authSession: null,
@@ -469,9 +515,9 @@ test("prompt home shows the newest prompt thread messages first", () => {
   assert.ok(mostRecentPromptIndex >= 0);
   assert.ok(earliestCompletionIndex >= 0);
   assert.ok(earliestPromptIndex >= 0);
-  assert.ok(mostRecentCompletionIndex < mostRecentPromptIndex);
-  assert.ok(mostRecentPromptIndex < earliestCompletionIndex);
-  assert.ok(earliestCompletionIndex < earliestPromptIndex);
+  assert.ok(earliestPromptIndex < earliestCompletionIndex);
+  assert.ok(earliestCompletionIndex < mostRecentPromptIndex);
+  assert.ok(mostRecentPromptIndex < mostRecentCompletionIndex);
 });
 
 test("prompt home stops auto-loading weather after the first load error", () => {

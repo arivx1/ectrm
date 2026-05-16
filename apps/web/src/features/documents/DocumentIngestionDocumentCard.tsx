@@ -3,6 +3,7 @@ import {
   actionPlanExecutable,
   actionPlanPrimaryLabel,
   actionPlanTone,
+  correctedPageCount,
   documentActionPlan,
   documentActionAlreadyApplied,
   documentLinkageAssessment,
@@ -23,6 +24,7 @@ import {
   routingPrimaryLabel,
   routingStatusTone,
   routingStrategyLabel,
+  learnedPageCount,
   reviewedPageCount,
 } from './documentIngestionUtils'
 import { DocumentIngestionPageEditor } from './DocumentIngestionPageEditor'
@@ -62,6 +64,8 @@ export function DocumentIngestionDocumentCard({
   const linkedRecords = documentRecordLinks(document)
   const actionApplied = documentActionAlreadyApplied(document)
   const canExecuteAction = actionPlanExecutable(actionPlan) && !actionApplied && !isDocumentProcessing
+  const correctedPages = correctedPageCount(document)
+  const learnedPages = learnedPageCount(document)
 
   return (
     <article className="position-card shipment-card workflow-item-card document-ingestion-card">
@@ -133,6 +137,16 @@ export function DocumentIngestionDocumentCard({
         <span className="entity-chip entity-chip-soft">
           {reviewReady(document) ? 'Ready To Verify' : 'Review Incomplete'}
         </span>
+        {correctedPages > 0 ? (
+          <span className="entity-chip entity-chip-soft">
+            {correctedPages} corrected page{correctedPages === 1 ? '' : 's'}
+          </span>
+        ) : null}
+        {learnedPages > 0 ? (
+          <span className="entity-chip entity-chip-soft">
+            {learnedPages} learned match{learnedPages === 1 ? '' : 'es'}
+          </span>
+        ) : null}
         {routingAssessment ? (
           <>
             <span className={`status-pill status-pill-${routingStatusTone(routingAssessment)}`}>
@@ -180,6 +194,12 @@ export function DocumentIngestionDocumentCard({
         {linkageAssessment?.reasons?.[0] ? <p>{linkageAssessment.reasons[0]}</p> : null}
         {actionPlan?.description ? <p>{actionPlan.description}</p> : null}
         {linkedRecords[0] ? <p>{`Linked to ${linkedRecords[0].record_label}.`}</p> : null}
+        {correctedPages > 0 ? (
+          <p>
+            {correctedPages} page{correctedPages === 1 ? '' : 's'} ha{correctedPages === 1 ? 's' : 've'} a saved
+            classification correction. Future uploads with similar extracted content can reuse that saved choice.
+          </p>
+        ) : null}
         {document.processing_errors.length > 0 ? <p className="field-error">{document.processing_errors.join(' ')}</p> : null}
       </div>
 

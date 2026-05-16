@@ -90,6 +90,16 @@ const SettlementWorkspace = lazy(() =>
     default: module.SettlementWorkspace,
   })),
 )
+const MessagingWorkspace = lazy(() =>
+  import('../../workspaces/messages/MessagingWorkspace').then((module) => ({
+    default: module.MessagingWorkspace,
+  })),
+)
+const LibraryWorkspace = lazy(() =>
+  import('../../workspaces/library/LibraryWorkspace').then((module) => ({
+    default: module.LibraryWorkspace,
+  })),
+)
 
 function buildActivityFeedHandoff(
   tradeId: string,
@@ -873,6 +883,16 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     },
     buildWindowNotices: buildSettlementWindowNotices,
   },
+  messages: {
+    key: 'messages',
+    label: 'Messages',
+    kicker: 'Inbox',
+    heroTitle: 'Unified messaging and desk follow-up',
+    heroBody:
+      'Review communication, queue digests, issues, and system notices in one message-oriented workspace before dropping into the execution screen that owns the fix.',
+    dataGroups: [],
+    blockingGroups: [],
+  },
   reports: {
     key: 'reports',
     label: 'Reports',
@@ -882,6 +902,16 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
       'Surface curated credit, exposure, and audit outputs for operators who need answers faster than a spreadsheet refresh.',
     dataGroups: ['trades', 'reports'],
     blockingGroups: ['trades', 'reports'],
+  },
+  library: {
+    key: 'library',
+    label: 'Library',
+    kicker: 'Files',
+    heroTitle: 'Uploaded document library and review surface',
+    heroBody:
+      'Browse uploaded PDFs in a dedicated library that keeps search, preview, review status, and source-file access in one place.',
+    dataGroups: [],
+    blockingGroups: [],
   },
   map: {
     key: 'map',
@@ -1433,6 +1463,35 @@ export const WORKSPACE_RENDERERS: Record<
       />
     ),
   },
+  messages: {
+    render: (context) => (
+      <MessagingWorkspace
+        authSession={context.workspaceData.authSession}
+        counts={{
+          activeTrades: context.workspaceData.workspaceBootstrapSummary?.trades.active_count ?? null,
+          openWorkItems: context.workspaceData.workspaceBootstrapSummary?.work_items.total_count ?? null,
+          operationsQueueItems:
+            context.workspaceData.workspaceBootstrapSummary?.work_items.operations_queue_count ?? null,
+          settlementQueueItems:
+            context.workspaceData.workspaceBootstrapSummary?.work_items.settlement_queue_count ?? null,
+          pendingInvoices: context.workspaceData.workspaceBootstrapSummary?.settlement.invoice_pending_count ?? null,
+          paymentsDue: context.workspaceData.workspaceBootstrapSummary?.settlement.payment_due_count ?? null,
+          attentionItems: context.workspaceData.workspaceBootstrapSummary?.dashboard.attention.total_count ?? null,
+          stalePricingItems:
+            context.workspaceData.workspaceBootstrapSummary?.dashboard.attention.stale_pricing_count ?? null,
+          pendingPricingTrades:
+            context.workspaceData.workspaceBootstrapSummary?.trades.pending_pricing_count ?? null,
+          pendingSettlementTrades:
+            context.workspaceData.workspaceBootstrapSummary?.trades.pending_settlement_count ?? null,
+        }}
+        onSessionSync={context.workspaceData.handleSessionSync}
+        onOpenPrompt={() => context.navigateToView('prompt')}
+        onOpenAssistant={() => context.navigateToView('assistant')}
+        onOpenOperations={() => context.navigateToView('operations')}
+        onOpenSettlement={() => context.navigateToView('settlement')}
+      />
+    ),
+  },
   reports: {
     render: (context) => (
       <ReportsWorkspace
@@ -1448,6 +1507,15 @@ export const WORKSPACE_RENDERERS: Record<
         onOpenPrompt={() => context.navigateToView('prompt')}
         onOpenSettlement={() => context.navigateToView('settlement')}
         onOpenTrade={context.navigateToTrade}
+      />
+    ),
+  },
+  library: {
+    render: (context) => (
+      <LibraryWorkspace
+        authSession={context.workspaceData.authSession}
+        formatDate={formatDate}
+        onOpenOperationsWorkspace={() => context.navigateToView('operations')}
       />
     ),
   },

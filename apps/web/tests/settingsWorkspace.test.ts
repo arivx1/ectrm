@@ -142,3 +142,24 @@ test('settings workspace renders the custom event entry form when that card is e
   assert.match(markup, /This first pass saves custom events in the current browser timezone\./)
   assert.match(markup, /Add Event/)
 })
+
+test('settings workspace renders home calendar overlay controls inside the Google Calendar card', () => {
+  usePersistentCollapsibleCardStateMock.mockImplementation((cardKey: string) => ({
+    expanded: cardKey === 'settings.google-calendar-card',
+    hasPersistedValue: cardKey === 'settings.google-calendar-card',
+    setExpanded: () => undefined,
+  }))
+
+  const markup = renderSettingsWorkspace()
+
+  assert.match(
+    markup,
+    /aria-expanded="true" aria-controls="settings-google-calendar-card-panel"/,
+  )
+  assert.match(markup, /Home overlays/)
+  assert.match(markup, /3 of 3 enabled/)
+  assert.match(markup, /Day card/)
+  assert.match(markup, /Week card/)
+  assert.match(markup, /Month card/)
+  assert.match(markup, /These preferences stay in this browser and update Home right away\./)
+})

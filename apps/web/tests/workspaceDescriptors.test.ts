@@ -22,6 +22,10 @@ describe('workspace descriptor system', () => {
       'weather',
     ])
     expect(WORKSPACE_DESCRIPTORS.map.buildWindowNotices).toBeUndefined()
+    expect(WORKSPACE_DESCRIPTORS.messages.dataGroups).toEqual([])
+    expect(WORKSPACE_DESCRIPTORS.messages.buildWindowNotices).toBeUndefined()
+    expect(WORKSPACE_DESCRIPTORS.library.dataGroups).toEqual([])
+    expect(WORKSPACE_DESCRIPTORS.library.buildWindowNotices).toBeUndefined()
 
     expect(WORKSPACE_DESCRIPTORS.operations.dataGroups).toEqual([
       'trades',

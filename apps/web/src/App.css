@@ -11,6 +11,7 @@
 @import "./styles/workspace-windows.css";
 @import "./styles/settings.css";
 @import "./styles/prompt-home.css";
+@import "./styles/messaging-workspace.css";
 @import "./styles/assistant-workspace.css";
 @import "./styles/data-sheet.css";
 @import "./styles/docs-content.css";
@@ -24,6 +25,7 @@
 @import "./styles/terminal-market-admin.css";
 @import "./styles/terminal-trade-inspector.css";
 @import "./styles/documents.css";
+@import "./styles/library.css";
 @import "./styles/scheduling.css";
 @import "./styles/pretrade.css";
 @import "./styles/shared-motion-responsive.css";

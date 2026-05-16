@@ -168,12 +168,16 @@
 
 .prompt-home-map-card {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.6rem;
+  width: 100%;
+  margin: 0 auto;
   min-width: 0;
   padding: 0.72rem 0.85rem;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.16);
   border-radius: 0.95rem;
-  border: 1px solid rgba(18, 42, 56, 0.08);
-  background: rgba(255, 255, 255, 0.05);
+  background:
+    radial-gradient(circle at center right, rgb(var(--theme-highlight-rgb, 78 167 255) / 0.1), transparent 40%),
+    rgba(255, 255, 255, 0.04);
 }
 
 .prompt-home-map-card-toggle {
@@ -195,7 +199,7 @@
 .prompt-home-map-card-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.3rem 0.65rem;
+  gap: 0.7rem 1rem;
   align-items: center;
   width: 100%;
 }
@@ -208,7 +212,7 @@
 
 .prompt-home-map-card-copy strong {
   font-size: 1rem;
-  line-height: 1.18;
+  line-height: 1.12;
 }
 
 .prompt-home-map-card-copy p,
@@ -221,7 +225,7 @@
 
 .prompt-home-map-card-toggle-side {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.5rem;
   justify-items: end;
   justify-self: end;
   align-content: center;
@@ -531,8 +535,9 @@
 
 .prompt-home-communication-card-copy p,
 .prompt-home-communication-card-toggle-meta small,
-.prompt-home-communication-item-copy p,
-.prompt-home-communication-item-side small {
+.prompt-home-communication-summary-copy p,
+.prompt-home-communication-message-copy p,
+.prompt-home-communication-footer .form-note {
   margin: 0;
   color: var(--color-copy-muted, #66717c);
   line-height: 1.5;
@@ -576,52 +581,270 @@
   display: none;
 }
 
-.prompt-home-communication-grid {
+.prompt-home-communication-shell {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-  gap: 0.75rem;
+  gap: 0.85rem;
 }
 
-.prompt-home-communication-item {
+.prompt-home-communication-inbox,
+.prompt-home-communication-thread {
   display: grid;
   gap: 0.75rem;
-  padding: 0.85rem 0.9rem;
-  border-radius: 0.95rem;
-  border: 1px solid rgba(18, 42, 56, 0.08);
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.prompt-home-communication-item-copy {
-  display: grid;
-  gap: 0.18rem;
   min-width: 0;
+  padding: 0.9rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1rem;
+  background:
+    linear-gradient(180deg, rgb(var(--theme-highlight-rgb, 78 167 255) / 0.05), transparent),
+    rgba(255, 255, 255, 0.05);
 }
 
-.prompt-home-communication-item-copy strong {
-  font-size: 1rem;
-  line-height: 1.14;
+.prompt-home-communication-inbox {
+  align-content: start;
 }
 
-.prompt-home-communication-item-metric {
-  color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.92);
-  font-size: 0.84rem;
-  font-weight: 600;
-  line-height: 1.4;
-}
-
-.prompt-home-communication-item-side {
+.prompt-home-communication-inbox-item {
   display: grid;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.8rem 0.85rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.prompt-home-communication-inbox-item:hover,
+.prompt-home-communication-inbox-item:focus-visible,
+.prompt-home-communication-inbox-item.is-selected {
+  transform: translateY(-1px);
+  border-color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.28);
+  background:
+    linear-gradient(180deg, rgb(var(--theme-highlight-rgb, 78 167 255) / 0.09), transparent),
+    rgba(255, 255, 255, 0.08);
+  box-shadow: 0 14px 30px rgba(8, 20, 31, 0.08);
+  outline: none;
+}
+
+.prompt-home-communication-inbox-item-head,
+.prompt-home-communication-inbox-item-foot {
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.55rem;
-  align-content: end;
-  justify-items: start;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.prompt-home-communication-inbox-item-head {
+  align-items: baseline;
+}
+
+.prompt-home-communication-inbox-item-head small,
+.prompt-home-communication-inbox-item-foot span,
+.prompt-home-communication-thread-copy p,
+.prompt-home-communication-thread-side small,
+.prompt-home-communication-thread-message-head span,
+.prompt-home-communication-thread-reply p,
+.prompt-home-communication-thread-reply small {
+  margin: 0;
+  color: var(--color-copy-muted, #66717c);
+  line-height: 1.5;
+}
+
+.prompt-home-communication-lane {
+  color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.96);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.prompt-home-communication-inbox-item-copy {
+  display: grid;
+  gap: 0.16rem;
+}
+
+.prompt-home-communication-inbox-item-copy strong,
+.prompt-home-communication-thread-copy strong {
+  font-size: 1rem;
+  line-height: 1.18;
+}
+
+.prompt-home-communication-inbox-item-copy p,
+.prompt-home-communication-thread-message p {
+  margin: 0;
+  line-height: 1.58;
+}
+
+.prompt-home-communication-inbox-item-copy p {
+  color: var(--color-copy-muted, #66717c);
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.prompt-home-communication-type-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-height: 1.5rem;
+  padding: 0.12rem 0.52rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(18, 42, 56, 0.1);
+  color: rgb(18 42 56 / 0.9);
+}
+
+.prompt-home-communication-type-badge[data-message-type="Email"] {
+  background: rgb(49 104 206 / 0.14);
+  color: rgb(49 104 206 / 0.96);
+}
+
+.prompt-home-communication-type-badge[data-message-type="To-Do"] {
+  background: rgb(12 138 105 / 0.14);
+  color: rgb(12 138 105 / 0.96);
+}
+
+.prompt-home-communication-type-badge[data-message-type="Issue"] {
+  background: rgb(185 78 20 / 0.16);
+  color: rgb(185 78 20 / 0.96);
+}
+
+.prompt-home-communication-type-badge[data-message-type="App Message"] {
+  background: rgb(123 72 201 / 0.16);
+  color: rgb(123 72 201 / 0.96);
+}
+
+.prompt-home-communication-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.8rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  background: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.14);
+  color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.95);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.prompt-home-communication-status.is-unread {
+  background: rgb(12 138 105 / 0.14);
+  color: rgb(12 138 105 / 0.96);
+}
+
+.prompt-home-communication-thread {
+  align-content: start;
+}
+
+.prompt-home-communication-thread-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem 1rem;
+  align-items: start;
+}
+
+.prompt-home-communication-thread-copy,
+.prompt-home-communication-thread-reply {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.prompt-home-communication-thread-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.prompt-home-communication-thread-meta span {
+  color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.96);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.prompt-home-communication-thread-side {
+  display: grid;
+  gap: 0.35rem;
+  justify-items: end;
+  text-align: right;
+}
+
+.prompt-home-communication-thread-message {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.prompt-home-communication-thread-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.8rem;
+  background:
+    linear-gradient(180deg, rgb(var(--theme-highlight-rgb, 78 167 255) / 0.88), rgb(var(--theme-highlight-rgb, 78 167 255) / 0.58)),
+    rgba(18, 42, 56, 0.16);
+  color: #ffffff;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.prompt-home-communication-thread-bubble {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.9rem 0.95rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.prompt-home-communication-thread-message-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.prompt-home-communication-thread-message-head strong,
+.prompt-home-communication-thread-reply strong {
+  color: inherit;
+}
+
+.prompt-home-communication-thread-reply {
+  padding: 0.85rem 0.9rem;
+  border: 1px dashed rgb(var(--theme-highlight-rgb, 78 167 255) / 0.24);
+  border-radius: 1rem;
+  background: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.05);
 }
 
 .prompt-home-communication-footer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  gap: 0.35rem;
+}
+
+@media (min-width: 920px) {
+  .prompt-home-communication-shell {
+    grid-template-columns: minmax(18rem, 0.9fr) minmax(0, 1.3fr);
+    align-items: start;
+  }
 }
 
 .prompt-home-prompt-card {
@@ -816,22 +1039,6 @@
 .prompt-home-time-meter-card-toggle-meta small {
   color: var(--color-copy-muted, #66717c);
   line-height: 1.4;
-}
-
-.prompt-home-time-meter-card-calendar-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: fit-content;
-  color: var(--color-copy-muted, #66717c);
-  font-size: 0.84rem;
-  line-height: 1.4;
-  cursor: pointer;
-}
-
-.prompt-home-time-meter-card-calendar-toggle input {
-  margin: 0;
-  accent-color: rgb(var(--theme-highlight-rgb, 78 167 255));
 }
 
 .prompt-home-time-meter-card-body {
@@ -1483,6 +1690,12 @@
   gap: 0.65rem;
 }
 
+.prompt-home-chat-log {
+  max-height: 32rem;
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
 .prompt-home-empty {
   min-height: 9rem;
   text-align: center;
@@ -1668,7 +1881,6 @@
 :root[data-color-mode='dark'] .prompt-home-time-meter-card-body-head small,
 :root[data-color-mode='dark'] .prompt-home-time-meter-card-meta,
 :root[data-color-mode='dark'] .prompt-home-time-meter-card-toggle-meta small,
-:root[data-color-mode='dark'] .prompt-home-time-meter-card-calendar-toggle,
 :root[data-color-mode='dark'] .prompt-home-time-meter-marker,
 :root[data-color-mode='dark'] .prompt-home-time-meter-ticks,
 :root[data-color-mode='dark'] .prompt-home-prompt-kits-empty,
@@ -1810,10 +2022,6 @@
 
   .prompt-home-time-meter-card-toggle-side {
     justify-items: end;
-  }
-
-  .prompt-home-time-meter-card-calendar-toggle {
-    width: 100%;
   }
 
   .prompt-home-time-meter-card-collapsed-line {

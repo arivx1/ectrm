@@ -83,6 +83,50 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-15 - Agent Replies In Messaging Surfaces Should Stay In-Thread And Use The Governed Assistant Runtime
+
+- Type: lesson
+- Domain: assistant messaging UX, prompt-first collaboration, and agent action
+  governance
+- Applies to: Slack-style message surfaces, in-thread agent drafting, channel
+  handoff UX, and future shared communication workspaces
+- Status: implemented
+- Source:
+  `apps/web/src/workspaces/messages/MessagingWorkspace.tsx`,
+  `apps/web/src/workspaces/messages/messagingInboxData.ts`,
+  `apps/web/tests/messagingWorkspace.test.ts`, and
+  `docs/engineering/agent-autonomy-rubric.md`
+- Lesson: when a workspace presents a chat-like thread, agent participation
+  should happen inside that thread through the existing `/assistant/respond`
+  runtime instead of routing the operator to a separate assistant screen just
+  to get a reply. Keep the interaction in-thread, preserve run tracing and
+  governed action-request behavior, and frame the channel context explicitly in
+  the assistant prompt context rather than inventing a parallel ad hoc agent
+  path. When no dedicated backend messaging-router profile exists yet, use a
+  deterministic front-end routing layer to decide whether a thread needs an
+  agent reply and which managed agent or workspace context to target. On public
+  messaging surfaces in local-dev mode, let the messaging agent auto-claim the
+  existing single-user OPS_ADMIN session when a reply is warranted instead of
+  blocking on a manual sign-in click. Preserve familiar chat composer behavior
+  too: `Enter` sends and `Shift+Enter` inserts a newline.
+- Deterministic opportunity: promote recurring thread scaffolding such as
+  channel-to-workspace mapping, thread context shaping, and governed action
+  request callouts into shared messaging helpers as more communication surfaces
+  adopt agent replies.
+- Agent autonomy impact: agents remain in the `Draft` and `Stage` lanes here.
+  They may respond, explain, and stage governed actions, but they still do not
+  externally commit the firm or directly mutate business records from the chat
+  surface.
+- Tests or evidence:
+  `npm test -- messagingWorkspace.test.ts workspaceLoading.test.ts promptHomeWorkspace.test.ts navigation.test.ts workspaceRegistry.test.ts workspaceDescriptors.test.ts workspaceRendererRegistry.test.ts`
+  plus browser checks confirming `Let messaging agent decide` keeps the browser
+  on `?view=messages`, leaves acknowledgement-style notes in-thread without
+  waking an agent, and appends governed assistant replies in the same thread
+  when a response is needed.
+- Follow-up: once message persistence exists, thread replies should reuse the
+  same governed assistant runtime while storing thread state as a durable work
+  object instead of local UI state.
+
 ### 2026-05-14 - Constrain Delivery Transport Modes Through Commodity Reference Data
 
 - Type: algorithm-added
@@ -3375,3 +3419,42 @@ independently"`.
   the same lane focus, extend the same typed handoff contract instead of
   inventing workspace-specific search conventions, and prefer governed pickers
   when the workspace should support that focus without a map entrypoint.
+
+### 2026-05-15 - Document Classification Corrections Should Become Deterministic Filename-Pattern Learning
+
+- Type: algorithm-added
+- Domain: document ingestion review, operator corrections, and deterministic
+  classification support
+- Applies to: uploaded document review, document-kind correction UX, and future
+  ingestion classifier promotion work
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_classification_learning.py`,
+  `apps/api/app/domains/documents/services/ingestion.py`,
+  `apps/api/app/domains/documents/services/document_ingestion_review.py`,
+  `apps/api/tests/test_document_ingestion_api.py`,
+  `apps/web/src/features/documents/DocumentIngestionPageEditor.tsx`, and
+  `apps/web/tests/documentIngestionSelectors.test.ts`
+- Lesson: when operators correct a system-assigned document kind, the platform
+  should persist that correction as structured review metadata instead of
+  silently overwriting the page kind. ECTRM now stores the original
+  system-assigned kind, the saved correction, and a compact extracted-content
+  feature profile, then deterministically reuses consistent prior corrections
+  only when a later upload's extracted page content looks materially similar.
+  A normalized filename signature remains as a small supporting signal, but
+  content similarity is the primary reuse rule.
+- Deterministic opportunity: if reviewed correction volume grows or the current
+  in-memory content-feature scan becomes too coarse, promote it into a
+  dedicated indexed learning registry with conflict review, richer document
+  features, and expiry controls instead of moving the rule back into prompt
+  prose.
+- Agent autonomy impact: agents can explain or stage document review work, but
+  the durable classification-learning loop stays inside typed ingestion
+  services and explicit operator corrections rather than freeform model output.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api`
+  and
+  `./node_modules/.bin/vitest run tests/documentIngestionSelectors.test.ts tests/documentApi.test.ts`
+- Follow-up: add conflict handling, reviewer thresholds, or admin-facing rule
+  visibility before using these corrections for higher-trust downstream routing
+  or record-creation automation.

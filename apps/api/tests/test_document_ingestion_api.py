@@ -230,6 +230,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
             label="GPT",
             api_key="openai-test-key",
             model="gpt-5-mini",
+            model_options=("gpt-5-mini", "gpt-5", "gpt-5-nano"),
             base_url="https://api.openai.com/v1",
             configured=True,
             enabled=True,
@@ -652,8 +653,12 @@ class DocumentIngestionApiTests(unittest.TestCase):
 
         providers = {row["provider"]: row for row in payload["providers"]}
         self.assertTrue(providers["openai"]["configured"])
+        self.assertIn("gpt-5", providers["openai"]["available_models"])
+        self.assertIn("gpt-5-mini", providers["openai"]["available_models"])
         self.assertFalse(providers["anthropic"]["configured"])
+        self.assertIn("claude-sonnet-4-0", providers["anthropic"]["available_models"])
         self.assertTrue(providers["anthropic"]["is_default"])
+        self.assertIn("gemini-2.5-pro", providers["google"]["available_models"])
         self.assertEqual(providers["google"]["setup_env_var"], "GOOGLE_API_KEY")
 
     def test_document_processor_settings_include_gmail_inbox_runtime(self) -> None:
@@ -1547,6 +1552,50 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertTrue(any(table["template_key"] == "line_items" for table in page["table_blocks"]))
         self.assertIn("Document AI result applied.", page["processing_warnings"])
 
+    def test_upload_can_choose_a_non_default_processor_model(self) -> None:
+        admin_token = self._bootstrap_admin()
+        settings.OPENAI_API_KEY = "openai-test-key"
+        settings.OPENAI_MODEL = "gpt-5-mini"
+
+        fake_processor_outcome = (
+            DocumentProcessorOutcome(
+                provider="openai",
+                model="gpt-5",
+                pages=[
+                    DocumentProcessorPageResult(
+                        page_number=1,
+                        document_kind="INVOICE",
+                        document_subtype="GPT_5_PASS",
+                        confidence=0.98,
+                        header_fields=[],
+                        table_blocks=[],
+                        warnings=[],
+                    )
+                ],
+            ),
+            [],
+        )
+
+        with patch(
+            "apps.api.app.domains.documents.services.ingestion.run_document_processor_analysis",
+            return_value=fake_processor_outcome,
+        ):
+            response = self.client.post(
+                "/documents/uploads",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                files={"file": ("invoice-batch.pdf", self._build_pdf_bytes(page_count=1), "application/pdf")},
+                data={"processor_provider": "openai", "processor_model": "gpt-5"},
+            )
+
+        self.assertEqual(response.status_code, 201)
+        uploaded = response.json()
+        self.assertEqual(uploaded["processor_provider"], "openai")
+        self.assertEqual(uploaded["processor_model"], "gpt-5")
+
+        analyzed = self._wait_for_document(admin_token, uploaded["document_id"])
+        self.assertEqual(analyzed["processor_model"], "gpt-5")
+        self.assertEqual(analyzed["pages"][0]["document_subtype"], "GPT_5_PASS")
+
     def test_reprocess_can_switch_document_processor_provider(self) -> None:
         admin_token = self._bootstrap_admin()
         settings.OPENAI_API_KEY = "openai-test-key"
@@ -1707,6 +1756,102 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(verify_body["review_status"], "VERIFIED")
         self.assertEqual(verify_body["reviewed_by"], "doc_admin")
         self.assertTrue(verify_body["analysis_summary"]["review_ready"])
+
+    def test_saved_classification_correction_is_reused_for_matching_document_content(self) -> None:
+        admin_token = self._bootstrap_admin()
+        first_raw_text = "\n".join(
+            [
+                "INVOICE NUMBER INV-9001",
+                "INVOICE DATE 2026-04-06",
+                "DUE DATE 2026-04-15",
+                "COUNTERPARTY Shell Trading",
+                "TRADE ID T-INV-9001",
+                "TOTAL AMOUNT USD 79250",
+            ]
+        )
+        second_raw_text = "\n".join(
+            [
+                "INVOICE NUMBER INV-9002",
+                "INVOICE DATE 2026-05-06",
+                "DUE DATE 2026-05-15",
+                "COUNTERPARTY Shell Trading",
+                "TRADE ID T-INV-9002",
+                "TOTAL AMOUNT USD 80400",
+            ]
+        )
+
+        with patch(
+            "apps.api.app.domains.documents.services.ingestion._extract_page_text",
+            return_value=(first_raw_text, []),
+        ), patch(
+            "apps.api.app.domains.documents.services.ingestion.run_document_processor_analysis",
+            return_value=(None, []),
+        ):
+            first_upload = self._upload_document(
+                admin_token,
+                filename="desk-upload-alpha.pdf",
+                page_count=1,
+            )
+        first_document = self._wait_for_document(admin_token, first_upload["document_id"])
+        first_page = first_document["pages"][0]
+
+        self.assertEqual(first_page["document_kind"], "INVOICE")
+        self.assertEqual(first_page["classification_payload"]["system_document_kind"], "INVOICE")
+        self.assertGreater(len(first_page["classification_payload"]["content_features"]), 0)
+        self.assertEqual(first_document["analysis_summary"]["corrected_page_count"], 0)
+
+        correction_response = self.client.patch(
+            f"/documents/{first_document['document_id']}/pages/{first_page['page_id']}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "document_kind": "TRADE_CONFIRMATION",
+                "document_subtype": "DESK_REVIEWED",
+                "review_notes": "Desk reviewed the upload and corrected the document kind.",
+            },
+        )
+        self.assertEqual(correction_response.status_code, 200)
+        corrected_document = correction_response.json()
+        corrected_page = corrected_document["pages"][0]
+        corrected_payload = corrected_page["classification_payload"]
+
+        self.assertEqual(corrected_page["document_kind"], "TRADE_CONFIRMATION")
+        self.assertEqual(corrected_page["document_subtype"], "DESK_REVIEWED")
+        self.assertTrue(corrected_payload["classification_corrected"])
+        self.assertEqual(corrected_payload["system_document_kind"], "INVOICE")
+        self.assertEqual(corrected_payload["corrected_document_kind"], "TRADE_CONFIRMATION")
+        self.assertEqual(corrected_payload["corrected_document_subtype"], "DESK_REVIEWED")
+        self.assertEqual(corrected_payload["classification_correction_count"], 1)
+        self.assertEqual(corrected_document["analysis_summary"]["corrected_page_count"], 1)
+
+        with patch(
+            "apps.api.app.domains.documents.services.ingestion._extract_page_text",
+            return_value=(second_raw_text, []),
+        ), patch(
+            "apps.api.app.domains.documents.services.ingestion.run_document_processor_analysis",
+            return_value=(None, []),
+        ):
+            second_upload = self._upload_document(
+                admin_token,
+                filename="settlement-desk-note.pdf",
+                page_count=1,
+            )
+        learned_document = self._wait_for_document(admin_token, second_upload["document_id"])
+        learned_page = learned_document["pages"][0]
+        learned_payload = learned_page["classification_payload"]
+
+        self.assertEqual(learned_page["document_kind"], "TRADE_CONFIRMATION")
+        self.assertEqual(learned_page["document_subtype"], "DESK_REVIEWED")
+        self.assertTrue(learned_payload["learning_applied"])
+        self.assertEqual(learned_payload["learning_example_count"], 1)
+        self.assertEqual(learned_payload["automated_document_kind"], "INVOICE")
+        self.assertEqual(learned_payload["automated_document_subtype"], None)
+        self.assertEqual(learned_payload["system_document_kind"], "TRADE_CONFIRMATION")
+        self.assertEqual(learned_payload["system_document_subtype"], "DESK_REVIEWED")
+        self.assertEqual(learned_payload["system_classification_source"], "learning")
+        self.assertEqual(learned_payload["learning_source"], "content_similarity")
+        self.assertFalse(learned_payload["learning_filename_assist"])
+        self.assertGreater(learned_payload["learning_similarity"], 0.5)
+        self.assertEqual(learned_document["analysis_summary"]["learning_applied_page_count"], 1)
 
     def test_document_response_includes_existing_record_linkage_candidates(self) -> None:
         admin_token = self._bootstrap_admin()

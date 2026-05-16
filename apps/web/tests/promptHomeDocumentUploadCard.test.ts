@@ -93,6 +93,7 @@ function buildController(
     selectedGmailMessageError: '',
     displayName: '',
     selectedProcessorProvider: 'builtin',
+    selectedProcessorModel: '',
     selectedFile: null,
     isDragActive: false,
     expandedDocumentIds: {},
@@ -104,6 +105,7 @@ function buildController(
     fileInputRef: { current: null },
     setDisplayName: () => undefined,
     setSelectedProcessorProvider: () => undefined,
+    setSelectedProcessorModel: () => undefined,
     setDocumentReprocessProvider: () => undefined,
     toggleDocumentExpanded: () => undefined,
     updateSelectedFile: () => undefined,
@@ -190,7 +192,7 @@ test('document history renders as a collapsed subcard inside the home upload car
           role: 'OPS_ADMIN',
         },
       },
-      onOpenOperationsWorkspace: () => undefined,
+      onOpenLibraryWorkspace: () => undefined,
       onSignIn: () => undefined,
     }),
   )
@@ -200,7 +202,7 @@ test('document history renders as a collapsed subcard inside the home upload car
     /<div class="prompt-home-document-upload-card-copy"><span class="eyebrow">Documents<\/span><strong>Upload documents<\/strong><\/div>/,
   )
   assert.match(markup, /<strong>Document history<\/strong>/)
-  assert.match(markup, /2 documents available in the work queue\./)
+  assert.match(markup, /2 documents available in the library\./)
   assert.match(
     markup,
     /aria-expanded="false" aria-controls="prompt-home-document-history-panel"/,
@@ -248,7 +250,7 @@ test('document history renders recent uploads when the subcard is expanded', () 
           role: 'OPS_ADMIN',
         },
       },
-      onOpenOperationsWorkspace: () => undefined,
+      onOpenLibraryWorkspace: () => undefined,
       onSignIn: () => undefined,
     }),
   )
@@ -259,6 +261,7 @@ test('document history renders recent uploads when the subcard is expanded', () 
   assert.match(markup, /Invoice Package/)
   assert.match(markup, /Analyzed · 2 pages/)
   assert.match(markup, /Processing · 4 pages/)
+  assert.match(markup, /Open Library/)
   assert.equal((markup.match(/>Open PDF</g) ?? []).length, 2)
 })
 
@@ -296,7 +299,7 @@ test('document history marks missing source PDFs as unavailable', () => {
           role: 'OPS_ADMIN',
         },
       },
-      onOpenOperationsWorkspace: () => undefined,
+      onOpenLibraryWorkspace: () => undefined,
       onSignIn: () => undefined,
     }),
   )

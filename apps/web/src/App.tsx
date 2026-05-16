@@ -30,6 +30,8 @@ import { useAppWorkspaceSummary } from './entities/app/useAppWorkspaceSummary'
 import {
   deriveWorkspaceStatus,
   isAuthenticationRequiredMessage,
+  shouldPresentStartHereOverlay,
+  shouldPresentSignedOutAuthGate,
   summarizeWorkspaceIssueMessage,
   VIEW_DATA_GROUPS,
 } from './entities/app/workspaceLoading'
@@ -815,14 +817,18 @@ export default function App() {
     replaceView,
   ])
 
-  const showStartHereOverlay =
-    startHere.showStartHere &&
-    !(authSession && startHereRouting.startHereReturnIntent) &&
-    currentView !== 'prompt' &&
-    currentView !== 'settings' &&
-    workspaceData.authInterruptionReason !== 'session_expired' &&
-    authInterruption.authInterruptionResume === null
-  const signedOutNeedsAuthGate = !authSession && currentView !== 'guide' && currentView !== 'prompt'
+  const showStartHereOverlay = shouldPresentStartHereOverlay({
+    currentView,
+    hasAuthSession: Boolean(authSession),
+    hasStartHereOnboarding: startHere.showStartHere,
+    hasStartHereReturnIntent: Boolean(startHereRouting.startHereReturnIntent),
+    authInterruptionReason: workspaceData.authInterruptionReason,
+    hasAuthInterruptionResume: authInterruption.authInterruptionResume !== null,
+  })
+  const signedOutNeedsAuthGate = shouldPresentSignedOutAuthGate({
+    currentView,
+    hasAuthSession: Boolean(authSession),
+  })
 
   if (signedOutNeedsAuthGate) {
     return (

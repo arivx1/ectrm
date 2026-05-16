@@ -112,6 +112,7 @@ export async function uploadPdfDocument(
   file: File,
   displayName?: string,
   processorProvider?: 'builtin' | 'openai' | 'anthropic' | 'google' | null,
+  processorModel?: string | null,
 ): Promise<DocumentIngestionRecord> {
   const formData = new FormData()
   formData.append('file', file)
@@ -120,6 +121,9 @@ export async function uploadPdfDocument(
   }
   if (processorProvider?.trim()) {
     formData.append('processor_provider', processorProvider.trim())
+  }
+  if (processorModel?.trim()) {
+    formData.append('processor_model', processorModel.trim())
   }
 
   return postFormData<DocumentIngestionRecord>(`${apiBase}/documents/uploads`, formData, {
@@ -163,10 +167,18 @@ export async function reprocessDocumentIngestion(
   session: StoredAuthSession,
   documentId: string,
   processorProvider?: 'builtin' | 'openai' | 'anthropic' | 'google' | null,
+  processorModel?: string | null,
 ): Promise<DocumentIngestionRecord> {
+  const payload: Record<string, unknown> = {}
+  if (processorProvider) {
+    payload.processor_provider = processorProvider
+  }
+  if (processorModel?.trim()) {
+    payload.processor_model = processorModel.trim()
+  }
   return postJson<DocumentIngestionRecord>(
     `${apiBase}/documents/${documentId}/reprocess`,
-    processorProvider ? { processor_provider: processorProvider } : {},
+    payload,
     {
       headers: documentHeaders(session),
     },

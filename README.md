@@ -201,6 +201,7 @@ dependencies.
 - [Governed core trade command model](docs/engineering/core-platform-trade-command-model.md)
 - [Governed core platform work packages](docs/engineering/core-platform-work-packages.md)
 - [Trader/Risk MVP work packages](docs/engineering/trader-risk-mvp-work-packages.md)
+- [Trading UI familiarity reference](docs/engineering/trading-ui-familiarity-reference.md)
 - [Trading EOD work packages](docs/engineering/trading-eod-work-packages.md)
 - [Trading source register](docs/engineering/trading-source-register.csv)
 - [ETRM trading source register](docs/engineering/trading-source-register-etrm.csv)

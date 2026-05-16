@@ -100,6 +100,8 @@ describe('mobile navigation helpers', () => {
     expect(primaryNavigationSectionForView('pretrade').key).toBe('trading')
     expect(primaryNavigationSectionForView('trades').key).toBe('trading')
     expect(primaryNavigationSectionForView('shipments').key).toBe('execution')
+    expect(primaryNavigationSectionForView('messages').key).toBe('intelligence')
+    expect(primaryNavigationSectionForView('library').key).toBe('intelligence')
     expect(primaryNavigationSectionForView('map').key).toBe('intelligence')
     expect(primaryNavigationSectionForView('assistant').key).toBe('intelligence')
     expect(primaryNavigationSectionForView('settings').key).toBe('administration')

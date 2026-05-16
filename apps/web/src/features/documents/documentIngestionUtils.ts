@@ -59,6 +59,16 @@ export function reviewedPageCount(document: DocumentIngestionRecord): number {
   return typeof candidate === 'number' ? candidate : 0
 }
 
+export function correctedPageCount(document: DocumentIngestionRecord): number {
+  const candidate = document.analysis_summary.corrected_page_count
+  return typeof candidate === 'number' ? candidate : 0
+}
+
+export function learnedPageCount(document: DocumentIngestionRecord): number {
+  const candidate = document.analysis_summary.learning_applied_page_count
+  return typeof candidate === 'number' ? candidate : 0
+}
+
 export function documentRoutingAssessment(document: DocumentIngestionRecord): DocumentRoutingAssessmentRecord | null {
   return document.routing_assessment
 }
@@ -85,6 +95,52 @@ export function pageProcessorTrace(page: DocumentIngestionPageRecord): DocumentP
 
 export function pageRoutingAssessment(page: DocumentIngestionPageRecord): DocumentRoutingAssessmentRecord | null {
   return page.routing_assessment
+}
+
+export function formatDocumentKindLabel(value: string | null | undefined): string {
+  return value?.trim() ? value.replaceAll('_', ' ') : 'UNKNOWN'
+}
+
+export function pageSystemClassification(page: DocumentIngestionPageRecord): {
+  documentKind: string
+  documentSubtype: string | null
+  confidence: number | null
+  source: string | null
+  matchedBy: string | null
+} {
+  const payload = page.classification_payload
+  return {
+    documentKind:
+      typeof payload.system_document_kind === 'string' && payload.system_document_kind.trim()
+        ? payload.system_document_kind
+        : page.document_kind,
+    documentSubtype:
+      typeof payload.system_document_subtype === 'string' && payload.system_document_subtype.trim()
+        ? payload.system_document_subtype
+        : null,
+    confidence: typeof payload.system_classification_confidence === 'number' ? payload.system_classification_confidence : null,
+    source:
+      typeof payload.system_classification_source === 'string' && payload.system_classification_source.trim()
+        ? payload.system_classification_source
+        : null,
+    matchedBy:
+      typeof payload.system_matched_by === 'string' && payload.system_matched_by.trim()
+        ? payload.system_matched_by
+        : null,
+  }
+}
+
+export function pageClassificationCorrected(page: DocumentIngestionPageRecord): boolean {
+  return page.classification_payload.classification_corrected === true
+}
+
+export function pageLearningApplied(page: DocumentIngestionPageRecord): boolean {
+  return page.classification_payload.learning_applied === true
+}
+
+export function pageLearningExampleCount(page: DocumentIngestionPageRecord): number {
+  const candidate = page.classification_payload.learning_example_count
+  return typeof candidate === 'number' ? candidate : 0
 }
 
 export function processorLabel(provider: 'builtin' | 'openai' | 'anthropic' | 'google' | null | undefined): string {

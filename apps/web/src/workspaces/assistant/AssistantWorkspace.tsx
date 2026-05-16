@@ -100,6 +100,22 @@ function createChatMessageId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+function buildMessageInitials(label: string, fallback: string): string {
+  const parts = label
+    .trim()
+    .split(/\s+/)
+    .filter((part) => part.length > 0)
+
+  if (parts.length === 0) {
+    return fallback
+  }
+
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('')
+}
+
 function buildAssistantContext({
   health,
   trades,
@@ -273,6 +289,39 @@ function formatTraceTimestamp(value: string | null | undefined): string {
   }
 
   return date.toLocaleString()
+}
+
+function formatChatTimestamp(value: string | null | undefined): string | null {
+  if (!value) {
+    return null
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function formatChatDayLabel(value: string | null | undefined): string | null {
+  if (!value) {
+    return null
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+
+  return date.toLocaleDateString([], {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  })
 }
 
 function matchesAssistantMessageFilter(message: ChatMessage, query: string): boolean {
@@ -672,6 +721,21 @@ export function AssistantWorkspace({
   const visibleRecentRuns = useMemo(
     () => recentRuns.filter((run) => matchesAssistantRunFilter(run, effectiveScreenFilter)),
     [effectiveScreenFilter, recentRuns],
+  )
+  const resolveAssistantMessageAuthorLabel = useCallback(
+    (message: ChatMessage): string =>
+      message.role === 'assistant'
+        ? message.agentName?.trim() || 'Assistant'
+        : authSession?.user.display_name?.trim() || 'You',
+    [authSession?.user.display_name],
+  )
+  const resolveAssistantMessageAvatarLabel = useCallback(
+    (message: ChatMessage): string =>
+      buildMessageInitials(
+        resolveAssistantMessageAuthorLabel(message),
+        message.role === 'assistant' ? 'AI' : 'YU',
+      ),
+    [resolveAssistantMessageAuthorLabel],
   )
 
   useEffect(() => {
@@ -1087,6 +1151,7 @@ export function AssistantWorkspace({
         id: createChatMessageId(),
         role: 'user',
         content: trimmedDraft,
+        runRecordedAt: new Date().toISOString(),
       },
     ]
 
@@ -1182,7 +1247,9 @@ export function AssistantWorkspace({
                 agentName: typeof metadata.agent_name === 'string' ? metadata.agent_name : undefined,
                 runId: runId && Number.isFinite(runId) ? runId : undefined,
                 runRecordedAt:
-                  typeof metadata.run_recorded_at === 'string' ? metadata.run_recorded_at : undefined,
+                  typeof metadata.run_recorded_at === 'string'
+                    ? metadata.run_recorded_at
+                    : new Date().toISOString(),
                 usage: usage
                   ? {
                       input_tokens:
@@ -1644,119 +1711,142 @@ export function AssistantWorkspace({
                 </p>
               </div>
             ) : (
-              visibleMessages.map((message) => {
+              visibleMessages.map((message, index) => {
                 const canReadAloud =
                   message.role === 'assistant' && voicePlayback.canPlay(message.content)
                 const readingMessage = voicePlayback.isPlaying(message.id)
+                const authorLabel = resolveAssistantMessageAuthorLabel(message)
+                const timestampLabel = formatChatTimestamp(message.runRecordedAt)
+                const currentDayLabel = formatChatDayLabel(message.runRecordedAt)
+                const previousDayLabel =
+                  index > 0 ? formatChatDayLabel(visibleMessages[index - 1]?.runRecordedAt) : null
+                const showDayDivider =
+                  currentDayLabel !== null && currentDayLabel !== previousDayLabel
 
                 return (
-                  <article
-                    key={message.id}
-                    className={`assistant-message assistant-message-${message.role}`}
-                  >
-                    <div className="assistant-message-head">
-                      <strong>{message.role === 'assistant' ? message.agentName ?? 'Assistant' : 'You'}</strong>
-                      {message.provider && message.model ? (
-                        <span>{message.provider} · {message.model}</span>
-                      ) : null}
-                    </div>
-                    <p>{message.content}</p>
-                    {canReadAloud ? (
-                      <div className="assistant-message-meta">
-                        <button
-                          type="button"
-                          className={`assistant-run-link ${readingMessage ? 'is-selected' : ''}`}
-                          aria-pressed={readingMessage}
-                          disabled={!voicePlayback.supported}
-                          title={
-                            voicePlayback.supported
-                              ? readingMessage
-                                ? 'Stop reading this assistant response aloud.'
-                                : 'Read this assistant response aloud.'
-                              : 'Read aloud is not supported in this browser.'
-                          }
-                          onClick={() => {
-                            voiceComposer.cancelListening()
-                            voicePlayback.togglePlayback(message.id, message.content)
-                          }}
-                        >
-                          {resolveVoicePlaybackButtonLabel(readingMessage)}
-                        </button>
+                  <div key={message.id} className="assistant-message-stack">
+                    {showDayDivider ? (
+                      <div className="assistant-message-divider">
+                        <span>{currentDayLabel}</span>
                       </div>
                     ) : null}
-                    {message.usage ? (
-                      <div className="assistant-message-meta">
-                        <span>
-                          Input tokens:{' '}
-                          {message.usage.input_tokens !== null
-                            ? formatTokenCount(message.usage.input_tokens)
-                            : 'n/a'}
-                        </span>
-                        <span>
-                          Output tokens:{' '}
-                          {message.usage.output_tokens !== null
-                            ? formatTokenCount(message.usage.output_tokens)
-                            : 'n/a'}
-                        </span>
-                        {message.runId ? <span>Run #{message.runId}</span> : null}
-                        {message.runId ? (
-                          <button
-                            type="button"
-                            className={`assistant-run-link ${selectedRunId === message.runId ? 'is-selected' : ''}`}
-                            onClick={() => setSelectedRunId(message.runId ?? null)}
-                          >
-                            {selectedRunId === message.runId ? 'Viewing trace' : 'Open trace'}
-                          </button>
+                    <article
+                      className={`assistant-message assistant-message-${message.role}`}
+                    >
+                      <div className="assistant-message-avatar" aria-hidden="true">
+                        {resolveAssistantMessageAvatarLabel(message)}
+                      </div>
+                      <div className="assistant-message-body">
+                        <div className="assistant-message-head">
+                          <div className="assistant-message-head-main">
+                            <strong>{authorLabel}</strong>
+                            {timestampLabel ? <span>{timestampLabel}</span> : null}
+                          </div>
+                          {message.provider && message.model ? (
+                            <span>{message.provider} · {message.model}</span>
+                          ) : null}
+                        </div>
+                        <div className="assistant-message-bubble">
+                          <p>{message.content}</p>
+                        </div>
+                        {canReadAloud ? (
+                          <div className="assistant-message-meta">
+                            <button
+                              type="button"
+                              className={`assistant-run-link ${readingMessage ? 'is-selected' : ''}`}
+                              aria-pressed={readingMessage}
+                              disabled={!voicePlayback.supported}
+                              title={
+                                voicePlayback.supported
+                                  ? readingMessage
+                                    ? 'Stop reading this assistant response aloud.'
+                                    : 'Read this assistant response aloud.'
+                                  : 'Read aloud is not supported in this browser.'
+                              }
+                              onClick={() => {
+                                voiceComposer.cancelListening()
+                                voicePlayback.togglePlayback(message.id, message.content)
+                              }}
+                            >
+                              {resolveVoicePlaybackButtonLabel(readingMessage)}
+                            </button>
+                          </div>
+                        ) : null}
+                        {message.usage ? (
+                          <div className="assistant-message-meta">
+                            <span>
+                              Input tokens:{' '}
+                              {message.usage.input_tokens !== null
+                                ? formatTokenCount(message.usage.input_tokens)
+                                : 'n/a'}
+                            </span>
+                            <span>
+                              Output tokens:{' '}
+                              {message.usage.output_tokens !== null
+                                ? formatTokenCount(message.usage.output_tokens)
+                                : 'n/a'}
+                            </span>
+                            {message.runId ? <span>Run #{message.runId}</span> : null}
+                            {message.runId ? (
+                              <button
+                                type="button"
+                                className={`assistant-run-link ${selectedRunId === message.runId ? 'is-selected' : ''}`}
+                                onClick={() => setSelectedRunId(message.runId ?? null)}
+                              >
+                                {selectedRunId === message.runId ? 'Viewing trace' : 'Open trace'}
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {!message.usage && message.runId ? (
+                          <div className="assistant-message-meta">
+                            <span>Run #{message.runId}</span>
+                            <button
+                              type="button"
+                              className={`assistant-run-link ${selectedRunId === message.runId ? 'is-selected' : ''}`}
+                              onClick={() => setSelectedRunId(message.runId ?? null)}
+                            >
+                              {selectedRunId === message.runId ? 'Viewing trace' : 'Open trace'}
+                            </button>
+                          </div>
+                        ) : null}
+                        <AssistantMessageFeedback
+                          key={`${message.id}-${message.feedback?.updated_at ?? 'new'}`}
+                          message={message}
+                          disabled={!authSession}
+                          inFlight={
+                            Boolean(message.runId) &&
+                            feedbackRunIdsInFlight.includes(message.runId as number)
+                          }
+                          onSubmit={handleAssistantRunFeedback}
+                        />
+                        {message.toolCalls && message.toolCalls.length > 0 ? (
+                          <AssistantToolCallList
+                            toolCalls={message.toolCalls}
+                            callerAgentName={message.agentName}
+                            selectedRunId={selectedRunId}
+                            onOpenRun={setSelectedRunId}
+                          />
+                        ) : null}
+                        {message.actionRequests && message.actionRequests.length > 0 ? (
+                          <AssistantActionRequestList
+                            actionRequests={message.actionRequests}
+                            actionRequestIdsInFlight={actionRequestIdsInFlight}
+                            formatDate={formatTraceTimestamp}
+                            onDecision={handleActionRequestDecision}
+                            onOpenRun={setSelectedRunId}
+                          />
+                        ) : null}
+                        {message.warnings && message.warnings.length > 0 ? (
+                          <div className="assistant-message-meta">
+                            {message.warnings.map((warning) => (
+                              <span key={warning}>{warning}</span>
+                            ))}
+                          </div>
                         ) : null}
                       </div>
-                    ) : null}
-                    {!message.usage && message.runId ? (
-                      <div className="assistant-message-meta">
-                        <span>Run #{message.runId}</span>
-                        <button
-                          type="button"
-                          className={`assistant-run-link ${selectedRunId === message.runId ? 'is-selected' : ''}`}
-                          onClick={() => setSelectedRunId(message.runId ?? null)}
-                        >
-                          {selectedRunId === message.runId ? 'Viewing trace' : 'Open trace'}
-                        </button>
-                      </div>
-                    ) : null}
-                    <AssistantMessageFeedback
-                      key={`${message.id}-${message.feedback?.updated_at ?? 'new'}`}
-                      message={message}
-                      disabled={!authSession}
-                      inFlight={
-                        Boolean(message.runId) &&
-                        feedbackRunIdsInFlight.includes(message.runId as number)
-                      }
-                      onSubmit={handleAssistantRunFeedback}
-                    />
-                    {message.toolCalls && message.toolCalls.length > 0 ? (
-                      <AssistantToolCallList
-                        toolCalls={message.toolCalls}
-                        callerAgentName={message.agentName}
-                        selectedRunId={selectedRunId}
-                        onOpenRun={setSelectedRunId}
-                      />
-                    ) : null}
-                    {message.actionRequests && message.actionRequests.length > 0 ? (
-                      <AssistantActionRequestList
-                        actionRequests={message.actionRequests}
-                        actionRequestIdsInFlight={actionRequestIdsInFlight}
-                        formatDate={formatTraceTimestamp}
-                        onDecision={handleActionRequestDecision}
-                        onOpenRun={setSelectedRunId}
-                      />
-                    ) : null}
-                    {message.warnings && message.warnings.length > 0 ? (
-                      <div className="assistant-message-meta">
-                        {message.warnings.map((warning) => (
-                          <span key={warning}>{warning}</span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </article>
+                    </article>
+                  </div>
                 )
               })
             )}

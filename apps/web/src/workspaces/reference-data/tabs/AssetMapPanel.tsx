@@ -215,10 +215,6 @@ function weatherOverlayPointLayerId(mode: DataBackedWeatherOverlayMode): string 
   return `weather-overlay-${mode}-point-layer`;
 }
 
-function weatherOverlayLabelLayerId(mode: DataBackedWeatherOverlayMode): string {
-  return `weather-overlay-${mode}-label-layer`;
-}
-
 function buildRecordSignature(records: AssetMapRecord[]): string {
   return records
     .map((record) =>
@@ -1192,6 +1188,22 @@ export function AssetMapCanvas({
     setSelectedWeatherLocationCode(null);
     onSelectRailRoute(code);
   });
+  const handleSelectWeatherLocation = useEffectEvent((code: string) => {
+    setSelectedWeatherLocationCode(code);
+
+    const location =
+      activeWeatherLocations.find((candidate) => candidate.code === code) ?? null;
+    const map = mapRef.current;
+    if (!location || !map) {
+      return;
+    }
+
+    map.easeTo({
+      center: [location.longitude, location.latitude],
+      zoom: Math.max(map.getZoom(), 6.5),
+      duration: 500,
+    });
+  });
   const showAssets = controlledShowAssets ?? uncontrolledShowAssets;
   const showRailRoutes =
     controlledShowRailRoutes ?? uncontrolledShowRailRoutes;
@@ -1529,6 +1541,14 @@ export function AssetMapCanvas({
     overlayError: weatherOverlayError,
     overlayPointCounts: weatherOverlayPointCounts,
   });
+  const hasVisibleDataBackedWeatherOverlay = useMemo(
+    () =>
+      trackedWeatherOverlayModes.some(
+        (mode) => (weatherOverlayPointCounts[mode] ?? 0) > 0,
+      ),
+    [trackedWeatherOverlayModes, weatherOverlayPointCounts],
+  );
+  const showWeatherMarkers = showWeather && !hasVisibleDataBackedWeatherOverlay;
 
   useEffect(() => {
     if (
@@ -2421,7 +2441,7 @@ export function AssetMapCanvas({
       markersRef.current.push(marker);
     });
 
-    if (showWeather) {
+    if (showWeatherMarkers) {
       activeWeatherLocations.forEach((location) => {
         const weatherStatus = weatherStatusByCode.get(location.code);
         const markerElement = document.createElement("button");
@@ -2450,12 +2470,7 @@ export function AssetMapCanvas({
           );
         }
         markerElement.addEventListener("click", () => {
-          setSelectedWeatherLocationCode(location.code);
-          map.easeTo({
-            center: [location.longitude, location.latitude],
-            zoom: Math.max(map.getZoom(), 6.5),
-            duration: 500,
-          });
+          handleSelectWeatherLocation(location.code);
         });
 
         const marker = new runtime.Marker({
@@ -2602,6 +2617,7 @@ export function AssetMapCanvas({
     showAssets,
     showRailRoutes,
     showWeather,
+    showWeatherMarkers,
     showTooltips,
     spatialFeatureSignature,
     spatialFeatures,
@@ -2725,7 +2741,6 @@ export function AssetMapCanvas({
       const sourceId = weatherOverlayPointSourceId(mode);
       const glowLayerId = weatherOverlayGlowLayerId(mode);
       const pointLayerId = weatherOverlayPointLayerId(mode);
-      const labelLayerId = weatherOverlayLabelLayerId(mode);
       const colorExpression = getWeatherOverlayColorExpression(mode);
       const opacity = weatherOverlayOpacities[mode];
       const overlayActive =
@@ -2802,29 +2817,6 @@ export function AssetMapCanvas({
         );
       }
 
-      if (!map.getLayer(labelLayerId)) {
-        map.addLayer(
-          {
-            id: labelLayerId,
-            type: "symbol",
-            source: sourceId,
-            layout: {
-              "text-field": ["get", "overlayLabel"],
-              "text-size": 11,
-              "text-offset": [0, 1.25],
-              "text-anchor": "top",
-              "text-allow-overlap": true,
-            },
-            paint: {
-              "text-color": "#13293d",
-              "text-halo-color": "rgba(255, 255, 255, 0.92)",
-              "text-halo-width": 1.15,
-            },
-          },
-          beforeLayerId,
-        );
-      }
-
       map.setPaintProperty(glowLayerId, "circle-color", colorExpression.glowColor);
       map.setPaintProperty(glowLayerId, "circle-opacity", opacity * 0.2);
       map.setPaintProperty(pointLayerId, "circle-color", colorExpression.circleColor);
@@ -2836,12 +2828,10 @@ export function AssetMapCanvas({
 
       setMapLayerVisibility(map, glowLayerId, overlayActive);
       setMapLayerVisibility(map, pointLayerId, overlayActive);
-      setMapLayerVisibility(map, labelLayerId, overlayActive);
     });
 
     const windPointSourceId = weatherOverlayPointSourceId("wind");
     const windPointLayerId = weatherOverlayPointLayerId("wind");
-    const windLabelLayerId = weatherOverlayLabelLayerId("wind");
     const windPointCollection = weatherOverlayPointCollections.wind;
     const windColorExpression = getWeatherOverlayColorExpression("wind");
     const windOpacity = weatherOverlayOpacities.wind;
@@ -2906,29 +2896,6 @@ export function AssetMapCanvas({
       );
     }
 
-    if (!map.getLayer(windLabelLayerId)) {
-      map.addLayer(
-        {
-          id: windLabelLayerId,
-          type: "symbol",
-          source: windPointSourceId,
-          layout: {
-            "text-field": ["get", "overlayLabel"],
-            "text-size": 11,
-            "text-offset": [0, 1.25],
-            "text-anchor": "top",
-            "text-allow-overlap": true,
-          },
-          paint: {
-            "text-color": "#13293d",
-            "text-halo-color": "rgba(255, 255, 255, 0.92)",
-            "text-halo-width": 1.15,
-          },
-        },
-        beforeLayerId,
-      );
-    }
-
     if (!map.getLayer(WEATHER_WIND_VECTOR_LAYER_ID)) {
       map.addLayer(
         {
@@ -2977,7 +2944,6 @@ export function AssetMapCanvas({
     );
 
     setMapLayerVisibility(map, windPointLayerId, windOverlayActive);
-    setMapLayerVisibility(map, windLabelLayerId, windOverlayActive);
     setMapLayerVisibility(
       map,
       WEATHER_WIND_VECTOR_LAYER_ID,
@@ -2991,6 +2957,72 @@ export function AssetMapCanvas({
     weatherOverlayVisibility,
     weatherWindVectorCollection,
   ]);
+
+  useEffect(() => {
+    if (!ready || !mapRef.current) {
+      return;
+    }
+
+    const map = mapRef.current;
+    const layerIds = [
+      ...WEATHER_SCALAR_OVERLAY_MODES.flatMap((mode) => [
+        weatherOverlayPointLayerId(mode),
+      ]),
+      weatherOverlayPointLayerId("wind"),
+      WEATHER_WIND_VECTOR_LAYER_ID,
+    ];
+
+    const handleWeatherOverlayClick = (event: {
+      features?: Array<{
+        properties?: {
+          code?: unknown;
+        };
+      }>;
+    }) => {
+      const selectedFeature = event.features?.find(
+        (feature) => typeof feature.properties?.code === "string",
+      );
+      const weatherLocationCode =
+        typeof selectedFeature?.properties?.code === "string"
+          ? selectedFeature.properties.code
+          : null;
+      if (!weatherLocationCode) {
+        return;
+      }
+
+      handleSelectWeatherLocation(weatherLocationCode);
+    };
+
+    const handleMouseEnter = () => {
+      map.getCanvas().style.cursor = "pointer";
+    };
+    const handleMouseLeave = () => {
+      map.getCanvas().style.cursor = "";
+    };
+
+    layerIds.forEach((layerId) => {
+      if (!map.getLayer(layerId)) {
+        return;
+      }
+
+      map.on("click", layerId, handleWeatherOverlayClick as never);
+      map.on("mouseenter", layerId, handleMouseEnter);
+      map.on("mouseleave", layerId, handleMouseLeave);
+    });
+
+    return () => {
+      layerIds.forEach((layerId) => {
+        if (!map.getLayer(layerId)) {
+          return;
+        }
+
+        map.off("click", layerId, handleWeatherOverlayClick as never);
+        map.off("mouseenter", layerId, handleMouseEnter);
+        map.off("mouseleave", layerId, handleMouseLeave);
+      });
+      map.getCanvas().style.cursor = "";
+    };
+  }, [ready]);
 
   return (
     <div className="asset-map-canvas-shell">
@@ -3243,6 +3275,11 @@ export function AssetMapCanvas({
                   aria-live="polite"
                 >
                   {weatherOverlayError}
+                </p>
+              ) : hasVisibleDataBackedWeatherOverlay ? (
+                <p className="asset-map-weather-overlay-description">
+                  Tracked Wx markers hide while point overlays are active. Click
+                  the weather graphic on the map to open the location preview.
                 </p>
               ) : null}
             </div>

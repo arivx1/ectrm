@@ -9,7 +9,7 @@ import type { StoredAuthSession } from '../../shared/mutation'
 
 type PromptHomeDocumentUploadCardProps = {
   authSession: StoredAuthSession | null
-  onOpenOperationsWorkspace: () => void
+  onOpenLibraryWorkspace: () => void
   onSignIn: () => void
 }
 
@@ -40,7 +40,7 @@ function formatDocumentHistorySummary(args: {
     return 'Loading document history.'
   }
   if (args.documentCount > 0) {
-    return `${formatDocumentCount(args.documentCount)} available in the work queue.`
+    return `${formatDocumentCount(args.documentCount)} available in the library.`
   }
   return 'No uploaded documents yet.'
 }
@@ -61,7 +61,7 @@ function revokeDocumentSourceUrlLater(sourceUrl: string): void {
 
 function PromptHomeDocumentUploadCardContent({
   authSession,
-  onOpenOperationsWorkspace,
+  onOpenLibraryWorkspace,
   onSignIn,
 }: PromptHomeDocumentUploadCardProps) {
   const controller = useDocumentIngestionController({ authSession })
@@ -141,6 +141,7 @@ function PromptHomeDocumentUploadCardContent({
         displayName={controller.displayName}
         processorSettings={controller.processorSettings}
         selectedProcessorProvider={controller.selectedProcessorProvider}
+        selectedProcessorModel={controller.selectedProcessorModel}
         selectedFile={controller.selectedFile}
         schemaRegistry={controller.schemaRegistry}
         uploading={controller.uploading}
@@ -153,6 +154,7 @@ function PromptHomeDocumentUploadCardContent({
         fileInputRef={controller.fileInputRef}
         onDisplayNameChange={controller.setDisplayName}
         onProcessorProviderChange={controller.setSelectedProcessorProvider}
+        onProcessorModelChange={controller.setSelectedProcessorModel}
         onFileChange={controller.updateSelectedFile}
         onOpenFilePicker={controller.openFilePicker}
         onDropzoneKeyDown={controller.handleDropzoneKeyDown}
@@ -171,7 +173,7 @@ function PromptHomeDocumentUploadCardContent({
             <strong>Document history</strong>
             <p>
               {historyExpandedState.expanded
-                ? 'Review the latest uploaded documents here, then move to the work queue for full page-by-page review.'
+                ? 'Review the latest uploaded documents here, then open the library for full preview, search, and page-by-page review.'
                 : historySummary}
             </p>
           </div>
@@ -263,9 +265,9 @@ function PromptHomeDocumentUploadCardContent({
           <button
             type="button"
             className="button button-secondary"
-            onClick={onOpenOperationsWorkspace}
+            onClick={onOpenLibraryWorkspace}
           >
-            Open Work Queue
+            Open Library
           </button>
         </div>
       </div>
@@ -281,7 +283,7 @@ function PromptHomeDocumentUploadCardContent({
 
 export function PromptHomeDocumentUploadCard({
   authSession,
-  onOpenOperationsWorkspace,
+  onOpenLibraryWorkspace,
   onSignIn,
 }: PromptHomeDocumentUploadCardProps) {
   const expandedState = usePersistentCollapsibleCardState(
@@ -323,7 +325,7 @@ export function PromptHomeDocumentUploadCard({
         {expandedState.expanded ? (
           <PromptHomeDocumentUploadCardContent
             authSession={authSession}
-            onOpenOperationsWorkspace={onOpenOperationsWorkspace}
+            onOpenLibraryWorkspace={onOpenLibraryWorkspace}
             onSignIn={onSignIn}
           />
         ) : null}

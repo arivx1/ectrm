@@ -24,6 +24,10 @@ import {
   saveGoogleCalendarScopeGranted,
   saveGoogleCalendarSelection,
 } from '../../entities/calendar/googleCalendarSession'
+import {
+  usePersistentPromptHomeCalendarCardState,
+  type PromptHomeCalendarCardKey,
+} from '../../shared/promptHomeCalendarSettings'
 import { SettingsDisclosureCard } from './SettingsDisclosureCard'
 
 type GoogleCalendarPanelProps = {
@@ -34,6 +38,28 @@ type GoogleCalendarPanelProps = {
 }
 
 type CalendarAction = 'connect' | 'refresh' | 'disconnect' | 'load' | null
+
+const HOME_TIMELINE_OVERLAY_OPTIONS: Array<{
+  key: PromptHomeCalendarCardKey
+  label: string
+  detail: string
+}> = [
+  {
+    key: 'day',
+    label: 'Day card',
+    detail: 'Show Google Calendar markers and agenda items on the day timeline.',
+  },
+  {
+    key: 'week',
+    label: 'Week card',
+    detail: 'Show this week’s Google Calendar items on the week timeline.',
+  },
+  {
+    key: 'month',
+    label: 'Month card',
+    detail: 'Show month-level Google Calendar markers and agenda items.',
+  },
+]
 
 function describeGoogleCalendarOauthError(error: GoogleOAuthErrorResponse): string {
   switch (error.type) {
@@ -70,6 +96,9 @@ export function GoogleCalendarPanel({
   runtimeSettingsError = '',
 }: GoogleCalendarPanelProps) {
   const initialCalendarSession = getGoogleCalendarSessionSnapshot()
+  const dayCalendarOverlayState = usePersistentPromptHomeCalendarCardState('day', true)
+  const weekCalendarOverlayState = usePersistentPromptHomeCalendarCardState('week', true)
+  const monthCalendarOverlayState = usePersistentPromptHomeCalendarCardState('month', true)
   const configuredClientId = googleClientId?.trim() ?? ''
   const [oauthReady, setOauthReady] = useState(false)
   const [oauthError, setOauthError] = useState('')
@@ -90,6 +119,14 @@ export function GoogleCalendarPanel({
   const calendarConfigured = Boolean(configuredClientId)
   const calendarConnected = Boolean(accessToken || events.length > 0 || calendars.length > 0)
   const currentCalendar = calendars.find((calendar) => calendar.id === selectedCalendarId) ?? null
+  const homeTimelineOverlayStates = {
+    day: dayCalendarOverlayState,
+    week: weekCalendarOverlayState,
+    month: monthCalendarOverlayState,
+  } as const
+  const enabledHomeTimelineOverlayCount = HOME_TIMELINE_OVERLAY_OPTIONS.filter(
+    (option) => homeTimelineOverlayStates[option.key].enabled,
+  ).length
 
   useEffect(() => {
     setOauthReady(false)
@@ -516,6 +553,44 @@ export function GoogleCalendarPanel({
           )}
         </div>
       )}
+
+      <div className="google-calendar-overlay-settings">
+        <div className="settings-summary-grid">
+          <article className="settings-summary-card">
+            <span>Home overlays</span>
+            <strong>{enabledHomeTimelineOverlayCount} of 3 enabled</strong>
+            <p>
+              Choose which Home timeline cards can show Google Calendar markers
+              and agenda items when a calendar is connected.
+            </p>
+          </article>
+        </div>
+
+        <div className="google-calendar-overlay-option-list">
+          {HOME_TIMELINE_OVERLAY_OPTIONS.map((option) => {
+            const overlayState = homeTimelineOverlayStates[option.key]
+
+            return (
+              <label key={option.key} className="google-calendar-overlay-option">
+                <input
+                  type="checkbox"
+                  checked={overlayState.enabled}
+                  aria-label={`Show Google Calendar on the Home ${option.label.toLowerCase()}`}
+                  onChange={(event) => overlayState.setEnabled(event.target.checked)}
+                />
+                <div className="google-calendar-overlay-option-copy">
+                  <strong>{option.label}</strong>
+                  <span>{option.detail}</span>
+                </div>
+              </label>
+            )
+          })}
+        </div>
+
+        <p className="form-note">
+          These preferences stay in this browser and update Home right away.
+        </p>
+      </div>
     </SettingsDisclosureCard>
   )
 }

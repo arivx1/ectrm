@@ -611,13 +611,20 @@ test("prompt home verbalize auto-reads assistant replies only when enabled", asy
     await operatorPrompt.fill("Where should I handle the invoice settlement item?");
     await page.getByRole("button", { name: "Send Prompt" }).click();
     await expect(
-      page.locator(".assistant-message-assistant").first(),
+      page.locator(".assistant-message-assistant").filter({
+        hasText: "Settlement is the right place to continue",
+      }),
     ).toContainText("Settlement is the right place to continue");
     await expect
       .poll(async () => (await readPromptHomeSpeechLog(page)).at(-1) ?? null)
       .toBe(
         "Settlement is the right place to continue because the open item is invoice and payment follow-through.",
       );
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("checkbox", { name: "Verbalize" }),
+    ).not.toBeChecked();
 
     assertNoHarnessRequestFailures(harness);
   } finally {
@@ -715,6 +722,12 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
       weatherOverlayControls.getByRole("checkbox", {
         name: "Precipitation",
       });
+    const temperatureOverlayToggle = weatherOverlayControls.getByRole(
+      "checkbox",
+      {
+        name: "Temperature",
+      },
+    );
     const weatherMarkerTooltip = page
       .locator(".asset-map-weather-marker")
       .nth(1)
@@ -812,6 +825,8 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(radarOverlayToggle).not.toBeChecked();
     await expect(precipitationOverlayToggle).toBeVisible();
     await expect(precipitationOverlayToggle).not.toBeChecked();
+    await expect(temperatureOverlayToggle).toBeVisible();
+    await expect(temperatureOverlayToggle).not.toBeChecked();
     await expect(page.getByText("Asset Types")).toBeVisible();
     await expect(
       assetTypeControls.getByRole("button", { name: "Uncheck all" }),
@@ -836,6 +851,11 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(
       page.locator(".asset-map-weather-marker").first(),
     ).toContainText("Wx");
+    const firstWeatherMarkerBox = await page
+      .locator(".asset-map-weather-marker")
+      .first()
+      .boundingBox();
+    expect(firstWeatherMarkerBox).not.toBeNull();
     await expectMarkersInsideFrame(
       page,
       mapFrameSelector,
@@ -936,6 +956,33 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(
       page.getByRole("checkbox", { name: "Pipeline" }),
     ).toBeChecked();
+    await temperatureOverlayToggle.check();
+    await expect(page.locator(".asset-map-weather-marker")).toHaveCount(0);
+    await expect(weatherOverlayControls).toContainText(
+      "Tracked Wx markers hide while point overlays are active. Click the weather graphic on the map to open the location preview.",
+    );
+    if (firstWeatherMarkerBox) {
+      const mapFrameBox = await page.locator(mapFrameSelector).boundingBox();
+      expect(mapFrameBox).not.toBeNull();
+      if (mapFrameBox) {
+        await page.locator(mapFrameSelector).click({
+          position: {
+            x:
+              firstWeatherMarkerBox.x +
+              firstWeatherMarkerBox.width / 2 -
+              mapFrameBox.x,
+            y:
+              firstWeatherMarkerBox.y +
+              firstWeatherMarkerBox.height / 2 -
+              mapFrameBox.y,
+          },
+        });
+      }
+    }
+    await expect(weatherPreview).toContainText("HOUSTON_GC");
+    await expect(weatherPreview).toContainText("Latest obs:");
+    await temperatureOverlayToggle.uncheck();
+    await expect(page.locator(".asset-map-weather-marker")).toHaveCount(2);
     await geographyControls
       .getByRole("button", { name: "Uncheck all" })
       .click();

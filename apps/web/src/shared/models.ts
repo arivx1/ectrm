@@ -811,6 +811,7 @@ export type DocumentProcessorProviderStatusRecord = {
   configured: boolean
   is_default: boolean
   default_model: string
+  available_models?: string[]
   base_url: string
   setup_env_var: string
 }
@@ -3654,7 +3655,9 @@ export type ViewKey =
   | 'scheduling'
   | 'operations'
   | 'settlement'
+  | 'messages'
   | 'reports'
+  | 'library'
   | 'map'
   | 'reference'
   | 'admin'

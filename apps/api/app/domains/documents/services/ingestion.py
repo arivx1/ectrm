@@ -33,6 +33,10 @@ from .document_ingestion_analysis import build_page_warnings
 from .document_ingestion_analysis import classify_document_page
 from .document_ingestion_analysis import extract_document_header_fields
 from .document_ingestion_analysis import extract_document_table_blocks
+from .document_classification_learning import apply_learned_classification_override
+from .document_classification_learning import initialize_page_classification_payload
+from .document_classification_learning import record_page_classification_correction
+from .document_classification_learning import update_system_classification_payload
 from .document_ingestion_analysis import extract_page_text as _extract_page_text
 from .document_ingestion_common import CLASSIFIER_VERSION
 from .document_ingestion_common import DOCUMENT_PROCESSOR_ACTOR_ID
@@ -128,6 +132,7 @@ def ingest_pdf_document(
     payload: bytes,
     display_name: str | None = None,
     processor_provider: DocumentProcessorSelection | None = None,
+    processor_model: str | None = None,
 ) -> DocumentIngestionOut:
     if not payload:
         raise ValueError("The uploaded PDF was empty")
@@ -138,7 +143,10 @@ def ingest_pdf_document(
     normalized_filename = normalize_filename(filename)
     normalized_display_name = normalize_display_name(display_name, normalized_filename)
     normalized_content_type = (content_type or "application/pdf").strip() or "application/pdf"
-    resolved_processor_provider, resolved_processor_model = resolve_requested_document_processor(processor_provider)
+    resolved_processor_provider, resolved_processor_model = resolve_requested_document_processor(
+        processor_provider,
+        processor_model,
+    )
     if normalized_content_type.lower() != "application/pdf" and not normalized_filename.lower().endswith(".pdf"):
         raise ValueError("Only PDF uploads are supported")
     if not payload.lstrip().startswith(b"%PDF-"):
@@ -296,6 +304,12 @@ def process_document_ingestion(
                 pages=pages,
                 outcome=processor_outcome,
             )
+        for page in pages:
+            apply_learned_classification_override(
+                db,
+                page=page,
+                filename=document.original_filename,
+            )
         if processor_warnings:
             _apply_document_processor_warnings(
                 pages=pages,
@@ -329,12 +343,23 @@ def reprocess_document_ingestion(
     document_id: str,
     actor_id: str,
     processor_provider: DocumentProcessorSelection | None = None,
+    processor_model: str | None = None,
     processor_provider_specified: bool = False,
+    processor_model_specified: bool = False,
 ) -> DocumentIngestionOut:
     document, pages = load_document_and_pages(db, document_id=document_id)
     now = datetime.now(timezone.utc)
-    if processor_provider_specified:
-        resolved_processor_provider, resolved_processor_model = resolve_requested_document_processor(processor_provider)
+    if processor_provider_specified or processor_model_specified:
+        requested_provider = processor_provider if processor_provider_specified else document.processor_provider
+        requested_model = (
+            processor_model
+            if processor_model_specified
+            else (None if processor_provider_specified else document.processor_model)
+        )
+        resolved_processor_provider, resolved_processor_model = resolve_requested_document_processor(
+            requested_provider,
+            requested_model,
+        )
         document.processor_provider = resolved_processor_provider
         document.processor_model = resolved_processor_model
     document.status = "UPLOADED"
@@ -406,7 +431,16 @@ def _apply_document_processor_outcome(
         classification_payload["processor_overrode_heuristics"] = overrode_heuristics
         classification_payload["processor_partial"] = result.partial
         classification_payload["processor_warnings"] = list(result.warnings or [])
-        page.classification_payload = classification_payload
+        page.classification_payload = update_system_classification_payload(
+            classification_payload,
+            document_kind=page.document_kind,
+            document_subtype=page.document_subtype,
+            confidence=page.classification_confidence,
+            matched_by=f"processor:{outcome.provider}",
+            source="processor",
+            provider=outcome.provider,
+            model=outcome.model,
+        )
         if result.warnings:
             page.processing_warnings = _dedupe_preserving_order(
                 [*list(page.processing_warnings or []), *result.warnings]
@@ -531,6 +565,7 @@ def update_document_ingestion_page(
 
     now = datetime.now(timezone.utc)
     previous_document_kind = page.document_kind
+    previous_document_subtype = page.document_subtype
     next_document_kind = str(changes.get("document_kind", page.document_kind)).upper()
     if next_document_kind not in list_supported_document_kinds():
         raise ValueError(f"Document kind '{next_document_kind}' is not supported")
@@ -541,12 +576,6 @@ def update_document_ingestion_page(
     if "document_kind" in changes:
         page.document_kind = next_document_kind
         page.classification_confidence = 1.0
-        classification_payload = dict(page.classification_payload or {})
-        classification_payload["review_override"] = True
-        classification_payload["review_override_by"] = actor_id
-        classification_payload["review_override_at"] = now.isoformat()
-        classification_payload["previous_document_kind"] = previous_document_kind
-        page.classification_payload = classification_payload
 
     if "header_fields" in changes:
         page.header_fields = normalize_header_fields(changes.get("header_fields") or [], document_kind=page.document_kind)
@@ -575,6 +604,13 @@ def update_document_ingestion_page(
             page.reviewed_at = None
             page.reviewed_by = None
 
+    record_page_classification_correction(
+        page,
+        actor_id=actor_id,
+        changed_at=now,
+        previous_document_kind=previous_document_kind,
+        previous_document_subtype=previous_document_subtype,
+    )
     page.updated_at = now
 
     document.review_status = derive_document_review_status_after_page_change(document.review_status, pages)
@@ -647,13 +683,17 @@ def _populate_page_analysis(
     page_record.document_kind = classification.document_kind
     page_record.document_subtype = classification.document_subtype
     page_record.classification_confidence = classification.confidence
-    page_record.classification_payload = {
-        "matched_by": classification.matched_by,
-        "filename": filename,
-        "preview_generated": preview_generated,
-        "text_source": text_source,
-        "ocr_used": text_source == "ocr",
-    }
+    page_record.classification_payload = initialize_page_classification_payload(
+        filename=filename,
+        raw_text=raw_text,
+        matched_by=classification.matched_by,
+        preview_generated=preview_generated,
+        text_source=text_source,
+        document_kind=classification.document_kind,
+        document_subtype=classification.document_subtype,
+        confidence=classification.confidence,
+        source="heuristic",
+    )
     page_record.header_fields = header_fields
     page_record.table_blocks = table_blocks
     page_record.raw_text = raw_text

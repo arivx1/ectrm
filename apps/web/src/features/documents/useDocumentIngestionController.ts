@@ -54,11 +54,53 @@ import { useDocumentPagePreviewCache } from './useDocumentPagePreviewCache'
 
 type DocumentDraftUpdater = (document: DocumentIngestionRecord) => DocumentIngestionRecord
 type PageDraftUpdater = (page: DocumentIngestionPageRecord) => DocumentIngestionPageRecord
+type DocumentProcessorSelectionValue = 'builtin' | 'openai' | 'anthropic' | 'google' | ''
+
+function resolveProcessorModelOptions(
+  settings: DocumentProcessorRuntimeSettingsRecord | null,
+  provider: DocumentProcessorSelectionValue,
+): string[] {
+  if (!settings || provider === '' || provider === 'builtin') {
+    return []
+  }
+
+  const configuredProvider = settings.providers.find(
+    (candidate) => candidate.provider === provider,
+  )
+  if (!configuredProvider) {
+    return []
+  }
+
+  const modelOptions = configuredProvider.available_models ?? []
+  if (modelOptions.length > 0) {
+    return modelOptions
+  }
+
+  return configuredProvider.default_model ? [configuredProvider.default_model] : []
+}
+
+function isSelectableProcessorProvider(
+  settings: DocumentProcessorRuntimeSettingsRecord | null,
+  provider: DocumentProcessorSelectionValue,
+): boolean {
+  if (provider === '' || provider === 'builtin') {
+    return true
+  }
+
+  return settings?.providers.some((candidate) => candidate.provider === provider && candidate.configured) ?? false
+}
+
+function resolveDefaultProcessorModel(
+  settings: DocumentProcessorRuntimeSettingsRecord | null,
+  provider: DocumentProcessorSelectionValue,
+): string {
+  return resolveProcessorModelOptions(settings, provider)[0] ?? ''
+}
 
 export type DocumentIngestionController = {
   documents: DocumentIngestionRecord[]
   processorSettings: DocumentProcessorRuntimeSettingsRecord | null
-  reprocessProviderByDocument: Record<string, 'builtin' | 'openai' | 'anthropic' | 'google' | ''>
+  reprocessProviderByDocument: Record<string, DocumentProcessorSelectionValue>
   schemaRegistry: DocumentSchemaRegistryRecord | null
   schemaByKind: Record<string, DocumentKindSchemaRecord>
   loading: boolean
@@ -78,9 +120,12 @@ export type DocumentIngestionController = {
   selectedGmailMessageLoading: boolean
   selectedGmailMessageError: string
   displayName: string
-  selectedProcessorProvider: 'builtin' | 'openai' | 'anthropic' | 'google' | ''
+  selectedProcessorProvider: DocumentProcessorSelectionValue
+  selectedProcessorModel: string
   selectedFile: File | null
   isDragActive: boolean
+  lastUploadedDocumentId: string | null
+  lastImportedDocumentIds: string[]
   expandedDocumentIds: Record<string, boolean>
   savingTarget: string | null
   saveErrors: Record<string, string>
@@ -89,8 +134,9 @@ export type DocumentIngestionController = {
   pagePreviewErrors: Record<number, string>
   fileInputRef: MutableRefObject<HTMLInputElement | null>
   setDisplayName: (value: string) => void
-  setSelectedProcessorProvider: (value: 'builtin' | 'openai' | 'anthropic' | 'google' | '') => void
-  setDocumentReprocessProvider: (documentId: string, value: 'builtin' | 'openai' | 'anthropic' | 'google' | '') => void
+  setSelectedProcessorProvider: (value: DocumentProcessorSelectionValue) => void
+  setSelectedProcessorModel: (value: string) => void
+  setDocumentReprocessProvider: (documentId: string, value: DocumentProcessorSelectionValue) => void
   toggleDocumentExpanded: (documentId: string) => void
   updateSelectedFile: (file: File | null) => void
   openFilePicker: () => void
@@ -158,13 +204,18 @@ export function useDocumentIngestionController({
   const [selectedGmailMessageLoading, setSelectedGmailMessageLoading] = useState(false)
   const [selectedGmailMessageError, setSelectedGmailMessageError] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [selectedProcessorProvider, setSelectedProcessorProvider] = useState<'builtin' | 'openai' | 'anthropic' | 'google' | ''>('')
+  const [selectedProcessorProviderState, setSelectedProcessorProviderState] =
+    useState<DocumentProcessorSelectionValue>('')
+  const [selectedProcessorModel, setSelectedProcessorModelState] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isDragActive, setIsDragActive] = useState(false)
+  const [lastUploadedDocumentId, setLastUploadedDocumentId] = useState<string | null>(null)
+  const [lastImportedDocumentIds, setLastImportedDocumentIds] = useState<string[]>([])
   const [savingTarget, setSavingTarget] = useState<string | null>(null)
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({})
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const dragDepthRef = useRef(0)
+  const selectedProcessorProvider = selectedProcessorProviderState
 
   function documentExpansionCardKey(documentId: string): string {
     return `document-ingestion.review.${documentId}`
@@ -310,9 +361,12 @@ export function useDocumentIngestionController({
       setSavingTarget(null)
       setSaveErrors({})
       setDisplayName('')
-      setSelectedProcessorProvider('')
+      setSelectedProcessorProviderState('')
+      setSelectedProcessorModelState('')
       setSelectedFile(null)
       setIsDragActive(false)
+      setLastUploadedDocumentId(null)
+      setLastImportedDocumentIds([])
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
@@ -390,7 +444,7 @@ export function useDocumentIngestionController({
               ]),
             ),
           }))
-          setSelectedProcessorProvider((current) => {
+          setSelectedProcessorProviderState((current) => {
             const configuredProviders = new Set(
               nextProcessorSettings.providers.filter((provider) => provider.configured).map((provider) => provider.provider),
             )
@@ -459,6 +513,27 @@ export function useDocumentIngestionController({
     }
   }, [authSession, hasProcessingDocuments])
 
+  useEffect(() => {
+    if (selectedProcessorProvider === '' || selectedProcessorProvider === 'builtin') {
+      if (selectedProcessorModel) {
+        setSelectedProcessorModelState('')
+      }
+      return
+    }
+
+    const modelOptions = resolveProcessorModelOptions(processorSettings, selectedProcessorProvider)
+    if (modelOptions.length === 0) {
+      if (selectedProcessorModel) {
+        setSelectedProcessorModelState('')
+      }
+      return
+    }
+
+    if (!selectedProcessorModel || !modelOptions.includes(selectedProcessorModel)) {
+      setSelectedProcessorModelState(modelOptions[0] ?? '')
+    }
+  }, [processorSettings, selectedProcessorModel, selectedProcessorProvider])
+
   function replaceDocument(nextDocument: DocumentIngestionRecord) {
     setReprocessProviderByDocument((current) => {
       if (!(nextDocument.document_id in current)) {
@@ -477,6 +552,25 @@ export function useDocumentIngestionController({
       nextDocuments[index] = nextDocument
       return nextDocuments
     })
+  }
+
+  function setSelectedProcessorProvider(value: DocumentProcessorSelectionValue) {
+    const nextValue = isSelectableProcessorProvider(processorSettings, value) ? value : 'builtin'
+    setSelectedProcessorProviderState(nextValue)
+    setSelectedProcessorModelState((current) => {
+      if (nextValue === '' || nextValue === 'builtin') {
+        return ''
+      }
+      const modelOptions = resolveProcessorModelOptions(processorSettings, nextValue)
+      if (current && modelOptions.includes(current)) {
+        return current
+      }
+      return resolveDefaultProcessorModel(processorSettings, nextValue)
+    })
+  }
+
+  function setSelectedProcessorModel(value: string) {
+    setSelectedProcessorModelState(value)
   }
 
   function updateDocumentDraft(documentId: string, updater: DocumentDraftUpdater) {
@@ -624,6 +718,7 @@ export function useDocumentIngestionController({
 
     setUploading(true)
     setUploadError('')
+    setLastUploadedDocumentId(null)
     try {
       const uploaded = await uploadPdfDocument(
         appConfig.apiBase,
@@ -631,6 +726,7 @@ export function useDocumentIngestionController({
         selectedFile,
         displayName,
         selectedProcessorProvider || null,
+        selectedProcessorProvider === 'builtin' ? null : selectedProcessorModel || null,
       )
       replaceDocument(uploaded)
       setExpandedDocumentIds((current) => ({ ...current, [uploaded.document_id]: true }))
@@ -640,6 +736,7 @@ export function useDocumentIngestionController({
         fileInputRef.current.value = ''
       }
       formElement.reset()
+      setLastUploadedDocumentId(uploaded.document_id)
     } catch (error) {
       if (error instanceof ApiError || error instanceof Error) {
         setUploadError(error.message)
@@ -660,10 +757,14 @@ export function useDocumentIngestionController({
     setGmailImporting(true)
     setGmailImportError('')
     setGmailImportSummary('')
+    setLastImportedDocumentIds([])
     try {
       const result = await importGmailInboxDocuments(appConfig.apiBase, authSession)
       const refreshedDocuments = await listDocumentIngestions(appConfig.apiBase, authSession)
       setDocuments(refreshedDocuments)
+      setLastImportedDocumentIds(
+        result.imported_documents.map((document) => document.document_id),
+      )
       if (result.imported_documents.length > 0) {
         setExpandedDocumentIds((current) => ({
           ...current,
@@ -1113,8 +1214,11 @@ export function useDocumentIngestionController({
     selectedGmailMessageError,
     displayName,
     selectedProcessorProvider,
+    selectedProcessorModel,
     selectedFile,
     isDragActive,
+    lastUploadedDocumentId,
+    lastImportedDocumentIds,
     expandedDocumentIds,
     savingTarget,
     saveErrors,
@@ -1124,6 +1228,7 @@ export function useDocumentIngestionController({
     fileInputRef,
     setDisplayName,
     setSelectedProcessorProvider,
+    setSelectedProcessorModel,
     setDocumentReprocessProvider,
     toggleDocumentExpanded,
     updateSelectedFile,

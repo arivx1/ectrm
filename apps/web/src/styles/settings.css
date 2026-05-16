@@ -184,6 +184,48 @@
   gap: 1rem;
 }
 
+.google-calendar-overlay-settings {
+  display: grid;
+  gap: 1rem;
+}
+
+.google-calendar-overlay-option-list {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.google-calendar-overlay-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  background: rgba(248, 250, 249, 0.92);
+  cursor: pointer;
+}
+
+.google-calendar-overlay-option input {
+  margin: 0.15rem 0 0;
+  accent-color: rgb(var(--theme-highlight-rgb, 78 167 255));
+}
+
+.google-calendar-overlay-option-copy {
+  display: grid;
+  gap: 0.24rem;
+}
+
+.google-calendar-overlay-option-copy strong {
+  color: #13293d;
+}
+
+.google-calendar-overlay-option-copy span {
+  color: #5c6975;
+  line-height: 1.5;
+}
+
 .settings-custom-events-panel,
 .settings-custom-events-form {
   display: grid;
@@ -282,6 +324,10 @@
   }
 
   .google-calendar-filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .google-calendar-overlay-option-list {
     grid-template-columns: minmax(0, 1fr);
   }
 

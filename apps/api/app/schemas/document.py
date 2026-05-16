@@ -213,6 +213,7 @@ class DocumentProcessorProviderStatusOut(BaseModel):
     configured: bool
     is_default: bool
     default_model: str
+    available_models: list[str] = Field(default_factory=list)
     base_url: str
     setup_env_var: str
 
@@ -534,3 +535,9 @@ class DocumentIngestionUpdate(BaseModel):
 
 class DocumentIngestionProcessRequest(BaseModel):
     processor_provider: Optional[DocumentProcessorSelection] = None
+    processor_model: Optional[str] = Field(default=None, max_length=160)
+
+    @field_validator("processor_model")
+    @classmethod
+    def normalize_processor_model(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="processor_model")

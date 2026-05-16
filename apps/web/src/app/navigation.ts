@@ -113,13 +113,25 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
     key: 'intelligence',
     label: 'Analysis',
     kicker: 'Understand',
-    heroTitle: 'Reports, maps, reference data, and desk support',
+    heroTitle: 'Messaging, documents, reports, maps, and desk support',
     heroBody:
-      'Jump between reporting, spatial context, reference data, and the assistant when you need answers faster than raw tables can give them.',
+      'Jump between messaging, uploaded documents, reporting, spatial context, reference data, and the assistant when you need answers faster than raw tables can give them.',
     landingBody:
-      'Use this section for analyst-style work: map review, reporting, desk reference maintenance, and grounded AI assistance.',
-    viewKeys: ['reports', 'map', 'reference', 'assistant'],
+      'Use this section for analyst-style work: inbox review, document inspection, map analysis, reporting, desk reference maintenance, and grounded AI assistance.',
+    viewKeys: ['messages', 'library', 'reports', 'map', 'reference', 'assistant'],
     startPaths: [
+      {
+        title: 'Review messages',
+        detail: 'Open the unified messaging view when the work starts with inbox follow-up across desk messages, queue digests, and system notices.',
+        viewKey: 'messages',
+        actionLabel: 'Open Messages',
+      },
+      {
+        title: 'Browse uploaded files',
+        detail: 'Open the document library when the work starts with a PDF, confirmation packet, invoice, or other file that has already been uploaded.',
+        viewKey: 'library',
+        actionLabel: 'Open Library',
+      },
       {
         title: 'Review physical footprint',
         detail: 'Open the dedicated map workspace to inspect map-ready assets, shared routes, and governed regions without entering maintenance mode.',
