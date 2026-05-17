@@ -15,6 +15,64 @@ The backend `documents/schema-registry` contract now carries that taxonomy in a
 machine-readable shape so the parser, review UI, and future matching workflows
 can all reference the same source of truth.
 
+## Hybrid Taxonomy Model
+
+The taxonomy uses a shallow primary document family plus controlled facets.
+Do not use a deep tree as the main source of truth for commodity documents:
+the same document can combine settlement, logistics, legal, accounting, and
+workflow dimensions. For example, a freight invoice can be payable, final,
+vendor-issued, disputed, tied to a shipment, and part of a letter-of-credit
+presentation pack. Those dimensions should not become one hard-coded type such
+as `FINAL_VENDOR_FREIGHT_SHIPMENT_INVOICE`.
+
+Use these concepts separately:
+
+1. Document kind: what the document is, such as `INVOICE` or
+   `BILL_OF_LADING`.
+2. Document role: why it matters to the workflow, such as billing evidence,
+   settlement support, title evidence, quality result, or compliance support.
+3. Controlled facets: typed properties that can combine, such as transport
+   mode, invoice stage, accounting direction, economic purpose, dispute state,
+   legal status, or original/copy status.
+4. Business links: the durable platform objects the document relates to, such
+   as trade, delivery, invoice, payment, settlement, inventory lot, LC, claim,
+   or workflow item.
+
+Create a new document kind only when the distinction changes behavior:
+
+- different extraction schema
+- different matching or reconciliation workflow
+- different legal or operational role
+- different downstream record creation or update path
+- materially different review or approval path
+
+Do not create a new kind merely because a value is filterable. `AP` versus
+`AR`, provisional versus final, truck versus vessel, original versus copy,
+freight versus commodity, and disputed versus not disputed are controlled
+facets unless they cross one of the behavior thresholds above.
+
+`UNKNOWN` is a classification status for pages that are not yet confidently
+classified. `OTHER` is a fallback bucket for documents that do not fit a
+supported schema yet; it should keep the document reviewable and should prompt
+taxonomy expansion when examples repeat.
+
+The schema registry exposes the first controlled facet definitions directly on
+the relevant document-kind contracts:
+
+- `INVOICE`: economic purpose, invoice stage, accounting direction, source
+  party role, dispute state, and line charge type.
+- `BILL_OF_LADING`: transport mode, legal role, cargo status, and
+  original/copy status.
+- movement evidence such as truck tickets, railcar tickets, dispatch notices,
+  delivery confirmations, notices of readiness, and weigh tickets: transport
+  mode and quantity basis.
+- quality documents: quality document role.
+
+Future persisted document-facet values should be typed rows with confidence,
+source, and review provenance. Loose tags may remain useful for search and
+human notes, but deterministic routing, matching, policy, and action planning
+should use controlled fields.
+
 ## Current Record Anchors
 
 Today the platform already has durable anchors for these document families:
@@ -44,6 +102,11 @@ trades.
 | Quality | Quality statement, sampling analysis, certificate of analysis, quality specification | `DeliveryObligation` or `Trade` | These documents govern delivered quality, disputes, and trade-specific quality tolerances. |
 | Compliance | Hazardous cargo documentation | `DeliveryObligation` | These are movement attachments and should behave like compliance evidence, not commercial records. |
 | Settlement | Invoice, settlement statement | `Trade`, `TradeInvoice`, `TradePayment` | These documents close the loop from delivery into money. |
+
+These groupings are for operator navigation and routing defaults. They are not
+a permission to add word-similarity parents such as a generic `Statement`
+family: broker statements, pipeline statements, storage statements, quality
+statements, and settlement statements belong to different workflows.
 
 ## Matching Worldview
 
@@ -93,6 +156,10 @@ Two routing rules matter early:
 | `HAZARDOUS_CARGO_DOCUMENTATION` | `DeliveryObligation` | Preserve compliance and handling evidence without creating new commercial state. |
 | `INVOICE` | `Trade`, then `TradeInvoice` | Match the commercial obligation first, then create the invoice record. |
 | `SETTLEMENT_STATEMENT` | `TradePayment` or `TradeInvoice` | Reconcile payments, balances, and invoice settlements across one or more trades. |
+
+Invoice economic purpose should remain a facet or line-item charge
+classification because one invoice can contain commodity, freight, inspection,
+tax, storage, demurrage, and service lines at once.
 
 ## Open Questions
 

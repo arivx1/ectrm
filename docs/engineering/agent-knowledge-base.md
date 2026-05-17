@@ -83,6 +83,39 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-17 - Document Taxonomy Uses Families Plus Controlled Facets
+
+- Type: algorithm-added
+- Domain: document ingestion, document taxonomy, deterministic classification,
+  and Library review
+- Applies to: `documents/schema-registry`, document-kind selection,
+  invoice/BOL classification, future facet persistence, and document routing
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/schema_registry.py`,
+  `apps/api/app/schemas/document.py`, and
+  `docs/engineering/document-taxonomy-trading-shipping.md`
+- Lesson: document kinds should stay shallow and behavior-driven while typed
+  facets carry combinable dimensions such as invoice economic purpose, invoice
+  stage, AP/AR direction, source party role, dispute state, line charge type,
+  BOL transport mode, legal role, cargo status, and original/copy status.
+  `UNKNOWN` remains a classification state and `OTHER` remains a review-needed
+  fallback, not normal taxonomy destinations.
+- Deterministic opportunity: when a recurring document distinction appears,
+  first decide whether it changes extraction schema, matching/reconciliation,
+  legal or operational role, downstream record mutation, or approval workflow.
+  If not, add or reuse a controlled facet value instead of creating another
+  document kind. Persisted facet values should eventually carry confidence,
+  source, and review provenance.
+- Agent autonomy impact: agents may suggest document kinds and facet values,
+  but deterministic routing, matching, and action planning should rely on the
+  typed schema registry and future reviewed facet rows rather than freeform
+  tags or prompt-only subtype names.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_schema_registry_exposes_supported_document_contracts`
+- Follow-up: add a persisted `DocumentFacet`/logical-document model when the
+  review UI is ready to capture actual facet values per page or packet.
+
 ### 2026-05-17 - Truck Tracking Exceptions Are Deterministic Read Models First
 
 - Type: algorithm-added

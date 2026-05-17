@@ -286,6 +286,7 @@ function buildSchema(): DocumentKindSchemaRecord {
     linkage_summary: 'Link to invoice and trade records.',
     record_targets: [],
     matching_keys: ['invoice_number'],
+    facets: [],
     header_fields: [],
     table_templates: [],
   }

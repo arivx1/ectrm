@@ -617,6 +617,22 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertTrue(any(field["field_key"] == "invoice_number" for field in kinds["INVOICE"]["header_fields"]))
         self.assertTrue(any(field["field_key"] == "letter_of_credit_number" for field in kinds["LETTER_OF_CREDIT"]["header_fields"]))
         self.assertTrue(any(template["template_key"] == "line_items" for template in kinds["INVOICE"]["table_templates"]))
+        invoice_facets = {facet["facet_key"]: facet for facet in kinds["INVOICE"]["facets"]}
+        self.assertIn("economic_purpose", invoice_facets)
+        self.assertIn("invoice_stage", invoice_facets)
+        self.assertIn("accounting_direction", invoice_facets)
+        self.assertIn("line_charge_type", invoice_facets)
+        self.assertEqual(invoice_facets["line_charge_type"]["value_type"], "multi_select")
+        self.assertTrue(
+            any(value["code"] == "freight" for value in invoice_facets["economic_purpose"]["allowed_values"])
+        )
+        bill_of_lading_facets = {facet["facet_key"]: facet for facet in kinds["BILL_OF_LADING"]["facets"]}
+        self.assertIn("transport_mode", bill_of_lading_facets)
+        self.assertIn("legal_role", bill_of_lading_facets)
+        self.assertTrue(
+            any(value["code"] == "vessel" for value in bill_of_lading_facets["transport_mode"]["allowed_values"])
+        )
+        self.assertEqual(kinds["UNKNOWN"]["facets"], [])
         self.assertEqual(kinds["TRADE_CONFIRMATION"]["document_family"], "TRADE_EXECUTION")
         self.assertEqual(kinds["DEAL_RECAP"]["document_family"], "TRADE_EXECUTION")
         self.assertIn("trade_id", kinds["TRADE_CONFIRMATION"]["matching_keys"])

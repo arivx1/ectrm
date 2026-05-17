@@ -1106,6 +1106,22 @@ export type DocumentRecordTargetRecord = {
   create_if_missing: boolean
 }
 
+export type DocumentFacetValueRecord = {
+  code: string
+  label: string
+  description: string | null
+}
+
+export type DocumentFacetSchemaRecord = {
+  facet_key: string
+  label: string
+  description: string | null
+  value_type: string
+  repeatable: boolean
+  required: boolean
+  allowed_values: DocumentFacetValueRecord[]
+}
+
 export type DocumentKindSchemaRecord = {
   document_kind: string
   label: string
@@ -1115,6 +1131,7 @@ export type DocumentKindSchemaRecord = {
   linkage_summary: string
   record_targets: DocumentRecordTargetRecord[]
   matching_keys: string[]
+  facets: DocumentFacetSchemaRecord[]
   header_fields: DocumentFieldSchemaRecord[]
   table_templates: DocumentTableTemplateSchemaRecord[]
 }

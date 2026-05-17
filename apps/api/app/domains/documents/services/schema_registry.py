@@ -1327,10 +1327,42 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
 )
 
 
+def _controlled_facets_for_kind(document_kind: str) -> tuple[DocumentFacetSchemaOut, ...]:
+    if document_kind == "INVOICE":
+        return INVOICE_CONTROLLED_FACETS
+    if document_kind == "BILL_OF_LADING":
+        return BILL_OF_LADING_CONTROLLED_FACETS
+    if document_kind in {
+        "DELIVERY_CONFIRMATION",
+        "DISPATCH_NOTICE",
+        "NOTICE_OF_READINESS",
+        "RAILCAR_TICKET",
+        "TRUCK_TICKET",
+        "WEIGH_TICKET",
+    }:
+        return LOGISTICS_CONTROLLED_FACETS
+    if document_kind in {
+        "CERTIFICATE_OF_ANALYSIS",
+        "INSPECTION_REPORT",
+        "QUALITY_SPECIFICATION",
+        "QUALITY_STATEMENT",
+        "SAMPLING_ANALYSIS",
+    }:
+        return QUALITY_CONTROLLED_FACETS
+    return ()
+
+
+def _schema_with_controlled_facets(schema: DocumentKindSchemaOut) -> DocumentKindSchemaOut:
+    facets = list(_controlled_facets_for_kind(str(schema.document_kind)))
+    if not facets:
+        return schema
+    return schema.model_copy(update={"facets": facets})
+
+
 def build_document_schema_registry() -> DocumentSchemaRegistryOut:
     return DocumentSchemaRegistryOut(
         version=DOCUMENT_SCHEMA_REGISTRY_VERSION,
-        document_kinds=list(DOCUMENT_KIND_SCHEMAS),
+        document_kinds=[_schema_with_controlled_facets(schema) for schema in DOCUMENT_KIND_SCHEMAS],
     )
 
 
@@ -1338,7 +1370,7 @@ def get_document_kind_schema(document_kind: str) -> DocumentKindSchemaOut | None
     normalized_kind = document_kind.strip().upper()
     for schema in DOCUMENT_KIND_SCHEMAS:
         if schema.document_kind == normalized_kind:
-            return schema
+            return _schema_with_controlled_facets(schema)
     return None
 
 
