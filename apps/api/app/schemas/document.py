@@ -17,23 +17,38 @@ DocumentPageTextSource = Literal["none", "pdf_text", "ocr"]
 DocumentProcessorProvider = Literal["openai", "anthropic", "google"]
 DocumentProcessorSelection = Literal["builtin", "openai", "anthropic", "google"]
 DocumentFieldValueType = Literal["text", "date", "number", "currency", "quantity", "identifier"]
+DocumentFacetValueType = Literal["single_select", "multi_select", "boolean", "text", "date", "identifier"]
 DocumentKind = Literal[
     "UNKNOWN",
     "TRADE_COMMUNICATION",
+    "DEAL_RECAP",
     "TRADE_CONFIRMATION",
     "TRADE_CONTRACT",
     "BROKER_CONFIRMATION",
     "BROKER_STATEMENT",
+    "LETTER_OF_CREDIT",
+    "NOMINATION",
+    "CURTAILMENT_NOTICE",
     "PIPELINE_STATEMENT",
+    "RAILCAR_TICKET",
+    "DISPATCH_NOTICE",
     "TRUCK_TICKET",
     "QUALITY_STATEMENT",
     "SAMPLING_ANALYSIS",
     "QUALITY_SPECIFICATION",
+    "INSPECTION_REPORT",
+    "FORCE_MAJEURE_NOTICE",
     "HAZARDOUS_CARGO_DOCUMENTATION",
+    "CERTIFICATE_OF_ORIGIN",
     "DELIVERY_CONFIRMATION",
+    "NOTICE_OF_READINESS",
+    "DEMURRAGE_CLAIM",
     "INVOICE",
     "BILL_OF_LADING",
     "CERTIFICATE_OF_ANALYSIS",
+    "PAYMENT_ADVICE",
+    "OUTAGE_NOTICE",
+    "STORAGE_STATEMENT",
     "SETTLEMENT_STATEMENT",
     "WEIGH_TICKET",
     "OTHER",
@@ -109,6 +124,22 @@ class DocumentRecordTargetOut(BaseModel):
     create_if_missing: bool = False
 
 
+class DocumentFacetValueOut(BaseModel):
+    code: str
+    label: str
+    description: Optional[str] = None
+
+
+class DocumentFacetSchemaOut(BaseModel):
+    facet_key: str
+    label: str
+    description: Optional[str] = None
+    value_type: DocumentFacetValueType | str = "single_select"
+    repeatable: bool = False
+    required: bool = False
+    allowed_values: list[DocumentFacetValueOut] = Field(default_factory=list)
+
+
 class DocumentKindSchemaOut(BaseModel):
     document_kind: DocumentKind | str
     label: str
@@ -118,6 +149,7 @@ class DocumentKindSchemaOut(BaseModel):
     linkage_summary: str
     record_targets: list[DocumentRecordTargetOut] = Field(default_factory=list)
     matching_keys: list[str] = Field(default_factory=list)
+    facets: list[DocumentFacetSchemaOut] = Field(default_factory=list)
     header_fields: list[DocumentFieldSchemaOut] = Field(default_factory=list)
     table_templates: list[DocumentTableTemplateSchemaOut] = Field(default_factory=list)
 

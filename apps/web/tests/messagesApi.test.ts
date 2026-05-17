@@ -5,6 +5,7 @@ import { test } from 'vitest'
 import {
   createMessagingWorkspacePost,
   loadMessagingWorkspaceState,
+  updateMessagingWorkspacePost,
 } from '../src/entities/messages/api'
 
 test('loadMessagingWorkspaceState targets the public messaging workspace endpoint', async () => {
@@ -46,12 +47,22 @@ test('loadMessagingWorkspaceState targets the public messaging workspace endpoin
                 id: 'assistant-day',
                 kind: 'system',
                 created_at: '2026-05-16T20:05:00Z',
+                source: 'SYSTEM',
                 label: 'Today',
                 detail: 'Action draft AR-204 moved into governed review.',
                 author: null,
                 body: [],
                 reactions: [],
                 attachment: null,
+                parent_message_id: null,
+                thread_root_message_id: null,
+                reply_count: 0,
+                thread_participants: [],
+                created_by_user_id: null,
+                created_by_role: null,
+                edited_at: null,
+                deleted_at: null,
+                pinned_at: null,
               },
             ],
           },
@@ -87,6 +98,8 @@ test('createMessagingWorkspacePost sends the durable post payload to the workspa
         conversation_id: 'ectrm-assistant',
         source: 'human',
         body: 'Hello',
+        parent_message_id: null,
+        thread_root_message_id: 'msg-1',
         author: {
           name: 'Guest Operator',
           title: 'Prototype author',
@@ -100,6 +113,11 @@ test('createMessagingWorkspacePost sends the durable post payload to the workspa
         created_by_user_id: null,
         created_by_session_id: null,
         created_by_role: null,
+        reactions: [],
+        attachment: null,
+        edited_at: null,
+        deleted_at: null,
+        pinned_at: null,
         created_at: '2026-05-16T20:00:00Z',
       }),
       {
@@ -113,15 +131,151 @@ test('createMessagingWorkspacePost sends the durable post payload to the workspa
     const result = await createMessagingWorkspacePost('http://localhost:8000', {
       conversation_id: 'ectrm-assistant',
       body: 'Hello',
+      attachment: {
+        label: 'Attachment',
+        title: 'timing-note.pdf',
+        summary: 'application/pdf • 42 KB',
+        footnote: 'Added from the desk composer.',
+      },
     })
 
     assert.equal(result.message_id, 'msg-1')
     assert.equal(requests[0]?.url, 'http://localhost:8000/messages/workspace/posts')
     assert.equal(requests[0]?.init?.method, 'POST')
-    assert.equal(requests[0]?.init?.body, JSON.stringify({
-      conversation_id: 'ectrm-assistant',
-      body: 'Hello',
-    }))
+    assert.equal(
+      requests[0]?.init?.body,
+      JSON.stringify({
+        conversation_id: 'ectrm-assistant',
+        body: 'Hello',
+        attachment: {
+          label: 'Attachment',
+          title: 'timing-note.pdf',
+          summary: 'application/pdf • 42 KB',
+          footnote: 'Added from the desk composer.',
+        },
+      }),
+    )
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('updateMessagingWorkspacePost targets the patch endpoint for post actions', async () => {
+  const originalFetch = global.fetch
+  const requests: { url: string; init?: RequestInit }[] = []
+
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({ url: String(input), init })
+    return new Response(
+      JSON.stringify({
+        message_id: 'msg-1',
+        conversation_id: 'ectrm-assistant',
+        source: 'human',
+        body: 'Updated body',
+        parent_message_id: null,
+        thread_root_message_id: 'msg-1',
+        author: {
+          name: 'Messaging Admin',
+          title: 'Desk operator',
+          presence: 'You',
+          initials: 'MA',
+          tone: 'human',
+        },
+        assistant_run_id: null,
+        assistant_agent_id: null,
+        assistant_agent_name: null,
+        created_by_user_id: 'messaging.admin',
+        created_by_session_id: 'session-1',
+        created_by_role: 'OPS_ADMIN',
+        reactions: ['👍'],
+        attachment: null,
+        edited_at: '2026-05-16T20:05:00Z',
+        deleted_at: null,
+        pinned_at: null,
+        created_at: '2026-05-16T20:00:00Z',
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    )
+  }) as typeof fetch
+
+  try {
+    const result = await updateMessagingWorkspacePost(
+      'http://localhost:8000',
+      'msg-1',
+      {
+        body: 'Updated body',
+      },
+    )
+
+    assert.equal(result.message_id, 'msg-1')
+    assert.equal(requests[0]?.url, 'http://localhost:8000/messages/workspace/posts/msg-1')
+    assert.equal(requests[0]?.init?.method, 'PATCH')
+    assert.equal(
+      requests[0]?.init?.body,
+      JSON.stringify({
+        body: 'Updated body',
+      }),
+    )
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('updateMessagingWorkspacePost can persist explicit reaction changes', async () => {
+  const originalFetch = global.fetch
+  const requests: { url: string; init?: RequestInit }[] = []
+
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({ url: String(input), init })
+    return new Response(
+      JSON.stringify({
+        message_id: 'msg-2',
+        conversation_id: 'ectrm-assistant',
+        source: 'human',
+        body: 'Acknowledged.',
+        parent_message_id: null,
+        thread_root_message_id: 'msg-2',
+        author: {
+          name: 'Messaging Admin',
+          title: 'Desk operator',
+          presence: 'You',
+          initials: 'MA',
+          tone: 'human',
+        },
+        assistant_run_id: null,
+        assistant_agent_id: null,
+        assistant_agent_name: null,
+        created_by_user_id: 'messaging.admin',
+        created_by_session_id: 'session-1',
+        created_by_role: 'OPS_ADMIN',
+        reactions: ['👍', '👀'],
+        attachment: null,
+        edited_at: null,
+        deleted_at: null,
+        pinned_at: null,
+        created_at: '2026-05-16T20:00:00Z',
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    )
+  }) as typeof fetch
+
+  try {
+    await updateMessagingWorkspacePost('http://localhost:8000', 'msg-2', {
+      reactions: ['👍', '👀'],
+    })
+
+    assert.equal(
+      requests[0]?.init?.body,
+      JSON.stringify({
+        reactions: ['👍', '👀'],
+      }),
+    )
   } finally {
     global.fetch = originalFetch
   }

@@ -112,6 +112,108 @@
       }
     },
     {
+      "case_id": "deal_recap_trade_terms",
+      "filename": "deal-recap-wti.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Deal Recap\nRecap Date: 2026-04-08\nTrade ID: T-700\nCounterparty: Shell Trading\nCommodity: WTI\nQuantity: 1000 bbl\nPrice: USD 79.25",
+      "expectations": {
+        "expected_document_kind": "DEAL_RECAP",
+        "min_confidence": 0.78,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected deal recap terminology",
+          "Matched required deal recap fields"
+        ]
+      }
+    },
+    {
+      "case_id": "letter_of_credit_bank_instrument",
+      "filename": "letter-of-credit-lc-4488.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Letter of Credit\nLetter of Credit Number: LC-4488\nIssue Date: 2026-04-12\nExpiry Date: 2026-05-31\nIssuing Bank: First Commodity Bank\nApplicant: Gulf Trading LLC\nBeneficiary: Shell Trading\nAmount: USD 500000\nCurrency: USD",
+      "expectations": {
+        "expected_document_kind": "LETTER_OF_CREDIT",
+        "min_confidence": 0.82,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected letter of credit terminology",
+          "Matched required letter of credit fields"
+        ]
+      }
+    },
+    {
+      "case_id": "payment_advice_invoice_reference",
+      "filename": "payment-advice-pay-123.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Payment Advice\nPayment Reference: PAY-123\nAdvice Date: 2026-04-20\nInvoice Number: INV-1007\nPayer: Shell Trading\nPayee: Gulf Trading LLC\nAmount: USD 79250\nCurrency: USD",
+      "expectations": {
+        "expected_document_kind": "PAYMENT_ADVICE",
+        "min_confidence": 0.78,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected payment advice terminology",
+          "Matched required payment advice fields"
+        ]
+      }
+    },
+    {
+      "case_id": "nomination_pipeline_flow",
+      "filename": "pipeline-nomination.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Pipeline Nomination\nNomination Reference: NOM-700\nFlow Date: 2026-04-12\nPipeline System: NGPL\nContract Number: CN-900\nReceipt Location: HENRY HUB\nDelivery Location: SABINE\nQuantity: 10000 MMBtu",
+      "expectations": {
+        "expected_document_kind": "NOMINATION",
+        "min_confidence": 0.78,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected nomination terminology",
+          "Matched required nomination fields"
+        ]
+      }
+    },
+    {
+      "case_id": "curtailment_notice_capacity_constraint",
+      "filename": "curtailment-notice-curt-100.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Curtailment Notice\nCurtailment Notice Number: CURT-100\nNotice Date: 2026-04-13\nEffective Start: 2026-04-14 06:00\nIssuing Entity: NGPL\nPipeline System: NGPL\nNomination Reference: NOM-700\nCurtailed Quantity: 2500 MMBtu\nReason: Capacity constraint",
+      "expectations": {
+        "expected_document_kind": "CURTAILMENT_NOTICE",
+        "min_confidence": 0.80,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected curtailment notice terminology",
+          "Matched required curtailment notice fields"
+        ]
+      }
+    },
+    {
+      "case_id": "dispatch_notice_delivery_instruction",
+      "filename": "dispatch-notice-dsp-55.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Dispatch Notice\nDispatch Number: DSP-55\nDispatch Date: 2026-04-12\nDelivery ID: DEL-900\nCarrier: Fleet Hauling\nAsset Reference: TRUCK-12\nOrigin: Midland Terminal\nDestination: Houston Terminal\nQuantity: 800 bbl",
+      "expectations": {
+        "expected_document_kind": "DISPATCH_NOTICE",
+        "min_confidence": 0.80,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected dispatch notice terminology",
+          "Matched required dispatch notice fields"
+        ]
+      }
+    },
+    {
       "case_id": "scanned_invoice_ocr",
       "filename": "scan-ocr-1007.pdf",
       "text_source": "ocr",

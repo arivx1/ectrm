@@ -1,4 +1,5 @@
 import type {
+  DeliveryTrackingSignalCreateInput,
   DeliveryTruckMovementCreateInput,
   DeliveryTruckStopCreateInput,
   RecordDeliveryTruckStopCheckpointInput,
@@ -73,6 +74,20 @@ export type TruckCheckpointDraft = {
   reversalReason: string
 }
 
+export type TruckTrackingSignalDraft = {
+  sourceSystem: string
+  sourceEventId: string
+  signalType: string
+  occurredAt: string
+  stopId: string
+  locationCode: string
+  externalStatus: string
+  normalizedStatus: string
+  matchConfidence: string
+  etaAtDestination: string
+  dispatcherNote: string
+}
+
 export type TruckCheckpointEventRecord = DeliveryEventRecord & {
   checkpoint_code: TruckCheckpointCode
   movement_id: string
@@ -107,6 +122,8 @@ export const TRUCK_STOP_STATUS_OPTIONS: TruckStopStatus[] = [
 export const TRUCK_STOP_TYPE_OPTIONS: TruckStopType[] = ['PICKUP', 'WAYPOINT', 'DROPOFF']
 
 export const TRUCK_CHECKPOINT_SOURCE = 'TRUCK_MANUAL_DISPATCH'
+
+export const TRUCK_TRACKING_SIGNAL_SOURCE = 'TRUCK_MANUAL_DISPATCH'
 
 export const TRUCK_CHECKPOINT_CODE_OPTIONS: TruckCheckpointCode[] = [
   'ARRIVED_PICKUP',
@@ -349,6 +366,25 @@ export function buildTruckCheckpointDraft(
   }
 }
 
+export function buildTruckTrackingSignalDraft(
+  movement?: DeliveryTruckMovementRecord | null,
+  current?: TruckTrackingSignalDraft | null,
+): TruckTrackingSignalDraft {
+  return {
+    sourceSystem: current?.sourceSystem ?? TRUCK_TRACKING_SIGNAL_SOURCE,
+    sourceEventId: current?.sourceEventId ?? '',
+    signalType: current?.signalType ?? 'POSITION',
+    occurredAt: current?.occurredAt ?? defaultTruckCheckpointOccurredAt(),
+    stopId: current?.stopId ?? '',
+    locationCode: current?.locationCode ?? movement?.current_location_code ?? '',
+    externalStatus: current?.externalStatus ?? '',
+    normalizedStatus: current?.normalizedStatus ?? '',
+    matchConfidence: current?.matchConfidence ?? '',
+    etaAtDestination: current?.etaAtDestination ?? formatLocalDateTimeInput(movement?.current_eta_at_destination),
+    dispatcherNote: current?.dispatcherNote ?? '',
+  }
+}
+
 function normalizedPositiveInt(value: string): number | null {
   const normalized = value.trim()
   if (!normalized) {
@@ -368,6 +404,27 @@ function normalizedPositiveNumber(value: string): number | null {
   }
   const parsedValue = Number(normalized)
   if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
+    return null
+  }
+  return parsedValue
+}
+
+function normalizedBoundedNumber(
+  value: string,
+  {
+    minimum,
+    maximum,
+  }: {
+    minimum: number
+    maximum: number
+  },
+): number | null {
+  const normalized = value.trim()
+  if (!normalized) {
+    return null
+  }
+  const parsedValue = Number(normalized)
+  if (!Number.isFinite(parsedValue) || parsedValue < minimum || parsedValue > maximum) {
     return null
   }
   return parsedValue
@@ -975,5 +1032,93 @@ export function buildTruckCheckpointReversePayload(
       reversal_reason: reversalReason,
     },
     validationMessage: null,
+  }
+}
+
+export function buildTruckTrackingSignalPayload(
+  draft: TruckTrackingSignalDraft,
+): {
+  payload: DeliveryTrackingSignalCreateInput
+  validationMessage: string | null
+} {
+  const signalType = normalizedNullableText(draft.signalType)?.toUpperCase()
+  if (!signalType) {
+    return {
+      payload: {
+        signal_type: '',
+        occurred_at: new Date().toISOString(),
+      },
+      validationMessage: 'Tracking signal type is required.',
+    }
+  }
+
+  const occurredAt = normalizedIsoDateTime(draft.occurredAt)
+  if (!occurredAt) {
+    return {
+      payload: {
+        signal_type: signalType,
+        occurred_at: new Date().toISOString(),
+      },
+      validationMessage: 'Tracking signal occurred at is required.',
+    }
+  }
+
+  const matchConfidence = normalizedBoundedNumber(draft.matchConfidence, {
+    minimum: 0,
+    maximum: 1,
+  })
+  if (draft.matchConfidence.trim() !== '' && matchConfidence === null) {
+    return {
+      payload: {
+        signal_type: signalType,
+        occurred_at: occurredAt,
+      },
+      validationMessage: 'Tracking signal match confidence must be between 0 and 1.',
+    }
+  }
+
+  const etaAtDestination = normalizedIsoDateTime(draft.etaAtDestination)
+  if (draft.etaAtDestination.trim() !== '' && etaAtDestination === null) {
+    return {
+      payload: {
+        signal_type: signalType,
+        occurred_at: occurredAt,
+      },
+      validationMessage: 'Tracking signal destination ETA must be a valid date/time.',
+    }
+  }
+
+  const dispatcherNote = normalizedNullableText(draft.dispatcherNote)
+  return {
+    payload: {
+      source_system: normalizedNullableText(draft.sourceSystem)?.toUpperCase() ?? null,
+      source_event_id: normalizedNullableText(draft.sourceEventId),
+      signal_type: signalType,
+      occurred_at: occurredAt,
+      stop_id: normalizedNullableText(draft.stopId),
+      location_code: normalizedNullableText(draft.locationCode),
+      external_status: normalizedNullableText(draft.externalStatus),
+      normalized_status: normalizedNullableText(draft.normalizedStatus)?.toUpperCase() ?? null,
+      match_confidence: matchConfidence,
+      eta_at_destination: etaAtDestination,
+      raw_payload: dispatcherNote ? { dispatcher_note: dispatcherNote } : {},
+    },
+    validationMessage: null,
+  }
+}
+
+export function truckTrackingSignalTone(
+  status: string,
+): 'active' | 'blocked' | 'in-progress' | 'planned' | 'shipped' {
+  switch (status) {
+    case 'MATCHED':
+      return 'active'
+    case 'UNRESOLVED':
+      return 'in-progress'
+    case 'REJECTED':
+    case 'ERROR':
+      return 'blocked'
+    default:
+      return 'planned'
   }
 }

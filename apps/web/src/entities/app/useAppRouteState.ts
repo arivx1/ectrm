@@ -38,12 +38,14 @@ export type AppRouteState = {
   docsDocumentKey: DocumentationDocumentKey
   tradeId: string | null
   messagingConversationId: string | null
+  libraryDocumentId: string | null
   handoff: AppRouteHandoff | null
 }
 
 type AppRouteNavigationOptions = {
   tradeId?: string | null
   messagingConversationId?: string | null
+  libraryDocumentId?: string | null
   hash?: string | null
 }
 
@@ -55,6 +57,7 @@ function readAppRouteState(): AppRouteState {
       docsDocumentKey: DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
       tradeId: null,
       messagingConversationId: null,
+      libraryDocumentId: null,
       handoff: null,
     }
   }
@@ -76,6 +79,8 @@ function readAppRouteState(): AppRouteState {
     tradeId: view === 'trades' ? params.get('trade')?.trim() || null : null,
     messagingConversationId:
       view === 'messages' ? params.get('conversation')?.trim() || null : null,
+    libraryDocumentId:
+      view === 'library' ? params.get('document')?.trim() || null : null,
     handoff: readAppRouteHandoff(params),
   }
 }
@@ -119,6 +124,9 @@ function buildAppRouteUrl(route: AppRouteState, hash: string): string {
     if (route.view === 'messages' && route.messagingConversationId) {
       params.set('conversation', route.messagingConversationId)
     }
+    if (route.view === 'library' && route.libraryDocumentId) {
+      params.set('document', route.libraryDocumentId)
+    }
     writeAppRouteHandoff(params, route.handoff)
   }
 
@@ -136,6 +144,8 @@ export function useAppRouteState() {
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(initialRoute.tradeId)
   const [selectedMessagingConversationId, setSelectedMessagingConversationId] =
     useState<string | null>(initialRoute.messagingConversationId)
+  const [selectedLibraryDocumentId, setSelectedLibraryDocumentId] =
+    useState<string | null>(initialRoute.libraryDocumentId)
   const [routeHandoff, setRouteHandoff] = useState<AppRouteHandoff | null>(initialRoute.handoff)
 
   function syncRouteState(
@@ -179,6 +189,10 @@ export function useAppRouteState() {
       options.messagingConversationId !== undefined
         ? options.messagingConversationId
         : selectedMessagingConversationId
+    const nextLibraryDocumentId =
+      options.libraryDocumentId !== undefined
+        ? options.libraryDocumentId
+        : selectedLibraryDocumentId
     const nextHash =
       options.hash !== undefined
         ? normalizeHashFragment(options.hash)
@@ -192,6 +206,7 @@ export function useAppRouteState() {
         docsDocumentKey: activeDocumentationDocumentKey,
         tradeId: nextTradeId,
         messagingConversationId: nextMessagingConversationId,
+        libraryDocumentId: nextLibraryDocumentId,
         handoff,
       },
       historyMode,
@@ -205,6 +220,9 @@ export function useAppRouteState() {
     }
     if (options.messagingConversationId !== undefined) {
       setSelectedMessagingConversationId(options.messagingConversationId)
+    }
+    if (options.libraryDocumentId !== undefined) {
+      setSelectedLibraryDocumentId(options.libraryDocumentId)
     }
   }
 
@@ -222,6 +240,7 @@ export function useAppRouteState() {
         docsDocumentKey: activeDocumentationDocumentKey,
         tradeId: selectedTradeId,
         messagingConversationId: selectedMessagingConversationId,
+        libraryDocumentId: selectedLibraryDocumentId,
         handoff: null,
       },
       nextHash,
@@ -246,6 +265,7 @@ export function useAppRouteState() {
         docsDocumentKey: activeDocumentationDocumentKey,
         tradeId: selectedTradeId,
         messagingConversationId: selectedMessagingConversationId,
+        libraryDocumentId: selectedLibraryDocumentId,
         handoff: null,
       },
       'push',
@@ -273,6 +293,7 @@ export function useAppRouteState() {
         docsDocumentKey: activeDocumentationDocumentKey,
         tradeId,
         messagingConversationId: selectedMessagingConversationId,
+        libraryDocumentId: selectedLibraryDocumentId,
         handoff: nextHandoff,
       },
       'push',
@@ -295,6 +316,7 @@ export function useAppRouteState() {
         docsDocumentKey: nextDocumentKey,
         tradeId: selectedTradeId,
         messagingConversationId: selectedMessagingConversationId,
+        libraryDocumentId: selectedLibraryDocumentId,
         handoff: null,
       },
       'push',
@@ -323,6 +345,9 @@ export function useAppRouteState() {
       if (nextRoute.view === 'messages') {
         setSelectedMessagingConversationId(nextRoute.messagingConversationId)
       }
+      if (nextRoute.view === 'library') {
+        setSelectedLibraryDocumentId(nextRoute.libraryDocumentId)
+      }
     }
 
     window.addEventListener('popstate', handlePopState)
@@ -337,6 +362,7 @@ export function useAppRouteState() {
         docsDocumentKey: activeDocumentationDocumentKey,
         tradeId: selectedTradeId,
         messagingConversationId: selectedMessagingConversationId,
+        libraryDocumentId: selectedLibraryDocumentId,
         handoff: routeHandoff,
       },
       'replace',
@@ -352,6 +378,7 @@ export function useAppRouteState() {
     activeDocumentationDocumentKey,
     selectedTradeId,
     selectedMessagingConversationId,
+    selectedLibraryDocumentId,
     routeHandoff,
   ])
 
@@ -367,8 +394,10 @@ export function useAppRouteState() {
     navigateToView,
     replaceView,
     routeHandoff,
+    selectedLibraryDocumentId,
     selectedMessagingConversationId,
     selectedTradeId,
+    setSelectedLibraryDocumentId,
     setSelectedMessagingConversationId,
     setSelectedTradeId,
   }

@@ -212,6 +212,7 @@ dependencies.
 - [Trader/Risk MVP work packages](docs/engineering/trader-risk-mvp-work-packages.md)
 - [Trading UI familiarity reference](docs/engineering/trading-ui-familiarity-reference.md)
 - [Bloomberg-style market terminal work packages](docs/engineering/bloomberg-style-market-terminal-work-packages.md)
+- [Market terminal operator guide](docs/engineering/market-terminal-operator-guide.md)
 - [Trading EOD work packages](docs/engineering/trading-eod-work-packages.md)
 - [Trading source register](docs/engineering/trading-source-register.csv)
 - [ETRM trading source register](docs/engineering/trading-source-register-etrm.csv)

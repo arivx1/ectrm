@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
 from uuid import uuid4
 
 from fastapi.encoders import jsonable_encoder
@@ -27,13 +28,23 @@ from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.delivery_truck_detail import DeliveryTruckDetail
 from apps.api.app.models.delivery_truck_movement import DeliveryTruckMovement
 from apps.api.app.models.delivery_truck_stop import DeliveryTruckStop
+from apps.api.app.models.delivery_tracking_signal import DeliveryTrackingSignal
 from apps.api.app.models.trade import Trade
+from apps.api.app.schemas.shipment import DeliveryTrackingSignalIngestResultOut
+from apps.api.app.schemas.shipment import DeliveryTrackingSignalOut
 from apps.api.app.schemas.shipment import DeliveryTruckMovementOut
 from apps.api.app.schemas.shipment import DeliveryTruckMovementSummaryOut
+from apps.api.app.schemas.shipment import DeliveryTruckMovementTrackingHealthOut
+from apps.api.app.schemas.shipment import DeliveryTruckTrackingExceptionOut
 from apps.api.app.schemas.shipment import DeliveryTruckStopOut
 from apps.api.app.shared.enums import DeliveryEventType
 from apps.api.app.shared.enums import DeliveryFieldSource
+from apps.api.app.shared.enums import TrackingSignalProcessingStatus
 from apps.api.app.shared.enums import TransportMode
+from apps.api.app.shared.enums import TruckDwellStatus
+from apps.api.app.shared.enums import TruckEtaStatus
+from apps.api.app.shared.enums import TruckTrackingExceptionSeverity
+from apps.api.app.shared.enums import TruckTrackingFreshnessStatus
 from apps.api.app.shared.enums import TruckCheckpointCode
 from apps.api.app.shared.enums import TruckMovementStatus
 from apps.api.app.shared.enums import TruckStopStatus
@@ -41,6 +52,21 @@ from apps.api.app.shared.enums import TruckStopType
 
 TRUCK_CHECKPOINT_EVENT_SOURCE = "TRUCK_MANUAL_DISPATCH"
 TRUCK_CHECKPOINT_STATUS_REASON_PREFIX = "Truck checkpoint"
+TRUCK_TRACKING_STALE_AFTER_MINUTES = 240
+TRUCK_DWELL_THRESHOLD_MINUTES = 120
+TRUCK_TRACKING_EXCEPTION_SEVERITY_SORT = {
+    TruckTrackingExceptionSeverity.ACTION_REQUIRED.value: 0,
+    TruckTrackingExceptionSeverity.WATCH.value: 1,
+    TruckTrackingExceptionSeverity.CLEAR.value: 2,
+}
+TRUCK_TRACKING_PRIMARY_EXCEPTION_SORT = {
+    "ETA_LATE": 0,
+    "OVER_DWELL": 1,
+    "STALE_TRACKING": 2,
+    "ETA_AT_RISK": 3,
+    "MISSING_TRACKING_SIGNAL": 4,
+    "MISSING_ETA": 5,
+}
 
 STOP_TERMINAL_STATUSES = {
     TruckStopStatus.SKIPPED.value,
@@ -80,6 +106,24 @@ def _normalize_optional_positive_float(value: object | None, *, label: str) -> f
         raise ValueError(f"{label} must be a numeric value.") from exc
     if normalized <= 0:
         raise ValueError(f"{label} must be greater than zero.")
+    return float(normalized)
+
+
+def _normalize_optional_bounded_float(
+    value: object | None,
+    *,
+    label: str,
+    minimum: Decimal,
+    maximum: Decimal,
+) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        normalized = Decimal(str(value))
+    except (ArithmeticError, InvalidOperation) as exc:
+        raise ValueError(f"{label} must be a numeric value.") from exc
+    if normalized < minimum or normalized > maximum:
+        raise ValueError(f"{label} must be between {minimum} and {maximum}.")
     return float(normalized)
 
 
@@ -124,6 +168,21 @@ def _validate_truck_checkpoint_code(value: object | None) -> TruckCheckpointCode
         valid_values = ", ".join(checkpoint.value for checkpoint in TruckCheckpointCode)
         raise ValueError(
             f"Truck checkpoint code '{normalized or value}' is invalid. Expected one of: {valid_values}."
+        ) from exc
+
+
+def _validate_optional_tracking_exception_severity(
+    value: object | None,
+) -> TruckTrackingExceptionSeverity | None:
+    if value in (None, ""):
+        return None
+    normalized = str(value or "").strip().upper()
+    try:
+        return TruckTrackingExceptionSeverity(normalized)
+    except ValueError as exc:
+        valid_values = ", ".join(severity.value for severity in TruckTrackingExceptionSeverity)
+        raise ValueError(
+            f"Truck tracking exception severity '{normalized or value}' is invalid. Expected one of: {valid_values}."
         ) from exc
 
 
@@ -193,6 +252,293 @@ def _movement_stops_by_id(
     return grouped
 
 
+def _whole_minutes_between(start: datetime, end: datetime) -> int:
+    return max(0, int((end - start).total_seconds() // 60))
+
+
+def _tracking_health_active_status(movement: DeliveryTruckMovement) -> bool:
+    return movement.status in {
+        TruckMovementStatus.ASSIGNED.value,
+        TruckMovementStatus.EN_ROUTE_TO_STOP.value,
+        TruckMovementStatus.AT_STOP.value,
+        TruckMovementStatus.IN_TRANSIT.value,
+    }
+
+
+def _destination_stop_for_health(stops: list[DeliveryTruckStop]) -> DeliveryTruckStop | None:
+    active_stops = _active_stops(stops)
+    if not active_stops:
+        return None
+    dropoff_stops = [stop for stop in active_stops if stop.stop_type == TruckStopType.DROPOFF.value]
+    return dropoff_stops[-1] if dropoff_stops else active_stops[-1]
+
+
+def _current_stop_for_health(
+    movement: DeliveryTruckMovement,
+    *,
+    stops: list[DeliveryTruckStop],
+) -> DeliveryTruckStop | None:
+    active_stops = _active_stops(stops)
+    if movement.current_stop_sequence is not None:
+        for stop in active_stops:
+            if stop.stop_sequence == movement.current_stop_sequence:
+                return stop
+    for stop in active_stops:
+        if stop.status in {TruckStopStatus.ARRIVED.value, TruckStopStatus.WORKING.value}:
+            return stop
+    return None
+
+
+def _evaluate_tracking_freshness(
+    movement: DeliveryTruckMovement,
+    *,
+    as_of: datetime,
+) -> tuple[TruckTrackingFreshnessStatus, str, int | None]:
+    if not _tracking_health_active_status(movement):
+        return (
+            TruckTrackingFreshnessStatus.NOT_REQUIRED,
+            f"Tracking freshness is not required while the truck run is {movement.status}.",
+            None,
+        )
+
+    last_signal_at = _coerce_utc(movement.last_signal_at)
+    if last_signal_at is None:
+        return (
+            TruckTrackingFreshnessStatus.MISSING,
+            "No accepted tracking signal has refreshed this truck run yet.",
+            None,
+        )
+
+    minutes_since_last_signal = _whole_minutes_between(last_signal_at, as_of)
+    if minutes_since_last_signal >= TRUCK_TRACKING_STALE_AFTER_MINUTES:
+        return (
+            TruckTrackingFreshnessStatus.STALE,
+            (
+                f"Last tracking signal is {minutes_since_last_signal} minutes old, "
+                f"past the {TRUCK_TRACKING_STALE_AFTER_MINUTES} minute freshness threshold."
+            ),
+            minutes_since_last_signal,
+        )
+
+    return (
+        TruckTrackingFreshnessStatus.FRESH,
+        f"Last tracking signal is {minutes_since_last_signal} minutes old.",
+        minutes_since_last_signal,
+    )
+
+
+def _evaluate_eta_status(
+    movement: DeliveryTruckMovement,
+    *,
+    stops: list[DeliveryTruckStop],
+    as_of: datetime,
+) -> tuple[TruckEtaStatus, str, DeliveryTruckStop | None, int | None]:
+    destination_stop = _destination_stop_for_health(stops)
+    if movement.status in {TruckMovementStatus.CANCELLED.value, TruckMovementStatus.ON_HOLD.value}:
+        return (
+            TruckEtaStatus.NOT_REQUIRED,
+            f"ETA classification is not required while the truck run is {movement.status}.",
+            destination_stop,
+            None,
+        )
+    if movement.status == TruckMovementStatus.COMPLETED.value:
+        return (
+            TruckEtaStatus.ARRIVED,
+            "Truck run is completed.",
+            destination_stop,
+            None,
+        )
+    if destination_stop is None:
+        return (
+            TruckEtaStatus.UNKNOWN,
+            "No active destination stop is available for ETA classification.",
+            None,
+            None,
+        )
+    if destination_stop.status in {TruckStopStatus.ARRIVED.value, TruckStopStatus.WORKING.value, TruckStopStatus.DEPARTED.value}:
+        return (
+            TruckEtaStatus.ARRIVED,
+            f"Destination stop {destination_stop.stop_id} has active arrival progress.",
+            destination_stop,
+            None,
+        )
+
+    destination_deadline = _coerce_utc(destination_stop.planned_arrival_end)
+    eta_at_destination = _coerce_utc(movement.current_eta_at_destination)
+    if destination_deadline is None:
+        return (
+            TruckEtaStatus.UNKNOWN,
+            f"Destination stop {destination_stop.stop_id} has no planned arrival end.",
+            destination_stop,
+            None,
+        )
+
+    if eta_at_destination is None:
+        if as_of > destination_deadline:
+            late_minutes = _whole_minutes_between(destination_deadline, as_of)
+            return (
+                TruckEtaStatus.LATE,
+                (
+                    f"Destination arrival window ended {late_minutes} minutes ago "
+                    "and no destination arrival is recorded."
+                ),
+                destination_stop,
+                late_minutes,
+            )
+        return (
+            TruckEtaStatus.MISSING_ETA,
+            "No destination ETA has been captured for this active truck run.",
+            destination_stop,
+            None,
+        )
+
+    if as_of > destination_deadline:
+        late_minutes = _whole_minutes_between(destination_deadline, as_of)
+        return (
+            TruckEtaStatus.LATE,
+            f"Destination arrival window ended {late_minutes} minutes ago.",
+            destination_stop,
+            late_minutes,
+        )
+    if eta_at_destination > destination_deadline:
+        late_minutes = _whole_minutes_between(destination_deadline, eta_at_destination)
+        return (
+            TruckEtaStatus.AT_RISK,
+            f"Current destination ETA is {late_minutes} minutes after the planned arrival window.",
+            destination_stop,
+            late_minutes,
+        )
+    return (
+        TruckEtaStatus.ON_TIME,
+        "Current destination ETA is inside the planned arrival window.",
+        destination_stop,
+        None,
+    )
+
+
+def _evaluate_dwell_status(
+    movement: DeliveryTruckMovement,
+    *,
+    stops: list[DeliveryTruckStop],
+    as_of: datetime,
+) -> tuple[TruckDwellStatus, str, DeliveryTruckStop | None, int | None]:
+    current_stop = _current_stop_for_health(movement, stops=stops)
+    if current_stop is None or current_stop.status not in {TruckStopStatus.ARRIVED.value, TruckStopStatus.WORKING.value}:
+        return (
+            TruckDwellStatus.NOT_DWELLING,
+            "Truck is not currently arrived or working at an active stop.",
+            current_stop,
+            None,
+        )
+
+    arrived_at = _coerce_utc(current_stop.actual_arrived_at)
+    if arrived_at is None:
+        return (
+            TruckDwellStatus.UNKNOWN,
+            f"Current stop {current_stop.stop_id} is at-stop but has no actual arrival time.",
+            current_stop,
+            None,
+        )
+
+    dwell_minutes = _whole_minutes_between(arrived_at, as_of)
+    departure_deadline = _coerce_utc(current_stop.planned_departure_end)
+    if departure_deadline is not None and as_of > departure_deadline:
+        overdue_minutes = _whole_minutes_between(departure_deadline, as_of)
+        return (
+            TruckDwellStatus.OVER_DWELL,
+            f"Current stop {current_stop.stop_id} is {overdue_minutes} minutes past planned departure end.",
+            current_stop,
+            dwell_minutes,
+        )
+    if dwell_minutes >= TRUCK_DWELL_THRESHOLD_MINUTES:
+        return (
+            TruckDwellStatus.OVER_DWELL,
+            (
+                f"Current stop {current_stop.stop_id} has been dwelling for {dwell_minutes} minutes, "
+                f"past the {TRUCK_DWELL_THRESHOLD_MINUTES} minute threshold."
+            ),
+            current_stop,
+            dwell_minutes,
+        )
+    return (
+        TruckDwellStatus.DWELLING,
+        f"Current stop {current_stop.stop_id} has been dwelling for {dwell_minutes} minutes.",
+        current_stop,
+        dwell_minutes,
+    )
+
+
+def _tracking_exception_summary(
+    *,
+    eta_status: TruckEtaStatus,
+    freshness_status: TruckTrackingFreshnessStatus,
+    dwell_status: TruckDwellStatus,
+) -> tuple[TruckTrackingExceptionSeverity, str | None]:
+    if eta_status == TruckEtaStatus.LATE:
+        return TruckTrackingExceptionSeverity.ACTION_REQUIRED, "ETA_LATE"
+    if dwell_status == TruckDwellStatus.OVER_DWELL:
+        return TruckTrackingExceptionSeverity.ACTION_REQUIRED, "OVER_DWELL"
+    if freshness_status == TruckTrackingFreshnessStatus.STALE:
+        return TruckTrackingExceptionSeverity.ACTION_REQUIRED, "STALE_TRACKING"
+    if eta_status == TruckEtaStatus.AT_RISK:
+        return TruckTrackingExceptionSeverity.WATCH, "ETA_AT_RISK"
+    if freshness_status == TruckTrackingFreshnessStatus.MISSING:
+        return TruckTrackingExceptionSeverity.WATCH, "MISSING_TRACKING_SIGNAL"
+    if eta_status == TruckEtaStatus.MISSING_ETA:
+        return TruckTrackingExceptionSeverity.WATCH, "MISSING_ETA"
+    if dwell_status in {TruckDwellStatus.DWELLING, TruckDwellStatus.UNKNOWN}:
+        return TruckTrackingExceptionSeverity.WATCH, f"DWELL_{dwell_status.value}"
+    if eta_status == TruckEtaStatus.UNKNOWN:
+        return TruckTrackingExceptionSeverity.WATCH, "ETA_UNKNOWN"
+    return TruckTrackingExceptionSeverity.CLEAR, None
+
+
+def _movement_tracking_health_to_out(
+    movement: DeliveryTruckMovement,
+    *,
+    stops: list[DeliveryTruckStop],
+    as_of: datetime | None = None,
+) -> DeliveryTruckMovementTrackingHealthOut:
+    evaluated_at = _coerce_utc(as_of) or datetime.now(timezone.utc)
+    freshness_status, freshness_reason, minutes_since_last_signal = _evaluate_tracking_freshness(
+        movement,
+        as_of=evaluated_at,
+    )
+    eta_status, eta_reason, destination_stop, eta_late_minutes = _evaluate_eta_status(
+        movement,
+        stops=stops,
+        as_of=evaluated_at,
+    )
+    dwell_status, dwell_reason, current_stop, dwell_minutes = _evaluate_dwell_status(
+        movement,
+        stops=stops,
+        as_of=evaluated_at,
+    )
+    exception_severity, primary_exception = _tracking_exception_summary(
+        eta_status=eta_status,
+        freshness_status=freshness_status,
+        dwell_status=dwell_status,
+    )
+    return DeliveryTruckMovementTrackingHealthOut(
+        last_evaluated_at=evaluated_at,
+        eta_status=eta_status.value,
+        eta_status_reason=eta_reason,
+        tracking_freshness_status=freshness_status.value,
+        tracking_freshness_reason=freshness_reason,
+        dwell_status=dwell_status.value,
+        dwell_status_reason=dwell_reason,
+        exception_severity=exception_severity.value,
+        primary_exception=primary_exception,
+        stale_after_minutes=TRUCK_TRACKING_STALE_AFTER_MINUTES,
+        dwell_threshold_minutes=TRUCK_DWELL_THRESHOLD_MINUTES,
+        destination_stop_id=destination_stop.stop_id if destination_stop is not None else None,
+        current_stop_id=current_stop.stop_id if current_stop is not None else None,
+        minutes_since_last_signal=minutes_since_last_signal,
+        current_dwell_minutes=dwell_minutes,
+        eta_late_minutes=eta_late_minutes,
+    )
+
+
 def _stop_to_out(stop: DeliveryTruckStop) -> DeliveryTruckStopOut:
     return DeliveryTruckStopOut(
         stop_id=stop.stop_id,
@@ -225,6 +571,7 @@ def _movement_summary_to_out(
     movement: DeliveryTruckMovement,
     *,
     stops: list[DeliveryTruckStop],
+    as_of: datetime | None = None,
 ) -> DeliveryTruckMovementSummaryOut:
     active_stop_count = sum(1 for stop in stops if stop.status not in STOP_TERMINAL_STATUSES)
     return DeliveryTruckMovementSummaryOut(
@@ -245,6 +592,7 @@ def _movement_summary_to_out(
         current_location_code=movement.current_location_code,
         last_signal_at=_coerce_utc(movement.last_signal_at),
         current_eta_at_destination=_coerce_utc(movement.current_eta_at_destination),
+        tracking_health=_movement_tracking_health_to_out(movement, stops=stops, as_of=as_of),
         hold_reason_code=movement.hold_reason_code,
         hold_reason_code_source=movement.hold_reason_code_source,
         stop_count=len(stops),
@@ -280,6 +628,45 @@ def _movement_to_out(
         truck_ticket_number=movement.truck_ticket_number,
         truck_ticket_number_source=movement.truck_ticket_number_source,
         stops=[_stop_to_out(stop) for stop in stops],
+    )
+
+
+def _tracking_signal_to_out(signal: DeliveryTrackingSignal) -> DeliveryTrackingSignalOut:
+    return DeliveryTrackingSignalOut(
+        signal_id=signal.signal_id,
+        delivery_id=signal.delivery_id,
+        movement_id=signal.movement_id,
+        stop_id=signal.stop_id,
+        source_system=signal.source_system,
+        source_event_id=signal.source_event_id,
+        signal_type=signal.signal_type,
+        occurred_at=_coerce_utc(signal.occurred_at) or datetime.now(timezone.utc),
+        received_at=_coerce_utc(signal.received_at) or datetime.now(timezone.utc),
+        latitude=float(signal.latitude) if signal.latitude is not None else None,
+        longitude=float(signal.longitude) if signal.longitude is not None else None,
+        location_code=signal.location_code,
+        external_status=signal.external_status,
+        normalized_status=signal.normalized_status,
+        match_confidence=float(signal.match_confidence) if signal.match_confidence is not None else None,
+        dedupe_key=signal.dedupe_key,
+        processing_status=signal.processing_status,
+        processing_error=signal.processing_error,
+        raw_payload=signal.raw_payload or {},
+    )
+
+
+def _tracking_signal_result(
+    signal: DeliveryTrackingSignal,
+    *,
+    movement: DeliveryTruckMovement,
+    stops: list[DeliveryTruckStop],
+    duplicate: bool,
+) -> DeliveryTrackingSignalIngestResultOut:
+    return DeliveryTrackingSignalIngestResultOut(
+        ingest_status="DUPLICATE" if duplicate else "CREATED",
+        duplicate=duplicate,
+        signal=_tracking_signal_to_out(signal),
+        movement=_movement_summary_to_out(movement, stops=stops),
     )
 
 
@@ -452,6 +839,106 @@ def _load_truck_stop(
     return stop, movement, delivery, trade
 
 
+def _tracking_signal_dedupe_key(
+    *,
+    source_system: str,
+    source_event_id: str | None,
+    movement_id: str,
+    stop_id: str | None,
+    signal_type: str,
+    occurred_at: datetime,
+    location_code: str | None,
+    external_status: str | None,
+) -> str:
+    if source_event_id:
+        readable_key = f"{source_system}:{source_event_id}"
+        if len(readable_key) <= 160:
+            return readable_key
+
+    seed = "|".join(
+        [
+            source_system,
+            source_event_id or "",
+            movement_id,
+            stop_id or "",
+            signal_type,
+            occurred_at.isoformat(),
+            location_code or "",
+            external_status or "",
+        ]
+    )
+    digest = sha256(seed.encode("utf-8")).hexdigest()
+    prefix = source_system[:32]
+    return f"{prefix}:{digest}"[:160]
+
+
+def _resolve_tracking_signal_stop_match(
+    db: Session,
+    *,
+    movement: DeliveryTruckMovement,
+    stops: list[DeliveryTruckStop],
+    requested_stop_id: str | None,
+    location_code: str | None,
+    requested_confidence: float | None,
+) -> tuple[DeliveryTruckStop | None, TrackingSignalProcessingStatus, float | None, str | None]:
+    if requested_stop_id:
+        stop = db.get(DeliveryTruckStop, requested_stop_id)
+        if stop is None:
+            return (
+                None,
+                TrackingSignalProcessingStatus.REJECTED,
+                0.0,
+                f"Truck stop '{requested_stop_id}' was not found.",
+            )
+        if stop.movement_id != movement.movement_id:
+            return (
+                None,
+                TrackingSignalProcessingStatus.REJECTED,
+                0.0,
+                f"Truck stop '{requested_stop_id}' does not belong to truck movement '{movement.movement_id}'.",
+            )
+        return (
+            stop,
+            TrackingSignalProcessingStatus.MATCHED,
+            requested_confidence if requested_confidence is not None else 1.0,
+            None,
+        )
+
+    if location_code:
+        matching_stops = [
+            stop
+            for stop in _active_stops(stops)
+            if _normalize_optional_text(stop.location_code) == location_code
+        ]
+        if len(matching_stops) == 1:
+            return (
+                matching_stops[0],
+                TrackingSignalProcessingStatus.MATCHED,
+                requested_confidence if requested_confidence is not None else 0.75,
+                None,
+            )
+        if len(matching_stops) > 1:
+            return (
+                None,
+                TrackingSignalProcessingStatus.UNRESOLVED,
+                requested_confidence,
+                f"Location '{location_code}' matched multiple active truck stops.",
+            )
+        return (
+            None,
+            TrackingSignalProcessingStatus.UNRESOLVED,
+            requested_confidence,
+            f"Location '{location_code}' did not match an active truck stop.",
+        )
+
+    return (
+        None,
+        TrackingSignalProcessingStatus.MATCHED,
+        requested_confidence if requested_confidence is not None else 0.5,
+        None,
+    )
+
+
 def _truck_checkpoint_reference_code(
     *,
     checkpoint_code: TruckCheckpointCode,
@@ -541,6 +1028,34 @@ def _validate_checkpoint_sequence(
         candidate.status != TruckStopStatus.DEPARTED.value for candidate in earlier_active_stops
     ):
         raise ValueError("Destination arrival cannot be recorded until earlier active truck stops have departed.")
+
+
+def _validate_checkpoint_reversal_dependencies(
+    *,
+    stop: DeliveryTruckStop,
+    checkpoint_code: TruckCheckpointCode,
+    stops: list[DeliveryTruckStop],
+) -> None:
+    if checkpoint_code != TruckCheckpointCode.DEPARTED_PICKUP:
+        return
+
+    downstream_progress_stop = next(
+        (
+            candidate
+            for candidate in _active_stops(stops)
+            if (
+                candidate.stop_sequence > stop.stop_sequence
+                and candidate.status != TruckStopStatus.PLANNED.value
+            )
+        ),
+        None,
+    )
+    if downstream_progress_stop is not None:
+        raise ValueError(
+            "DEPARTED_PICKUP cannot be reversed while downstream truck stop "
+            f"{downstream_progress_stop.stop_id} has active progress. "
+            "Reverse or correct downstream stop progress first."
+        )
 
 
 def _checkpoint_projection_values(
@@ -718,6 +1233,277 @@ def get_delivery_truck_movement(
     movement, _delivery, _trade = _load_truck_movement(db, movement_id=movement_id)
     stops = _movement_stops_by_id(db, movement_ids=[movement.movement_id]).get(movement.movement_id, [])
     return _movement_to_out(movement, stops=stops)
+
+
+def get_delivery_truck_movement_tracking_health(
+    db: Session,
+    *,
+    movement_id: str,
+    as_of: datetime | None = None,
+) -> DeliveryTruckMovementTrackingHealthOut:
+    movement, _delivery, _trade = _load_truck_movement(db, movement_id=movement_id)
+    stops = _movement_stops_by_id(db, movement_ids=[movement.movement_id]).get(movement.movement_id, [])
+    return _movement_tracking_health_to_out(movement, stops=stops, as_of=as_of)
+
+
+def _truck_tracking_exception_sort_key(
+    row: DeliveryTruckTrackingExceptionOut,
+) -> tuple[int, int, str, str, int]:
+    delivery_start = row.delivery_start.isoformat() if row.delivery_start is not None else "9999-12-31"
+    return (
+        TRUCK_TRACKING_EXCEPTION_SEVERITY_SORT.get(row.tracking_health.exception_severity, 99),
+        TRUCK_TRACKING_PRIMARY_EXCEPTION_SORT.get(row.tracking_health.primary_exception or "", 99),
+        delivery_start,
+        row.trade_id,
+        row.movement.sequence_no,
+    )
+
+
+def list_delivery_truck_tracking_exceptions(
+    db: Session,
+    *,
+    include_clear: bool = False,
+    severity: str | None = None,
+    as_of: datetime | None = None,
+    limit: int | None = 50,
+) -> list[DeliveryTruckTrackingExceptionOut]:
+    severity_filter = _validate_optional_tracking_exception_severity(severity)
+    if limit is not None:
+        limit = _normalize_required_positive_int(limit, label="Truck tracking exception limit")
+
+    movement_rows = db.execute(
+        select(DeliveryTruckMovement, DeliveryObligation, Trade)
+        .join(DeliveryObligation, DeliveryObligation.delivery_id == DeliveryTruckMovement.delivery_id)
+        .join(Trade, Trade.trade_id == DeliveryObligation.trade_id)
+        .where(
+            DeliveryObligation.transport_mode == TransportMode.TRUCK.value,
+            Trade.trade_nature == "PHYSICAL",
+            Trade.status == "ACTIVE",
+        )
+        .order_by(
+            DeliveryTruckMovement.updated_at.desc(),
+            DeliveryTruckMovement.sequence_no.asc(),
+            DeliveryTruckMovement.movement_id.asc(),
+        )
+    ).all()
+    movement_ids = [movement.movement_id for movement, _delivery, _trade in movement_rows]
+    delivery_ids = [delivery.delivery_id for _movement, delivery, _trade in movement_rows]
+    stops_by_id = _movement_stops_by_id(db, movement_ids=movement_ids)
+    logistics_details_by_id = {
+        detail.delivery_id: detail
+        for detail in db.execute(
+            select(DeliveryLogisticsDetail).where(DeliveryLogisticsDetail.delivery_id.in_(delivery_ids))
+        ).scalars().all()
+    }
+
+    exception_rows: list[DeliveryTruckTrackingExceptionOut] = []
+    for movement, delivery, _trade in movement_rows:
+        stops = stops_by_id.get(movement.movement_id, [])
+        movement_summary = _movement_summary_to_out(movement, stops=stops, as_of=as_of)
+        health = movement_summary.tracking_health
+        if severity_filter is not None:
+            if health.exception_severity != severity_filter.value:
+                continue
+        elif not include_clear and health.exception_severity == TruckTrackingExceptionSeverity.CLEAR.value:
+            continue
+
+        logistics_detail = logistics_details_by_id.get(delivery.delivery_id)
+        exception_rows.append(
+            DeliveryTruckTrackingExceptionOut(
+                delivery_id=delivery.delivery_id,
+                trade_id=delivery.trade_id,
+                leg_no=delivery.leg_no,
+                external_trade_id=delivery.external_trade_id,
+                book=delivery.book,
+                portfolio=delivery.portfolio,
+                counterparty=delivery.counterparty,
+                commodity_class=delivery.commodity_class,
+                commodity=delivery.commodity,
+                transport_mode=delivery.transport_mode,
+                execution_status=delivery.execution_status,
+                delivery_start=delivery.delivery_start,
+                delivery_end=delivery.delivery_end,
+                location_code=delivery.location_code,
+                origin_location_code=(
+                    logistics_detail.origin_location_code if logistics_detail is not None else None
+                ),
+                destination_location_code=(
+                    logistics_detail.destination_location_code if logistics_detail is not None else None
+                ),
+                operations_owner=delivery.operations_owner,
+                movement=movement_summary,
+                tracking_health=health,
+            )
+        )
+
+    sorted_rows = sorted(exception_rows, key=_truck_tracking_exception_sort_key)
+    return sorted_rows[:limit] if limit is not None else sorted_rows
+
+
+def list_delivery_truck_tracking_signals(
+    db: Session,
+    *,
+    movement_id: str,
+) -> list[DeliveryTrackingSignalOut]:
+    movement, _delivery, _trade = _load_truck_movement(db, movement_id=movement_id)
+    signals = db.execute(
+        select(DeliveryTrackingSignal)
+        .where(DeliveryTrackingSignal.movement_id == movement.movement_id)
+        .order_by(DeliveryTrackingSignal.occurred_at.desc(), DeliveryTrackingSignal.signal_id.desc())
+    ).scalars().all()
+    return [_tracking_signal_to_out(signal) for signal in signals]
+
+
+def record_delivery_truck_tracking_signal(
+    db: Session,
+    *,
+    movement_id: str,
+    actor_id: str,
+    payload: object,
+    now: datetime | None = None,
+) -> DeliveryTrackingSignalIngestResultOut:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    movement, _delivery, trade = _load_truck_movement(db, movement_id=movement_id)
+    stops = _movement_stops_by_id(db, movement_ids=[movement.movement_id]).get(movement.movement_id, [])
+
+    source_system = (
+        _normalize_optional_text(getattr(payload, "source_system", None)) or TRUCK_CHECKPOINT_EVENT_SOURCE
+    ).upper()
+    source_event_id = _normalize_optional_text(getattr(payload, "source_event_id", None))
+    signal_type = _normalize_required_text(getattr(payload, "signal_type", None), label="Tracking signal type").upper()
+    occurred_at = _normalize_optional_datetime(
+        getattr(payload, "occurred_at", None),
+        label="Tracking signal occurred at",
+    )
+    if occurred_at is None:
+        raise ValueError("Tracking signal occurred at is required.")
+    received_at = (
+        _normalize_optional_datetime(getattr(payload, "received_at", None), label="Tracking signal received at")
+        or reference_time
+    )
+    location_code = _normalize_optional_text(getattr(payload, "location_code", None))
+    external_status = _normalize_optional_text(getattr(payload, "external_status", None))
+    normalized_status = _normalize_optional_text(getattr(payload, "normalized_status", None))
+    if normalized_status is not None:
+        normalized_status = normalized_status.upper()
+    requested_stop_id = _normalize_optional_text(getattr(payload, "stop_id", None))
+    requested_confidence = _normalize_optional_bounded_float(
+        getattr(payload, "match_confidence", None),
+        label="Tracking signal match confidence",
+        minimum=Decimal("0"),
+        maximum=Decimal("1"),
+    )
+    latitude = _normalize_optional_bounded_float(
+        getattr(payload, "latitude", None),
+        label="Tracking signal latitude",
+        minimum=Decimal("-90"),
+        maximum=Decimal("90"),
+    )
+    longitude = _normalize_optional_bounded_float(
+        getattr(payload, "longitude", None),
+        label="Tracking signal longitude",
+        minimum=Decimal("-180"),
+        maximum=Decimal("180"),
+    )
+    eta_at_destination = _normalize_optional_datetime(
+        getattr(payload, "eta_at_destination", None),
+        label="Tracking signal destination ETA",
+    )
+    raw_payload = jsonable_encoder(getattr(payload, "raw_payload", {}) or {})
+    if not isinstance(raw_payload, dict):
+        raise ValueError("Tracking signal raw payload must be an object.")
+    if eta_at_destination is not None:
+        raw_payload = {
+            **raw_payload,
+            "eta_at_destination": eta_at_destination.isoformat(),
+        }
+
+    dedupe_key = _tracking_signal_dedupe_key(
+        source_system=source_system,
+        source_event_id=source_event_id,
+        movement_id=movement.movement_id,
+        stop_id=requested_stop_id,
+        signal_type=signal_type,
+        occurred_at=occurred_at,
+        location_code=location_code,
+        external_status=external_status,
+    )
+    existing_signal = db.execute(
+        select(DeliveryTrackingSignal).where(DeliveryTrackingSignal.dedupe_key == dedupe_key)
+    ).scalars().first()
+    if existing_signal is not None:
+        if existing_signal.movement_id not in {None, movement.movement_id}:
+            raise ValueError(
+                f"Tracking signal dedupe key already belongs to truck movement '{existing_signal.movement_id}'."
+            )
+        return _tracking_signal_result(
+            existing_signal,
+            movement=movement,
+            stops=stops,
+            duplicate=True,
+        )
+
+    matched_stop, processing_status, match_confidence, processing_error = _resolve_tracking_signal_stop_match(
+        db,
+        movement=movement,
+        stops=stops,
+        requested_stop_id=requested_stop_id,
+        location_code=location_code,
+        requested_confidence=requested_confidence,
+    )
+    signal = DeliveryTrackingSignal(
+        delivery_id=movement.delivery_id,
+        movement_id=movement.movement_id,
+        stop_id=matched_stop.stop_id if matched_stop is not None else None,
+        source_system=source_system,
+        source_event_id=source_event_id,
+        signal_type=signal_type,
+        occurred_at=occurred_at,
+        received_at=received_at,
+        latitude=latitude,
+        longitude=longitude,
+        location_code=location_code,
+        external_status=external_status,
+        normalized_status=normalized_status,
+        match_confidence=match_confidence,
+        dedupe_key=dedupe_key,
+        processing_status=processing_status.value,
+        processing_error=processing_error,
+        raw_payload=raw_payload,
+    )
+    db.add(signal)
+
+    if processing_status != TrackingSignalProcessingStatus.REJECTED:
+        movement_updates: dict[str, object | None] = {}
+        current_last_signal_at = _coerce_utc(movement.last_signal_at)
+        if current_last_signal_at is None or occurred_at > current_last_signal_at:
+            movement_updates["last_signal_at"] = occurred_at
+        if eta_at_destination is not None:
+            movement_updates["current_eta_at_destination"] = eta_at_destination
+        if _apply_model_changes(movement, movement_updates):
+            _touch_audited_record(movement, actor_id=actor_id, reference_time=reference_time)
+
+    db.flush()
+    refreshed_stops = _movement_stops_by_id(db, movement_ids=[movement.movement_id]).get(movement.movement_id, [])
+    signal_out = _tracking_signal_to_out(signal)
+    _append_truck_movement_audit(
+        db,
+        trade_id=trade.trade_id,
+        actor_id=actor_id,
+        event_type="TradeDeliveryTruckTrackingSignalIngested",
+        movement=_movement_to_out(movement, stops=refreshed_stops),
+        causation_id=f"delivery:{movement.delivery_id}:truck-movement:{movement.movement_id}:signal:{signal.signal_id}",
+        request_payload={
+            "signal": signal_out.model_dump(mode="json"),
+            "duplicate": False,
+        },
+    )
+    return _tracking_signal_result(
+        signal,
+        movement=movement,
+        stops=refreshed_stops,
+        duplicate=False,
+    )
 
 
 def create_delivery_truck_movement(
@@ -1519,6 +2305,7 @@ def reverse_delivery_truck_stop_checkpoint(
 ) -> DeliveryTruckMovementOut:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
     stop, movement, _delivery, trade = _load_truck_stop(db, stop_id=stop_id)
+    stops = _movement_stops_by_id(db, movement_ids=[movement.movement_id]).get(movement.movement_id, [])
     all_stop_events = _truck_stop_checkpoint_events(
         db,
         delivery_id=movement.delivery_id,
@@ -1533,6 +2320,18 @@ def reverse_delivery_truck_stop_checkpoint(
         raise ValueError(f"Delivery event {event_id} is not a truck checkpoint event.")
     if target_event.reversal_of_event_id is not None or target_event.event_type == DeliveryEventType.EVENT_REVERSED.value:
         raise ValueError(f"Delivery event {event_id} is already a reversal entry and cannot be reversed.")
+    target_checkpoint_code = _truck_checkpoint_code_from_reference(
+        target_event.reference_code,
+        movement_id=movement.movement_id,
+        stop_id=stop.stop_id,
+    )
+    if target_checkpoint_code is None:
+        raise ValueError(f"Delivery event {event_id} is not linked to truck stop {stop_id}.")
+    _validate_checkpoint_reversal_dependencies(
+        stop=stop,
+        checkpoint_code=target_checkpoint_code,
+        stops=stops,
+    )
 
     reverse_delivery_event(
         db,

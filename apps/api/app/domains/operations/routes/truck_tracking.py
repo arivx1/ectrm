@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request, status
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import is_operations_role
@@ -11,17 +13,26 @@ from apps.api.app.domains.operations.services.truck_tracking import cancel_deliv
 from apps.api.app.domains.operations.services.truck_tracking import create_delivery_truck_movement
 from apps.api.app.domains.operations.services.truck_tracking import create_delivery_truck_stop
 from apps.api.app.domains.operations.services.truck_tracking import get_delivery_truck_movement
+from apps.api.app.domains.operations.services.truck_tracking import get_delivery_truck_movement_tracking_health
 from apps.api.app.domains.operations.services.truck_tracking import list_delivery_truck_movements
+from apps.api.app.domains.operations.services.truck_tracking import list_delivery_truck_tracking_exceptions
+from apps.api.app.domains.operations.services.truck_tracking import list_delivery_truck_tracking_signals
 from apps.api.app.domains.operations.services.truck_tracking import record_delivery_truck_stop_checkpoint
+from apps.api.app.domains.operations.services.truck_tracking import record_delivery_truck_tracking_signal
 from apps.api.app.domains.operations.services.truck_tracking import reverse_delivery_truck_stop_checkpoint
 from apps.api.app.domains.operations.services.truck_tracking import skip_delivery_truck_stop
 from apps.api.app.domains.operations.services.truck_tracking import update_delivery_truck_movement
 from apps.api.app.domains.operations.services.truck_tracking import update_delivery_truck_stop
+from apps.api.app.schemas.shipment import DeliveryTrackingSignalIngestResultOut
+from apps.api.app.schemas.shipment import DeliveryTrackingSignalOut
+from apps.api.app.schemas.shipment import DeliveryTrackingSignalWrite
 from apps.api.app.schemas.shipment import DeliveryTruckMovementCancelWrite
 from apps.api.app.schemas.shipment import DeliveryTruckMovementCreate
 from apps.api.app.schemas.shipment import DeliveryTruckMovementOut
 from apps.api.app.schemas.shipment import DeliveryTruckMovementSummaryOut
+from apps.api.app.schemas.shipment import DeliveryTruckMovementTrackingHealthOut
 from apps.api.app.schemas.shipment import DeliveryTruckMovementUpdate
+from apps.api.app.schemas.shipment import DeliveryTruckTrackingExceptionOut
 from apps.api.app.schemas.shipment import DeliveryTruckStopCancelWrite
 from apps.api.app.schemas.shipment import DeliveryTruckStopCheckpointReverseWrite
 from apps.api.app.schemas.shipment import DeliveryTruckStopCheckpointWrite
@@ -43,6 +54,30 @@ TRUCK_TRACKING_MUTATION_SPEC = build_role_mutation_spec(
 )
 TRUCK_MOVEMENT_LIST_QUERY_SPEC = OperationalQuerySpec(load=list_delivery_truck_movements)
 TRUCK_MOVEMENT_QUERY_SPEC = OperationalQuerySpec(load=get_delivery_truck_movement)
+TRUCK_MOVEMENT_TRACKING_HEALTH_QUERY_SPEC = OperationalQuerySpec(load=get_delivery_truck_movement_tracking_health)
+TRUCK_TRACKING_EXCEPTION_LIST_QUERY_SPEC = OperationalQuerySpec(load=list_delivery_truck_tracking_exceptions)
+TRUCK_TRACKING_SIGNAL_LIST_QUERY_SPEC = OperationalQuerySpec(load=list_delivery_truck_tracking_signals)
+
+
+@router.get(
+    "/truck-tracking/exceptions",
+    response_model=list[DeliveryTruckTrackingExceptionOut],
+)
+def list_truck_tracking_exceptions(
+    include_clear: bool = False,
+    severity: str | None = None,
+    as_of: datetime | None = None,
+    limit: int | None = 50,
+    db: Session = Depends(get_db),
+) -> list[DeliveryTruckTrackingExceptionOut]:
+    return execute_operational_query_spec(
+        TRUCK_TRACKING_EXCEPTION_LIST_QUERY_SPEC,
+        db,
+        include_clear=include_clear,
+        severity=severity,
+        as_of=as_of,
+        limit=limit,
+    )
 
 
 @router.get(
@@ -94,6 +129,66 @@ def get_truck_movement(
         db,
         movement_id=movement_id,
     )
+
+
+@router.get(
+    "/truck-movements/{movement_id}/tracking-health",
+    response_model=DeliveryTruckMovementTrackingHealthOut,
+)
+def get_truck_movement_tracking_health(
+    movement_id: str,
+    as_of: datetime | None = None,
+    db: Session = Depends(get_db),
+) -> DeliveryTruckMovementTrackingHealthOut:
+    return execute_operational_query_spec(
+        TRUCK_MOVEMENT_TRACKING_HEALTH_QUERY_SPEC,
+        db,
+        movement_id=movement_id,
+        as_of=as_of,
+    )
+
+
+@router.get(
+    "/truck-movements/{movement_id}/tracking-signals",
+    response_model=list[DeliveryTrackingSignalOut],
+)
+def list_truck_movement_tracking_signals(
+    movement_id: str,
+    db: Session = Depends(get_db),
+) -> list[DeliveryTrackingSignalOut]:
+    return execute_operational_query_spec(
+        TRUCK_TRACKING_SIGNAL_LIST_QUERY_SPEC,
+        db,
+        movement_id=movement_id,
+    )
+
+
+@router.post(
+    "/truck-movements/{movement_id}/tracking-signals",
+    response_model=DeliveryTrackingSignalIngestResultOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_truck_movement_tracking_signal(
+    movement_id: str,
+    payload: DeliveryTrackingSignalWrite,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> DeliveryTrackingSignalIngestResultOut:
+    result = execute_operational_mutation(
+        TRUCK_TRACKING_MUTATION_SPEC,
+        request,
+        db,
+        lambda actor: record_delivery_truck_tracking_signal(
+            db,
+            movement_id=movement_id,
+            actor_id=actor.actor_id,
+            payload=payload,
+        ),
+    )
+    if result.duplicate:
+        response.status_code = status.HTTP_200_OK
+    return result
 
 
 @router.patch("/truck-movements/{movement_id}", response_model=DeliveryTruckMovementOut)
@@ -292,9 +387,13 @@ def post_truck_stop_checkpoint_reversal(
 
 __all__ = [
     "router",
+    "list_truck_tracking_exceptions",
     "list_truck_movements_for_delivery",
     "post_truck_movement_for_delivery",
     "get_truck_movement",
+    "get_truck_movement_tracking_health",
+    "list_truck_movement_tracking_signals",
+    "post_truck_movement_tracking_signal",
     "patch_truck_movement",
     "post_truck_movement_cancel",
     "post_truck_movement_stop",

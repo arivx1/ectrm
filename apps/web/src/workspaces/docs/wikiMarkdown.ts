@@ -18,6 +18,13 @@ export type ParsedWikiPageLink = {
   target: string
 }
 
+export type ActiveWikiPageMention = {
+  startIndex: number
+  endIndex: number
+  query: string
+  label: string | null
+}
+
 type RenderWikiMarkdownOptions = {
   resolvePageLink?: (target: string) => ResolvedWikiPageLink | null
 }
@@ -46,6 +53,122 @@ export function parseWikiMarkdownLinks(markdown: string): ParsedWikiPageLink[] {
   }
 
   return links
+}
+
+export function rewriteWikiMarkdownLinkTarget(
+  markdown: string,
+  link: ParsedWikiPageLink,
+  nextPageId: string,
+): string {
+  const normalizedLabel = link.label.trim()
+  const normalizedTarget = link.target.trim()
+  const normalizedNextPageId = nextPageId.trim()
+
+  if (!normalizedLabel || !normalizedTarget || !normalizedNextPageId) {
+    return markdown
+  }
+
+  return markdown.replace(wikiPageLinkPattern, (rawMatch, customLabel, customTarget, simpleLabel) => {
+    if (typeof customLabel === 'string' && typeof customTarget === 'string') {
+      const label = customLabel.trim()
+      const target = customTarget.trim()
+      if (label === normalizedLabel && target === normalizedTarget) {
+        return `[[${label}|${normalizedNextPageId}]]`
+      }
+      return rawMatch
+    }
+
+    if (typeof simpleLabel === 'string') {
+      const label = simpleLabel.trim()
+      if (label === normalizedLabel && label === normalizedTarget) {
+        return `[[${label}|${normalizedNextPageId}]]`
+      }
+    }
+
+    return rawMatch
+  })
+}
+
+export function findActiveWikiPageMention(
+  markdown: string,
+  cursorIndex: number,
+): ActiveWikiPageMention | null {
+  const boundedCursorIndex = Math.max(0, Math.min(markdown.length, cursorIndex))
+  const prefix = markdown.slice(0, boundedCursorIndex)
+  const startIndex = prefix.lastIndexOf('[[')
+
+  if (startIndex < 0) {
+    return null
+  }
+
+  const lastClosedIndex = prefix.lastIndexOf(']]')
+  if (lastClosedIndex > startIndex) {
+    return null
+  }
+
+  const mentionText = prefix.slice(startIndex + 2)
+  if (mentionText.includes('\n') || mentionText.includes('[') || mentionText.includes(']')) {
+    return null
+  }
+
+  const pipeIndex = mentionText.indexOf('|')
+  if (pipeIndex !== mentionText.lastIndexOf('|')) {
+    return null
+  }
+
+  if (pipeIndex >= 0) {
+    const label = mentionText.slice(0, pipeIndex).trim()
+    const query = mentionText.slice(pipeIndex + 1).trim()
+    if (!label) {
+      return null
+    }
+    return {
+      startIndex,
+      endIndex: boundedCursorIndex,
+      query,
+      label,
+    }
+  }
+
+  return {
+    startIndex,
+    endIndex: boundedCursorIndex,
+    query: mentionText.trim(),
+    label: null,
+  }
+}
+
+export function replaceActiveWikiPageMention(
+  markdown: string,
+  mention: ActiveWikiPageMention,
+  page: {
+    pageId: string
+    title: string
+  },
+): {
+  markdown: string
+  cursorIndex: number
+} {
+  const title = page.title.trim()
+  const pageId = page.pageId.trim()
+  const label = mention.label?.trim() || title
+
+  if (!title || !pageId || mention.startIndex < 0 || mention.endIndex < mention.startIndex) {
+    return {
+      markdown,
+      cursorIndex: mention.endIndex,
+    }
+  }
+
+  const insertedText = `[[${label}|${pageId}]]`
+  const nextMarkdown = `${markdown.slice(0, mention.startIndex)}${insertedText}${markdown.slice(
+    mention.endIndex,
+  )}`
+
+  return {
+    markdown: nextMarkdown,
+    cursorIndex: mention.startIndex + insertedText.length,
+  }
 }
 
 function renderResolvedWikiPageLink(

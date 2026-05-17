@@ -129,7 +129,7 @@ from apps.api.app.domains.assistant.services.profile_requests import (
     mark_profile_request_activated,
     reject_profile_request,
     submit_profile_request,
-    to_profile_request_out,
+    to_profile_request_out_with_diff,
     validate_agent_activation_requirements,
 )
 from apps.api.app.domains.assistant.services.runs import (
@@ -286,7 +286,7 @@ def list_current_user_assistant_profile_requests(
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return [
-        to_profile_request_out(record)
+        to_profile_request_out_with_diff(db, record)
         for record in list_profile_requests(
             db,
             status=status,
@@ -309,12 +309,13 @@ def create_current_user_assistant_profile_request(
 ) -> AssistantAgentProfileRequestOut:
     try:
         user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
-        return to_profile_request_out(
+        return to_profile_request_out_with_diff(
+            db,
             submit_profile_request(
                 db,
                 payload=payload,
                 requested_by=user.user_id,
-            )
+            ),
         )
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -754,7 +755,7 @@ def list_admin_assistant_profile_requests(
     db: Session = Depends(get_db),
 ) -> list[AssistantAgentProfileRequestOut]:
     return [
-        to_profile_request_out(record)
+        to_profile_request_out_with_diff(db, record)
         for record in list_profile_requests(db, status=status, limit=limit, offset=offset)
     ]
 
@@ -769,7 +770,7 @@ def create_admin_assistant_profile_request(
     db: Session = Depends(get_db),
 ) -> AssistantAgentProfileRequestOut:
     try:
-        return to_profile_request_out(create_profile_request(db, payload))
+        return to_profile_request_out_with_diff(db, create_profile_request(db, payload))
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -781,7 +782,7 @@ def approve_admin_assistant_profile_request(
     db: Session = Depends(get_db),
 ) -> AssistantAgentProfileRequestOut:
     try:
-        return to_profile_request_out(approve_profile_request(db, request_id=request_id, payload=payload))
+        return to_profile_request_out_with_diff(db, approve_profile_request(db, request_id=request_id, payload=payload))
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -793,7 +794,7 @@ def reject_admin_assistant_profile_request(
     db: Session = Depends(get_db),
 ) -> AssistantAgentProfileRequestOut:
     try:
-        return to_profile_request_out(reject_profile_request(db, request_id=request_id, payload=payload))
+        return to_profile_request_out_with_diff(db, reject_profile_request(db, request_id=request_id, payload=payload))
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -808,7 +809,7 @@ def activate_admin_assistant_profile_request(
         record = mark_profile_request_activated(db, request_id=request_id, payload=payload)
         db.commit()
         db.refresh(record)
-        return to_profile_request_out(record)
+        return to_profile_request_out_with_diff(db, record)
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

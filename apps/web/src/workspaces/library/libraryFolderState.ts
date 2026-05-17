@@ -57,6 +57,30 @@ export type CopyDocumentLibraryFolderResult =
       error: string
     }
 
+export type RenameDocumentLibraryFolderResult =
+  | {
+      ok: true
+      snapshot: DocumentLibraryFolderSnapshot
+      folder: DocumentLibraryCustomFolder
+    }
+  | {
+      ok: false
+      error: string
+    }
+
+export type DeleteDocumentLibraryFolderResult =
+  | {
+      ok: true
+      snapshot: DocumentLibraryFolderSnapshot
+      deletedFolderIds: string[]
+      deletedFolderCount: number
+      unassignedDocumentCount: number
+    }
+  | {
+      ok: false
+      error: string
+    }
+
 function normalizeFolderName(value: string): string {
   return value.trim().replace(/\s+/g, ' ')
 }
@@ -365,6 +389,102 @@ export function copyDocumentLibraryFolderTree(
   }
 }
 
+export function renameDocumentLibraryFolder(
+  snapshot: DocumentLibraryFolderSnapshot,
+  folderId: string,
+  name: string,
+): RenameDocumentLibraryFolderResult {
+  const normalizedSnapshot = normalizeDocumentLibraryFolderSnapshot(snapshot)
+  const folder = normalizedSnapshot.folders.find((candidate) => candidate.id === folderId)
+
+  if (!folder) {
+    return {
+      ok: false,
+      error: 'That folder could not be found.',
+    }
+  }
+
+  const normalizedName = normalizeFolderName(name)
+  if (!normalizedName) {
+    return {
+      ok: false,
+      error: 'Enter a folder name.',
+    }
+  }
+
+  if (
+    folderNameExistsAtLevel(
+      normalizedSnapshot.folders,
+      normalizedName,
+      folder.parentFolderId,
+      folder.id,
+    )
+  ) {
+    return {
+      ok: false,
+      error: 'A folder with that name already exists here.',
+    }
+  }
+
+  const nextFolder = {
+    ...folder,
+    name: normalizedName,
+  }
+
+  return {
+    ok: true,
+    snapshot: {
+      ...normalizedSnapshot,
+      folders: normalizedSnapshot.folders.map((candidate) =>
+        candidate.id === folder.id ? nextFolder : candidate,
+      ),
+    },
+    folder: nextFolder,
+  }
+}
+
+export function deleteDocumentLibraryFolderTree(
+  snapshot: DocumentLibraryFolderSnapshot,
+  folderId: string,
+): DeleteDocumentLibraryFolderResult {
+  const normalizedSnapshot = normalizeDocumentLibraryFolderSnapshot(snapshot)
+  const folder = normalizedSnapshot.folders.find((candidate) => candidate.id === folderId)
+
+  if (!folder) {
+    return {
+      ok: false,
+      error: 'That folder could not be found.',
+    }
+  }
+
+  const deletedFolderIds = buildDocumentLibraryFolderDescendantIds(
+    folder.id,
+    normalizedSnapshot.folders,
+  )
+  const nextAssignments: DocumentLibraryFolderAssignments = {}
+  let unassignedDocumentCount = 0
+
+  Object.entries(normalizedSnapshot.assignments).forEach(([documentId, assignedFolderId]) => {
+    if (deletedFolderIds.has(assignedFolderId)) {
+      unassignedDocumentCount += 1
+      return
+    }
+
+    nextAssignments[documentId] = assignedFolderId
+  })
+
+  return {
+    ok: true,
+    snapshot: {
+      folders: normalizedSnapshot.folders.filter((candidate) => !deletedFolderIds.has(candidate.id)),
+      assignments: nextAssignments,
+    },
+    deletedFolderIds: Array.from(deletedFolderIds),
+    deletedFolderCount: deletedFolderIds.size,
+    unassignedDocumentCount,
+  }
+}
+
 export function getDocumentLibraryFolderSnapshot(): DocumentLibraryFolderSnapshot {
   if (typeof window === 'undefined') {
     return EMPTY_DOCUMENT_LIBRARY_FOLDER_SNAPSHOT
@@ -457,6 +577,8 @@ export function useDocumentLibraryFolderState(): {
     folderId: string,
     parentFolderId: string | null,
   ) => CopyDocumentLibraryFolderResult
+  renameFolder: (folderId: string, name: string) => RenameDocumentLibraryFolderResult
+  deleteFolder: (folderId: string) => DeleteDocumentLibraryFolderResult
   assignDocumentToFolder: (documentId: string, folderId: string | null) => void
   assignDocumentsToFolder: (documentIds: string[], folderId: string | null) => void
 } {
@@ -561,6 +683,43 @@ export function useDocumentLibraryFolderState(): {
     [assignDocumentsToFolder],
   )
 
+  const renameFolder = useCallback(
+    (folderId: string, name: string): RenameDocumentLibraryFolderResult => {
+      const result = renameDocumentLibraryFolder(
+        getDocumentLibraryFolderSnapshot(),
+        folderId,
+        name,
+      )
+      if (!result.ok) {
+        return result
+      }
+
+      return {
+        ...result,
+        snapshot: saveDocumentLibraryFolderSnapshot(result.snapshot),
+      }
+    },
+    [],
+  )
+
+  const deleteFolder = useCallback(
+    (folderId: string): DeleteDocumentLibraryFolderResult => {
+      const result = deleteDocumentLibraryFolderTree(
+        getDocumentLibraryFolderSnapshot(),
+        folderId,
+      )
+      if (!result.ok) {
+        return result
+      }
+
+      return {
+        ...result,
+        snapshot: saveDocumentLibraryFolderSnapshot(result.snapshot),
+      }
+    },
+    [],
+  )
+
   const moveFolder = useCallback(
     (folderId: string, parentFolderId: string | null): MoveDocumentLibraryFolderResult => {
       const result = moveDocumentLibraryFolderTree(
@@ -603,6 +762,8 @@ export function useDocumentLibraryFolderState(): {
     createFolder,
     moveFolder,
     copyFolder,
+    renameFolder,
+    deleteFolder,
     assignDocumentToFolder,
     assignDocumentsToFolder,
   }

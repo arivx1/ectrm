@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from apps.api.app.schemas.document import DocumentFacetSchemaOut
+from apps.api.app.schemas.document import DocumentFacetValueOut
 from apps.api.app.schemas.document import DocumentFieldSchemaOut
 from apps.api.app.schemas.document import DocumentKindSchemaOut
 from apps.api.app.schemas.document import DocumentRecordTargetOut
@@ -7,7 +9,7 @@ from apps.api.app.schemas.document import DocumentSchemaRegistryOut
 from apps.api.app.schemas.document import DocumentTableColumnSchemaOut
 from apps.api.app.schemas.document import DocumentTableTemplateSchemaOut
 
-DOCUMENT_SCHEMA_REGISTRY_VERSION = "2026-04-14.review-v3"
+DOCUMENT_SCHEMA_REGISTRY_VERSION = "2026-05-17.review-v5"
 
 
 def _field(
@@ -57,13 +59,220 @@ def _target(
     )
 
 
+def _facet_value(code: str, label: str, description: str | None = None) -> DocumentFacetValueOut:
+    return DocumentFacetValueOut(code=code, label=label, description=description)
+
+
+def _facet(
+    facet_key: str,
+    label: str,
+    *,
+    description: str,
+    value_type: str = "single_select",
+    repeatable: bool = False,
+    required: bool = False,
+    allowed_values: tuple[DocumentFacetValueOut, ...] = (),
+) -> DocumentFacetSchemaOut:
+    return DocumentFacetSchemaOut(
+        facet_key=facet_key,
+        label=label,
+        description=description,
+        value_type=value_type,
+        repeatable=repeatable,
+        required=required,
+        allowed_values=list(allowed_values),
+    )
+
+
+ECONOMIC_PURPOSE_VALUES = (
+    _facet_value("commodity", "Commodity"),
+    _facet_value("freight", "Freight"),
+    _facet_value("service", "Service"),
+    _facet_value("storage", "Storage"),
+    _facet_value("demurrage", "Demurrage"),
+    _facet_value("inspection", "Inspection"),
+    _facet_value("tax", "Tax"),
+    _facet_value("other", "Other"),
+)
+
+INVOICE_STAGE_VALUES = (
+    _facet_value("provisional", "Provisional"),
+    _facet_value("final", "Final"),
+    _facet_value("corrected", "Corrected"),
+    _facet_value("adjustment", "Adjustment"),
+    _facet_value("credit", "Credit"),
+    _facet_value("debit", "Debit"),
+    _facet_value("proforma", "Proforma"),
+)
+
+ACCOUNTING_DIRECTION_VALUES = (
+    _facet_value("ap", "AP"),
+    _facet_value("ar", "AR"),
+    _facet_value("intercompany", "Intercompany"),
+    _facet_value("shadow_internal", "Shadow/Internal"),
+)
+
+SOURCE_PARTY_ROLE_VALUES = (
+    _facet_value("counterparty", "Counterparty"),
+    _facet_value("broker", "Broker"),
+    _facet_value("carrier", "Carrier"),
+    _facet_value("inspector", "Inspector"),
+    _facet_value("pipeline", "Pipeline"),
+    _facet_value("terminal", "Terminal"),
+    _facet_value("internal", "Internal"),
+)
+
+TRANSPORT_MODE_VALUES = (
+    _facet_value("truck", "Truck"),
+    _facet_value("vessel", "Vessel"),
+    _facet_value("rail", "Rail"),
+    _facet_value("barge", "Barge"),
+    _facet_value("pipeline", "Pipeline"),
+    _facet_value("multimodal", "Multimodal"),
+)
+
+BOL_LEGAL_ROLE_VALUES = (
+    _facet_value("title_document", "Title Document"),
+    _facet_value("transport_receipt", "Transport Receipt"),
+    _facet_value("non_negotiable_copy", "Non-negotiable Copy"),
+    _facet_value("sea_waybill", "Sea Waybill"),
+)
+
+BOL_CARGO_STATUS_VALUES = (
+    _facet_value("clean", "Clean"),
+    _facet_value("claused", "Claused"),
+    _facet_value("on_board", "On-board"),
+    _facet_value("received_for_shipment", "Received for Shipment"),
+)
+
+ORIGINAL_COPY_STATUS_VALUES = (
+    _facet_value("original", "Original"),
+    _facet_value("copy", "Copy"),
+    _facet_value("certified_copy", "Certified Copy"),
+    _facet_value("unknown", "Unknown"),
+)
+
+QUANTITY_BASIS_VALUES = (
+    _facet_value("gross_weight", "Gross Weight"),
+    _facet_value("net_weight", "Net Weight"),
+    _facet_value("loaded_quantity", "Loaded Quantity"),
+    _facet_value("delivered_quantity", "Delivered Quantity"),
+    _facet_value("metered_quantity", "Metered Quantity"),
+    _facet_value("allocated_quantity", "Allocated Quantity"),
+)
+
+QUALITY_DOCUMENT_ROLE_VALUES = (
+    _facet_value("requirement", "Requirement"),
+    _facet_value("evidence", "Evidence"),
+    _facet_value("result", "Result"),
+    _facet_value("inspection", "Inspection"),
+    _facet_value("lab_analysis", "Lab Analysis"),
+)
+
+INVOICE_CONTROLLED_FACETS = (
+    _facet(
+        "economic_purpose",
+        "Economic Purpose",
+        description="Header-level commercial purpose. Line items may still carry their own charge types.",
+        value_type="multi_select",
+        repeatable=True,
+        allowed_values=ECONOMIC_PURPOSE_VALUES,
+    ),
+    _facet(
+        "invoice_stage",
+        "Invoice Stage",
+        description="Invoice lifecycle or settlement stage; not a separate document family by itself.",
+        allowed_values=INVOICE_STAGE_VALUES,
+    ),
+    _facet(
+        "accounting_direction",
+        "Accounting Direction",
+        description="Whether the invoice is payable, receivable, intercompany, or internal shadow evidence.",
+        allowed_values=ACCOUNTING_DIRECTION_VALUES,
+    ),
+    _facet(
+        "source_party_role",
+        "Source Party Role",
+        description="Business role of the party that issued or supplied the invoice.",
+        allowed_values=SOURCE_PARTY_ROLE_VALUES,
+    ),
+    _facet(
+        "is_disputed",
+        "Disputed",
+        description="Whether the invoice is currently disputed.",
+        value_type="boolean",
+    ),
+    _facet(
+        "line_charge_type",
+        "Line Charge Type",
+        description="Controlled charge-purpose values for invoice line items.",
+        value_type="multi_select",
+        repeatable=True,
+        allowed_values=ECONOMIC_PURPOSE_VALUES,
+    ),
+)
+
+BILL_OF_LADING_CONTROLLED_FACETS = (
+    _facet(
+        "transport_mode",
+        "Transport Mode",
+        description="Mode used for the movement without forcing truck, vessel, rail, or barge into separate types.",
+        allowed_values=TRANSPORT_MODE_VALUES,
+    ),
+    _facet(
+        "legal_role",
+        "Legal Role",
+        description="Legal or operational role the bill of lading plays in the shipment packet.",
+        allowed_values=BOL_LEGAL_ROLE_VALUES,
+    ),
+    _facet(
+        "cargo_status",
+        "Cargo Status",
+        description="Clean, claused, on-board, or received-for-shipment cargo status when present.",
+        value_type="multi_select",
+        repeatable=True,
+        allowed_values=BOL_CARGO_STATUS_VALUES,
+    ),
+    _facet(
+        "original_copy_status",
+        "Original/Copy Status",
+        description="Presentation status of the document image or copy.",
+        allowed_values=ORIGINAL_COPY_STATUS_VALUES,
+    ),
+)
+
+LOGISTICS_CONTROLLED_FACETS = (
+    _facet(
+        "transport_mode",
+        "Transport Mode",
+        description="Movement mode when the same operational document family can appear across transport modes.",
+        allowed_values=TRANSPORT_MODE_VALUES,
+    ),
+    _facet(
+        "quantity_basis",
+        "Quantity Basis",
+        description="Basis for the measured or stated quantity.",
+        allowed_values=QUANTITY_BASIS_VALUES,
+    ),
+)
+
+QUALITY_CONTROLLED_FACETS = (
+    _facet(
+        "quality_document_role",
+        "Quality Document Role",
+        description="Whether the document describes requirements, observed evidence, inspection findings, or lab results.",
+        allowed_values=QUALITY_DOCUMENT_ROLE_VALUES,
+    ),
+)
+
+
 DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
     DocumentKindSchemaOut(
         document_kind="TRADE_COMMUNICATION",
         label="Trade Communication",
         document_family="TRADE_EXECUTION",
-        description="Commercial recap, email, or message thread capturing trade terms or negotiation context.",
-        review_guidance="Confirm whether the communication represents a firm trade recap, then capture the trade identifiers, sender, and counterparties.",
+        description="Email, message thread, or other correspondence capturing trade negotiation context.",
+        review_guidance="Confirm whether the communication is supporting context rather than a firm deal recap, then capture the trade identifiers, sender, and counterparties.",
         linkage_summary="Links primarily to trade records using trade IDs, external trade IDs, counterparties, and the communication date.",
         record_targets=[
             _target("TRADE", "Trade", "Match using trade or external trade identifiers when present."),
@@ -78,6 +287,49 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
             _field("subject", "Subject"),
         ],
         table_templates=[],
+    ),
+    DocumentKindSchemaOut(
+        document_kind="DEAL_RECAP",
+        label="Deal Recap",
+        document_family="TRADE_EXECUTION",
+        description="Desk or counterparty recap summarizing agreed deal economics before formal confirmation.",
+        review_guidance="Confirm the recap reflects a firm deal, then capture economic terms, parties, and delivery window before linking it.",
+        linkage_summary="Links primarily to trade records using trade IDs, external references, counterparties, commodity, quantity, price, and recap date.",
+        record_targets=[
+            _target("TRADE", "Trade", "Match using trade ID, external trade ID, counterparty, and recap economics."),
+            _target(
+                "TRADE_WORKFLOW_ITEM",
+                "Trade Workflow Item",
+                "Use the recap to support confirmation or booking follow-up when no final trade record exists yet.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["trade_id", "external_trade_id", "counterparty", "recap_date"],
+        header_fields=[
+            _field("recap_number", "Recap Number", value_type="identifier"),
+            _field("recap_date", "Recap Date", value_type="date", required=True),
+            _field("trade_id", "Trade ID", value_type="identifier"),
+            _field("external_trade_id", "External Trade ID", value_type="identifier"),
+            _field("counterparty", "Counterparty", required=True),
+            _field("trader", "Trader"),
+            _field("commodity", "Commodity", required=True),
+            _field("quantity", "Quantity", value_type="quantity"),
+            _field("price", "Price"),
+            _field("delivery_start", "Delivery Start", value_type="date"),
+            _field("delivery_end", "Delivery End", value_type="date"),
+        ],
+        table_templates=[
+            DocumentTableTemplateSchemaOut(
+                template_key="commercial_terms",
+                label="Commercial Terms",
+                description="Recap terms captured as term/value rows.",
+                min_occurrences=0,
+                columns=[
+                    _column("term_name", "Term Name", required=True),
+                    _column("term_value", "Term Value", required=True),
+                ],
+            )
+        ],
     ),
     DocumentKindSchemaOut(
         document_kind="INVOICE",
@@ -237,6 +489,114 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         table_templates=[],
     ),
     DocumentKindSchemaOut(
+        document_kind="LETTER_OF_CREDIT",
+        label="Letter of Credit",
+        document_family="SETTLEMENT",
+        description="Bank-issued credit instrument supporting payment or shipment obligations for a commodity transaction.",
+        review_guidance="Verify the issuing bank, applicant, beneficiary, expiry date, and amount before linking it to the trade or settlement workflow.",
+        linkage_summary="Links primarily to trade and settlement records using letter of credit numbers, trade IDs, counterparties, banks, and expiry dates.",
+        record_targets=[
+            _target("TRADE", "Trade", "Match using trade ID, applicant, beneficiary, and counterparty."),
+            _target(
+                "SETTLEMENT_ACCOUNT",
+                "Settlement Account",
+                "Use bank and credit instrument details when the trade linkage is incomplete.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["letter_of_credit_number", "trade_id", "applicant", "beneficiary", "issuing_bank"],
+        header_fields=[
+            _field("letter_of_credit_number", "Letter of Credit Number", value_type="identifier", required=True),
+            _field("issue_date", "Issue Date", value_type="date"),
+            _field("expiry_date", "Expiry Date", value_type="date", required=True),
+            _field("issuing_bank", "Issuing Bank", required=True),
+            _field("applicant", "Applicant", required=True),
+            _field("beneficiary", "Beneficiary", required=True),
+            _field("trade_id", "Trade ID", value_type="identifier"),
+            _field("amount", "Amount", value_type="currency", required=True),
+            _field("currency", "Currency", value_type="identifier"),
+        ],
+        table_templates=[],
+    ),
+    DocumentKindSchemaOut(
+        document_kind="NOMINATION",
+        label="Nomination",
+        document_family="NETWORK_FLOW",
+        description="Pipeline, terminal, or transport nomination requesting scheduled commodity movement.",
+        review_guidance="Confirm the nomination reference, flow date, system, locations, and quantity before matching it to delivery obligations.",
+        linkage_summary="Links primarily to delivery and trade records using nomination references, trade IDs, contract numbers, locations, and gas or flow dates.",
+        record_targets=[
+            _target("DELIVERY", "Delivery", "Match using nomination reference, delivery ID, locations, and flow date."),
+            _target(
+                "TRADE",
+                "Trade",
+                "Use trade ID or contract number when the delivery linkage is incomplete.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["nomination_reference", "trade_id", "delivery_id", "contract_number"],
+        header_fields=[
+            _field("nomination_reference", "Nomination Reference", value_type="identifier", required=True),
+            _field("nomination_date", "Nomination Date", value_type="date"),
+            _field("flow_date", "Flow Date", value_type="date", required=True),
+            _field("trade_id", "Trade ID", value_type="identifier"),
+            _field("delivery_id", "Delivery ID", value_type="identifier"),
+            _field("pipeline_system", "Pipeline System"),
+            _field("contract_number", "Contract Number", value_type="identifier"),
+            _field("receipt_location_code", "Receipt Location", value_type="identifier"),
+            _field("delivery_location_code", "Delivery Location", value_type="identifier"),
+            _field("quantity", "Quantity", value_type="quantity"),
+        ],
+        table_templates=[
+            DocumentTableTemplateSchemaOut(
+                template_key="flow_lines",
+                label="Flow Lines",
+                description="Scheduled receipt or delivery flow rows.",
+                min_occurrences=0,
+                columns=[
+                    _column("location", "Location", required=True),
+                    _column("quantity", "Quantity", value_type="quantity", required=True),
+                    _column("unit", "Unit"),
+                    _column("flow_date", "Flow Date", value_type="date"),
+                ],
+            )
+        ],
+    ),
+    DocumentKindSchemaOut(
+        document_kind="CURTAILMENT_NOTICE",
+        label="Curtailment Notice",
+        document_family="NETWORK_FLOW",
+        description="Operational notice reducing scheduled or available commodity flow because of capacity, reliability, or system constraints.",
+        review_guidance="Confirm the curtailment notice identity, effective window, issuing entity, affected system, and curtailed quantity before routing it to operations.",
+        linkage_summary="Links primarily to delivery and trade records using curtailment notice numbers, nomination references, delivery IDs, trade IDs, systems, and locations.",
+        record_targets=[
+            _target("DELIVERY", "Delivery", "Match using delivery ID, nomination reference, system, location, and effective window."),
+            _target(
+                "TRADE",
+                "Trade",
+                "Use trade ID or contract reference when the delivery linkage is incomplete.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["curtailment_notice_number", "trade_id", "delivery_id", "nomination_reference", "pipeline_system"],
+        header_fields=[
+            _field("curtailment_notice_number", "Curtailment Notice Number", value_type="identifier", required=True),
+            _field("notice_date", "Notice Date", value_type="date", required=True),
+            _field("effective_start", "Effective Start", value_type="date", required=True),
+            _field("effective_end", "Effective End", value_type="date"),
+            _field("issuing_entity", "Issuing Entity", required=True),
+            _field("pipeline_system", "Pipeline System"),
+            _field("facility", "Facility"),
+            _field("location", "Location"),
+            _field("trade_id", "Trade ID", value_type="identifier"),
+            _field("delivery_id", "Delivery ID", value_type="identifier"),
+            _field("nomination_reference", "Nomination Reference", value_type="identifier"),
+            _field("curtailed_quantity", "Curtailed Quantity", value_type="quantity"),
+            _field("reason", "Reason"),
+        ],
+        table_templates=[],
+    ),
+    DocumentKindSchemaOut(
         document_kind="PIPELINE_STATEMENT",
         label="Pipeline Statement",
         document_family="NETWORK_FLOW",
@@ -293,6 +653,71 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
             _field("origin", "Origin"),
             _field("destination", "Destination"),
             _field("net_quantity", "Net Quantity", value_type="quantity"),
+        ],
+        table_templates=[],
+    ),
+    DocumentKindSchemaOut(
+        document_kind="RAILCAR_TICKET",
+        label="Railcar Ticket",
+        document_family="LOGISTICS",
+        description="Rail movement record documenting waybill, railcar, route, and loaded or delivered quantities.",
+        review_guidance="Confirm the waybill or railcar identity, carrier, route, and movement date before reviewing quantity details.",
+        linkage_summary="Links primarily to delivery and trade records using waybill numbers, railcar numbers, delivery IDs, trade IDs, and carrier references.",
+        record_targets=[
+            _target("DELIVERY", "Delivery", "Match using delivery ID, waybill number, railcar number, and route details."),
+            _target(
+                "TRADE",
+                "Trade",
+                "Use trade ID as secondary context for the rail movement record.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["waybill_number", "railcar_number", "trade_id", "delivery_id", "carrier_reference"],
+        header_fields=[
+            _field("waybill_number", "Waybill Number", value_type="identifier", required=True),
+            _field("railcar_number", "Railcar Number", value_type="identifier", required=True),
+            _field("load_date", "Load Date", value_type="date"),
+            _field("trade_id", "Trade ID", value_type="identifier"),
+            _field("delivery_id", "Delivery ID", value_type="identifier"),
+            _field("carrier", "Carrier"),
+            _field("carrier_reference", "Carrier Reference", value_type="identifier"),
+            _field("origin", "Origin"),
+            _field("destination", "Destination"),
+            _field("net_quantity", "Net Quantity", value_type="quantity"),
+        ],
+        table_templates=[],
+    ),
+    DocumentKindSchemaOut(
+        document_kind="DISPATCH_NOTICE",
+        label="Dispatch Notice",
+        document_family="LOGISTICS",
+        description="Operational dispatch instruction for a truck, rail, vessel, terminal, pipeline, or power delivery movement.",
+        review_guidance="Confirm the dispatch number, dispatch window, asset or carrier, route, and quantity before matching it to the delivery workflow.",
+        linkage_summary="Links primarily to delivery and trade records using dispatch numbers, delivery IDs, trade IDs, carrier references, asset references, routes, and dates.",
+        record_targets=[
+            _target("DELIVERY", "Delivery", "Match using delivery ID, dispatch number, route, carrier, asset reference, and dispatch window."),
+            _target(
+                "TRADE",
+                "Trade",
+                "Use trade ID as secondary context for the dispatched movement.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["dispatch_number", "trade_id", "delivery_id", "carrier_reference", "asset_reference"],
+        header_fields=[
+            _field("dispatch_number", "Dispatch Number", value_type="identifier", required=True),
+            _field("dispatch_date", "Dispatch Date", value_type="date", required=True),
+            _field("dispatch_start", "Dispatch Start", value_type="date"),
+            _field("dispatch_end", "Dispatch End", value_type="date"),
+            _field("trade_id", "Trade ID", value_type="identifier"),
+            _field("delivery_id", "Delivery ID", value_type="identifier"),
+            _field("carrier", "Carrier"),
+            _field("carrier_reference", "Carrier Reference", value_type="identifier"),
+            _field("asset_reference", "Asset Reference", value_type="identifier"),
+            _field("origin", "Origin"),
+            _field("destination", "Destination"),
+            _field("quantity", "Quantity", value_type="quantity"),
+            _field("instructions", "Instructions"),
         ],
         table_templates=[],
     ),
@@ -366,6 +791,37 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         table_templates=[],
     ),
     DocumentKindSchemaOut(
+        document_kind="NOTICE_OF_READINESS",
+        label="Notice of Readiness",
+        document_family="LOGISTICS",
+        description="Vessel or terminal notice that cargo or transport equipment is ready for loading or discharge.",
+        review_guidance="Confirm the notice time, vessel or terminal details, ports, and delivery references before using it for operational readiness.",
+        linkage_summary="Links primarily to delivery and trade records using notice numbers, vessel names, voyage numbers, ports, delivery IDs, and trade IDs.",
+        record_targets=[
+            _target("DELIVERY", "Delivery", "Match using delivery ID, vessel or voyage details, ports, and notice time."),
+            _target(
+                "TRADE",
+                "Trade",
+                "Use trade ID or bill of lading reference as secondary context.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["notice_number", "delivery_id", "trade_id", "vessel_name", "voyage_number"],
+        header_fields=[
+            _field("notice_number", "Notice Number", value_type="identifier"),
+            _field("notice_date", "Notice Date", value_type="date", required=True),
+            _field("notice_time", "Notice Time"),
+            _field("delivery_id", "Delivery ID", value_type="identifier"),
+            _field("trade_id", "Trade ID", value_type="identifier"),
+            _field("vessel_name", "Vessel Name", required=True),
+            _field("voyage_number", "Voyage Number", value_type="identifier"),
+            _field("load_port", "Load Port"),
+            _field("discharge_port", "Discharge Port"),
+            _field("eta", "ETA", value_type="date"),
+        ],
+        table_templates=[],
+    ),
+    DocumentKindSchemaOut(
         document_kind="CERTIFICATE_OF_ANALYSIS",
         label="Certificate of Analysis",
         document_family="QUALITY",
@@ -407,6 +863,97 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
                 ],
             )
         ],
+    ),
+    DocumentKindSchemaOut(
+        document_kind="CERTIFICATE_OF_ORIGIN",
+        label="Certificate of Origin",
+        document_family="COMPLIANCE",
+        description="Origin certificate documenting source country, shipper, consignee, and cargo details.",
+        review_guidance="Confirm the certificate identity, origin country, product, and shipping references before using it as compliance support.",
+        linkage_summary="Links primarily to delivery, trade, and compliance records using certificate numbers, bill of lading numbers, origin country, trade IDs, and delivery IDs.",
+        record_targets=[
+            _target("COMPLIANCE_RECORD", "Compliance Record", "Match using certificate number, origin country, and cargo references."),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Use bill of lading, delivery, or trade references to attach the certificate to a movement.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["certificate_number", "bill_of_lading_number", "trade_id", "delivery_id", "origin_country"],
+        header_fields=[
+            _field("certificate_number", "Certificate Number", value_type="identifier", required=True),
+            _field("issue_date", "Issue Date", value_type="date"),
+            _field("origin_country", "Origin Country", required=True),
+            _field("product", "Product", required=True),
+            _field("shipper", "Shipper"),
+            _field("consignee", "Consignee"),
+            _field("bill_of_lading_number", "Bill of Lading Number", value_type="identifier"),
+            _field("trade_id", "Trade ID", value_type="identifier"),
+            _field("delivery_id", "Delivery ID", value_type="identifier"),
+        ],
+        table_templates=[],
+    ),
+    DocumentKindSchemaOut(
+        document_kind="INSPECTION_REPORT",
+        label="Inspection Report",
+        document_family="QUALITY",
+        description="Inspection company report covering cargo, vessel, terminal, or quality observations.",
+        review_guidance="Verify the report number, inspector, location, product, and movement references before accepting inspection findings.",
+        linkage_summary="Links primarily to quality, delivery, and trade records using report numbers, inspection dates, delivery IDs, trade IDs, vessel names, and product details.",
+        record_targets=[
+            _target("QUALITY_RECORD", "Quality Record", "Match using report number, inspection date, product, or movement reference."),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Use delivery, bill of lading, vessel, or trade references when the report belongs to a movement.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["inspection_report_number", "inspection_date", "trade_id", "delivery_id", "product"],
+        header_fields=[
+            _field("inspection_report_number", "Inspection Report Number", value_type="identifier", required=True),
+            _field("inspection_date", "Inspection Date", value_type="date", required=True),
+            _field("trade_id", "Trade ID", value_type="identifier"),
+            _field("delivery_id", "Delivery ID", value_type="identifier"),
+            _field("bill_of_lading_number", "Bill of Lading Number", value_type="identifier"),
+            _field("inspector", "Inspector", required=True),
+            _field("location", "Location"),
+            _field("vessel_name", "Vessel Name"),
+            _field("product", "Product", required=True),
+        ],
+        table_templates=[],
+    ),
+    DocumentKindSchemaOut(
+        document_kind="FORCE_MAJEURE_NOTICE",
+        label="Force Majeure Notice",
+        document_family="COMPLIANCE",
+        description="Legal or operational notice asserting a force majeure event affecting trade, delivery, or facility obligations.",
+        review_guidance="Confirm the notice number, counterparty, contract or trade reference, event window, and affected location before attaching it to the governed record.",
+        linkage_summary="Links primarily to compliance, trade, and delivery records using notice numbers, contract numbers, counterparties, trade IDs, delivery IDs, and event windows.",
+        record_targets=[
+            _target("COMPLIANCE_RECORD", "Compliance Record", "Match using notice number, counterparty, contract reference, and event window."),
+            _target(
+                "TRADE",
+                "Trade",
+                "Use trade ID or contract number to connect the notice to affected commercial obligations.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["force_majeure_notice_number", "trade_id", "delivery_id", "contract_number", "counterparty"],
+        header_fields=[
+            _field("force_majeure_notice_number", "Force Majeure Notice Number", value_type="identifier", required=True),
+            _field("notice_date", "Notice Date", value_type="date", required=True),
+            _field("counterparty", "Counterparty", required=True),
+            _field("contract_number", "Contract Number", value_type="identifier"),
+            _field("trade_id", "Trade ID", value_type="identifier"),
+            _field("delivery_id", "Delivery ID", value_type="identifier"),
+            _field("event_start", "Event Start", value_type="date", required=True),
+            _field("event_end", "Event End", value_type="date"),
+            _field("affected_location", "Affected Location"),
+            _field("event_description", "Event Description"),
+        ],
+        table_templates=[],
     ),
     DocumentKindSchemaOut(
         document_kind="QUALITY_STATEMENT",
@@ -495,6 +1042,166 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
             _field("product", "Product", required=True),
         ],
         table_templates=[],
+    ),
+    DocumentKindSchemaOut(
+        document_kind="DEMURRAGE_CLAIM",
+        label="Demurrage Claim",
+        document_family="SETTLEMENT",
+        description="Claim package for delay or laytime charges tied to a vessel, terminal, or cargo movement.",
+        review_guidance="Verify the claim number, bill of lading or vessel reference, laytime basis, counterparty, and claimed amount before routing to settlement.",
+        linkage_summary="Links primarily to settlement, delivery, and trade records using claim numbers, bill of lading numbers, vessel names, delivery IDs, trade IDs, and counterparties.",
+        record_targets=[
+            _target(
+                "TRADE_INVOICE",
+                "Trade Invoice",
+                "Match using claim number, bill of lading, trade ID, delivery ID, and claimed amount.",
+                create_if_missing=True,
+            ),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Use vessel, bill of lading, or delivery references as the movement anchor.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["claim_number", "bill_of_lading_number", "trade_id", "delivery_id", "counterparty"],
+        header_fields=[
+            _field("claim_number", "Claim Number", value_type="identifier", required=True),
+            _field("claim_date", "Claim Date", value_type="date", required=True),
+            _field("trade_id", "Trade ID", value_type="identifier"),
+            _field("delivery_id", "Delivery ID", value_type="identifier"),
+            _field("bill_of_lading_number", "Bill of Lading Number", value_type="identifier"),
+            _field("vessel_name", "Vessel Name"),
+            _field("counterparty", "Counterparty", required=True),
+            _field("laytime_start", "Laytime Start", value_type="date"),
+            _field("laytime_end", "Laytime End", value_type="date"),
+            _field("claim_amount", "Claim Amount", value_type="currency", required=True),
+            _field("currency", "Currency", value_type="identifier"),
+        ],
+        table_templates=[
+            DocumentTableTemplateSchemaOut(
+                template_key="claim_lines",
+                label="Claim Lines",
+                description="Delay, rate, and amount rows supporting the demurrage claim.",
+                min_occurrences=0,
+                columns=[
+                    _column("description", "Description", required=True),
+                    _column("days", "Days", value_type="number"),
+                    _column("rate", "Rate", value_type="currency"),
+                    _column("amount", "Amount", value_type="currency", required=True),
+                ],
+            )
+        ],
+    ),
+    DocumentKindSchemaOut(
+        document_kind="PAYMENT_ADVICE",
+        label="Payment Advice",
+        document_family="SETTLEMENT",
+        description="Payment or remittance advice showing cash application details for invoices or settlements.",
+        review_guidance="Confirm the payment reference, advice date, payer, payee, amount, and invoice references before linking to settlement records.",
+        linkage_summary="Links primarily to trade payment and invoice records using payment references, invoice numbers, counterparties, amounts, and dates.",
+        record_targets=[
+            _target(
+                "TRADE_PAYMENT",
+                "Trade Payment",
+                "Match using payment reference first, then invoice number, account, amount, and advice date.",
+                create_if_missing=True,
+            ),
+            _target(
+                "TRADE_INVOICE",
+                "Trade Invoice",
+                "Use invoice number as the owning settlement anchor when payment creation is required.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["payment_reference", "invoice_number", "account", "advice_date"],
+        header_fields=[
+            _field("payment_reference", "Payment Reference", value_type="identifier", required=True),
+            _field("advice_date", "Advice Date", value_type="date", required=True),
+            _field("invoice_number", "Invoice Number", value_type="identifier"),
+            _field("payer", "Payer"),
+            _field("payee", "Payee"),
+            _field("account", "Account"),
+            _field("amount", "Amount", value_type="currency", required=True),
+            _field("currency", "Currency", value_type="identifier"),
+        ],
+        table_templates=[],
+    ),
+    DocumentKindSchemaOut(
+        document_kind="OUTAGE_NOTICE",
+        label="Outage Notice",
+        document_family="NETWORK_FLOW",
+        description="Notice of planned or unplanned facility, pipeline, transmission, or generation outage affecting commodity movement or availability.",
+        review_guidance="Confirm the outage number, affected facility or asset, outage window, and operational impact before routing it to operations.",
+        linkage_summary="Links primarily to delivery, inventory, and trade records using outage numbers, facility or asset references, systems, locations, trade IDs, and delivery IDs.",
+        record_targets=[
+            _target("DELIVERY", "Delivery", "Match using delivery ID, facility, asset, system, location, and outage window."),
+            _target(
+                "TRADE",
+                "Trade",
+                "Use trade ID as secondary context when the outage affects commercial obligations.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["outage_number", "facility", "asset_reference", "pipeline_system", "trade_id", "delivery_id"],
+        header_fields=[
+            _field("outage_number", "Outage Number", value_type="identifier", required=True),
+            _field("notice_date", "Notice Date", value_type="date", required=True),
+            _field("facility", "Facility", required=True),
+            _field("pipeline_system", "Pipeline System"),
+            _field("asset_reference", "Asset Reference", value_type="identifier"),
+            _field("outage_start", "Outage Start", value_type="date", required=True),
+            _field("outage_end", "Outage End", value_type="date"),
+            _field("location", "Location"),
+            _field("trade_id", "Trade ID", value_type="identifier"),
+            _field("delivery_id", "Delivery ID", value_type="identifier"),
+            _field("reason", "Reason"),
+        ],
+        table_templates=[],
+    ),
+    DocumentKindSchemaOut(
+        document_kind="STORAGE_STATEMENT",
+        label="Storage Statement",
+        document_family="NETWORK_FLOW",
+        description="Storage terminal or facility statement summarizing inventory movements, balances, or storage fees.",
+        review_guidance="Verify the statement number, facility, account, product, and period before matching inventory or delivery activity.",
+        linkage_summary="Links primarily to inventory, delivery, and trade records using facility, account, period, product, trade IDs, and delivery IDs.",
+        record_targets=[
+            _target("DELIVERY", "Delivery", "Match using delivery ID, trade ID, facility, product, and period."),
+            _target(
+                "INVENTORY_POSITION",
+                "Inventory Position",
+                "Use facility, account, product, and period when the statement describes inventory balances.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["statement_number", "facility", "account", "product", "trade_id", "delivery_id"],
+        header_fields=[
+            _field("statement_number", "Statement Number", value_type="identifier", required=True),
+            _field("statement_date", "Statement Date", value_type="date"),
+            _field("facility", "Facility", required=True),
+            _field("account", "Account"),
+            _field("period_start", "Period Start", value_type="date"),
+            _field("period_end", "Period End", value_type="date"),
+            _field("product", "Product", required=True),
+            _field("trade_id", "Trade ID", value_type="identifier"),
+            _field("delivery_id", "Delivery ID", value_type="identifier"),
+            _field("inventory_quantity", "Inventory Quantity", value_type="quantity"),
+        ],
+        table_templates=[
+            DocumentTableTemplateSchemaOut(
+                template_key="inventory_lines",
+                label="Inventory Lines",
+                description="Storage movement, receipt, delivery, or balance rows.",
+                min_occurrences=0,
+                columns=[
+                    _column("movement_type", "Movement Type", required=True),
+                    _column("quantity", "Quantity", value_type="quantity", required=True),
+                    _column("unit", "Unit"),
+                    _column("effective_date", "Effective Date", value_type="date"),
+                ],
+            )
+        ],
     ),
     DocumentKindSchemaOut(
         document_kind="SETTLEMENT_STATEMENT",

@@ -1,4 +1,4 @@
-import { fetchJson, postJson } from '../../shared/api'
+import { fetchJson, patchJson, postJson } from '../../shared/api'
 
 export type MessagingWorkspaceConversationSection =
   | 'Starred'
@@ -55,12 +55,22 @@ export type MessagingWorkspaceTimelineItemRecord = {
   id: string
   kind: MessagingWorkspaceTimelineItemKind
   created_at: string
+  source: string | null
   label: string | null
   detail: string | null
   author: MessagingWorkspaceMemberRecord | null
   body: string[]
   reactions: string[]
   attachment: MessagingWorkspaceAttachmentRecord | null
+  parent_message_id: string | null
+  thread_root_message_id: string | null
+  reply_count: number
+  thread_participants: string[]
+  created_by_user_id: string | null
+  created_by_role: string | null
+  edited_at: string | null
+  deleted_at: string | null
+  pinned_at: string | null
 }
 
 export type MessagingWorkspaceMessageRecord = {
@@ -68,6 +78,8 @@ export type MessagingWorkspaceMessageRecord = {
   conversation_id: string
   source: MessagingWorkspacePostSource
   body: string
+  parent_message_id: string | null
+  thread_root_message_id: string | null
   author: MessagingWorkspaceMemberRecord
   assistant_run_id: number | null
   assistant_agent_id: string | null
@@ -75,6 +87,11 @@ export type MessagingWorkspaceMessageRecord = {
   created_by_user_id: string | null
   created_by_session_id: string | null
   created_by_role: string | null
+  reactions: string[]
+  attachment: MessagingWorkspaceAttachmentRecord | null
+  edited_at: string | null
+  deleted_at: string | null
+  pinned_at: string | null
   created_at: string
 }
 
@@ -86,9 +103,18 @@ export type CreateMessagingWorkspacePostInput = {
   conversation_id: string
   body: string
   source?: MessagingWorkspacePostSource
+  parent_message_id?: string | null
+  attachment?: MessagingWorkspaceAttachmentRecord | null
   assistant_run_id?: number | null
   assistant_agent_id?: string | null
   assistant_agent_name?: string | null
+}
+
+export type UpdateMessagingWorkspacePostInput = {
+  body?: string | null
+  pinned?: boolean | null
+  deleted?: boolean | null
+  reactions?: string[] | null
 }
 
 function optionalAuthHeaders(accessToken?: string): Headers | undefined {
@@ -116,6 +142,21 @@ export async function createMessagingWorkspacePost(
 ): Promise<MessagingWorkspaceMessageRecord> {
   return postJson<MessagingWorkspaceMessageRecord>(
     `${apiBase}/messages/workspace/posts`,
+    payload as Record<string, unknown>,
+    {
+      headers: optionalAuthHeaders(init?.accessToken),
+    },
+  )
+}
+
+export async function updateMessagingWorkspacePost(
+  apiBase: string,
+  messageId: string,
+  payload: UpdateMessagingWorkspacePostInput,
+  init?: { accessToken?: string },
+): Promise<MessagingWorkspaceMessageRecord> {
+  return patchJson<MessagingWorkspaceMessageRecord>(
+    `${apiBase}/messages/workspace/posts/${messageId}`,
     payload as Record<string, unknown>,
     {
       headers: optionalAuthHeaders(init?.accessToken),

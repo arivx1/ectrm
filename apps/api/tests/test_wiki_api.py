@@ -309,6 +309,11 @@ class WikiApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(confirmations_response.status_code, 201)
+        confirmations_links = confirmations_response.json()["links"]
+        self.assertEqual(confirmations_links[0]["label"], "Cash Handoff")
+        self.assertEqual(confirmations_links[0]["target"], "settlement-runbook")
+        self.assertIn("Compare the PDF", confirmations_links[0]["snippet"])
+        self.assertIn("before escalation", confirmations_links[0]["snippet"])
 
         archived_response = self.client.post(
             "/wiki/pages",

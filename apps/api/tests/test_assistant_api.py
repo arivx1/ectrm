@@ -44,6 +44,7 @@ from apps.api.app.domains.assistant.services.chat import ASSISTANT_ACTION_DEFINI
 from apps.api.app.domains.assistant.services.policies import POLICY_RULES
 from apps.api.app.domains.assistant.services.role_archetypes import validate_role_archetype_registry
 from apps.api.app.domains.assistant.services.execution import prepare_assistant_execution
+from apps.api.app.domains.assistant.services.agent_revisions import serialize_agent_revision_payload
 from apps.api.app.domains.assistant.services.tools import build_tool_definitions
 from apps.api.app.main import app
 from apps.api.app.models import Base
@@ -869,6 +870,13 @@ class AssistantApiTests(unittest.TestCase):
             request_listing.json()[0]["linked_revision_id"],
             update_response.json()["published_revision_id"],
         )
+        diff_by_field = {
+            row["field_key"]: row
+            for row in request_listing.json()[0]["applied_diff_summary"]
+        }
+        self.assertEqual(diff_by_field["status"]["current_value"], "DRAFT")
+        self.assertEqual(diff_by_field["status"]["next_value"], "ACTIVE")
+        self.assertIn("Approved by platform owner", diff_by_field["activation_notes"]["next_value"])
 
         with self.SessionLocal() as session:
             operation_keys = {
@@ -894,6 +902,29 @@ class AssistantApiTests(unittest.TestCase):
             authority_ceiling="STAGE",
             activation_notes="Reviewed for staged workflow follow-up.",
         )
+        with self.SessionLocal() as session:
+            agent = session.get(AssistantAgent, "risk-ops")
+            self.assertIsNotNone(agent)
+            assert agent is not None
+            snapshot = serialize_agent_revision_payload(agent)
+            revision = AssistantAgentRevision(
+                agent_id=agent.agent_id,
+                version=agent.version,
+                payload=snapshot,
+                change_summary=["Initial assistant agent snapshot."],
+                created_at=agent.updated_at,
+                created_by=agent.updated_by,
+                published_at=agent.updated_at,
+                published_by=agent.updated_by,
+            )
+            session.add(revision)
+            session.flush()
+            agent.latest_revision_id = revision.revision_id
+            agent.published_revision_id = revision.revision_id
+            agent.published_snapshot = snapshot
+            agent.published_at = agent.updated_at
+            agent.published_by = agent.updated_by
+            session.commit()
         requester_token = self._create_session_token(user_id="ops_requester", role="OPS_USER")
         reviewer_token = self._create_session_token(user_id="ops_admin", role="OPS_ADMIN")
         other_token = self._create_session_token(user_id="ops_other", role="OPS_USER")
@@ -992,6 +1023,14 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(activate_response.json()["status"], "ACTIVATED")
         self.assertEqual(activate_response.json()["linked_agent_id"], "risk-ops")
         self.assertEqual(activate_response.json()["linked_revision_id"], linked_revision_id)
+        diff_by_field = {
+            row["field_key"]: row
+            for row in activate_response.json()["applied_diff_summary"]
+        }
+        self.assertEqual(diff_by_field["authority_ceiling"]["current_value"], "STAGE")
+        self.assertEqual(diff_by_field["authority_ceiling"]["next_value"], "EXPLAIN")
+        self.assertEqual(diff_by_field["allowed_action_types"]["current_value"], "update_trade_workflow_item")
+        self.assertEqual(diff_by_field["allowed_action_types"]["next_value"], "None")
 
     def test_current_user_narrow_access_request_rejects_scope_expansion(self) -> None:
         self._create_agent(

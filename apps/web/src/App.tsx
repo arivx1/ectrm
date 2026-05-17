@@ -689,7 +689,6 @@ function AuthenticatedWorkspaceShell({
         {isPromptHomeView ? (
           <header className="workspace-topbar workspace-topbar-prompt">
             <div className="workspace-topbar-copy">
-              <span className="eyebrow">Prompt-First</span>
               <strong>{currentWorkspaceLabel}</strong>
             </div>
             <div className="workspace-topbar-actions">
@@ -826,9 +825,11 @@ function AuthenticatedWorkspaceShell({
               routeHandoff={route.routeHandoff}
               referenceState={referenceState}
               roadmapRefreshVersion={shell.roadmapRefreshVersion}
+              selectedLibraryDocumentId={route.selectedLibraryDocumentId}
               selectedMessagingConversationId={route.selectedMessagingConversationId}
               selectedTradeId={route.selectedTradeId}
               setInspectorTab={shell.setInspectorTab}
+              setSelectedLibraryDocumentId={route.setSelectedLibraryDocumentId}
               setSelectedMessagingConversationId={route.setSelectedMessagingConversationId}
               setSelectedTradeId={route.setSelectedTradeId}
               shell={shell}
@@ -875,9 +876,11 @@ function AuthenticatedWorkspaceShell({
               routeHandoff={route.routeHandoff}
               referenceState={referenceState}
               roadmapRefreshVersion={shell.roadmapRefreshVersion}
+              selectedLibraryDocumentId={route.selectedLibraryDocumentId}
               selectedMessagingConversationId={route.selectedMessagingConversationId}
               selectedTradeId={route.selectedTradeId}
               setInspectorTab={shell.setInspectorTab}
+              setSelectedLibraryDocumentId={route.setSelectedLibraryDocumentId}
               setSelectedMessagingConversationId={route.setSelectedMessagingConversationId}
               setSelectedTradeId={route.setSelectedTradeId}
               shell={shell}
@@ -1092,6 +1095,7 @@ export default function App() {
     hasAuthSession: Boolean(authSession),
     hasStartHereOnboarding: startHere.showStartHere,
     hasStartHereReturnIntent: Boolean(startHereRouting.startHereReturnIntent),
+    hasRouteHandoff: Boolean(route.routeHandoff),
     authInterruptionReason: workspaceData.authInterruptionReason,
     hasAuthInterruptionResume: authInterruption.authInterruptionResume !== null,
     usesTerminalMode: appearance.isTerminalMode,

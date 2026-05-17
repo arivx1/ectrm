@@ -20,6 +20,7 @@ import {
   listAdminAssistantProfileRequests,
   listAdminAssistantRoleArchetypes,
   loadAssistantRuntimeSettings,
+  previewAssistantPromptContext,
   publishAssistantAgentRevision,
   rejectAssistantAgentProfileRequest,
   runAssistantAgentEval,
@@ -79,14 +80,18 @@ import type {
   AssistantAgentRoleArchetype,
   AssistantAgentScope,
   AssistantAgentStatus,
+  AssistantPromptContext,
   AssistantPolicyDecision,
   AssistantPolicySimulation,
   AssistantPolicySimulationPhase,
   AssistantProvider,
   AssistantProviderStatus,
+  AssistantRuntimeSettings,
+  AssistantToolDefinition,
   ViewKey,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import { AssistantConstructionExplainerPanel } from '../assistant/AssistantConstructionExplainerPanel'
 import {
   AGENT_BUILDER_TEMPLATES,
   AGENT_BUILDER_WORKSPACE_OPTIONS,
@@ -298,6 +303,9 @@ function applyProfileRequestToAgentForm(
   current: AgentForm,
   request: AssistantAgentProfileRequest,
 ): AgentForm {
+  const capabilities = capabilitiesForProfileRequest(request)
+  const allowedActionTypes = capabilities.includes('ACTION') ? [...request.requested_action_types] : []
+
   return {
     ...current,
     specialization_summary: request.proposed_mission,
@@ -307,12 +315,12 @@ function applyProfileRequestToAgentForm(
       ? `Approved profile request #${request.request_id}: ${request.approval_notes}`
       : `Approved profile request #${request.request_id}.`,
     profile_request_id: request.request_id,
-    capabilities: capabilitiesForProfileRequest(request),
+    capabilities,
     allowed_workspaces:
       request.requested_workspaces.length > 0 ? [...request.requested_workspaces] : current.allowed_workspaces,
     skills: [...request.requested_skills],
     allowed_tools: [...request.requested_inputs_tools],
-    allowed_action_types: [...request.requested_action_types],
+    allowed_action_types: allowedActionTypes,
   }
 }
 
@@ -1434,6 +1442,31 @@ function summarizeActionSelection(values: readonly AssistantActionType[]): strin
     : 'No explicit governed actions'
 }
 
+function buildAdminAgentConstructionPreviewContext(agent: AssistantAdminAgent): string {
+  return [
+    'Admin managed-agent construction review',
+    `agent_id: ${agent.agent_id}`,
+    `agent_name: ${agent.name}`,
+    `profile_kind: ${agent.profile_kind}`,
+    agent.role_key ? `role_key: ${agent.role_key}` : null,
+    agent.human_owner_role ? `human_owner_role: ${agent.human_owner_role}` : null,
+    agent.authority_ceiling ? `authority_ceiling: ${agent.authority_ceiling}` : null,
+    `status: ${agent.status}`,
+    `workspaces: ${agent.allowed_workspaces.map((workspace) => workspaceLabel(workspace)).join(', ')}`,
+    `capabilities: ${agent.capabilities.join(', ') || 'none'}`,
+    `skills: ${agent.skills.join(', ') || 'none'}`,
+    `tools: ${agent.allowed_tools.join(', ') || 'none'}`,
+    `actions: ${agent.allowed_action_types.join(', ') || 'none'}`,
+    `orchestration_pattern: ${agent.orchestration_pattern}`,
+    agent.parent_agent_id ? `parent_agent_id: ${agent.parent_agent_id}` : null,
+    agent.managed_agent_ids.length > 0 ? `managed_agent_ids: ${agent.managed_agent_ids.join(', ')}` : null,
+    agent.delegation_guidance ? `delegation_guidance: ${agent.delegation_guidance}` : null,
+    'review_goal: Show the saved context, policy, hierarchy, skills, and prompt layers before an admin edits or publishes the agent.',
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n')
+}
+
 export function AgentManagementPanel({
   authSession,
   formatDate,
@@ -1441,6 +1474,7 @@ export function AgentManagementPanel({
   controlTowerIntent = null,
 }: AgentManagementPanelProps) {
   const requestSequenceRef = useRef(0)
+  const agentPromptPreviewSequenceRef = useRef(0)
   const appliedSupervisionIntentIdRef = useRef<number | null>(null)
   const adminEnabled = hasAdministrativeAccess(authSession)
 
@@ -1449,6 +1483,7 @@ export function AgentManagementPanel({
   const [agentEvalRecords, setAgentEvalRecords] = useState<AssistantAgentEval[]>([])
   const [availableSkills, setAvailableSkills] = useState<AssistantAgentSkillDefinition[]>([])
   const [availableTools, setAvailableTools] = useState<string[]>([])
+  const [availableToolDefinitions, setAvailableToolDefinitions] = useState<AssistantToolDefinition[]>([])
   const [availableActionDefinitions, setAvailableActionDefinitions] = useState<AssistantActionDefinition[]>([])
   const [roleArchetypes, setRoleArchetypes] = useState<AssistantAgentRoleArchetype[]>([])
   const [agentsLoading, setAgentsLoading] = useState(false)
@@ -1495,6 +1530,9 @@ export function AgentManagementPanel({
   const [agentRevisionsLoading, setAgentRevisionsLoading] = useState(false)
   const [agentRevisionsError, setAgentRevisionsError] = useState('')
   const [publishingRevisionId, setPublishingRevisionId] = useState<number | null>(null)
+  const [agentPromptPreview, setAgentPromptPreview] = useState<AssistantPromptContext | null>(null)
+  const [agentPromptPreviewLoading, setAgentPromptPreviewLoading] = useState(false)
+  const [agentPromptPreviewError, setAgentPromptPreviewError] = useState('')
   const [agentHealthReview, setAgentHealthReview] = useState<AssistantAgentHealthReview | null>(null)
   const [agentHealthReviewLoading, setAgentHealthReviewLoading] = useState(false)
   const [agentHealthReviewError, setAgentHealthReviewError] = useState('')
@@ -1604,6 +1642,16 @@ export function AgentManagementPanel({
     () => assistantActionTypeOptions(availableActionDefinitions),
     [availableActionDefinitions],
   )
+  const adminConstructionRuntimeSettings = useMemo<
+    Pick<AssistantRuntimeSettings, 'available_skills' | 'available_tools' | 'available_action_types'>
+  >(
+    () => ({
+      available_skills: availableSkills,
+      available_tools: availableToolDefinitions,
+      available_action_types: availableActionDefinitions,
+    }),
+    [availableActionDefinitions, availableSkills, availableToolDefinitions],
+  )
   const createWorkspaceSummary = createForm.allowed_workspaces.map((workspace) => workspaceLabel(workspace)).join(' · ')
   const createCapabilitySummary = createForm.capabilities.join(' · ')
   const createSkillSummary = summarizeSkillSelection(createForm.skills, skillDefinitionsByName)
@@ -1681,6 +1729,7 @@ export function AgentManagementPanel({
         setAgentEvalRecords(nextAgentEvals)
         setRoleArchetypes(nextRoles)
         setAvailableSkills(runtimeSettings.available_skills)
+        setAvailableToolDefinitions(runtimeSettings.available_tools)
         setAvailableTools(runtimeSettings.available_tools.map((tool) => tool.name))
         setAvailableActionDefinitions(runtimeSettings.available_action_types)
         setOpenAiProviderStatus(
@@ -1710,6 +1759,7 @@ export function AgentManagementPanel({
         setAgentEvalRecords([])
         setRoleArchetypes([])
         setAvailableSkills([])
+        setAvailableToolDefinitions([])
         setAvailableTools([])
         setAvailableActionDefinitions([])
         setOpenAiProviderStatus(null)
@@ -1748,6 +1798,52 @@ export function AgentManagementPanel({
       }
     },
     [adminEnabled],
+  )
+
+  const loadAgentPromptPreview = useCallback(
+    async (agent: AssistantAdminAgent | null) => {
+      if (!adminEnabled || !authSession || !agent) {
+        agentPromptPreviewSequenceRef.current += 1
+        setAgentPromptPreview(null)
+        setAgentPromptPreviewError('')
+        setAgentPromptPreviewLoading(false)
+        return
+      }
+
+      const requestId = agentPromptPreviewSequenceRef.current + 1
+      agentPromptPreviewSequenceRef.current = requestId
+      setAgentPromptPreviewLoading(true)
+      setAgentPromptPreviewError('')
+      try {
+        const preview = await previewAssistantPromptContext(
+          appConfig.apiBase,
+          {
+            agent_id: agent.agent_id,
+            workspace: 'admin',
+            context: buildAdminAgentConstructionPreviewContext(agent),
+            use_live_tools: agent.capabilities.includes('READ'),
+          },
+          { accessToken: authSession.accessToken },
+        )
+        if (agentPromptPreviewSequenceRef.current !== requestId) {
+          return
+        }
+        setAgentPromptPreview(preview)
+      } catch (error) {
+        if (agentPromptPreviewSequenceRef.current !== requestId) {
+          return
+        }
+        setAgentPromptPreview(null)
+        setAgentPromptPreviewError(
+          error instanceof Error ? error.message : 'Could not load agent construction preview.',
+        )
+      } finally {
+        if (agentPromptPreviewSequenceRef.current === requestId) {
+          setAgentPromptPreviewLoading(false)
+        }
+      }
+    },
+    [adminEnabled, authSession],
   )
 
   const loadAgentWorkPackages = useCallback(async () => {
@@ -1799,6 +1895,8 @@ export function AgentManagementPanel({
       setProfileRequests([])
       setAgentEvalRecords([])
       setRoleArchetypes([])
+      setAvailableSkills([])
+      setAvailableToolDefinitions([])
       setAvailableTools([])
       setAvailableActionDefinitions([])
       setAgentsError('')
@@ -1836,6 +1934,9 @@ export function AgentManagementPanel({
       setAgentRevisionsError('')
       setAgentRevisionsLoading(false)
       setPublishingRevisionId(null)
+      setAgentPromptPreview(null)
+      setAgentPromptPreviewError('')
+      setAgentPromptPreviewLoading(false)
       setAgentHealthReview(null)
       setAgentHealthReviewError('')
       setAgentHealthReviewLoading(false)
@@ -1893,6 +1994,9 @@ export function AgentManagementPanel({
       setAgentRevisionsError('')
       setAgentRevisionsLoading(false)
       setPublishingRevisionId(null)
+      setAgentPromptPreview(null)
+      setAgentPromptPreviewError('')
+      setAgentPromptPreviewLoading(false)
       setSelectedAgentEvalId(null)
       setAgentEvalForm(createEmptyAgentEvalForm())
       setAgentEvalRuns([])
@@ -1919,6 +2023,9 @@ export function AgentManagementPanel({
     setAgentRevisionsError('')
     setAgentRevisionsLoading(false)
     setPublishingRevisionId(null)
+    setAgentPromptPreview(null)
+    setAgentPromptPreviewError('')
+    setAgentPromptPreviewLoading(false)
     setAgentEvalRuns([])
     setAgentEvalRunsLoading(false)
     setAgentEvalError('')
@@ -1938,6 +2045,10 @@ export function AgentManagementPanel({
   useEffect(() => {
     void loadAgentRevisions(selectedAgent?.agent_id ?? null)
   }, [loadAgentRevisions, selectedAgent?.agent_id])
+
+  useEffect(() => {
+    void loadAgentPromptPreview(selectedAgent)
+  }, [loadAgentPromptPreview, selectedAgent])
 
   useEffect(() => {
     if (!controlTowerIntent) {
@@ -3698,6 +3809,7 @@ export function AgentManagementPanel({
                   profileRequests.map((request) => {
                     const linkedAgent = getProfileRequestLinkedAgent(request, agentRecords)
                     const linkedRevisionId = getPublishedProfileRequestRevisionId(request, linkedAgent)
+                    const requestDiffRows = request.applied_diff_summary
                     const readyToMarkApplied = Boolean(
                       request.status === 'APPROVED' &&
                         request.request_kind !== 'NEW_SPECIALIZATION' &&
@@ -3750,6 +3862,21 @@ export function AgentManagementPanel({
                         <small>
                           Save the review draft into the target agent before marking this request applied.
                         </small>
+                      ) : null}
+                      {requestDiffRows.length > 0 ? (
+                        <div className="assistant-profile-request-review-note">
+                          <strong>Saved configuration diff</strong>
+                          {requestDiffRows.slice(0, 8).map((diffRow) => (
+                            <p key={`${request.request_id}-${diffRow.field_key}`}>
+                              <strong>{diffRow.label}:</strong> {diffRow.current_value}
+                              {' -> '}
+                              {diffRow.next_value}
+                            </p>
+                          ))}
+                          {requestDiffRows.length > 8 ? (
+                            <small>{requestDiffRows.length - 8} more saved change(s) in the linked revision.</small>
+                          ) : null}
+                        </div>
                       ) : null}
 
                       {request.status === 'REQUESTED' ? (
@@ -6014,6 +6141,51 @@ export function AgentManagementPanel({
 
                   <RoleProfileFitSummary fit={editProfileFit} />
                   <PromptProfilePreview form={editForm} role={editFormRole} agentRecords={agentRecords} />
+
+                  <div className="assistant-admin-construction-review">
+                    <div className="assistant-admin-section-head">
+                      <div>
+                        <span className="eyebrow">Construction Provenance</span>
+                        <h4>Saved Construction Preview</h4>
+                      </div>
+                      <button
+                        type="button"
+                        className="button button-ghost"
+                        onClick={() => void loadAgentPromptPreview(selectedAgent)}
+                        disabled={agentPromptPreviewLoading}
+                      >
+                        {agentPromptPreviewLoading ? 'Refreshing...' : 'Refresh Preview'}
+                      </button>
+                    </div>
+                    <p>
+                      This server-built preview reflects the last saved agent profile. Save current edits to update
+                      the effective prompt, context, hierarchy, tool, and action construction.
+                    </p>
+                    {agentPromptPreviewError ? (
+                      <div className="assistant-profile-fit-messages is-error">
+                        <small>{agentPromptPreviewError}</small>
+                      </div>
+                    ) : null}
+                    {agentPromptPreview ? (
+                      <AssistantConstructionExplainerPanel
+                        activeAgent={selectedAgent}
+                        activeGroundingSections={agentPromptPreview.sections}
+                        agents={agentRecords}
+                        promptPreview={agentPromptPreview}
+                        runtimeSettings={adminConstructionRuntimeSettings}
+                        selectedRun={null}
+                        includeContext={true}
+                        useLiveTools={selectedAgent.capabilities.includes('READ')}
+                        onSelectAgent={setSelectedAgentId}
+                      />
+                    ) : (
+                      <small>
+                        {agentPromptPreviewLoading
+                          ? 'Loading the server-owned prompt construction preview.'
+                          : 'Prompt construction preview is not loaded yet.'}
+                      </small>
+                    )}
+                  </div>
 
                   {editFormRole ? (
                     <div className="toolbar settings-actions">

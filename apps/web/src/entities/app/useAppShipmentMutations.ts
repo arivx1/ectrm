@@ -61,7 +61,15 @@ export function useAppShipmentMutations(args: {
     deliveryId: string
     run: () => Promise<unknown>
     fallbackMessage: string
-  }) {
+  }): Promise<void> {
+    await runDeliveryMutationResult(args)
+  }
+
+  async function runDeliveryMutationResult(args: {
+    deliveryId: string
+    run: () => Promise<unknown>
+    fallbackMessage: string
+  }): Promise<string | null> {
     const { deliveryId, run, fallbackMessage } = args
     setDeliveryMutationError('')
     setDeliveryMutationPendingId(deliveryId)
@@ -69,8 +77,11 @@ export function useAppShipmentMutations(args: {
     try {
       await run()
       await refreshMutationData('delivery')
+      return null
     } catch (nextError) {
-      setDeliveryMutationError(nextError instanceof Error ? nextError.message : fallbackMessage)
+      const errorMessage = nextError instanceof Error ? nextError.message : fallbackMessage
+      setDeliveryMutationError(errorMessage)
+      return errorMessage
     } finally {
       setDeliveryMutationPendingId((current) => (current === deliveryId ? null : current))
     }
@@ -257,8 +268,8 @@ export function useAppShipmentMutations(args: {
     deliveryId: string,
     stopId: string,
     payload: RecordDeliveryTruckStopCheckpointInput,
-  ) {
-    await runDeliveryMutation({
+  ): Promise<string | null> {
+    return runDeliveryMutationResult({
       deliveryId,
       fallbackMessage: 'Failed to record truck checkpoint.',
       run: () =>
@@ -274,8 +285,8 @@ export function useAppShipmentMutations(args: {
     stopId: string,
     eventId: number,
     payload: ReverseDeliveryTruckStopCheckpointInput,
-  ) {
-    await runDeliveryMutation({
+  ): Promise<string | null> {
+    return runDeliveryMutationResult({
       deliveryId,
       fallbackMessage: 'Failed to reverse truck checkpoint.',
       run: () =>

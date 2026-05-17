@@ -26,6 +26,7 @@ class WikiPageRevisionOut(BaseModel):
 class WikiPageLinkOut(BaseModel):
     label: str
     target: str
+    snippet: str = ""
 
 
 class WikiPageSummaryOut(BaseModel):

@@ -2,6 +2,7 @@ import type { PromptHomeCounts } from '../prompt/promptHomeStarters'
 import type {
   MessagingWorkspaceConversationRecord,
   MessagingWorkspaceMessageRecord,
+  MessagingWorkspacePostSource,
 } from '../../entities/messages/api'
 
 export type MessagingInboxMessageType =
@@ -55,15 +56,27 @@ export type MessagingWorkspaceTimelineItem =
       label: string
       detail: string
     }
-  | {
-      id: string
-      kind: 'message'
-      author: MessagingWorkspaceMember
-      timestamp: string
-      body: string[]
-      reactions?: string[]
-      attachment?: MessagingWorkspaceAttachment | null
-    }
+  | MessagingWorkspaceTimelineMessage
+
+export type MessagingWorkspaceTimelineMessage = {
+  id: string
+  kind: 'message'
+  author: MessagingWorkspaceMember
+  timestamp: string
+  body: string[]
+  source?: MessagingWorkspacePostSource
+  parentMessageId?: string | null
+  threadRootMessageId?: string | null
+  replyCount?: number
+  threadParticipants?: string[]
+  createdByUserId?: string | null
+  createdByRole?: string | null
+  editedAt?: string | null
+  deletedAt?: string | null
+  pinnedAt?: string | null
+  reactions?: string[]
+  attachment?: MessagingWorkspaceAttachment | null
+}
 
 export type MessagingWorkspaceChannelMetric = {
   label: string
@@ -103,6 +116,16 @@ export type MessagingWorkspacePost = {
   author: MessagingWorkspaceMember
   timestamp: string
   body: string
+  source?: MessagingWorkspacePostSource
+  parentMessageId?: string | null
+  threadRootMessageId?: string | null
+  reactions?: string[]
+  attachment?: MessagingWorkspaceAttachment | null
+  createdByUserId?: string | null
+  createdByRole?: string | null
+  editedAt?: string | null
+  deletedAt?: string | null
+  pinnedAt?: string | null
 }
 
 function formatMessageTimestamp(value: string): string {
@@ -191,34 +214,207 @@ export function formatMessagingWorkspacePostBody(body: string): string[] {
     .filter((paragraph) => paragraph.length > 0)
 }
 
+function buildMessagePreview(item: MessagingWorkspaceTimelineMessage): string {
+  if (item.deletedAt) {
+    return 'Message deleted.'
+  }
+
+  return (item.body[0] ?? '').replace(/@\[(.+?)\]/g, '@$1')
+}
+
+function normalizeTimelineMessage(
+  item: MessagingWorkspaceTimelineMessage,
+): MessagingWorkspaceTimelineMessage {
+  return {
+    ...item,
+    source: item.source ?? 'human',
+    parentMessageId: item.parentMessageId ?? null,
+    threadRootMessageId: item.threadRootMessageId ?? item.parentMessageId ?? item.id,
+    replyCount: item.replyCount ?? 0,
+    threadParticipants: item.threadParticipants ?? [],
+    createdByUserId: item.createdByUserId ?? null,
+    createdByRole: item.createdByRole ?? null,
+    editedAt: item.editedAt ?? null,
+    deletedAt: item.deletedAt ?? null,
+    pinnedAt: item.pinnedAt ?? null,
+    reactions: item.reactions ?? [],
+    attachment: item.attachment ?? null,
+  }
+}
+
+function rebuildMessagingWorkspaceChannel(
+  channel: MessagingWorkspaceChannel,
+  timeline: MessagingWorkspaceTimelineItem[],
+  options?: {
+    unreadCount?: number
+  },
+): MessagingWorkspaceChannel {
+  const normalizedTimeline = timeline.map((item) =>
+    item.kind === 'message' ? normalizeTimelineMessage(item) : item,
+  )
+  const replyCounts = new Map<string, number>()
+  const threadParticipants = new Map<string, string[]>()
+  const seenParticipants = new Map<string, Set<string>>()
+
+  for (const item of normalizedTimeline) {
+    if (item.kind !== 'message' || !item.parentMessageId) {
+      continue
+    }
+
+    const rootId = item.threadRootMessageId ?? item.parentMessageId
+    replyCounts.set(rootId, (replyCounts.get(rootId) ?? 0) + 1)
+
+    const seen = seenParticipants.get(rootId) ?? new Set<string>()
+    if (!seen.has(item.author.name)) {
+      seen.add(item.author.name)
+      seenParticipants.set(rootId, seen)
+      threadParticipants.set(rootId, [...(threadParticipants.get(rootId) ?? []), item.author.name])
+    }
+  }
+
+  const enrichedTimeline = normalizedTimeline.map((item) => {
+    if (item.kind !== 'message') {
+      return item
+    }
+
+    if (item.parentMessageId) {
+      return {
+        ...item,
+        replyCount: 0,
+      }
+    }
+
+    return {
+      ...item,
+      threadRootMessageId: item.threadRootMessageId ?? item.id,
+      replyCount: replyCounts.get(item.id) ?? 0,
+      threadParticipants: threadParticipants.get(item.id) ?? [],
+    }
+  })
+
+  const latestTimelineItem = enrichedTimeline[enrichedTimeline.length - 1]
+  const nextPreview =
+    latestTimelineItem?.kind === 'message'
+      ? buildMessagePreview(latestTimelineItem)
+      : latestTimelineItem?.detail ?? channel.preview
+
+  const members: MessagingWorkspaceMember[] = []
+  for (const item of enrichedTimeline) {
+    if (item.kind !== 'message') {
+      continue
+    }
+    if (members.some((member) => member.name === item.author.name)) {
+      continue
+    }
+    members.push(item.author)
+  }
+
+  return {
+    ...channel,
+    preview: nextPreview || channel.preview,
+    timestamp:
+      latestTimelineItem?.kind === 'message'
+        ? latestTimelineItem.timestamp
+        : latestTimelineItem?.kind === 'system'
+          ? channel.timestamp
+          : channel.timestamp,
+    unreadCount: options?.unreadCount ?? channel.unreadCount,
+    members,
+    timeline: enrichedTimeline,
+  }
+}
+
 export function appendMessagingWorkspacePost(
   channel: MessagingWorkspaceChannel,
   post: MessagingWorkspacePost,
 ): MessagingWorkspaceChannel {
-  const paragraphs = formatMessagingWorkspacePostBody(post.body)
-  if (paragraphs.length === 0) {
+  const paragraphs = post.deletedAt ? [] : formatMessagingWorkspacePostBody(post.body)
+  if (paragraphs.length === 0 && !post.deletedAt) {
     return channel
   }
 
-  const authorAlreadyPresent = channel.members.some((member) => member.name === post.author.name)
-
-  return {
-    ...channel,
-    preview: paragraphs[0],
+  const nextItem: MessagingWorkspaceTimelineMessage = normalizeTimelineMessage({
+    id: post.id,
+    kind: 'message',
+    author: post.author,
     timestamp: post.timestamp,
-    unreadCount: 0,
-    members: authorAlreadyPresent ? channel.members : [...channel.members, post.author],
-    timeline: [
-      ...channel.timeline,
-      {
-        id: post.id,
-        kind: 'message',
-        author: post.author,
-        timestamp: post.timestamp,
-        body: paragraphs,
-      },
-    ],
-  }
+    body: paragraphs,
+    source: post.source ?? 'human',
+    parentMessageId: post.parentMessageId ?? null,
+    threadRootMessageId: post.threadRootMessageId ?? post.parentMessageId ?? post.id,
+    reactions: post.reactions,
+    attachment: post.attachment ?? null,
+    createdByUserId: post.createdByUserId ?? null,
+    createdByRole: post.createdByRole ?? null,
+    editedAt: post.editedAt ?? null,
+    deletedAt: post.deletedAt ?? null,
+    pinnedAt: post.pinnedAt ?? null,
+  })
+
+  const existingIndex = channel.timeline.findIndex(
+    (item) => item.kind === 'message' && item.id === post.id,
+  )
+  const nextTimeline =
+    existingIndex >= 0
+      ? channel.timeline.map((item, index) => (index === existingIndex ? nextItem : item))
+      : [...channel.timeline, nextItem]
+
+  return rebuildMessagingWorkspaceChannel(channel, nextTimeline, { unreadCount: 0 })
+}
+
+export function updateMessagingWorkspaceChannelPost(
+  channel: MessagingWorkspaceChannel,
+  postId: string,
+  updater: (post: MessagingWorkspacePost) => MessagingWorkspacePost,
+): MessagingWorkspaceChannel {
+  const nextTimeline = channel.timeline.map((item) => {
+    if (item.kind !== 'message' || item.id !== postId) {
+      return item
+    }
+
+    const updatedPost = updater({
+      id: item.id,
+      author: item.author,
+      timestamp: item.timestamp,
+      body: item.body.join('\n\n'),
+      source: item.source,
+      parentMessageId: item.parentMessageId,
+      threadRootMessageId: item.threadRootMessageId,
+      reactions: item.reactions,
+      attachment: item.attachment ?? null,
+      createdByUserId: item.createdByUserId,
+      createdByRole: item.createdByRole,
+      editedAt: item.editedAt,
+      deletedAt: item.deletedAt,
+      pinnedAt: item.pinnedAt,
+    })
+
+    return normalizeTimelineMessage({
+      id: updatedPost.id,
+      kind: 'message',
+      author: updatedPost.author,
+      timestamp: updatedPost.timestamp,
+      body: updatedPost.deletedAt ? [] : formatMessagingWorkspacePostBody(updatedPost.body),
+      source: updatedPost.source ?? item.source,
+      parentMessageId: updatedPost.parentMessageId ?? item.parentMessageId,
+      threadRootMessageId:
+        updatedPost.threadRootMessageId ??
+        updatedPost.parentMessageId ??
+        item.threadRootMessageId ??
+        item.id,
+      reactions: updatedPost.reactions ?? item.reactions,
+      attachment: updatedPost.attachment ?? item.attachment ?? null,
+      createdByUserId: updatedPost.createdByUserId ?? item.createdByUserId,
+      createdByRole: updatedPost.createdByRole ?? item.createdByRole,
+      editedAt: updatedPost.editedAt ?? item.editedAt,
+      deletedAt: updatedPost.deletedAt ?? item.deletedAt,
+      pinnedAt: updatedPost.pinnedAt ?? item.pinnedAt,
+    })
+  })
+
+  return rebuildMessagingWorkspaceChannel(channel, nextTimeline, {
+    unreadCount: channel.unreadCount,
+  })
 }
 
 export function buildMessagingWorkspacePostFromRecord(
@@ -236,6 +432,23 @@ export function buildMessagingWorkspacePostFromRecord(
     },
     timestamp,
     body: record.body,
+    source: record.source,
+    parentMessageId: record.parent_message_id,
+    threadRootMessageId: record.thread_root_message_id,
+    reactions: record.reactions,
+    attachment: record.attachment
+      ? {
+          label: record.attachment.label,
+          title: record.attachment.title,
+          summary: record.attachment.summary,
+          footnote: record.attachment.footnote,
+        }
+      : null,
+    createdByUserId: record.created_by_user_id,
+    createdByRole: record.created_by_role,
+    editedAt: record.edited_at,
+    deletedAt: record.deleted_at,
+    pinnedAt: record.pinned_at,
   }
 }
 
@@ -244,75 +457,151 @@ export function buildMessagingWorkspaceChannelsFromRecords(
 ): MessagingWorkspaceChannel[] {
   return [...records]
     .sort((left, right) => left.sort_order - right.sort_order)
-    .map((record) => ({
-      id: record.conversation_id,
-      section: record.section,
-      kind: record.kind,
-      label: record.label,
-      preview: record.preview,
-      timestamp: record.latest_activity_at ? formatMessageTimestamp(record.latest_activity_at) : '',
-      unreadCount: record.unread_count,
-      description: record.description,
-      topic: record.topic,
-      connectedWorkspace: record.connected_workspace,
-      assistantWorkspace: normalizeAssistantWorkspace(record.assistant_workspace),
-      composerHint: record.composer_hint,
-      highlights: record.highlights,
-      metrics: record.metrics.map((metric) => ({
-        label: metric.label,
-        value: metric.value,
-      })),
-      members: record.members.map((member) => ({
-        name: member.name,
-        title: member.title,
-        presence: member.presence,
-        initials: member.initials,
-        tone: member.tone,
-      })),
-      timeline: record.timeline.flatMap<MessagingWorkspaceTimelineItem>((item) => {
-        if (item.kind === 'system') {
-          return item.label && item.detail
-            ? [
-                {
-                  id: item.id,
-                  kind: 'system' as const,
-                  label: item.label,
-                  detail: item.detail,
+    .map((record) =>
+      rebuildMessagingWorkspaceChannel(
+        {
+          id: record.conversation_id,
+          section: record.section,
+          kind: record.kind,
+          label: record.label,
+          preview: record.preview,
+          timestamp: record.latest_activity_at ? formatMessageTimestamp(record.latest_activity_at) : '',
+          unreadCount: record.unread_count,
+          description: record.description,
+          topic: record.topic,
+          connectedWorkspace: record.connected_workspace,
+          assistantWorkspace: normalizeAssistantWorkspace(record.assistant_workspace),
+          composerHint: record.composer_hint,
+          highlights: record.highlights,
+          metrics: record.metrics.map((metric) => ({
+            label: metric.label,
+            value: metric.value,
+          })),
+          members: record.members.map((member) => ({
+            name: member.name,
+            title: member.title,
+            presence: member.presence,
+            initials: member.initials,
+            tone: member.tone,
+          })),
+          timeline: record.timeline.flatMap<MessagingWorkspaceTimelineItem>((item) => {
+            if (item.kind === 'system') {
+              return item.label && item.detail
+                ? [
+                    {
+                      id: item.id,
+                      kind: 'system' as const,
+                      label: item.label,
+                      detail: item.detail,
+                    },
+                  ]
+                : []
+            }
+
+            if (!item.author) {
+              return []
+            }
+
+            return [
+              {
+                id: item.id,
+                kind: 'message' as const,
+                author: {
+                  name: item.author.name,
+                  title: item.author.title,
+                  presence: item.author.presence,
+                  initials: item.author.initials,
+                  tone: item.author.tone,
                 },
-              ]
-            : []
-        }
+                timestamp: formatMessageTimestamp(item.created_at),
+                body: item.body,
+                source:
+                  item.source === 'assistant' || item.source === 'human'
+                    ? item.source
+                    : 'human',
+                parentMessageId: item.parent_message_id,
+                threadRootMessageId: item.thread_root_message_id,
+                replyCount: item.reply_count,
+                threadParticipants: item.thread_participants,
+                createdByUserId: item.created_by_user_id,
+                createdByRole: item.created_by_role,
+                editedAt: item.edited_at,
+                deletedAt: item.deleted_at,
+                pinnedAt: item.pinned_at,
+                reactions: item.reactions.length > 0 ? item.reactions : undefined,
+                attachment: item.attachment
+                  ? {
+                      label: item.attachment.label,
+                      title: item.attachment.title,
+                      summary: item.attachment.summary,
+                      footnote: item.attachment.footnote,
+                    }
+                  : null,
+              },
+            ]
+          }),
+        },
+        record.timeline.flatMap<MessagingWorkspaceTimelineItem>((item) => {
+          if (item.kind === 'system') {
+            return item.label && item.detail
+              ? [
+                  {
+                    id: item.id,
+                    kind: 'system' as const,
+                    label: item.label,
+                    detail: item.detail,
+                  },
+                ]
+              : []
+          }
 
-        if (!item.author) {
-          return []
-        }
+          if (!item.author) {
+            return []
+          }
 
-        return [
-          {
-            id: item.id,
-            kind: 'message' as const,
-            author: {
-              name: item.author.name,
-              title: item.author.title,
-              presence: item.author.presence,
-              initials: item.author.initials,
-              tone: item.author.tone,
+          return [
+            {
+              id: item.id,
+              kind: 'message' as const,
+              author: {
+                name: item.author.name,
+                title: item.author.title,
+                presence: item.author.presence,
+                initials: item.author.initials,
+                tone: item.author.tone,
+              },
+              timestamp: formatMessageTimestamp(item.created_at),
+              body: item.body,
+              source:
+                item.source === 'assistant' || item.source === 'human'
+                  ? item.source
+                  : 'human',
+              parentMessageId: item.parent_message_id,
+              threadRootMessageId: item.thread_root_message_id,
+              replyCount: item.reply_count,
+              threadParticipants: item.thread_participants,
+              createdByUserId: item.created_by_user_id,
+              createdByRole: item.created_by_role,
+              editedAt: item.edited_at,
+              deletedAt: item.deleted_at,
+              pinnedAt: item.pinned_at,
+              reactions: item.reactions.length > 0 ? item.reactions : undefined,
+              attachment: item.attachment
+                ? {
+                    label: item.attachment.label,
+                    title: item.attachment.title,
+                    summary: item.attachment.summary,
+                    footnote: item.attachment.footnote,
+                  }
+                : null,
             },
-            timestamp: formatMessageTimestamp(item.created_at),
-            body: item.body,
-            reactions: item.reactions.length > 0 ? item.reactions : undefined,
-            attachment: item.attachment
-              ? {
-                  label: item.attachment.label,
-                  title: item.attachment.title,
-                  summary: item.attachment.summary,
-                  footnote: item.attachment.footnote,
-                }
-              : null,
-          },
-        ]
-      }),
-    }))
+          ]
+        }),
+        {
+          unreadCount: record.unread_count,
+        },
+      ),
+    )
 }
 
 export function buildMessagingWorkspaceChannels(

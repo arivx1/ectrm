@@ -3,7 +3,7 @@ import {
   dominantDocumentKind,
   reviewReady,
 } from '../../features/documents/documentIngestionUtils'
-import type { DocumentIngestionRecord } from '../../shared/models'
+import type { DocumentIngestionRecord, DocumentKindSchemaRecord } from '../../shared/models'
 import type { DocumentLibraryCustomFolder } from './libraryFolderState'
 
 export const DOCUMENT_LIBRARY_COLLECTIONS = [
@@ -76,6 +76,18 @@ export function formatDocumentLibraryLabel(value: string): string {
     .split('_')
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(' ')
+}
+
+export function sortDocumentLibraryKindOptions(
+  documentKinds: DocumentKindSchemaRecord[],
+): DocumentKindSchemaRecord[] {
+  return [...documentKinds].sort((left, right) => {
+    const labelComparison = left.label.localeCompare(right.label)
+    if (labelComparison !== 0) {
+      return labelComparison
+    }
+    return left.document_kind.localeCompare(right.document_kind)
+  })
 }
 
 export function buildDocumentLibraryCollectionCounts(

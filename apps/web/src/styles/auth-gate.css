@@ -10,12 +10,38 @@
   min-height: 100vh;
   min-height: 100dvh;
   padding: 2rem clamp(1.2rem, 3vw, 2.6rem);
+  background: #02080d;
+}
+
+.auth-gate-background-stack {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.auth-gate-background-layer {
+  position: absolute;
+  inset: 0;
   background-image:
     var(--auth-gate-stage-scrim),
     var(--auth-gate-background-image);
   background-position: center;
   background-size: cover;
   background-repeat: no-repeat;
+  opacity: 1;
+  transform: translateZ(0);
+  will-change: opacity;
+}
+
+.auth-gate-background-layer-current {
+  z-index: 0;
+}
+
+.auth-gate-background-layer-previous {
+  z-index: 1;
+  animation: auth-gate-background-fade-out 1200ms ease both;
 }
 
 .auth-gate-stage-sunrise {
@@ -39,6 +65,7 @@
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 1;
   pointer-events: none;
 }
 
@@ -63,7 +90,7 @@
   align-items: start;
   justify-items: center;
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 .auth-gate-wordmark {
@@ -72,16 +99,26 @@
 }
 
 .auth-gate-wordmark .brand-mark {
-  padding: 0.72rem 1.15rem;
-  font-size: 0.88rem;
-  letter-spacing: 0.24em;
+  padding: 0.72rem 1.22rem;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-size: 1.16rem;
+  font-weight: 760;
+  line-height: 1;
+  letter-spacing: 0.01em;
   text-transform: none;
   color: #f7fbff;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.08));
-  border: 1px solid rgba(222, 237, 248, 0.14);
+  background: linear-gradient(135deg, rgba(12, 28, 40, 0.52), rgba(31, 57, 72, 0.42));
+  border: 1px solid rgba(222, 237, 248, 0.2);
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    0 18px 40px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
   backdrop-filter: blur(20px);
 }
 
@@ -101,6 +138,7 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(26px) saturate(140%);
   animation: auth-gate-rise 520ms ease both;
+  cursor: default;
 }
 
 .auth-gate-panel::before {
@@ -170,7 +208,11 @@
   width: 100%;
   height: 100%;
   transform-style: preserve-3d;
-  animation: auth-gate-logo-flip 10s ease-in-out infinite;
+  transform: rotateY(0deg);
+}
+
+.auth-gate-logo-flip.is-flipping {
+  animation: auth-gate-logo-flip 760ms ease-in-out both;
 }
 
 .auth-gate-orb-logo {
@@ -194,27 +236,26 @@
 }
 
 .auth-gate-logo-face-back {
-  transform: rotateY(180deg) scale(1.18);
-  filter:
-    brightness(1.34)
-    saturate(1.12)
-    drop-shadow(0 0 12px rgb(var(--theme-accent-rgb, 61 214 160) / 0.42))
-    drop-shadow(0 10px 18px rgba(0, 0, 0, 0.24));
+  transform: rotateY(180deg);
 }
 
 @keyframes auth-gate-logo-flip {
-  0%,
-  42% {
+  from {
     transform: rotateY(0deg);
   }
 
-  50%,
-  92% {
+  to {
     transform: rotateY(180deg);
   }
+}
 
-  100% {
-    transform: rotateY(360deg);
+@keyframes auth-gate-background-fade-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
   }
 }
 
@@ -280,54 +321,57 @@
 }
 
 .auth-gate-primary-actions .button.button-primary {
-  border: none;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(233, 241, 245, 0.94));
-  color: #0d2230;
-  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.24);
+  border: 1px solid rgba(224, 242, 250, 0.26);
+  background: linear-gradient(180deg, rgba(146, 181, 194, 0.9), rgba(66, 96, 109, 0.82));
+  color: #f6fbff;
+  text-shadow: 0 1px 1px rgba(3, 13, 20, 0.22);
+  box-shadow:
+    0 18px 38px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.26);
 }
 
 .auth-gate-primary-actions .button.button-primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  filter: brightness(1.02);
+  border-color: rgba(224, 242, 250, 0.36);
+  background: linear-gradient(180deg, rgba(160, 197, 209, 0.94), rgba(74, 109, 123, 0.86));
 }
 
-.auth-gate-time-skip {
-  position: fixed;
-  right: clamp(1rem, 2.2vw, 1.6rem);
-  bottom: clamp(1rem, 2.2vw, 1.6rem);
-  z-index: 2;
-  min-width: 7.5rem;
-  min-height: 2.75rem;
-  padding: 0 1rem;
-  border: 1px solid rgba(222, 237, 248, 0.24);
+.auth-gate-sso-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.auth-gate-keyhole {
+  position: relative;
+  display: inline-block;
+  width: 0.9rem;
+  height: 1.05rem;
+  flex: 0 0 0.9rem;
+  color: currentColor;
+}
+
+.auth-gate-keyhole::before,
+.auth-gate-keyhole::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  background: currentColor;
+  transform: translateX(-50%);
+}
+
+.auth-gate-keyhole::before {
+  top: 0.08rem;
+  width: 0.56rem;
+  height: 0.56rem;
   border-radius: 999px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.12));
-  color: #f7fbff;
-  font: inherit;
-  font-size: 0.82rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-  box-shadow:
-    0 18px 42px rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
-  backdrop-filter: blur(18px) saturate(140%);
-  transition:
-    transform 180ms ease,
-    border-color 180ms ease,
-    background 180ms ease;
 }
 
-.auth-gate-time-skip:hover {
-  transform: translateY(-1px);
-  border-color: rgba(222, 237, 248, 0.36);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.16));
-}
-
-.auth-gate-time-skip:focus-visible {
-  outline: 3px solid rgb(var(--theme-accent-rgb, 61 214 160) / 0.42);
-  outline-offset: 3px;
+.auth-gate-keyhole::after {
+  bottom: 0.08rem;
+  width: 0.34rem;
+  height: 0.58rem;
+  border-radius: 999px 999px 0.1rem 0.1rem;
 }
 
 .auth-gate-primary-note {

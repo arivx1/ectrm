@@ -33,6 +33,7 @@ import { DocumentIngestionPanel } from './DocumentIngestionPanel'
 import { OperationalBoardController } from './OperationalBoardController'
 import { renderOperationalInlineBoard } from './operationalInlineBoardRegistry'
 import { resolveOperationalWorkboardDefinition } from './operationalWorkboardRegistry'
+import { TruckTrackingExceptionQueue } from './TruckTrackingExceptionQueue'
 
 type OperationsWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -557,6 +558,23 @@ export function OperationsWorkspace({
                   <p>Once trades need confirmations, blocker clearing, or expiry decisions, the operational control loop will fill in here.</p>
                 </div>
               ),
+          },
+          {
+            id: 'operations-truck-tracking-exceptions',
+            eyebrow: 'Truck Tracking',
+            title: 'Truck Tracking Exceptions',
+            description: 'Read-only carrier freshness, ETA, and dwell exceptions for active truck runs.',
+            span: 'full',
+            availableSpans: ['full', 'wide'],
+            content: (
+              <TruckTrackingExceptionQueue
+                authSession={authSession}
+                formatDate={formatDate}
+                formatDateOnly={formatDateOnly}
+                formatNumber={formatNumber}
+                onOpenTrade={onOpenTrade}
+              />
+            ),
           },
           {
             id: 'operations-option-expiry',

@@ -197,6 +197,13 @@ export type TruckCheckpointCode =
   | 'DEPARTED_PICKUP'
   | 'ARRIVED_DESTINATION'
 
+export type TruckTrackingSignalProcessingStatus =
+  | 'RECEIVED'
+  | 'MATCHED'
+  | 'UNRESOLVED'
+  | 'REJECTED'
+  | 'ERROR'
+
 export type DeliveryTruckDetailRecord = {
   delivery_id: string
   target_run_count: number | null
@@ -246,6 +253,25 @@ export type DeliveryTruckStopRecord = {
   version: number
 }
 
+export type DeliveryTruckMovementTrackingHealthRecord = {
+  last_evaluated_at: string
+  eta_status: string
+  eta_status_reason: string
+  tracking_freshness_status: string
+  tracking_freshness_reason: string
+  dwell_status: string
+  dwell_status_reason: string
+  exception_severity: 'CLEAR' | 'WATCH' | 'ACTION_REQUIRED'
+  primary_exception: string | null
+  stale_after_minutes: number
+  dwell_threshold_minutes: number
+  destination_stop_id: string | null
+  current_stop_id: string | null
+  minutes_since_last_signal: number | null
+  current_dwell_minutes: number | null
+  eta_late_minutes: number | null
+}
+
 export type DeliveryTruckMovementSummaryRecord = {
   movement_id: string
   delivery_id: string
@@ -264,6 +290,7 @@ export type DeliveryTruckMovementSummaryRecord = {
   current_location_code: string | null
   last_signal_at: string | null
   current_eta_at_destination: string | null
+  tracking_health?: DeliveryTruckMovementTrackingHealthRecord | null
   hold_reason_code: string | null
   hold_reason_code_source: DeliveryFieldSource
   stop_count: number
@@ -291,6 +318,57 @@ export type DeliveryTruckMovementRecord = DeliveryTruckMovementSummaryRecord & {
   truck_ticket_number: string | null
   truck_ticket_number_source: DeliveryFieldSource
   stops: DeliveryTruckStopRecord[]
+}
+
+export type DeliveryTruckTrackingExceptionRecord = {
+  delivery_id: string
+  trade_id: string
+  leg_no: number | null
+  external_trade_id: string | null
+  book: string
+  portfolio: string | null
+  counterparty: string | null
+  commodity_class: string
+  commodity: string
+  transport_mode: DeliveryRecord['transport_mode']
+  execution_status: DeliveryExecutionStatus
+  delivery_start: string | null
+  delivery_end: string | null
+  location_code: string | null
+  origin_location_code: string | null
+  destination_location_code: string | null
+  operations_owner: string | null
+  movement: DeliveryTruckMovementSummaryRecord
+  tracking_health: DeliveryTruckMovementTrackingHealthRecord
+}
+
+export type DeliveryTrackingSignalRecord = {
+  signal_id: number
+  delivery_id: string | null
+  movement_id: string | null
+  stop_id: string | null
+  source_system: string
+  source_event_id: string | null
+  signal_type: string
+  occurred_at: string
+  received_at: string
+  latitude: number | null
+  longitude: number | null
+  location_code: string | null
+  external_status: string | null
+  normalized_status: string | null
+  match_confidence: number | null
+  dedupe_key: string
+  processing_status: TruckTrackingSignalProcessingStatus
+  processing_error: string | null
+  raw_payload: Record<string, unknown>
+}
+
+export type DeliveryTrackingSignalIngestResultRecord = {
+  ingest_status: string
+  duplicate: boolean
+  signal: DeliveryTrackingSignalRecord
+  movement: DeliveryTruckMovementSummaryRecord
 }
 
 export type DeliveryRecord = {
@@ -3033,6 +3111,7 @@ export type AssistantAgentProfileRequest = {
   rejection_reason: string | null
   linked_agent_id: string | null
   linked_revision_id: number | null
+  applied_diff_summary: AssistantAgentRevisionDiff[]
   requested_at: string
   requested_by: string
   reviewed_at: string | null

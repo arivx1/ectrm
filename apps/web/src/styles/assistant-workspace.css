@@ -533,7 +533,9 @@
 .assistant-construction-card-list,
 .assistant-construction-detail-list,
 .assistant-construction-source-list,
-.assistant-construction-source-card {
+.assistant-construction-source-card,
+.assistant-construction-provenance-list,
+.assistant-construction-provenance-row {
   display: grid;
 }
 
@@ -575,21 +577,29 @@
 }
 
 .assistant-construction-detail-list,
-.assistant-construction-source-list {
+.assistant-construction-source-list,
+.assistant-construction-provenance-list {
   gap: 0.45rem;
 }
 
 .assistant-construction-detail-list small,
-.assistant-construction-source-card small {
+.assistant-construction-source-card small,
+.assistant-construction-provenance-row small {
   color: var(--terminal-dim);
 }
 
-.assistant-construction-source-card {
+.assistant-construction-source-card,
+.assistant-construction-provenance-row {
   gap: 0.35rem;
   padding: 0.7rem 0.75rem;
   border-radius: 0.8rem;
   border: 1px solid rgba(126, 154, 184, 0.12);
   background: rgba(10, 18, 29, 0.58);
+}
+
+.assistant-construction-provenance-list > strong {
+  color: var(--terminal-text);
+  font-size: 0.9rem;
 }
 
 .assistant-conversation-banner {

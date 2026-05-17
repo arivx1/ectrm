@@ -4,8 +4,10 @@ import { afterEach, test } from 'vitest'
 
 import {
   copyDocumentLibraryFolderTree,
+  deleteDocumentLibraryFolderTree,
   getDocumentLibraryFolderSnapshot,
   moveDocumentLibraryFolderTree,
+  renameDocumentLibraryFolder,
 } from '../src/workspaces/library/libraryFolderState'
 
 type LocalStorageMock = {
@@ -226,4 +228,94 @@ test('copies a folder subtree with a unique root name and leaves file assignment
       parentFolderId: 'copy-1',
     },
   ])
+})
+
+test('renames a folder while enforcing sibling name uniqueness', () => {
+  const snapshot = {
+    folders: [
+      {
+        id: 'credit-docs',
+        name: 'Credit Docs',
+        createdAt: '2026-05-15T10:00:00Z',
+        parentFolderId: null,
+      },
+      {
+        id: 'archive',
+        name: 'Archive',
+        createdAt: '2026-05-15T10:10:00Z',
+        parentFolderId: null,
+      },
+    ],
+    assignments: {
+      'DOC-1': 'credit-docs',
+    },
+  }
+
+  const result = renameDocumentLibraryFolder(snapshot, 'credit-docs', '  Credit Review  ')
+
+  assert.equal(result.ok, true)
+  if (!result.ok) {
+    return
+  }
+
+  assert.equal(result.folder.name, 'Credit Review')
+  assert.deepEqual(result.snapshot.assignments, snapshot.assignments)
+  assert.equal(result.snapshot.folders[0].name, 'Credit Review')
+
+  assert.deepEqual(renameDocumentLibraryFolder(snapshot, 'credit-docs', 'archive'), {
+    ok: false,
+    error: 'A folder with that name already exists here.',
+  })
+})
+
+test('deletes a folder subtree and returns assigned files to the library root', () => {
+  const snapshot = {
+    folders: [
+      {
+        id: 'credit-docs',
+        name: 'Credit Docs',
+        createdAt: '2026-05-15T10:00:00Z',
+        parentFolderId: null,
+      },
+      {
+        id: 'letters-of-credit',
+        name: 'Letters Of Credit',
+        createdAt: '2026-05-15T10:05:00Z',
+        parentFolderId: 'credit-docs',
+      },
+      {
+        id: 'archive',
+        name: 'Archive',
+        createdAt: '2026-05-15T10:10:00Z',
+        parentFolderId: null,
+      },
+    ],
+    assignments: {
+      'DOC-1': 'credit-docs',
+      'DOC-2': 'letters-of-credit',
+      'DOC-3': 'archive',
+    },
+  }
+
+  const result = deleteDocumentLibraryFolderTree(snapshot, 'credit-docs')
+
+  assert.equal(result.ok, true)
+  if (!result.ok) {
+    return
+  }
+
+  assert.deepEqual(result.deletedFolderIds, ['credit-docs', 'letters-of-credit'])
+  assert.equal(result.deletedFolderCount, 2)
+  assert.equal(result.unassignedDocumentCount, 2)
+  assert.deepEqual(result.snapshot.folders, [
+    {
+      id: 'archive',
+      name: 'Archive',
+      createdAt: '2026-05-15T10:10:00Z',
+      parentFolderId: null,
+    },
+  ])
+  assert.deepEqual(result.snapshot.assignments, {
+    'DOC-3': 'archive',
+  })
 })

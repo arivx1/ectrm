@@ -1,7 +1,9 @@
 import type {
   DeliveryRecord,
+  DeliveryTrackingSignalRecord,
   DeliveryTruckMovementRecord,
   DeliveryTruckMovementSummaryRecord,
+  DeliveryTruckMovementTrackingHealthRecord,
 } from "../../../src/shared/models";
 
 export type RecordedRequest = {
@@ -519,6 +521,25 @@ export const smokeDeliveries = [
   },
 ] satisfies DeliveryRecord[];
 
+const smokeTruckTrackingHealth = {
+  last_evaluated_at: "2026-05-10T13:30:00Z",
+  eta_status: "ON_TIME",
+  eta_status_reason: "Current destination ETA is inside the planned arrival window.",
+  tracking_freshness_status: "STALE",
+  tracking_freshness_reason: "Last tracking signal is 270 minutes old, past the 240 minute freshness threshold.",
+  dwell_status: "NOT_DWELLING",
+  dwell_status_reason: "Truck is not currently arrived or working at an active stop.",
+  exception_severity: "ACTION_REQUIRED",
+  primary_exception: "STALE_TRACKING",
+  stale_after_minutes: 240,
+  dwell_threshold_minutes: 120,
+  destination_stop_id: "STOP-SMOKE-2",
+  current_stop_id: "STOP-SMOKE-1",
+  minutes_since_last_signal: 270,
+  current_dwell_minutes: null,
+  eta_late_minutes: null,
+} satisfies DeliveryTruckMovementTrackingHealthRecord;
+
 const smokeTruckMovementBase = {
   movement_id: "MOVE-SMOKE-1",
   delivery_id: "DLV-TRUCK-SMOKE-1",
@@ -537,6 +558,7 @@ const smokeTruckMovementBase = {
   current_location_code: "MIDLAND",
   last_signal_at: "2026-05-10T09:00:00Z",
   current_eta_at_destination: "2026-05-10T14:30:00Z",
+  tracking_health: smokeTruckTrackingHealth,
   hold_reason_code: null,
   hold_reason_code_source: "SYSTEM_GENERATED",
   stop_count: 2,
@@ -623,6 +645,32 @@ export const smokeTruckMovements = [
     ],
   },
 ] satisfies DeliveryTruckMovementRecord[];
+
+export const smokeTruckTrackingSignals = [
+  {
+    signal_id: 17,
+    delivery_id: "DLV-TRUCK-SMOKE-1",
+    movement_id: "MOVE-SMOKE-1",
+    stop_id: "STOP-SMOKE-1",
+    source_system: "MANUAL_DISPATCH",
+    source_event_id: "CALL-1",
+    signal_type: "POSITION",
+    occurred_at: "2026-05-10T09:05:00Z",
+    received_at: "2026-05-10T09:06:00Z",
+    latitude: null,
+    longitude: null,
+    location_code: "MIDLAND",
+    external_status: "Driver called from gate",
+    normalized_status: "AT_STOP",
+    match_confidence: 0.75,
+    dedupe_key: "MANUAL_DISPATCH:smoke-call-1",
+    processing_status: "MATCHED",
+    processing_error: null,
+    raw_payload: {
+      dispatcher_note: "Driver called from gate.",
+    },
+  },
+] satisfies DeliveryTrackingSignalRecord[];
 
 const smokeTokenBudget = {
   status: "GREEN",

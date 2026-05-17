@@ -24,10 +24,30 @@ vendor branding or proprietary product behavior.
 ## Primary Design Inputs
 
 - [Trading UI Familiarity Reference](./trading-ui-familiarity-reference.md)
+- [Market Terminal Operator Guide](./market-terminal-operator-guide.md)
 - [Platform Blueprint](./platform-blueprint.md)
 - [Prompt-First Operator Experience Work Packages](./prompt-first-operator-experience-work-packages.md)
 - [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md)
 - [Trading Source Roadmap](./trading-source-roadmap.md)
+
+## Implementation Status
+
+Phase 1 is implemented and verified as a Bloomberg-style familiarity layer, not
+a vendor clone. The shipped slice is a read, explain, navigate, and personalize
+surface over existing ECTRM workspaces.
+
+| Package | Status | Evidence |
+| --- | --- | --- |
+| MTERM-01 terminal shell and density mode | Implemented | User-selectable market terminal mode, persisted appearance preference, denser shell treatment, and Live Desk landing behavior. |
+| MTERM-02 global command and search bar | Implemented | Terminal command bar supports workspace, trade, counterparty, commodity, price-index, and report routing with mutation verbs blocked. |
+| MTERM-03 monitor presets and saved layouts | Implemented | Market Overview, Risk Board, and Operations Monitor presets reuse `TileLayout` and saved workspace layout state. |
+| MTERM-04 market monitor board | Implemented | Live Desk includes terminal-style market strip, monitor board, cross-panel market, exposure, and operational signals. |
+| MTERM-05 instrument brief and drill-down pages | Implemented | Supported market instruments and commodity classes open read-only contextual briefs from terminal search and dashboard tiles. |
+| MTERM-06 desk headlines and attention stream | Implemented | Desk headlines blend market, pricing, operational, settlement, document, and message context with routeable source links. |
+| MTERM-07 keyboard shortcuts and quick navigation | Implemented | Command, workspace, filter, tile, reset, and shortcut-reference shortcuts are available with conflict-aware handling. |
+| MTERM-08 watchlists and alerts | Implemented | Live Desk watchlists serialize safely and evaluate typed price, stale data, exposure, pricing, and settlement alert rules. |
+| MTERM-09 regression, assistant routing, and browser smoke coverage | Implemented | Focused web tests, Prompt Home fail-closed coverage, dashboard smoke, full web smoke, and assistant evals pass. |
+| MTERM-CLOSEOUT release readiness | Implemented | Roadmap status, operator guide, and Wave 3 candidate backlog documented. |
 
 ## Current Repo Anchors
 
@@ -96,33 +116,48 @@ It may not:
 
 | Work object | Status | Notes |
 | --- | --- | --- |
-| Terminal mode preference | Planned | User-level choice for layout density and terminal-style navigation. |
+| Terminal mode preference | Implemented | User-level choice for layout density and terminal-style navigation. |
 | Workspace layout definition | Existing | Reuse the current personal layout API before adding anything heavier. |
-| Monitor preset | Planned | System-owned starting layouts such as Market Overview or Risk Board. |
-| Watchlist | Planned | Saved list of commodities, price indices, books, counterparties, or reports. |
-| Instrument brief | Planned | Read-only drill-down object for a price index, commodity, or market theme. |
-| Alert definition | Planned | Typed thresholds or status triggers for watchlists and attention cards. |
-| Desk headline or attention item | Derived | Unified stream built from market context, events, reports, docs, and messages. |
+| Monitor preset | Implemented | System-owned starting layouts such as Market Overview, Risk Board, and Operations Monitor. |
+| Watchlist | Implemented | Saved list of price indices, commodity classes, and desk signals for the Live Desk. |
+| Instrument brief | Implemented | Read-only drill-down object for a price index, commodity class, or market theme. |
+| Alert definition | Implemented | Typed thresholds or status triggers for watchlists and attention cards. |
+| Desk headline or attention item | Implemented | Unified stream built from market context, events, reports, docs, and messages. |
 
 ## Delivery Order
 
 ### Wave 0: Foundation For A Terminal Mode
 
-1. MTERM-01 terminal shell and density mode
-2. MTERM-02 global command and search bar
-3. MTERM-03 monitor presets and saved layouts
+1. MTERM-01 terminal shell and density mode - implemented
+2. MTERM-02 global command and search bar - implemented
+3. MTERM-03 monitor presets and saved layouts - implemented
 
 ### Wave 1: First Bloomberg-Style Operating Surface
 
-4. MTERM-04 market monitor board
-5. MTERM-05 instrument brief and drill-down pages
-6. MTERM-06 desk headlines and attention stream
+4. MTERM-04 market monitor board - implemented
+5. MTERM-05 instrument brief and drill-down pages - implemented
+6. MTERM-06 desk headlines and attention stream - implemented
 
 ### Wave 2: Power-User Depth
 
-7. MTERM-07 keyboard shortcuts and quick navigation
-8. MTERM-08 watchlists and alerts
-9. MTERM-09 regression, assistant routing, and browser smoke coverage
+7. MTERM-07 keyboard shortcuts and quick navigation - implemented
+8. MTERM-08 watchlists and alerts - implemented
+9. MTERM-09 regression, assistant routing, and browser smoke coverage - implemented
+
+### Closeout
+
+10. MTERM-CLOSEOUT release readiness - implemented
+
+### Wave 3: Candidate Enhancements
+
+These are intentionally candidates, not committed scope. They should be
+selected after the Phase 1 terminal mode has been reviewed by operators.
+
+1. MTERM-10 multi-monitor workspace sets
+2. MTERM-11 expanded terminal command aliases and functions
+3. MTERM-12 time-series, quote chart, and curve panels
+4. MTERM-13 persistent alert delivery and notification routing
+5. MTERM-14 deeper instrument analytics for curve, basis, volatility, and P&L
 
 ## Shared Definition Of Done
 
@@ -140,6 +175,10 @@ Each work package is done only when:
 - docs are updated when the user workflow or operating model changes
 
 ## MTERM-01: Terminal Shell And Density Mode
+
+### Status
+
+Implemented.
 
 ### Priority
 
@@ -178,6 +217,10 @@ first-class landing option.
 - focused rendering checks for shell class changes and fallback behavior
 
 ## MTERM-02: Global Command And Search Bar
+
+### Status
+
+Implemented.
 
 ### Priority
 
@@ -222,6 +265,10 @@ workspaces and key desk objects.
 
 ## MTERM-03: Monitor Presets And Saved Layouts
 
+### Status
+
+Implemented.
+
 ### Priority
 
 P0
@@ -261,6 +308,10 @@ variations using the existing layout-definition infrastructure.
 - focused web tests for preset selection, save, reset, and schema drift fallback
 
 ## MTERM-04: Market Monitor Board
+
+### Status
+
+Implemented.
 
 ### Priority
 
@@ -302,6 +353,10 @@ than a simple dashboard.
 
 ## MTERM-05: Instrument Brief And Drill-Down Pages
 
+### Status
+
+Implemented.
+
 ### Priority
 
 P1
@@ -342,6 +397,10 @@ a price index, commodity, or market theme.
 - focused service tests if new summary builders are introduced
 
 ## MTERM-06: Desk Headlines And Attention Stream
+
+### Status
+
+Implemented.
 
 ### Priority
 
@@ -385,6 +444,10 @@ signals with desk workflow context.
 
 ## MTERM-07: Keyboard Shortcuts And Quick Navigation
 
+### Status
+
+Implemented.
+
 ### Priority
 
 P1
@@ -422,6 +485,10 @@ navigation flows no longer require pointer-only interaction.
 - browser smoke for a basic keyboard-only navigation path
 
 ## MTERM-08: Watchlists And Alerts
+
+### Status
+
+Implemented.
 
 ### Priority
 
@@ -461,6 +528,10 @@ see terminal-mode attention cues when those signals move.
 
 ## MTERM-09: Regression, Assistant Routing, And Browser Smoke Coverage
 
+### Status
+
+Implemented.
+
 ### Priority
 
 P0
@@ -499,3 +570,51 @@ handoffs.
 - `make web-test`
 - `make web-smoke-test` for the seeded browser path when browser routing changes
 - `make api-assistant-evals` if prompt routing behavior changes
+
+## MTERM-CLOSEOUT: Terminal Mode Release Readiness
+
+### Status
+
+Implemented.
+
+### Priority
+
+P0
+
+### Outcome
+
+The implemented terminal-mode slice is documented, reviewable, and ready for
+operator feedback without relying on chat history or code archaeology.
+
+### Scope
+
+- mark MTERM-01 through MTERM-09 implementation status in this roadmap
+- add an operator guide that explains:
+  - terminal mode intent and boundaries
+  - command bar scopes and supported prefixes
+  - monitor presets and saved layouts
+  - watchlists and typed alerts
+  - keyboard shortcuts
+  - assistant handoffs and fail-closed behavior
+- document Wave 3 candidate enhancements without committing them as active work
+- keep the authority boundary explicit: terminal mode is still read, explain,
+  navigate, and personalize first
+
+### Out Of Scope
+
+- creating new terminal product behavior
+- staging or committing unrelated dirty worktree changes
+- promoting Wave 3 candidates without operator review
+
+### Acceptance Criteria
+
+- the roadmap reflects the implemented Phase 1 terminal-mode slice
+- operators have a single guide for using the terminal-mode behavior
+- future contributors can see what is shipped, what is bounded, and what is
+  merely candidate scope
+
+### Verification
+
+- docs links resolve locally
+- markdown formatting is readable
+- no code tests are required unless implementation behavior changes

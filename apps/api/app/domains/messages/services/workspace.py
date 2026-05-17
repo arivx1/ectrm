@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
 import uuid
 
 from sqlalchemy import inspect, select
@@ -12,12 +13,14 @@ from apps.api.app.models.messaging_workspace_conversation import MessagingWorksp
 from apps.api.app.models.messaging_workspace_message import MessagingWorkspaceMessage
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.schemas.messaging import (
+    MessagingWorkspaceAttachmentValue,
     MessagingWorkspaceAttachmentOut,
     MessagingWorkspaceConversationOut,
     MessagingWorkspaceMemberOut,
     MessagingWorkspaceMessageOut,
     MessagingWorkspaceMetricOut,
     MessagingWorkspacePostCreate,
+    MessagingWorkspacePostUpdate,
     MessagingWorkspaceStateOut,
     MessagingWorkspaceTimelineItemOut,
 )
@@ -53,12 +56,15 @@ class MessagingWorkspaceSeedTimelineItem:
     kind: str
     created_at: datetime
     source: str
+    parent_message_id: str | None = None
+    thread_root_message_id: str | None = None
     body: str = ""
     label: str | None = None
     detail: str | None = None
     author: MessagingWorkspaceSeedMember | None = None
     reactions: tuple[str, ...] = ()
     attachment: MessagingWorkspaceSeedAttachment | None = None
+    pinned_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -185,12 +191,15 @@ DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS: tuple[MessagingWorkspaceSeedConversat
                     summary="Owner: Desk Ops. Stop conditions: missing counterparty confirmation, settlement conflict, or delivery variance without explanation.",
                     footnote="Open Assistant Console for prompt context, evidence, and the approval record.",
                 ),
+                pinned_at=build_seed_timestamp(13, 16),
             ),
             MessagingWorkspaceSeedTimelineItem(
                 message_id="assistant-msg-2",
                 kind="message",
                 source="HUMAN",
                 created_at=build_seed_timestamp(13, 12),
+                parent_message_id="assistant-msg-1",
+                thread_root_message_id="assistant-msg-1",
                 author=MIA_CHEN,
                 body="Keep this threaded with the nomination conversation so Operations can react without switching screens.",
                 reactions=("aligned 2",),
@@ -248,6 +257,8 @@ DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS: tuple[MessagingWorkspaceSeedConversat
                 kind="message",
                 source="HUMAN",
                 created_at=build_seed_timestamp(15, 1),
+                parent_message_id="northshore-msg-1",
+                thread_root_message_id="northshore-msg-1",
                 author=MIA_CHEN,
                 body="I can take this into the operations lane as soon as the desk confirms we should accept the revised timing.",
                 reactions=("on it 1",),
@@ -382,6 +393,8 @@ DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS: tuple[MessagingWorkspaceSeedConversat
                 kind="message",
                 source="HUMAN",
                 created_at=build_seed_timestamp(14, 24),
+                parent_message_id="settlement-msg-1",
+                thread_root_message_id="settlement-msg-1",
                 author=MIA_CHEN,
                 body="I will update this lane once Operations confirms the delivery window. That way settlement does not have to chase the queue separately.",
                 reactions=("thanks 1",),
@@ -552,6 +565,12 @@ def build_seed_message_record(
         conversation_id=conversation_id,
         item_kind=item.kind.upper(),
         source=item.source,
+        parent_message_id=item.parent_message_id,
+        thread_root_message_id=(
+            item.thread_root_message_id
+            if item.thread_root_message_id is not None
+            else item.message_id if item.kind == "message" and item.parent_message_id is None else item.parent_message_id
+        ),
         body=item.body,
         system_label=item.label,
         system_detail=item.detail,
@@ -568,7 +587,45 @@ def build_seed_message_record(
         created_by_user_id=None,
         created_by_session_id=None,
         created_by_role=None,
+        edited_at=None,
+        edited_by_user_id=None,
+        edited_by_session_id=None,
+        edited_by_role=None,
+        deleted_at=None,
+        deleted_by_user_id=None,
+        deleted_by_session_id=None,
+        deleted_by_role=None,
+        pinned_at=item.pinned_at,
+        pinned_by_user_id=None,
+        pinned_by_session_id=None,
+        pinned_by_role=None,
         created_at=item.created_at,
+    )
+
+
+def build_attachment_payload(
+    attachment: MessagingWorkspaceAttachmentValue | None,
+) -> dict[str, str] | None:
+    if attachment is None:
+        return None
+
+    return {
+        "label": attachment.label,
+        "title": attachment.title,
+        "summary": attachment.summary,
+        "footnote": attachment.footnote,
+    }
+
+
+def build_attachment_out(payload: dict[str, str] | None) -> MessagingWorkspaceAttachmentOut | None:
+    if not isinstance(payload, dict):
+        return None
+
+    return MessagingWorkspaceAttachmentOut(
+        label=str(payload.get("label", "")),
+        title=str(payload.get("title", "")),
+        summary=str(payload.get("summary", "")),
+        footnote=str(payload.get("footnote", "")),
     )
 
 
@@ -692,6 +749,45 @@ def list_messaging_workspace_state(db: Session) -> MessagingWorkspaceStateOut:
     )
 
 
+def resolve_parent_thread_context(
+    db: Session,
+    *,
+    conversation: MessagingWorkspaceConversation,
+    parent_message_id: str | None,
+) -> tuple[str | None, str | None]:
+    if parent_message_id is None:
+        return None, None
+
+    parent_record = db.get(MessagingWorkspaceMessage, parent_message_id)
+    if parent_record is None or parent_record.conversation_id != conversation.conversation_id:
+        raise MessagingWorkspaceError(
+            404,
+            f"Messaging parent message {parent_message_id} was not found in {conversation.conversation_id}.",
+        )
+    if parent_record.item_kind.upper() != "MESSAGE":
+        raise MessagingWorkspaceError(409, "System timeline dividers cannot own threaded replies.")
+
+    return parent_record.message_id, parent_record.thread_root_message_id or parent_record.message_id
+
+
+def require_post_content_permission(
+    record: MessagingWorkspaceMessage,
+    *,
+    actor_id: str | None,
+) -> None:
+    if not actor_id:
+        raise MessagingWorkspaceError(401, "Sign in before editing or deleting persisted desk messages.")
+    if record.created_by_user_id != actor_id:
+        raise MessagingWorkspaceError(403, "You can only edit or delete your own persisted desk messages.")
+    if record.source.upper() != "HUMAN":
+        raise MessagingWorkspaceError(403, "Only human-authored desk messages can be edited or deleted.")
+
+
+def require_post_pin_permission(actor_id: str | None) -> None:
+    if not actor_id:
+        raise MessagingWorkspaceError(401, "Sign in before pinning or unpinning desk messages.")
+
+
 def create_messaging_workspace_post(
     db: Session,
     *,
@@ -718,6 +814,12 @@ def create_messaging_workspace_post(
             "Sign in before storing assistant-authored messaging replies.",
         )
 
+    parent_message_id, parent_thread_root_message_id = resolve_parent_thread_context(
+        db,
+        conversation=conversation,
+        parent_message_id=payload.parent_message_id,
+    )
+
     author = build_messaging_workspace_author(
         db=db,
         conversation=conversation,
@@ -725,11 +827,14 @@ def create_messaging_workspace_post(
         actor_id=actor_id,
     )
     now = datetime.now(timezone.utc)
+    message_id = str(uuid.uuid4())
     record = MessagingWorkspaceMessage(
-        message_id=str(uuid.uuid4()),
+        message_id=message_id,
         conversation_id=conversation.conversation_id,
         item_kind="MESSAGE",
         source=payload.source.upper(),
+        parent_message_id=parent_message_id,
+        thread_root_message_id=parent_thread_root_message_id or message_id,
         body=payload.body,
         system_label=None,
         system_detail=None,
@@ -739,17 +844,107 @@ def create_messaging_workspace_post(
         author_initials=author.initials,
         author_tone=author.tone,
         reactions=None,
-        attachment_payload=None,
+        attachment_payload=build_attachment_payload(payload.attachment),
         assistant_run_id=payload.assistant_run_id,
         assistant_agent_id=payload.assistant_agent_id,
         assistant_agent_name=payload.assistant_agent_name,
         created_by_user_id=actor_id,
         created_by_session_id=session_id,
         created_by_role=actor_role,
+        edited_at=None,
+        edited_by_user_id=None,
+        edited_by_session_id=None,
+        edited_by_role=None,
+        deleted_at=None,
+        deleted_by_user_id=None,
+        deleted_by_session_id=None,
+        deleted_by_role=None,
+        pinned_at=None,
+        pinned_by_user_id=None,
+        pinned_by_session_id=None,
+        pinned_by_role=None,
         created_at=now,
     )
     db.add(record)
     conversation.updated_at = now
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def update_messaging_workspace_post(
+    db: Session,
+    *,
+    message_id: str,
+    payload: MessagingWorkspacePostUpdate,
+    actor_id: str | None,
+    session_id: str | None,
+    actor_role: str | None,
+) -> MessagingWorkspaceMessage:
+    if not messaging_workspace_tables_available(db):
+        raise MessagingWorkspaceError(
+            503,
+            "Messaging workspace persistence is unavailable because the database schema is behind the current code. Run the latest migrations and retry.",
+        )
+
+    ensure_messaging_workspace_conversations(db)
+    record = db.get(MessagingWorkspaceMessage, message_id)
+    if record is None or record.item_kind.upper() != "MESSAGE":
+        raise MessagingWorkspaceError(404, f"Messaging post {message_id} was not found.")
+
+    now = datetime.now(timezone.utc)
+    content_mutated = False
+
+    if payload.body is not None:
+        require_post_content_permission(record, actor_id=actor_id)
+        if record.deleted_at is not None:
+            raise MessagingWorkspaceError(409, "Deleted desk messages cannot be edited.")
+        record.body = payload.body
+        record.edited_at = now
+        record.edited_by_user_id = actor_id
+        record.edited_by_session_id = session_id
+        record.edited_by_role = actor_role
+        content_mutated = True
+
+    if payload.deleted:
+        require_post_content_permission(record, actor_id=actor_id)
+        if record.deleted_at is None:
+            record.body = ""
+            record.reactions = None
+            record.attachment_payload = None
+            record.deleted_at = now
+            record.deleted_by_user_id = actor_id
+            record.deleted_by_session_id = session_id
+            record.deleted_by_role = actor_role
+            record.pinned_at = None
+            record.pinned_by_user_id = None
+            record.pinned_by_session_id = None
+            record.pinned_by_role = None
+            content_mutated = True
+
+    if payload.reactions is not None:
+        require_post_pin_permission(actor_id)
+        if record.deleted_at is not None:
+            raise MessagingWorkspaceError(409, "Deleted desk messages cannot accept reactions.")
+        record.reactions = payload.reactions or None
+
+    if payload.pinned is not None:
+        require_post_pin_permission(actor_id)
+        if payload.pinned:
+            record.pinned_at = now
+            record.pinned_by_user_id = actor_id
+            record.pinned_by_session_id = session_id
+            record.pinned_by_role = actor_role
+        else:
+            record.pinned_at = None
+            record.pinned_by_user_id = None
+            record.pinned_by_session_id = None
+            record.pinned_by_role = None
+
+    conversation = db.get(MessagingWorkspaceConversation, record.conversation_id)
+    if content_mutated and conversation is not None:
+        conversation.updated_at = now
+
     db.commit()
     db.refresh(record)
     return record
@@ -761,7 +956,15 @@ def to_messaging_workspace_conversation_out(
     *,
     workspace_counts: MessagingWorkspaceCounts,
 ) -> MessagingWorkspaceConversationOut:
-    timeline = [to_messaging_workspace_timeline_item_out(message) for message in messages]
+    reply_count_by_root, thread_participants_by_root = build_thread_metadata(messages)
+    timeline = [
+        to_messaging_workspace_timeline_item_out(
+            message,
+            reply_count=reply_count_by_root.get(message.message_id, 0),
+            thread_participants=thread_participants_by_root.get(message.message_id, []),
+        )
+        for message in messages
+    ]
     latest_item = timeline[-1] if timeline else None
     preview = build_preview_for_timeline_item(latest_item) or record.description
     members: list[MessagingWorkspaceMemberOut] = []
@@ -796,9 +999,40 @@ def to_messaging_workspace_conversation_out(
 def build_preview_for_timeline_item(item: MessagingWorkspaceTimelineItemOut | None) -> str | None:
     if item is None:
         return None
+    if item.deleted_at is not None:
+        return "Message deleted."
     if item.kind == "system":
         return item.detail
-    return next((paragraph for paragraph in item.body if paragraph.strip()), None)
+    preview = next((paragraph for paragraph in item.body if paragraph.strip()), None)
+    if preview is None:
+        return None
+    return re.sub(r"@\[(.+?)\]", r"@\1", preview)
+
+
+def build_thread_metadata(
+    messages: list[MessagingWorkspaceMessage],
+) -> tuple[dict[str, int], dict[str, list[str]]]:
+    reply_count_by_root: dict[str, int] = {}
+    participants_by_root: dict[str, list[str]] = {}
+    seen_participants_by_root: dict[str, set[str]] = {}
+
+    for record in messages:
+        if record.item_kind.upper() != "MESSAGE" or not record.parent_message_id:
+            continue
+
+        root_id = record.thread_root_message_id or record.parent_message_id
+        reply_count_by_root[root_id] = reply_count_by_root.get(root_id, 0) + 1
+
+        if not record.author_name:
+            continue
+
+        seen = seen_participants_by_root.setdefault(root_id, set())
+        if record.author_name in seen:
+            continue
+        seen.add(record.author_name)
+        participants_by_root.setdefault(root_id, []).append(record.author_name)
+
+    return reply_count_by_root, participants_by_root
 
 
 def build_unread_count(conversation_id: str) -> int:
@@ -879,15 +1113,11 @@ def build_conversation_metrics(
 
 def to_messaging_workspace_timeline_item_out(
     record: MessagingWorkspaceMessage,
+    *,
+    reply_count: int = 0,
+    thread_participants: list[str] | None = None,
 ) -> MessagingWorkspaceTimelineItemOut:
-    attachment = None
-    if isinstance(record.attachment_payload, dict):
-        attachment = MessagingWorkspaceAttachmentOut(
-            label=str(record.attachment_payload.get("label", "")),
-            title=str(record.attachment_payload.get("title", "")),
-            summary=str(record.attachment_payload.get("summary", "")),
-            footnote=str(record.attachment_payload.get("footnote", "")),
-        )
+    attachment = build_attachment_out(record.attachment_payload)
 
     author = None
     if record.author_name and record.author_title and record.author_presence and record.author_initials and record.author_tone:
@@ -903,12 +1133,22 @@ def to_messaging_workspace_timeline_item_out(
         id=record.message_id,
         kind=record.item_kind.lower(),
         created_at=normalize_timestamp(record.created_at),
+        source=record.source.lower(),
         label=record.system_label,
         detail=record.system_detail,
         author=author,
         body=format_message_body(record.body),
         reactions=list(record.reactions or []),
         attachment=attachment,
+        parent_message_id=record.parent_message_id,
+        thread_root_message_id=record.thread_root_message_id,
+        reply_count=reply_count,
+        thread_participants=list(thread_participants or []),
+        created_by_user_id=record.created_by_user_id,
+        created_by_role=record.created_by_role,
+        edited_at=normalize_timestamp(record.edited_at) if record.edited_at is not None else None,
+        deleted_at=normalize_timestamp(record.deleted_at) if record.deleted_at is not None else None,
+        pinned_at=normalize_timestamp(record.pinned_at) if record.pinned_at is not None else None,
     )
 
 
@@ -922,6 +1162,8 @@ def to_messaging_workspace_message_out(record: MessagingWorkspaceMessage) -> Mes
         conversation_id=record.conversation_id,
         source=record.source.lower(),
         body=record.body,
+        parent_message_id=record.parent_message_id,
+        thread_root_message_id=record.thread_root_message_id,
         author=MessagingWorkspaceMemberOut(
             name=record.author_name or "Unknown author",
             title=record.author_title or "Messaging author",
@@ -935,6 +1177,11 @@ def to_messaging_workspace_message_out(record: MessagingWorkspaceMessage) -> Mes
         created_by_user_id=record.created_by_user_id,
         created_by_session_id=record.created_by_session_id,
         created_by_role=record.created_by_role,
+        reactions=list(record.reactions or []),
+        attachment=build_attachment_out(record.attachment_payload),
+        edited_at=normalize_timestamp(record.edited_at) if record.edited_at is not None else None,
+        deleted_at=normalize_timestamp(record.deleted_at) if record.deleted_at is not None else None,
+        pinned_at=normalize_timestamp(record.pinned_at) if record.pinned_at is not None else None,
         created_at=normalize_timestamp(record.created_at),
     )
 

@@ -608,12 +608,19 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertTrue(body["version"])
         kinds = {entry["document_kind"]: entry for entry in body["document_kinds"]}
         self.assertIn("INVOICE", kinds)
+        self.assertIn("DEAL_RECAP", kinds)
+        self.assertIn("LETTER_OF_CREDIT", kinds)
+        self.assertIn("BILL_OF_LADING", kinds)
         self.assertIn("PIPELINE_STATEMENT", kinds)
         self.assertIn("QUALITY_SPECIFICATION", kinds)
+        self.assertEqual(len(kinds), len(body["document_kinds"]))
         self.assertTrue(any(field["field_key"] == "invoice_number" for field in kinds["INVOICE"]["header_fields"]))
+        self.assertTrue(any(field["field_key"] == "letter_of_credit_number" for field in kinds["LETTER_OF_CREDIT"]["header_fields"]))
         self.assertTrue(any(template["template_key"] == "line_items" for template in kinds["INVOICE"]["table_templates"]))
         self.assertEqual(kinds["TRADE_CONFIRMATION"]["document_family"], "TRADE_EXECUTION")
+        self.assertEqual(kinds["DEAL_RECAP"]["document_family"], "TRADE_EXECUTION")
         self.assertIn("trade_id", kinds["TRADE_CONFIRMATION"]["matching_keys"])
+        self.assertIn("letter_of_credit_number", kinds["LETTER_OF_CREDIT"]["matching_keys"])
         self.assertTrue(any(target["record_type"] == "TRADE" for target in kinds["TRADE_CONFIRMATION"]["record_targets"]))
         self.assertTrue(
             any(target["create_if_missing"] for target in kinds["INVOICE"]["record_targets"] if target["record_type"] == "TRADE_INVOICE")
@@ -628,6 +635,75 @@ class DocumentIngestionApiTests(unittest.TestCase):
                 Statement Number: PIPE-100
                 Pipeline System: NGPL
                 Nomination Reference: NOM-7
+                """,
+            ),
+            "deal-recap.pdf": (
+                "DEAL_RECAP",
+                """
+                Deal Recap
+                Recap Date: 2026-04-08
+                Counterparty: Shell Trading
+                Commodity: WTI
+                Quantity: 1000 bbl
+                Price: USD 79.25
+                """,
+            ),
+            "letter-of-credit.pdf": (
+                "LETTER_OF_CREDIT",
+                """
+                Letter of Credit
+                Letter of Credit Number: LC-4488
+                Expiry Date: 2026-05-31
+                Issuing Bank: First Commodity Bank
+                Applicant: Gulf Trading LLC
+                Beneficiary: Shell Trading
+                Amount: USD 500000
+                """,
+            ),
+            "nomination.pdf": (
+                "NOMINATION",
+                """
+                Pipeline Nomination
+                Nomination Reference: NOM-700
+                Flow Date: 2026-04-12
+                Pipeline System: NGPL
+                Contract Number: CN-900
+                Quantity: 10000 MMBtu
+                """,
+            ),
+            "curtailment-notice.pdf": (
+                "CURTAILMENT_NOTICE",
+                """
+                Curtailment Notice
+                Curtailment Notice Number: CURT-100
+                Notice Date: 2026-04-13
+                Effective Start: 2026-04-14 06:00
+                Issuing Entity: NGPL
+                Pipeline System: NGPL
+                Nomination Reference: NOM-700
+                Curtailed Quantity: 2500 MMBtu
+                """,
+            ),
+            "railcar-ticket.pdf": (
+                "RAILCAR_TICKET",
+                """
+                Railcar Ticket
+                Waybill Number: WB-77
+                Railcar Number: UTLX12345
+                Carrier: BNSF
+                Load Date: 2026-04-11
+                """,
+            ),
+            "dispatch-notice.pdf": (
+                "DISPATCH_NOTICE",
+                """
+                Dispatch Notice
+                Dispatch Number: DSP-55
+                Dispatch Date: 2026-04-12
+                Delivery ID: DEL-900
+                Carrier: Fleet Hauling
+                Asset Reference: TRUCK-12
+                Quantity: 800 bbl
                 """,
             ),
             "truck-ticket.pdf": (
@@ -648,6 +724,28 @@ class DocumentIngestionApiTests(unittest.TestCase):
                 Product: ULSD
                 """,
             ),
+            "inspection-report.pdf": (
+                "INSPECTION_REPORT",
+                """
+                Inspection Report
+                Inspection Report Number: IR-200
+                Inspection Date: 2026-04-10
+                Inspector: SGS
+                Product: Gasoline
+                """,
+            ),
+            "force-majeure-notice.pdf": (
+                "FORCE_MAJEURE_NOTICE",
+                """
+                Force Majeure Notice
+                Force Majeure Notice Number: FM-77
+                Notice Date: 2026-04-15
+                Counterparty: Shell Trading
+                Contract Number: CN-900
+                Event Start: 2026-04-15
+                Affected Location: Houston Terminal
+                """,
+            ),
             "hazmat-sheet.pdf": (
                 "HAZARDOUS_CARGO_DOCUMENTATION",
                 """
@@ -655,6 +753,68 @@ class DocumentIngestionApiTests(unittest.TestCase):
                 Document Number: SDS-200
                 Product: Methanol
                 Hazard Class: 3
+                """,
+            ),
+            "certificate-of-origin.pdf": (
+                "CERTIFICATE_OF_ORIGIN",
+                """
+                Certificate of Origin
+                Certificate Number: COO-900
+                Origin Country: Canada
+                Product: Crude Oil
+                Bill of Lading Number: BOL-88
+                """,
+            ),
+            "notice-of-readiness.pdf": (
+                "NOTICE_OF_READINESS",
+                """
+                Notice of Readiness
+                Notice Date: 2026-04-12
+                Vessel Name: Energy Star
+                Voyage Number: V-100
+                Load Port: Houston
+                """,
+            ),
+            "demurrage-claim.pdf": (
+                "DEMURRAGE_CLAIM",
+                """
+                Demurrage Claim
+                Claim Number: DEM-44
+                Claim Date: 2026-04-18
+                Counterparty: Shell Trading
+                Claim Amount: USD 12500
+                Bill of Lading Number: BOL-88
+                """,
+            ),
+            "payment-advice.pdf": (
+                "PAYMENT_ADVICE",
+                """
+                Payment Advice
+                Payment Reference: PAY-123
+                Advice Date: 2026-04-20
+                Invoice Number: INV-1007
+                Amount: USD 79250
+                """,
+            ),
+            "outage-notice.pdf": (
+                "OUTAGE_NOTICE",
+                """
+                Outage Notice
+                Outage Number: OUT-12
+                Notice Date: 2026-04-11
+                Facility: Houston Terminal
+                Outage Start: 2026-04-12 06:00
+                Reason: Planned maintenance
+                """,
+            ),
+            "storage-statement.pdf": (
+                "STORAGE_STATEMENT",
+                """
+                Storage Statement
+                Statement Number: STOR-33
+                Facility: Houston Terminal
+                Product: ULSD
+                Inventory Quantity: 50000 bbl
                 """,
             ),
         }

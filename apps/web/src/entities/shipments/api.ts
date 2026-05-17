@@ -4,8 +4,12 @@ import type {
   DeliveryEventType,
   DeliveryExecutionStatus,
   DeliveryRecord,
+  DeliveryTrackingSignalIngestResultRecord,
+  DeliveryTrackingSignalRecord,
   DeliveryTruckMovementRecord,
   DeliveryTruckMovementSummaryRecord,
+  DeliveryTruckMovementTrackingHealthRecord,
+  DeliveryTruckTrackingExceptionRecord,
   TruckCheckpointCode,
   TruckMovementStatus,
   TruckStopStatus,
@@ -236,6 +240,23 @@ export type ReverseDeliveryTruckStopCheckpointInput = {
   reversal_reason: string
   reversed_at?: string | null
   notes?: string | null
+}
+
+export type DeliveryTrackingSignalCreateInput = {
+  source_system?: string | null
+  source_event_id?: string | null
+  signal_type: string
+  occurred_at: string
+  received_at?: string | null
+  stop_id?: string | null
+  latitude?: number | null
+  longitude?: number | null
+  location_code?: string | null
+  external_status?: string | null
+  normalized_status?: string | null
+  match_confidence?: number | null
+  eta_at_destination?: string | null
+  raw_payload?: Record<string, unknown>
 }
 
 export type DeliverySyncResult = {
@@ -521,6 +542,66 @@ export async function reverseDeliveryTruckStopCheckpoint(
   const { stopId, eventId, payload } = args
 
   return postJson(`${apiBase}/truck-stops/${stopId}/checkpoints/${eventId}/reverse`, payload, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function listDeliveryTruckTrackingSignals(
+  apiBase: string,
+  movementId: string,
+): Promise<DeliveryTrackingSignalRecord[]> {
+  return fetchJson(`${apiBase}/truck-movements/${movementId}/tracking-signals`, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function getDeliveryTruckMovementTrackingHealth(
+  apiBase: string,
+  movementId: string,
+): Promise<DeliveryTruckMovementTrackingHealthRecord> {
+  return fetchJson(`${apiBase}/truck-movements/${movementId}/tracking-health`, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function listDeliveryTruckTrackingExceptions(
+  apiBase: string,
+  options?: {
+    includeClear?: boolean
+    severity?: DeliveryTruckMovementTrackingHealthRecord['exception_severity']
+    asOf?: string
+    limit?: number
+  },
+): Promise<DeliveryTruckTrackingExceptionRecord[]> {
+  const params = new URLSearchParams()
+  if (options?.includeClear) {
+    params.set('include_clear', 'true')
+  }
+  if (options?.severity) {
+    params.set('severity', options.severity)
+  }
+  if (options?.asOf) {
+    params.set('as_of', options.asOf)
+  }
+  if (typeof options?.limit === 'number') {
+    params.set('limit', String(options.limit))
+  }
+  const queryString = params.toString()
+  return fetchJson(`${apiBase}/truck-tracking/exceptions${queryString ? `?${queryString}` : ''}`, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function recordDeliveryTruckTrackingSignal(
+  apiBase: string,
+  args: {
+    movementId: string
+    payload: DeliveryTrackingSignalCreateInput
+  },
+): Promise<DeliveryTrackingSignalIngestResultRecord> {
+  const { movementId, payload } = args
+
+  return postJson(`${apiBase}/truck-movements/${movementId}/tracking-signals`, payload, {
     headers: shipmentHeaders(),
   })
 }

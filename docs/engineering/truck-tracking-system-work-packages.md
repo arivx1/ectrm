@@ -256,6 +256,21 @@ tracking evidence without silently mutating business state.
 - unmatched or conflicting signals have a human-visible handling path
 - the contract is usable by both polling and webhook-style providers
 
+### Implementation Note
+
+The first backend intake slice is implemented for truck movements through
+`POST /truck-movements/{movement_id}/tracking-signals` and
+`GET /truck-movements/{movement_id}/tracking-signals`. The service stores
+normalized signal evidence in `delivery_tracking_signals`, returns duplicates
+idempotently, validates optional stop references, and only refreshes movement
+signal freshness or ETA. Accepted business milestones still require the typed
+checkpoint path.
+
+The shipment truck workflow now exposes the same signal contract in the
+selected-run panel. Dispatchers can view signal history, record manual
+dispatcher/provider evidence, see duplicate or rejected outcomes, and refresh
+movement freshness/ETA without promoting the signal into a checkpoint.
+
 ### Verification
 
 - docs review
@@ -400,6 +415,29 @@ or stale from a deterministic ruleset instead of ad hoc judgment.
 - operators can distinguish missing data from true late movement behavior
 - workflow items are created only through explicit rules
 - exception rules do not mutate actualization or settlement state directly
+
+### Implementation Note
+
+The first deterministic exception slice is implemented on truck movement reads.
+`DeliveryTruckMovementSummaryOut` now includes `tracking_health`, and
+`GET /truck-movements/{movement_id}/tracking-health` can evaluate the same
+rules at an explicit `as_of` timestamp for replayable tests. A read-only
+cross-delivery queue is also available at `GET /truck-tracking/exceptions` so
+scheduling and operations can surface exception rows without fanning out across
+every delivery or creating workflow items. The rule set currently classifies
+ETA as `ON_TIME`, `AT_RISK`, `LATE`,
+`MISSING_ETA`, `ARRIVED`, `UNKNOWN`, or `NOT_REQUIRED`; tracking freshness as
+`FRESH`, `STALE`, `MISSING`, or `NOT_REQUIRED`; and dwell as `NOT_DWELLING`,
+`DWELLING`, `OVER_DWELL`, or `UNKNOWN`. The first thresholds are 240 minutes
+for stale tracking and 120 minutes for stop dwell, with planned departure end
+acting as an earlier over-dwell boundary when available.
+
+Exception rollup is read-only for this slice. `ETA_LATE`, `OVER_DWELL`, and
+`STALE_TRACKING` become `ACTION_REQUIRED`; `ETA_AT_RISK`, missing signal,
+missing ETA, and ambiguous ETA/dwell states become `WATCH`; clear movements
+stay `CLEAR`. The scheduling and operations workspaces consume the exception
+queue as a visibility surface only. No workflow item is created automatically
+yet; that remains a separate explicit-rule package.
 
 ### Verification
 

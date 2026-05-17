@@ -83,6 +83,108 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-17 - Truck Tracking Exceptions Are Deterministic Read Models First
+
+- Type: algorithm-added
+- Domain: truck tracking, exception triage, ETA, dwell, and signal freshness
+- Applies to: truck movement summaries, `tracking_health`,
+  `/truck-movements/{movement_id}/tracking-health`,
+  `/truck-tracking/exceptions`, shipment truck UI, and scheduling/operations
+  exception queues
+- Status: implemented
+- Source:
+  `apps/api/app/domains/operations/services/truck_tracking.py`,
+  `apps/api/app/domains/operations/routes/truck_tracking.py`,
+  `apps/api/tests/test_truck_tracking_api.py`,
+  `apps/web/src/workspaces/shipments/DeliveryTruckWorkflowEditor.tsx`,
+  `apps/web/src/workspaces/operations/TruckTrackingExceptionQueue.tsx`, and
+  `apps/web/tests/browser/smokeHarness.spec.ts`
+- Lesson: truck ETA, stale-signal, and dwell exceptions now come from a typed
+  deterministic read model instead of ad hoc operator judgment or assistant
+  prose. The service classifies ETA, signal freshness, and dwell separately,
+  then rolls those states into `CLEAR`, `WATCH`, or `ACTION_REQUIRED` with a
+  named primary exception.
+- Deterministic opportunity: workflow-item creation should remain a separate
+  explicit policy layer that consumes `tracking_health`. Do not let raw
+  signals, UI labels, or assistant summaries create exception work items until
+  the rule owner approves idempotency, ownership, suppression, and closure
+  behavior.
+- Agent autonomy impact: agents may explain why a truck run is late, stale, or
+  dwelling by citing `tracking_health`, but they should not invent thresholds
+  or mutate workflow state from their own interpretation.
+- Tests or evidence:
+  `.venv/bin/python -m unittest apps.api.tests.test_truck_tracking_api` and
+  `npm --prefix apps/web run test:smoke -- --grep "shipments truck workflow|truck tracking exceptions"`
+- Follow-up: define the workflow item auto-create/update contract only after
+  owner review; the current operations/scheduling queues are intentionally
+  read-only consumers of `tracking_health`.
+
+### 2026-05-17 - Truck Tracking Signals Stay Evidence Until Accepted
+
+- Type: algorithm-added
+- Domain: truck tracking, telemetry evidence, and movement freshness
+- Applies to: `delivery_tracking_signals`, truck movement signal ingest,
+  provider/manual tracking updates, stop matching, and ETA freshness
+- Status: implemented
+- Source:
+  `apps/api/app/domains/operations/services/truck_tracking.py` and
+  `apps/api/tests/test_truck_tracking_api.py`
+- Lesson: raw truck updates now land through an append-only normalized tracking
+  signal path before any business milestone is accepted. The ingest service
+  creates deterministic dedupe keys from provider event identity or normalized
+  movement/signal fields, returns existing rows as duplicates, validates
+  optional stop references, and records `MATCHED`, `UNRESOLVED`, or `REJECTED`
+  processing status without creating `DeliveryEvent` milestones.
+- Deterministic opportunity: keep provider-specific adapters outside business
+  mutation logic. Downstream services should consume the normalized signal
+  record and only promote a signal into a checkpoint through explicit
+  checkpoint/milestone acceptance rules with source evidence.
+- Agent autonomy impact: agents may summarize tracking signals, explain why a
+  signal was duplicate or rejected, and draft follow-up work. They must not
+  turn raw telemetry into actualization, settlement, or accepted movement
+  history without the typed checkpoint or actualization services.
+- Tests or evidence:
+  `.venv/bin/python -m unittest apps.api.tests.test_truck_tracking_api`
+- Follow-up: provider adapters should call the same ingest service and add
+  adapter fixture tests before enabling automatic checkpoint acceptance from
+  external feeds.
+
+### 2026-05-17 - Truck Checkpoint Status Projection Must Be Sequence-Safe
+
+- Type: algorithm-added
+- Domain: truck tracking, delivery events, and movement status projection
+- Applies to: manual truck checkpoint capture, `CHECKPOINT_RECORDED`,
+  `EVENT_REVERSED`, delivery truck stops, and delivery truck movements
+- Status: implemented
+- Source:
+  `apps/api/app/domains/operations/services/truck_tracking.py` and
+  `apps/api/tests/test_truck_tracking_api.py`
+- Lesson: accepted truck checkpoints are now the deterministic source for
+  low-risk stop and movement progression. `ARRIVED_PICKUP` projects a pickup
+  stop to `ARRIVED`, `DEPARTED_PICKUP` projects it to `DEPARTED` and advances
+  the movement toward the next active stop, and `ARRIVED_DESTINATION` projects
+  the destination stop to `ARRIVED`. Corrections stay append-only through
+  `EVENT_REVERSED`; live stop and movement status is recomputed from the
+  remaining active checkpoint events.
+- Deterministic opportunity: keep truck checkpoint sequencing and rollback in
+  the typed truck tracking service. The rule owner is Operations Lead; inputs
+  are delivery ID, movement ID, stop ID, checkpoint code, event history, stop
+  order, stop statuses, and event timestamps. Outputs are allowed stop status,
+  movement status, current stop sequence, current location, actual arrival and
+  departure timestamps, and validation errors. Stop conditions include
+  checkpoints on cancelled or skipped stops, destination arrival before earlier
+  active stops depart, duplicate active checkpoints, and reversing
+  `DEPARTED_PICKUP` while downstream stop progress is still active.
+- Agent autonomy impact: agents may explain or stage truck milestone
+  corrections, but they should not infer or mutate movement state from prose.
+  Status changes must flow through the typed checkpoint endpoints so audit
+  events, reversal rows, duplicate protection, and rollback guards remain
+  visible.
+- Tests or evidence:
+  `.venv/bin/python -m unittest apps.api.tests.test_truck_tracking_api`
+- Follow-up: later provider-signal ingestion should reuse this same projection
+  and stop-condition set before any automatic checkpoint acceptance is allowed.
+
 ### 2026-05-16 - Wiki Grounding Is Evidence, Not Assistant Authority
 
 - Type: lesson
@@ -102,6 +204,60 @@ proposal form until a human owner approves the domain rule.
   `test_wiki_page_search_ranks_title_content_links_and_archive_filter`, and
   `test_wiki_page_rename_rewrites_title_links_to_stable_targets`
 - Follow-up: if wiki content grows beyond prompt-sized ranked grounding, add read-only wiki search/detail live tools with explicit evidence items before adding any governed wiki edit action.
+
+### 2026-05-17 - Missing Wiki Links Should Become Typed Pages With Stable IDs
+
+- Type: lesson
+- Domain: desk wiki authoring, deterministic link repair, and knowledge graph growth
+- Applies to: unresolved `[[Page]]` and `[[label|target]]` links, linked-page creation, and future wiki edit actions
+- Status: implemented
+- Source:
+  `apps/web/src/workspaces/docs/useWikiDocumentController.ts`,
+  `apps/web/src/workspaces/docs/wikiMarkdown.ts`, and
+  `apps/web/tests/wikiMarkdown.test.ts`
+- Lesson: unresolved wiki links are a product workflow, not an assistant-only suggestion. When an operator creates a page from an unresolved link, the client should call the typed wiki page service, then rewrite the original reference to a stable `[[label|page_id]]` target so future renames, backlinks, search, and assistant grounding can rely on durable IDs.
+- Deterministic opportunity: keep link detection and link rewriting deterministic. Future assistant-authored wiki suggestions should stage or call the same typed page/link workflow rather than editing markdown by freeform prose.
+- Agent autonomy impact: agents may suggest missing pages or draft content, but actual page creation and link repair should remain visible through typed wiki services and user-initiated product controls until a governed wiki action type exists.
+- Tests or evidence:
+  `rewriteWikiMarkdownLinkTarget` coverage in `apps/web/tests/wikiMarkdown.test.ts`
+- Follow-up: if assistant-staged wiki edits are added later, reuse this stable-link rewrite behavior inside a backend action contract with previewable before/after markdown.
+
+### 2026-05-17 - Wiki Mentions Should Insert Stable Links At Authoring Time
+
+- Type: lesson
+- Domain: desk wiki authoring, backlinks, deterministic markdown editing, and future assistant wiki actions
+- Applies to: `[[` editor mentions, stable page ID links, backlink source snippets, and future wiki edit previews
+- Status: implemented
+- Source:
+  `apps/web/src/workspaces/docs/DocumentationWorkspace.tsx`,
+  `apps/web/src/workspaces/docs/wikiMarkdown.ts`,
+  `apps/api/app/domains/wiki/services/pages.py`, and
+  `apps/api/app/schemas/wiki.py`
+- Lesson: page mentions should become stable `[[label|page_id]]` links while the user is authoring, not later through cleanup. Backlinks are more reviewable when the deterministic link parser also supplies a short source snippet for the exact link occurrence.
+- Deterministic opportunity: keep active mention detection, mention replacement, and link-context snippets in deterministic code so assistant suggestions and product controls share the same link semantics.
+- Agent autonomy impact: agents may recommend wiki pages to link or draft mention edits, but durable references should still be previewed and applied through typed wiki services or deterministic markdown helpers.
+- Tests or evidence:
+  `findActiveWikiPageMention` and `replaceActiveWikiPageMention` coverage in
+  `apps/web/tests/wikiMarkdown.test.ts`, plus
+  `apps.api.tests.test_wiki_api` link-snippet assertions
+- Follow-up: if governed wiki edit actions are added, include the same stable-link replacement and backlink snippet preview in the action request before approval.
+
+### 2026-05-17 - Wiki Page Templates Should Be Deterministic Draft Scaffolds
+
+- Type: lesson
+- Domain: desk wiki authoring, page creation, and future assistant wiki actions
+- Applies to: built-in wiki templates, typed page creation, and assistant-suggested documentation scaffolds
+- Status: implemented
+- Source:
+  `apps/web/src/workspaces/docs/wikiTemplates.ts`,
+  `apps/web/src/workspaces/docs/useWikiDocumentController.ts`, and
+  `apps/web/src/workspaces/docs/DocumentationWorkspace.tsx`
+- Lesson: Notion-like page templates should be deterministic scaffolds that feed the existing typed wiki page creation service. The template can choose the initial title and markdown body, but the API remains the durable write boundary and blank remains the safe default.
+- Deterministic opportunity: keep template keys, labels, descriptions, titles, and markdown bodies in versioned code so future assistant drafts can reference the same scaffolds instead of inventing inconsistent page structures.
+- Agent autonomy impact: agents may recommend or preselect a template when drafting a wiki action, but page creation should still call the typed wiki service with previewable template-derived content.
+- Tests or evidence:
+  `apps/web/tests/wikiTemplates.test.ts` and the documentation wiki browser smoke path
+- Follow-up: if user-defined templates are added later, store them as governed wiki/template records with audit, ownership, and rollback rather than freeform prompt instructions.
 
 ### 2026-05-16 - Distributed Execution Should Use Centralized Control And Untrusted Node Defaults
 
@@ -838,13 +994,19 @@ proposal form until a human owner approves the domain rule.
   `apps/api/app/domains/assistant/services/chat.py`,
   `apps/api/app/domains/assistant/services/prompt_context.py`,
   `apps/api/app/domains/assistant/services/registry.py`, and
-  `apps/web/src/workspaces/admin/AgentManagementPanel.tsx`
+  `apps/web/src/workspaces/admin/AgentManagementPanel.tsx`,
+  `apps/web/src/workspaces/assistant/AssistantConstructionExplainerPanel.tsx`,
+  and `apps/web/src/workspaces/assistant/assistantConstructionExplainer.ts`
 - Lesson: users should not have to infer what an agent is from a hidden system
   prompt alone. A managed agent is now expressed as an explicit recipe:
   `role + skills + capabilities + workspaces + live tools + governed actions +
   system prompt`. Skills are first-class metadata that describe the agent's
   specialty, and inter-agent consultation is only available when the profile
-  explicitly carries the `inter_agent_consultation` skill.
+  explicitly carries the `inter_agent_consultation` skill. Admin review should
+  reuse the server-owned prompt preview and section metadata for the saved
+  construction view, so users can see source, scope, owner, freshness, fallback,
+  hierarchy, skills, tools, and actions from the same contract the runtime uses
+  rather than a client-only approximation.
 - Deterministic opportunity: when the same skill bundle keeps appearing for a
   role, preserve it in the governed role archetype and builder defaults rather
   than re-explaining specialization through freeform prompt text each time.
@@ -854,10 +1016,14 @@ proposal form until a human owner approves the domain rule.
 - Tests or evidence:
   `./.venv/bin/python -m unittest apps.api.tests.test_assistant_api apps.api.tests.test_assistant_tooling`
   and `npm --prefix apps/web test -- --run assistantAgentBuilder.test.ts
-  assistantApi.test.ts`
-- Follow-up: if consultation routing patterns stabilize, promote them into
-  typed manager or workflow rules instead of expanding skill lists or prompt
-  prose ad hoc.
+  assistantApi.test.ts`, plus `npm --prefix apps/web test --
+  assistantConstructionExplainer.test.ts agentManagementPanel.test.ts
+  assistantApi.test.ts` and `npx playwright test
+  tests/browser/smokeHarness.spec.ts --grep "admin smoke shows the
+  role-derived pilot lineup"`
+- Follow-up: if consultation routing patterns or context-source warnings
+  stabilize, promote them into typed manager, workflow, or context-profile rules
+  instead of expanding skill lists or prompt prose ad hoc.
 
 ### 2026-05-07 - Treat Trading EOD Readiness As A Deterministic Governed Decision
 
@@ -3741,7 +3907,9 @@ independently"`.
   be marked applied after the linked agent has a published revision whose
   payload carries the approved profile request ID, so the final status is tied
   to a concrete before/after agent configuration delta rather than a manual
-  closure click.
+  closure click. Profile-request responses also carry a compact applied diff
+  summary derived from the linked revision, which keeps the requester and admin
+  review cards aligned on exactly which saved configuration fields changed.
 - Deterministic opportunity: if request patterns stabilize, promote frequent
   reductions or safe edit classes into narrower typed workflows rather than
   widening this queue into a generic freeform mutation surface.
@@ -3758,9 +3926,9 @@ independently"`.
   and `npx playwright test
   tests/browser/smokeHarness.spec.ts --grep "assistant smoke submits a
   governed agent change request"`
-- Follow-up: add a compact admin diff summary directly on each profile-request
-  card if reviewers need to compare multiple saved revisions before applying
-  the request.
+- Follow-up: if reviewers need alternate baselines or multi-revision comparison,
+  promote the compact profile-request diff into a richer revision-compare
+  endpoint instead of duplicating diff logic in the client.
 
 ### 2026-05-16 - Document Classification Should Persist Explainable Deterministic Assessment
 
@@ -3846,6 +4014,39 @@ independently"`.
   replay set with confusion-matrix reporting and promotion thresholds for new
   document kinds.
 
+### 2026-05-17 - Commodity Document Taxonomy Should Prefer Specific Trade Lifecycle Buckets
+
+- Type: algorithm-added
+- Domain: document ingestion, deterministic classification, and Library review
+- Applies to: document-kind schema registry, deterministic classifier rules,
+  routing hints, operator type overrides, and Library type dropdown ordering
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/schema_registry.py`,
+  `apps/api/app/domains/documents/services/document_ingestion_analysis.py`,
+  `apps/api/app/domains/documents/services/document_routing.py`,
+  `apps/web/src/workspaces/library/LibraryWorkspace.tsx`, and
+  `apps/web/src/workspaces/library/libraryWorkspaceSupport.ts`
+- Lesson: commodity document classification should avoid broad buckets when a
+  recurring document has stable operational meaning. Deal recaps now classify
+  separately from generic trade communications, Bill of Lading remains the
+  existing logistics class instead of being duplicated, and the taxonomy now
+  includes trade finance, nomination, curtailment, dispatch, rail, marine
+  readiness, demurrage, inspection, force majeure, origin, payment advice,
+  outage, and storage statement classes.
+- Deterministic opportunity: add future commodity document kinds through the
+  same registry-plus-eval path: schema fields, classifier keywords, routing
+  keys, replay cases, and alphabetized operator selection.
+- Agent autonomy impact: agents may suggest likely document types, but durable
+  classification corrections and new classes stay in typed ingestion services
+  with replayable deterministic evals.
+- Tests or evidence:
+  `make api-document-classification-evals`,
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_schema_registry_exposes_supported_document_contracts apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_trade_shipping_taxonomy_classifies_additional_document_types`,
+  and `npm run test -- tests/documentLibrary.test.ts tests/libraryWorkspace.test.ts`
+- Follow-up: expand the reviewed replay corpus with real examples for the new
+  logistics, trade-finance, and settlement classes before tuning weights.
+
 ### 2026-05-16 - Reviewed Document Replay Fixtures Should Be Sanitized And Track Caution Behavior
 
 - Type: lesson
@@ -3881,3 +4082,112 @@ independently"`.
 - Follow-up: export a first real reviewed replay corpus from the configured
   database, replay it through the scorer lane, and tighten thresholds by
   document kind once the historical sample is large enough to be representative.
+
+### 2026-05-16 - Slack-Style Messaging Needs Durable Thread Metadata Before UI Polish
+
+- Type: lesson
+- Domain: messaging workspace, conversation UX, and durable desk collaboration
+- Applies to: Slack-style thread surfaces, reply semantics, message actions, and
+  composer upgrades in the `Messages` workspace
+- Status: implemented
+- Source:
+  `apps/api/app/domains/messages/services/workspace.py`,
+  `apps/api/app/routes/messages.py`,
+  `apps/api/app/schemas/messaging.py`,
+  `apps/api/app/models/messaging_workspace_message.py`,
+  `apps/web/src/workspaces/messages/MessagingWorkspace.tsx`,
+  `apps/web/src/workspaces/messages/messagingInboxData.ts`, and
+  `apps/web/src/workspaces/messages/messagingComposerFormatting.ts`
+- Lesson: once a messaging surface starts to mimic Slack or Teams, threads and
+  message actions cannot stay as frontend-only conventions. ECTRM now persists
+  `parent_message_id`, `thread_root_message_id`, and audited edit/delete/pin
+  timestamps on durable message records, exposes them through the public
+  workspace API, and keeps the UI thread pane, reply counts, quote flow, inline
+  edit/delete, and pin state synchronized from those records. Toolbar buttons in
+  the channel composer now mutate the draft instead of acting as decorative
+  labels, which prevents prompt text from compensating for missing product
+  behavior.
+- Deterministic opportunity: graduate message ownership and moderation rules
+  beyond the current “signed-in author can edit/delete; signed-in operator can
+  pin” baseline before introducing cross-user collaboration or enterprise
+  notification routing.
+- Agent autonomy impact: agents should not introduce Slack-like reply or action
+  affordances as local state sugar. If a reply belongs to a specific message or
+  an action changes message history, that behavior should live in durable typed
+  records with audit fields.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_messaging_workspace_api`,
+  `npm test -- messagingWorkspace.test.ts messagesApi.test.ts messagingComposerFormatting.test.ts messagingAgentSession.test.ts messagingAgentRouter.test.ts`,
+  and file-scoped `eslint` on the touched messaging files
+- Follow-up: add durable attachment records, mentions, and richer notification
+  semantics on top of the new thread/action model instead of layering them onto
+  flat timeline items.
+
+### 2026-05-16 - Focused Handoffs And Lowered Agent Authority Must Fail Closed
+
+- Type: lesson
+- Domain: assistant handoffs, terminal navigation, onboarding overlays, and
+  governed agent profile changes
+- Applies to: Prompt Home destination routing, terminal-style route handoffs,
+  Start Here onboarding, and admin-managed agent authority edits
+- Status: implemented
+- Source:
+  `apps/web/src/entities/app/promptNavigationIntent.ts`,
+  `apps/web/src/entities/app/workspaceLoading.ts`,
+  `apps/web/src/workspaces/admin/AgentManagementPanel.tsx`, and
+  `apps/web/tests/browser/smokeHarness.spec.ts`
+- Lesson: focused workspace handoffs are deliberate operator context and should
+  fail closed or stay uninterrupted. Unsupported assistant focus metadata is
+  rejected instead of partially opening a destination, and signed-in Start Here
+  onboarding stays hidden while a route handoff is active. When an approved
+  agent profile request lowers authority below action staging, the admin draft
+  strips governed action permissions before validation and save.
+- Deterministic opportunity: keep authority-ceiling-to-action-permission
+  normalization in typed product logic rather than in reviewer instructions or
+  smoke-only setup. Similar handoff overlays should check for focused context
+  before interrupting task-specific routes.
+- Agent autonomy impact: agents may suggest handoffs or profile changes, but
+  product code must enforce unsupported-focus rejection and authority/action
+  compatibility before any durable save.
+- Tests or evidence:
+  `npm run test -- --run tests/terminalCommandSearch.test.ts tests/promptNavigationIntent.test.ts tests/appRouteHandoff.test.ts tests/workspaceLoading.test.ts tests/workspaceLayoutPresets.test.ts`,
+  `make web-lint web-build web-test`, `make web-smoke-test`, and
+  `make api-assistant-evals`
+- Follow-up: add explicit unit coverage around profile-request authority
+  downgrades if more authority ceilings or action families are introduced.
+
+### 2026-05-16 - Messaging Composer Upgrades Should Reuse The Durable Post Contract
+
+- Type: lesson
+- Domain: messaging composer UX, lightweight attachments, mentions, emoji, and
+  reactions
+- Applies to: extending the `Messages` workspace toward Slack-style compose
+  behavior without reintroducing UI-only state
+- Status: implemented
+- Source:
+  `apps/api/app/schemas/messaging.py`,
+  `apps/api/app/domains/messages/services/workspace.py`,
+  `apps/web/src/entities/messages/api.ts`,
+  `apps/web/src/workspaces/messages/MessagingWorkspace.tsx`, and
+  `apps/web/src/workspaces/messages/messagingComposerFormatting.ts`
+- Lesson: once a messaging surface has a durable post contract, new compose
+  affordances should ride that contract instead of creating sidecar state or
+  fake-only UI. ECTRM now persists attachment metadata on post create, stores
+  reaction updates through the existing patch path, inserts mentions with an
+  explicit `@[Name]` token that renders back as a styled mention, and keeps
+  emoji insertion as plain durable text rather than special transient state.
+- Deterministic opportunity: if mentions graduate into notifications or access
+  control, add a typed mention entity and notification fan-out service instead
+  of asking prompts or client code to infer semantics from freeform text.
+- Agent autonomy impact: agents should prefer lightweight token or metadata
+  contracts when promoting a decorative compose affordance into durable product
+  behavior, and only introduce richer storage models when the new behavior
+  requires them.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_messaging_workspace_api`,
+  `npm test -- messagingWorkspace.test.ts messagesApi.test.ts messagingComposerFormatting.test.ts messagingAgentSession.test.ts messagingAgentRouter.test.ts`,
+  `npx eslint src/workspaces/messages/MessagingWorkspace.tsx src/workspaces/messages/messagingInboxData.ts src/workspaces/messages/messagingComposerFormatting.ts src/entities/messages/api.ts tests/messagingWorkspace.test.ts tests/messagesApi.test.ts tests/messagingComposerFormatting.test.ts`,
+  and `npm run build`
+- Follow-up: replace the metadata-only attachment prototype with real file
+  storage and add mention-driven notifications once ownership and delivery
+  rules are defined.

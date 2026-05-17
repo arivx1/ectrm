@@ -392,12 +392,12 @@
 }
 
 :root[data-color-mode='light'] .auth-gate-wordmark .brand-mark {
-  color: #103045;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.5));
-  border-color: rgba(18, 42, 56, 0.12);
+  color: #f7fbff;
+  background: linear-gradient(135deg, rgba(12, 28, 40, 0.52), rgba(31, 57, 72, 0.42));
+  border-color: rgba(222, 237, 248, 0.2);
   box-shadow:
-    0 20px 50px rgba(17, 30, 41, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    0 18px 40px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 
 :root[data-color-mode='light'] .auth-gate-panel {

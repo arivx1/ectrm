@@ -164,6 +164,68 @@ describe('prompt navigation intents', () => {
     })
   })
 
+  it('builds assistant terminal-dashboard handoffs for supported market instruments', () => {
+    const intent = normalizePromptNavigationIntent({
+      kind: 'open_workspace',
+      targetView: 'dashboard',
+      label: 'Open Henry Hub IFERC brief',
+      rationale: 'Review the curve beside related trades, exposure, and activity.',
+      filter: 'HH_IFERC',
+      focus: {
+        type: 'market_instrument',
+        id: 'price_index:HH_IFERC',
+        label: 'Henry Hub IFERC',
+      },
+      sourceRunId: 202,
+      sourceConversationId: 33,
+    })
+
+    expect(intent).not.toBeNull()
+    expect(buildPromptNavigationRouteHandoff(intent!)).toEqual({
+      source: 'assistant',
+      tradeId: 'price_index:HH_IFERC',
+      focus: {
+        type: 'market_instrument',
+        id: 'price_index:HH_IFERC',
+        label: 'Henry Hub IFERC',
+      },
+      tradeInspectorTab: null,
+      eventType: null,
+      label: 'Open Henry Hub IFERC brief',
+      rationale: 'Review the curve beside related trades, exposure, and activity.',
+      filter: 'HH_IFERC',
+      sourceRunId: 202,
+      sourceConversationId: 33,
+      sourceActionRequestId: null,
+    })
+  })
+
+  it('fails closed when assistant terminal handoffs include unsupported focus metadata', () => {
+    const parsed = parsePromptNavigationIntentsFromAssistantContent(
+      [
+        'I can explain where to look, but this handoff should not run.',
+        '```navigation_intent',
+        JSON.stringify({
+          kind: 'open_workspace',
+          target_view: 'dashboard',
+          label: 'Open Custom Terminal Formula',
+          focus: {
+            type: 'arbitrary_expression',
+            id: 'price > moving_average(20)',
+            label: 'Custom formula',
+          },
+        }),
+        '```',
+      ].join('\n'),
+    )
+
+    expect(parsed.content).toBe('I can explain where to look, but this handoff should not run.')
+    expect(parsed.intents).toEqual([])
+    expect(parsed.warnings).toEqual([
+      'A workspace handoff suggestion could not be applied and was ignored.',
+    ])
+  })
+
   it('fails closed for invalid navigation_intent blocks and raises a warning', () => {
     const parsed = parsePromptNavigationIntentsFromAssistantContent(
       [

@@ -237,3 +237,33 @@ class TrackingSignalProcessingStatus(StrEnum):
     UNRESOLVED = "UNRESOLVED"
     REJECTED = "REJECTED"
     ERROR = "ERROR"
+
+
+class TruckTrackingFreshnessStatus(StrEnum):
+    FRESH = "FRESH"
+    STALE = "STALE"
+    MISSING = "MISSING"
+    NOT_REQUIRED = "NOT_REQUIRED"
+
+
+class TruckEtaStatus(StrEnum):
+    ON_TIME = "ON_TIME"
+    AT_RISK = "AT_RISK"
+    LATE = "LATE"
+    MISSING_ETA = "MISSING_ETA"
+    ARRIVED = "ARRIVED"
+    UNKNOWN = "UNKNOWN"
+    NOT_REQUIRED = "NOT_REQUIRED"
+
+
+class TruckDwellStatus(StrEnum):
+    NOT_DWELLING = "NOT_DWELLING"
+    DWELLING = "DWELLING"
+    OVER_DWELL = "OVER_DWELL"
+    UNKNOWN = "UNKNOWN"
+
+
+class TruckTrackingExceptionSeverity(StrEnum):
+    CLEAR = "CLEAR"
+    WATCH = "WATCH"
+    ACTION_REQUIRED = "ACTION_REQUIRED"

@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 
 import {
   getDeliveryTruckMovement,
+  listDeliveryTruckTrackingSignals,
   listDeliveryTruckMovements,
+  recordDeliveryTruckTrackingSignal,
   type CancelDeliveryTruckMovementInput,
   type CancelDeliveryTruckStopInput,
   type DeliveryTruckMovementCreateInput,
@@ -17,8 +19,10 @@ import {
 import { appConfig } from '../../shared/config'
 import type {
   DeliveryRecord,
+  DeliveryTrackingSignalRecord,
   DeliveryTruckMovementRecord,
   DeliveryTruckMovementSummaryRecord,
+  DeliveryTruckMovementTrackingHealthRecord,
   DeliveryTruckStopRecord,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
@@ -33,6 +37,8 @@ import {
   buildTruckMovementCreatePayload,
   buildTruckMovementDraft,
   buildTruckMovementUpdatePayload,
+  buildTruckTrackingSignalDraft,
+  buildTruckTrackingSignalPayload,
   buildTruckStopCreatePayload,
   buildTruckStopDraft,
   buildTruckStopUpdatePayload,
@@ -40,12 +46,14 @@ import {
   formatTruckCheckpointLabel,
   checkpointOptionsForStop,
   latestActiveTruckCheckpointEvent,
+  truckTrackingSignalTone,
   TRUCK_MOVEMENT_STATUS_OPTIONS,
   TRUCK_STOP_STATUS_OPTIONS,
   TRUCK_STOP_TYPE_OPTIONS,
   type TruckCheckpointDraft,
   type TruckDetailDraft,
   type TruckMovementDraft,
+  type TruckTrackingSignalDraft,
   type TruckStopDraft,
 } from './deliveryTruckWorkflowHelpers'
 
@@ -90,13 +98,13 @@ type DeliveryTruckWorkflowEditorProps = {
     deliveryId: string,
     stopId: string,
     payload: RecordDeliveryTruckStopCheckpointInput,
-  ) => Promise<void>
+  ) => Promise<string | null>
   onReverseTruckStopCheckpoint: (
     deliveryId: string,
     stopId: string,
     eventId: number,
     payload: ReverseDeliveryTruckStopCheckpointInput,
-  ) => Promise<void>
+  ) => Promise<string | null>
 }
 
 function movementTone(status: DeliveryTruckMovementSummaryRecord['status']): 'active' | 'blocked' | 'in-progress' | 'planned' | 'shipped' {
@@ -141,6 +149,46 @@ function formatMovementWindow(movement: DeliveryTruckMovementSummaryRecord): str
     return `Last signal ${movement.last_signal_at}`
   }
   return 'No live signal yet'
+}
+
+function formatTrackingSignalConfidence(signal: DeliveryTrackingSignalRecord): string {
+  if (signal.match_confidence === null) {
+    return 'Confidence TBD'
+  }
+  return `${Math.round(signal.match_confidence * 100)}% confidence`
+}
+
+function trackingSignalNote(signal: DeliveryTrackingSignalRecord): string {
+  const dispatcherNote = signal.raw_payload.dispatcher_note
+  if (typeof dispatcherNote === 'string' && dispatcherNote.trim()) {
+    return dispatcherNote
+  }
+  return signal.processing_error ?? signal.external_status ?? signal.normalized_status ?? 'No signal notes captured.'
+}
+
+function trackingHealthTone(
+  health: DeliveryTruckMovementTrackingHealthRecord | null | undefined,
+): 'active' | 'blocked' | 'in-progress' | 'planned' | 'shipped' {
+  switch (health?.exception_severity) {
+    case 'ACTION_REQUIRED':
+      return 'blocked'
+    case 'WATCH':
+      return 'in-progress'
+    case 'CLEAR':
+      return 'active'
+    default:
+      return 'planned'
+  }
+}
+
+function trackingHealthLabel(health: DeliveryTruckMovementTrackingHealthRecord | null | undefined): string {
+  if (!health) {
+    return 'Tracking health pending'
+  }
+  if (health.primary_exception) {
+    return formatEnumLabel(health.primary_exception)
+  }
+  return formatEnumLabel(health.exception_severity)
 }
 
 function stopLocationSummary(stop: DeliveryTruckStopRecord): string {
@@ -188,6 +236,15 @@ export function DeliveryTruckWorkflowEditor({
   )
   const [stopDraftsById, setStopDraftsById] = useState<Record<string, TruckStopDraft>>({})
   const [checkpointDraftsByStopId, setCheckpointDraftsByStopId] = useState<Record<string, TruckCheckpointDraft>>({})
+  const [checkpointErrorsByStopId, setCheckpointErrorsByStopId] = useState<Record<string, string>>({})
+  const [trackingSignals, setTrackingSignals] = useState<DeliveryTrackingSignalRecord[]>([])
+  const [trackingSignalDraft, setTrackingSignalDraft] = useState<TruckTrackingSignalDraft>(() =>
+    buildTruckTrackingSignalDraft(),
+  )
+  const [trackingSignalLoading, setTrackingSignalLoading] = useState(false)
+  const [trackingSignalSaving, setTrackingSignalSaving] = useState(false)
+  const [trackingSignalError, setTrackingSignalError] = useState('')
+  const [trackingSignalSaveMessage, setTrackingSignalSaveMessage] = useState('')
   const [newStopDraft, setNewStopDraft] = useState<TruckStopDraft>(() => emptyWaypointDraft())
   const [movementListLoading, setMovementListLoading] = useState(false)
   const [movementDetailLoading, setMovementDetailLoading] = useState(false)
@@ -206,6 +263,11 @@ export function DeliveryTruckWorkflowEditor({
     setSelectedMovementDraft(buildTruckMovementDraft(delivery, null))
     setStopDraftsById({})
     setCheckpointDraftsByStopId({})
+    setCheckpointErrorsByStopId({})
+    setTrackingSignals([])
+    setTrackingSignalDraft(buildTruckTrackingSignalDraft())
+    setTrackingSignalError('')
+    setTrackingSignalSaveMessage('')
     setWorkflowError('')
   }, [delivery])
 
@@ -263,6 +325,8 @@ export function DeliveryTruckWorkflowEditor({
       setSelectedMovementDraft(buildTruckMovementDraft(delivery, null))
       setStopDraftsById({})
       setCheckpointDraftsByStopId({})
+      setCheckpointErrorsByStopId({})
+      setTrackingSignalDraft(buildTruckTrackingSignalDraft())
       return
     }
 
@@ -277,12 +341,20 @@ export function DeliveryTruckWorkflowEditor({
         }
         setSelectedMovement(movement)
         setSelectedMovementDraft(buildTruckMovementDraft(delivery, movement))
+        setTrackingSignalDraft(buildTruckTrackingSignalDraft(movement))
         setStopDraftsById(
           Object.fromEntries(movement.stops.map((stop) => [stop.stop_id, buildTruckStopDraft(stop)])),
         )
         setCheckpointDraftsByStopId((current) =>
           Object.fromEntries(
             movement.stops.map((stop) => [stop.stop_id, buildTruckCheckpointDraft(stop, current[stop.stop_id])]),
+          ),
+        )
+        setCheckpointErrorsByStopId((current) =>
+          Object.fromEntries(
+            movement.stops
+              .filter((stop) => current[stop.stop_id])
+              .map((stop) => [stop.stop_id, current[stop.stop_id]]),
           ),
         )
       } catch (nextError) {
@@ -303,6 +375,45 @@ export function DeliveryTruckWorkflowEditor({
       cancelled = true
     }
   }, [authSession, delivery, selectedMovementId])
+
+  useEffect(() => {
+    if (delivery.transport_mode !== 'TRUCK' || !authSession || !selectedMovementId) {
+      setTrackingSignals([])
+      setTrackingSignalLoading(false)
+      setTrackingSignalError('')
+      setTrackingSignalSaveMessage('')
+      return
+    }
+
+    const movementId = selectedMovementId
+    let cancelled = false
+    async function loadTrackingSignals() {
+      setTrackingSignalLoading(true)
+      setTrackingSignalError('')
+      try {
+        const rows = await listDeliveryTruckTrackingSignals(appConfig.apiBase, movementId)
+        if (cancelled) {
+          return
+        }
+        setTrackingSignals(rows)
+      } catch (nextError) {
+        if (!cancelled) {
+          setTrackingSignalError(
+            nextError instanceof Error ? nextError.message : 'Failed to load truck tracking signals.',
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setTrackingSignalLoading(false)
+        }
+      }
+    }
+
+    void loadTrackingSignals()
+    return () => {
+      cancelled = true
+    }
+  }, [authSession, delivery.transport_mode, selectedMovementId])
 
   async function handleSaveTruckDetail() {
     const { payload, hasChanges, validationMessage } = buildTruckDetailPayload(delivery, truckDetailDraft)
@@ -427,15 +538,39 @@ export function DeliveryTruckWorkflowEditor({
     setNewStopDraft(emptyWaypointDraft())
   }
 
+  function setCheckpointError(stopId: string, message: string) {
+    setCheckpointErrorsByStopId((current) => ({
+      ...current,
+      [stopId]: message,
+    }))
+  }
+
+  function clearCheckpointError(stopId: string) {
+    setCheckpointErrorsByStopId((current) => {
+      if (!current[stopId]) {
+        return current
+      }
+      const next = { ...current }
+      delete next[stopId]
+      return next
+    })
+  }
+
   async function handleRecordCheckpoint(stop: DeliveryTruckStopRecord) {
     const draft = checkpointDraftsByStopId[stop.stop_id] ?? buildTruckCheckpointDraft(stop)
     const { payload, validationMessage } = buildTruckCheckpointPayload(stop, draft)
     if (validationMessage) {
-      setWorkflowError(validationMessage)
+      setWorkflowError('')
+      setCheckpointError(stop.stop_id, validationMessage)
       return
     }
     setWorkflowError('')
-    await onRecordTruckStopCheckpoint(delivery.delivery_id, stop.stop_id, payload)
+    clearCheckpointError(stop.stop_id)
+    const errorMessage = await onRecordTruckStopCheckpoint(delivery.delivery_id, stop.stop_id, payload)
+    if (errorMessage) {
+      setCheckpointError(stop.stop_id, errorMessage)
+      return
+    }
     setCheckpointDraftsByStopId((current) => ({
       ...current,
       [stop.stop_id]: buildTruckCheckpointDraft(stop, {
@@ -450,11 +585,17 @@ export function DeliveryTruckWorkflowEditor({
     const draft = checkpointDraftsByStopId[stop.stop_id] ?? buildTruckCheckpointDraft(stop)
     const { payload, validationMessage } = buildTruckCheckpointReversePayload(draft)
     if (validationMessage) {
-      setWorkflowError(validationMessage)
+      setWorkflowError('')
+      setCheckpointError(stop.stop_id, validationMessage)
       return
     }
     setWorkflowError('')
-    await onReverseTruckStopCheckpoint(delivery.delivery_id, stop.stop_id, eventId, payload)
+    clearCheckpointError(stop.stop_id)
+    const errorMessage = await onReverseTruckStopCheckpoint(delivery.delivery_id, stop.stop_id, eventId, payload)
+    if (errorMessage) {
+      setCheckpointError(stop.stop_id, errorMessage)
+      return
+    }
     setCheckpointDraftsByStopId((current) => ({
       ...current,
       [stop.stop_id]: {
@@ -462,6 +603,72 @@ export function DeliveryTruckWorkflowEditor({
         reversalReason: '',
       },
     }))
+  }
+
+  async function handleRecordTrackingSignal() {
+    if (!selectedMovement) {
+      return
+    }
+    const { payload, validationMessage } = buildTruckTrackingSignalPayload(trackingSignalDraft)
+    if (validationMessage) {
+      setTrackingSignalError(validationMessage)
+      setTrackingSignalSaveMessage('')
+      return
+    }
+
+    setTrackingSignalSaving(true)
+    setTrackingSignalError('')
+    setTrackingSignalSaveMessage('')
+    try {
+      const result = await recordDeliveryTruckTrackingSignal(appConfig.apiBase, {
+        movementId: selectedMovement.movement_id,
+        payload,
+      })
+      const signal = result.signal
+      setTrackingSignals((current) =>
+        [signal, ...current.filter((row) => row.signal_id !== signal.signal_id)].sort((left, right) => {
+          const rightTime = new Date(right.occurred_at).getTime()
+          const leftTime = new Date(left.occurred_at).getTime()
+          if (rightTime !== leftTime) {
+            return rightTime - leftTime
+          }
+          return right.signal_id - left.signal_id
+        }),
+      )
+      setMovementSummaries((current) =>
+        current.map((movement) =>
+          movement.movement_id === result.movement.movement_id ? result.movement : movement,
+        ),
+      )
+      const nextMovement = {
+        ...selectedMovement,
+        ...result.movement,
+      }
+      setSelectedMovement((current) =>
+        current && current.movement_id === result.movement.movement_id
+          ? {
+              ...current,
+              ...result.movement,
+            }
+          : current,
+      )
+      setTrackingSignalDraft({
+        ...buildTruckTrackingSignalDraft(nextMovement),
+        sourceSystem: trackingSignalDraft.sourceSystem,
+        signalType: trackingSignalDraft.signalType || 'POSITION',
+      })
+      setTrackingSignalSaveMessage(
+        result.duplicate
+          ? `Duplicate tracking signal already recorded as signal ${signal.signal_id}.`
+          : `Signal ${signal.signal_id} recorded as ${formatEnumLabel(signal.processing_status)}.`,
+      )
+    } catch (nextError) {
+      setTrackingSignalError(
+        nextError instanceof Error ? nextError.message : 'Failed to record truck tracking signal.',
+      )
+    } finally {
+      setTrackingSignalSaving(false)
+    }
   }
 
   return (
@@ -1072,6 +1279,9 @@ export function DeliveryTruckWorkflowEditor({
                     <span className="entity-chip entity-chip-soft">
                       {movement.current_location_code ?? 'Location TBD'}
                     </span>
+                    <span className={`status-pill status-pill-${trackingHealthTone(movement.tracking_health)}`}>
+                      {trackingHealthLabel(movement.tracking_health)}
+                    </span>
                     {latestCheckpoint ? (
                       <span className="entity-chip entity-chip-soft">
                         {formatTruckCheckpointLabel(latestCheckpoint.checkpoint_code)} {formatDate(latestCheckpoint.occurred_at)}
@@ -1124,6 +1334,30 @@ export function DeliveryTruckWorkflowEditor({
                 </span>
               </div>
               {movementDetailLoading ? <p className="workflow-editor-note">Refreshing truck run detail…</p> : null}
+              <div className="shipment-card-meta">
+                <span className={`status-pill status-pill-${trackingHealthTone(selectedMovement.tracking_health)}`}>
+                  Tracking Health: {trackingHealthLabel(selectedMovement.tracking_health)}
+                </span>
+                <span className="entity-chip entity-chip-soft">
+                  ETA {selectedMovement.tracking_health ? formatEnumLabel(selectedMovement.tracking_health.eta_status) : 'PENDING'}
+                </span>
+                <span className="entity-chip entity-chip-soft">
+                  Freshness{' '}
+                  {selectedMovement.tracking_health
+                    ? formatEnumLabel(selectedMovement.tracking_health.tracking_freshness_status)
+                    : 'PENDING'}
+                </span>
+                <span className="entity-chip entity-chip-soft">
+                  Dwell {selectedMovement.tracking_health ? formatEnumLabel(selectedMovement.tracking_health.dwell_status) : 'PENDING'}
+                </span>
+              </div>
+              {selectedMovement.tracking_health ? (
+                <p className="workflow-editor-note">
+                  {selectedMovement.tracking_health.eta_status_reason}{' '}
+                  {selectedMovement.tracking_health.tracking_freshness_reason}{' '}
+                  {selectedMovement.tracking_health.dwell_status_reason}
+                </p>
+              ) : null}
               <div className="shipment-editor-grid">
                 <label className="field">
                   <span>Run Sequence</span>
@@ -1358,6 +1592,266 @@ export function DeliveryTruckWorkflowEditor({
             <article className="position-card shipment-card workflow-item-card-compact">
               <div className="shipment-card-head">
                 <div className="shipment-card-copy">
+                  <strong>Tracking Signals</strong>
+                  <span>Capture raw provider or dispatcher evidence without turning it into a business checkpoint.</span>
+                </div>
+                <span className="entity-chip entity-chip-soft">
+                  {trackingSignalLoading ? 'Loading…' : `${trackingSignals.length} signal${trackingSignals.length === 1 ? '' : 's'}`}
+                </span>
+              </div>
+
+              {trackingSignalError ? (
+                <p className="field-error workflow-item-save-error">{trackingSignalError}</p>
+              ) : null}
+              {trackingSignalSaveMessage ? (
+                <p className="workflow-editor-note">{trackingSignalSaveMessage}</p>
+              ) : null}
+
+              <div className="shipment-editor-grid">
+                <label className="field">
+                  <span>Source System</span>
+                  <input
+                    className="control control-compact"
+                    value={trackingSignalDraft.sourceSystem}
+                    onChange={(event) =>
+                      setTrackingSignalDraft((current) => ({
+                        ...current,
+                        sourceSystem: event.target.value,
+                      }))
+                    }
+                    placeholder="Defaults to manual dispatch"
+                    disabled={mutationPending || trackingSignalSaving}
+                  />
+                </label>
+                <label className="field">
+                  <span>Provider Event ID</span>
+                  <input
+                    className="control control-compact"
+                    value={trackingSignalDraft.sourceEventId}
+                    onChange={(event) =>
+                      setTrackingSignalDraft((current) => ({
+                        ...current,
+                        sourceEventId: event.target.value,
+                      }))
+                    }
+                    placeholder="Optional dedupe key"
+                    disabled={mutationPending || trackingSignalSaving}
+                  />
+                </label>
+                <label className="field">
+                  <span>Signal Type</span>
+                  <input
+                    className="control control-compact"
+                    value={trackingSignalDraft.signalType}
+                    onChange={(event) =>
+                      setTrackingSignalDraft((current) => ({
+                        ...current,
+                        signalType: event.target.value,
+                      }))
+                    }
+                    placeholder="POSITION, ETA_UPDATE, STATUS"
+                    disabled={mutationPending || trackingSignalSaving}
+                  />
+                </label>
+                <label className="field">
+                  <span>Signal Occurred At</span>
+                  <input
+                    type="datetime-local"
+                    className="control control-compact"
+                    value={trackingSignalDraft.occurredAt}
+                    onChange={(event) =>
+                      setTrackingSignalDraft((current) => ({
+                        ...current,
+                        occurredAt: event.target.value,
+                      }))
+                    }
+                    disabled={mutationPending || trackingSignalSaving}
+                  />
+                </label>
+                <label className="field">
+                  <span>Stop Match</span>
+                  <select
+                    className="control control-compact"
+                    value={trackingSignalDraft.stopId}
+                    onChange={(event) =>
+                      setTrackingSignalDraft((current) => ({
+                        ...current,
+                        stopId: event.target.value,
+                      }))
+                    }
+                    disabled={mutationPending || trackingSignalSaving}
+                  >
+                    <option value="">Movement-level signal</option>
+                    {selectedMovement.stops.map((stop) => (
+                      <option key={stop.stop_id} value={stop.stop_id}>
+                        Stop {stop.stop_sequence} - {stop.location_code ?? formatEnumLabel(stop.stop_type)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Signal Location</span>
+                  <input
+                    className="control control-compact"
+                    value={trackingSignalDraft.locationCode}
+                    onChange={(event) =>
+                      setTrackingSignalDraft((current) => ({
+                        ...current,
+                        locationCode: event.target.value,
+                      }))
+                    }
+                    placeholder="Terminal, site, or geofence code"
+                    disabled={mutationPending || trackingSignalSaving}
+                  />
+                </label>
+                <label className="field">
+                  <span>External Status</span>
+                  <input
+                    className="control control-compact"
+                    value={trackingSignalDraft.externalStatus}
+                    onChange={(event) =>
+                      setTrackingSignalDraft((current) => ({
+                        ...current,
+                        externalStatus: event.target.value,
+                      }))
+                    }
+                    placeholder="Provider or driver wording"
+                    disabled={mutationPending || trackingSignalSaving}
+                  />
+                </label>
+                <label className="field">
+                  <span>Normalized Status</span>
+                  <input
+                    className="control control-compact"
+                    value={trackingSignalDraft.normalizedStatus}
+                    onChange={(event) =>
+                      setTrackingSignalDraft((current) => ({
+                        ...current,
+                        normalizedStatus: event.target.value,
+                      }))
+                    }
+                    placeholder="AT_STOP, IN_TRANSIT, DELAYED"
+                    disabled={mutationPending || trackingSignalSaving}
+                  />
+                </label>
+                <label className="field">
+                  <span>Match Confidence</span>
+                  <input
+                    className="control control-compact"
+                    value={trackingSignalDraft.matchConfidence}
+                    onChange={(event) =>
+                      setTrackingSignalDraft((current) => ({
+                        ...current,
+                        matchConfidence: event.target.value,
+                      }))
+                    }
+                    placeholder="0 to 1"
+                    disabled={mutationPending || trackingSignalSaving}
+                  />
+                </label>
+                <label className="field">
+                  <span>Destination ETA</span>
+                  <input
+                    type="datetime-local"
+                    className="control control-compact"
+                    value={trackingSignalDraft.etaAtDestination}
+                    onChange={(event) =>
+                      setTrackingSignalDraft((current) => ({
+                        ...current,
+                        etaAtDestination: event.target.value,
+                      }))
+                    }
+                    disabled={mutationPending || trackingSignalSaving}
+                  />
+                </label>
+                <label className="field field-wide">
+                  <span>Dispatcher Signal Note</span>
+                  <textarea
+                    className="control control-textarea"
+                    value={trackingSignalDraft.dispatcherNote}
+                    onChange={(event) =>
+                      setTrackingSignalDraft((current) => ({
+                        ...current,
+                        dispatcherNote: event.target.value,
+                      }))
+                    }
+                    rows={2}
+                    placeholder="Optional raw evidence note. Promotion to checkpoint stays separate."
+                    disabled={mutationPending || trackingSignalSaving}
+                  />
+                </label>
+              </div>
+
+              <div className="shipment-card-actions workflow-item-actions">
+                <span>
+                  Last signal {selectedMovement.last_signal_at ?? 'not recorded'} • ETA{' '}
+                  {selectedMovement.current_eta_at_destination ?? 'TBD'}
+                </span>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => void handleRecordTrackingSignal()}
+                  disabled={mutationPending || trackingSignalSaving || !authSession}
+                >
+                  {trackingSignalSaving ? 'Recording…' : 'Record Tracking Signal'}
+                </button>
+              </div>
+
+              {trackingSignals.length > 0 ? (
+                <div className="position-list">
+                  {trackingSignals.map((signal) => (
+                    <article
+                      key={signal.signal_id}
+                      className="position-card shipment-card workflow-item-card-compact"
+                    >
+                      <div className="shipment-card-head">
+                        <div className="shipment-card-copy">
+                          <strong>{formatEnumLabel(signal.signal_type)}</strong>
+                          <span>
+                            {signal.source_system}
+                            {signal.source_event_id ? ` / ${signal.source_event_id}` : ''}
+                          </span>
+                        </div>
+                        <span className={`status-pill status-pill-${truckTrackingSignalTone(signal.processing_status)}`}>
+                          {formatEnumLabel(signal.processing_status)}
+                        </span>
+                      </div>
+                      <div className="shipment-card-meta">
+                        <span className="entity-chip entity-chip-soft">
+                          Occurred {formatDate(signal.occurred_at)}
+                        </span>
+                        <span className="entity-chip entity-chip-soft">
+                          Received {formatDate(signal.received_at)}
+                        </span>
+                        <span className="entity-chip entity-chip-soft">
+                          Stop {signal.stop_id ?? 'unmatched'}
+                        </span>
+                        <span className="entity-chip entity-chip-soft">
+                          {signal.location_code ?? 'Location TBD'}
+                        </span>
+                        <span className="entity-chip entity-chip-soft">
+                          {formatTrackingSignalConfidence(signal)}
+                        </span>
+                      </div>
+                      <div className="shipment-card-actions">
+                        <span>{trackingSignalNote(signal)}</span>
+                        <span className="entity-chip entity-chip-soft">
+                          {signal.normalized_status ?? signal.external_status ?? 'Status TBD'}
+                        </span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="workflow-editor-note">
+                  No tracking signals have been captured for this run yet.
+                </p>
+              )}
+            </article>
+
+            <article className="position-card shipment-card workflow-item-card-compact">
+              <div className="shipment-card-head">
+                <div className="shipment-card-copy">
                   <strong>Run Stops</strong>
                   <span>Maintain stop order, appointments, actual times, and stop-level status without leaving the delivery board.</span>
                 </div>
@@ -1370,6 +1864,7 @@ export function DeliveryTruckWorkflowEditor({
                   const checkpointOptions = checkpointOptionsForStop(stop)
                   const checkpointDraft =
                     checkpointDraftsByStopId[stop.stop_id] ?? buildTruckCheckpointDraft(stop)
+                  const checkpointError = checkpointErrorsByStopId[stop.stop_id] ?? ''
                   const activeCheckpointEvents = activeTruckCheckpointEventsForStop(delivery, {
                     movementId: selectedMovement.movement_id,
                     stopId: stop.stop_id,
@@ -1611,6 +2106,9 @@ export function DeliveryTruckWorkflowEditor({
                             <strong>Truck Checkpoints</strong>
                             <span>Record the safe Wave 0 milestone for this stop, or reverse a mistaken checkpoint.</span>
                           </div>
+                          {checkpointError ? (
+                            <p className="field-error workflow-item-save-error">{checkpointError}</p>
+                          ) : null}
                           <div className="shipment-editor-grid">
                             <label className="field">
                               <span>Checkpoint</span>

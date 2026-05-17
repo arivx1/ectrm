@@ -249,9 +249,11 @@ export type WorkspaceViewRenderContext = {
   hrefForView: ReturnType<typeof useAppRouteState>['hrefForView']
   handleRoadmapPublished: ReturnType<typeof useAppShellState>['handleRoadmapPublished']
   roadmapRefreshVersion: ReturnType<typeof useAppShellState>['roadmapRefreshVersion']
+  selectedLibraryDocumentId: ReturnType<typeof useAppRouteState>['selectedLibraryDocumentId']
   selectedMessagingConversationId: ReturnType<typeof useAppRouteState>['selectedMessagingConversationId']
   selectedTradeId: ReturnType<typeof useAppRouteState>['selectedTradeId']
   setInspectorTab: ReturnType<typeof useAppShellState>['setInspectorTab']
+  setSelectedLibraryDocumentId: ReturnType<typeof useAppRouteState>['setSelectedLibraryDocumentId']
   setSelectedMessagingConversationId: ReturnType<typeof useAppRouteState>['setSelectedMessagingConversationId']
   setSelectedTradeId: ReturnType<typeof useAppRouteState>['setSelectedTradeId']
   shell: Pick<ReturnType<typeof useAppShellState>, 'eventFilter' | 'inspectorTab' | 'setEventFilter'>
@@ -1532,6 +1534,8 @@ export const WORKSPACE_RENDERERS: Record<
       <LibraryWorkspace
         authSession={context.workspaceData.authSession}
         formatDate={formatDate}
+        activeDocumentId={context.selectedLibraryDocumentId}
+        onActiveDocumentChange={context.setSelectedLibraryDocumentId}
         onOpenOperationsWorkspace={() => context.navigateToView('operations')}
       />
     ),

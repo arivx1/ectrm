@@ -127,6 +127,10 @@ const previewSections = [
     title: 'Organization contract',
     source: 'organization',
     scope: 'GLOBAL',
+    kind: 'CONFIGURABLE',
+    owner: 'Platform Admin',
+    contract_key: 'organization-context',
+    contract_version: 2,
     content: 'Organization rules.',
   },
   {
@@ -141,6 +145,7 @@ const previewSections = [
     title: 'Risk Ops profile',
     source: 'agent',
     scope: 'AGENT',
+    freshness: 'STATIC',
     content: 'Managed profile guidance.',
   },
   {
@@ -148,6 +153,8 @@ const previewSections = [
     title: 'Live trade summary',
     source: 'data',
     scope: 'RUNTIME',
+    freshness: 'LIVE',
+    uses_fallback: true,
     content: 'Live data snapshot.',
   },
 ] satisfies AssistantPromptSection[]
@@ -192,6 +199,10 @@ describe('buildAssistantConstructionExplainer', () => {
       'Managed agent overlay',
       'Operational data',
     ])
+    expect(explainer.provenanceRows.find((row) => row.key === 'org')?.details.join(' ')).toContain(
+      'contract organization-context v2',
+    )
+    expect(explainer.provenanceRows.find((row) => row.key === 'data')?.usesFallback).toBe(true)
   })
 
   it('summarizes a stored run even when no named agent is active in the current composer state', () => {

@@ -80,17 +80,28 @@ const initialWorkspaceState = {
           id: "assistant-day",
           kind: "system" as const,
           created_at: "2026-05-16T17:05:00Z",
+          source: "SYSTEM",
           label: "Today",
           detail: "Action draft AR-204 moved into governed review.",
           author: null,
           body: [],
           reactions: [],
           attachment: null,
+          parent_message_id: null,
+          thread_root_message_id: null,
+          reply_count: 0,
+          thread_participants: [],
+          created_by_user_id: null,
+          created_by_role: null,
+          edited_at: null,
+          deleted_at: null,
+          pinned_at: null,
         },
         {
           id: "assistant-msg-1",
           kind: "message" as const,
           created_at: "2026-05-16T17:07:00Z",
+          source: "human",
           label: null,
           detail: null,
           author: {
@@ -113,6 +124,44 @@ const initialWorkspaceState = {
             footnote:
               "Open Assistant Console for prompt context, evidence, and the approval record.",
           },
+          parent_message_id: null,
+          thread_root_message_id: "assistant-msg-1",
+          reply_count: 1,
+          thread_participants: ["Mia Chen"],
+          created_by_user_id: null,
+          created_by_role: null,
+          edited_at: null,
+          deleted_at: null,
+          pinned_at: "2026-05-16T17:16:00Z",
+        },
+        {
+          id: "assistant-msg-2",
+          kind: "message" as const,
+          created_at: "2026-05-16T17:12:00Z",
+          source: "human",
+          label: null,
+          detail: null,
+          author: {
+            name: "Mia Chen",
+            title: "Scheduler",
+            presence: "Online",
+            initials: "MC",
+            tone: "human" as const,
+          },
+          body: [
+            "Keep this threaded with the nomination conversation so Operations can react without switching screens.",
+          ],
+          reactions: ["aligned 2"],
+          attachment: null,
+          parent_message_id: "assistant-msg-1",
+          thread_root_message_id: "assistant-msg-1",
+          reply_count: 0,
+          thread_participants: [],
+          created_by_user_id: "mia.chen",
+          created_by_role: "OPERATIONS",
+          edited_at: null,
+          deleted_at: null,
+          pinned_at: null,
         },
       ],
     },
@@ -163,17 +212,28 @@ const initialWorkspaceState = {
           id: "northshore-day",
           kind: "system" as const,
           created_at: "2026-05-16T18:55:00Z",
+          source: "SYSTEM",
           label: "Today",
           detail: "Northshore revised the delivery note and requested confirmation.",
           author: null,
           body: [],
           reactions: [],
           attachment: null,
+          parent_message_id: null,
+          thread_root_message_id: null,
+          reply_count: 0,
+          thread_participants: [],
+          created_by_user_id: null,
+          created_by_role: null,
+          edited_at: null,
+          deleted_at: null,
+          pinned_at: null,
         },
         {
           id: "northshore-msg-1",
           kind: "message" as const,
           created_at: "2026-05-16T18:57:00Z",
+          source: "human",
           label: null,
           detail: null,
           author: {
@@ -188,6 +248,15 @@ const initialWorkspaceState = {
           ],
           reactions: [],
           attachment: null,
+          parent_message_id: null,
+          thread_root_message_id: "northshore-msg-1",
+          reply_count: 0,
+          thread_participants: [],
+          created_by_user_id: null,
+          created_by_role: null,
+          edited_at: null,
+          deleted_at: null,
+          pinned_at: null,
         },
       ],
     },
@@ -216,6 +285,11 @@ test("messaging workspace renders the dedicated unified inbox view", () => {
   assert.match(markup, /Send message/);
   assert.match(markup, /Clear draft/);
   assert.match(markup, /Let messaging agent decide/);
+  assert.match(markup, /@Mention/);
+  assert.match(markup, /Emoji/);
+  assert.match(markup, /Attach/);
+  assert.match(markup, /Reply in thread/);
+  assert.match(markup, /Quote/);
   assert.match(markup, /Open Assistant Console/);
   assert.match(markup, /Open Work Queue/);
   assert.match(markup, /Open Settlement/);
@@ -262,6 +336,8 @@ test("appendMessagingWorkspacePost adds a sent message to the selected thread sh
     },
     timestamp: "3:45 PM",
     body: "Hello\n\nThis is a test reply.",
+    createdByUserId: "ops.admin",
+    createdByRole: "OPS_ADMIN",
   });
 
   assert.equal(updated.preview, "Hello");
@@ -274,6 +350,55 @@ test("appendMessagingWorkspacePost adds a sent message to the selected thread sh
   assert.equal(lastTimelineItem?.kind, "message");
   if (lastTimelineItem?.kind === "message") {
     assert.deepEqual(lastTimelineItem.body, ["Hello", "This is a test reply."]);
+    assert.equal(lastTimelineItem.threadRootMessageId, "local-post-1");
+  }
+});
+
+test("appendMessagingWorkspacePost keeps threaded replies attached to their root message", () => {
+  const channel = buildMessagingWorkspaceChannels(defaultCounts)[0];
+  const withRoot = appendMessagingWorkspacePost(channel, {
+    id: "root-post-1",
+    author: {
+      name: "Admin",
+      title: "Desk operator",
+      presence: "You",
+      initials: "AD",
+      tone: "human",
+    },
+    timestamp: "3:45 PM",
+    body: "Root message",
+  });
+  const withReply = appendMessagingWorkspacePost(withRoot, {
+    id: "reply-post-1",
+    author: {
+      name: "Analyst",
+      title: "Desk operator",
+      presence: "Online",
+      initials: "AN",
+      tone: "human",
+    },
+    timestamp: "3:46 PM",
+    body: "Thread reply",
+    parentMessageId: "root-post-1",
+    threadRootMessageId: "root-post-1",
+  });
+
+  const rootMessage = withReply.timeline.find(
+    (item) => item.kind === "message" && item.id === "root-post-1",
+  );
+  const replyMessage = withReply.timeline.find(
+    (item) => item.kind === "message" && item.id === "reply-post-1",
+  );
+
+  assert.equal(rootMessage?.kind, "message");
+  assert.equal(replyMessage?.kind, "message");
+  if (rootMessage?.kind === "message") {
+    assert.equal(rootMessage.replyCount, 1);
+    assert.deepEqual(rootMessage.threadParticipants, ["Analyst"]);
+  }
+  if (replyMessage?.kind === "message") {
+    assert.equal(replyMessage.parentMessageId, "root-post-1");
+    assert.equal(replyMessage.threadRootMessageId, "root-post-1");
   }
 });
 
@@ -322,6 +447,8 @@ test("buildMessagingWorkspacePostFromRecord preserves durable author metadata fo
       conversation_id: "ectrm-assistant",
       source: "assistant",
       body: "Drafting a governed reply.",
+      parent_message_id: null,
+      thread_root_message_id: "msg-7",
       author: {
         name: "ECTRM Assistant",
         title: "Managed agent · Assistant Console",
@@ -335,6 +462,16 @@ test("buildMessagingWorkspacePostFromRecord preserves durable author metadata fo
       created_by_user_id: "ops.admin",
       created_by_session_id: "session-1",
       created_by_role: "OPS_ADMIN",
+      reactions: ["👍"],
+      attachment: {
+        label: "Attachment",
+        title: "timing-note.pdf",
+        summary: "application/pdf • 42 KB",
+        footnote: "Added from the desk composer.",
+      },
+      edited_at: null,
+      deleted_at: null,
+      pinned_at: null,
       created_at: "2026-05-16T20:00:00Z",
     },
     "4:00 PM",
@@ -345,4 +482,7 @@ test("buildMessagingWorkspacePostFromRecord preserves durable author metadata fo
   assert.equal(post.author.tone, "system");
   assert.equal(post.timestamp, "4:00 PM");
   assert.equal(post.body, "Drafting a governed reply.");
+  assert.equal(post.threadRootMessageId, "msg-7");
+  assert.deepEqual(post.reactions, ["👍"]);
+  assert.equal(post.attachment?.title, "timing-note.pdf");
 });

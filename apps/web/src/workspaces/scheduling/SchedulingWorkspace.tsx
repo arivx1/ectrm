@@ -25,6 +25,7 @@ import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import { OperationalBoardController } from '../operations/OperationalBoardController'
 import { renderOperationalActionPanel } from '../operations/operationalActionPanelRegistry'
 import { resolveOperationalWorkboardDefinition } from '../operations/operationalWorkboardRegistry'
+import { TruckTrackingExceptionQueue } from '../operations/TruckTrackingExceptionQueue'
 import type {
   SchedulingAllocationFilter,
   SchedulingLifecycleFilter,
@@ -1131,6 +1132,23 @@ export function SchedulingWorkspace({
                 </div>
               ) : null}
             </OperationalBoardController>
+          ),
+        },
+        {
+          id: 'scheduling-truck-tracking-exceptions',
+          eyebrow: 'Truck Tracking',
+          title: 'Truck Tracking Exceptions',
+          description: 'Read-only ETA, freshness, and dwell exceptions before they become workflow automation.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: (
+            <TruckTrackingExceptionQueue
+              authSession={authSession}
+              formatDate={formatDate}
+              formatDateOnly={formatDateOnly}
+              formatNumber={formatNumber}
+              onOpenTrade={onOpenTrade}
+            />
           ),
         },
       ]}

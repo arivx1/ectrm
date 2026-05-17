@@ -112,13 +112,13 @@ type DeliveryWorkspaceProps = {
     deliveryId: string,
     stopId: string,
     payload: RecordDeliveryTruckStopCheckpointInput,
-  ) => Promise<void>
+  ) => Promise<string | null>
   onReverseDeliveryTruckStopCheckpoint: (
     deliveryId: string,
     stopId: string,
     eventId: number,
     payload: ReverseDeliveryTruckStopCheckpointInput,
-  ) => Promise<void>
+  ) => Promise<string | null>
   onCreateDeliveryEvent: (deliveryId: string, payload: CreateDeliveryEventInput) => Promise<void>
 }
 

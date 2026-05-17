@@ -23,6 +23,7 @@ from apps.api.app.schemas.wiki import (
 
 MAX_RECENT_REVISIONS = 12
 MAX_WIKI_SEARCH_LIMIT = 25
+WIKI_LINK_SNIPPET_CHARS = 180
 WIKI_SEARCH_SNIPPET_CHARS = 220
 WIKI_PAGE_LINK_PATTERN = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 WIKI_SEARCH_TOKEN_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]*", re.IGNORECASE)
@@ -105,9 +106,46 @@ def _parse_wiki_page_links(markdown: str) -> list[WikiPageLinkOut]:
     for match in WIKI_PAGE_LINK_PATTERN.finditer(markdown):
         label = match.group(1).strip()
         target = (match.group(2) or label).strip()
-        links.append(WikiPageLinkOut(label=label, target=target))
+        links.append(
+            WikiPageLinkOut(
+                label=label,
+                target=target,
+                snippet=_wiki_link_snippet(markdown, match=match, label=label, target=target),
+            ),
+        )
 
     return links
+
+
+def _wiki_link_snippet(
+    markdown: str,
+    *,
+    match: re.Match[str],
+    label: str,
+    target: str,
+) -> str:
+    line_start = markdown.rfind("\n", 0, match.start()) + 1
+    line_end = markdown.find("\n", match.end())
+    if line_end < 0:
+        line_end = len(markdown)
+
+    context = _plain_text_from_markdown(markdown[line_start:line_end])
+    if not context:
+        return label or target
+
+    if len(context) <= WIKI_LINK_SNIPPET_CHARS:
+        return context
+
+    match_index = _find_first_match_index(context, [label, target])
+    start = max(0, match_index - 60)
+    end = min(len(context), start + WIKI_LINK_SNIPPET_CHARS)
+    start = max(0, end - WIKI_LINK_SNIPPET_CHARS)
+    snippet = context[start:end].strip()
+    if start > 0:
+        snippet = f"...{snippet}"
+    if end < len(context):
+        snippet = f"{snippet}..."
+    return snippet or label or target
 
 
 def _normalize_search_text(value: str) -> str:

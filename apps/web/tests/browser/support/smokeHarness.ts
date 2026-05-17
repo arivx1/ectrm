@@ -7,6 +7,12 @@ import react from '@vitejs/plugin-react'
 import type { Page } from 'playwright/test'
 import { createServer as createViteServer, type ViteDevServer } from 'vite'
 
+import type {
+  DeliveryTrackingSignalRecord,
+  DeliveryTruckMovementRecord,
+  DeliveryTruckMovementSummaryRecord,
+  DeliveryTruckTrackingExceptionRecord,
+} from '../../../src/shared/models'
 import { buildFallbackTradeMetadata } from '../../../src/shared/tradeMetadata'
 import {
   assets,
@@ -37,6 +43,7 @@ import {
   smokeDeliveries,
   smokeTruckMovements,
   smokeTruckMovementSummaries,
+  smokeTruckTrackingSignals,
   type RecordedRequest,
   selectedTradeEvents,
   smokeAccessToken,
@@ -57,6 +64,12 @@ type SmokeEventRow = (typeof selectedTradeEvents)[number]
 type SmokeAssistantActionRequestRow = (typeof assistantActionRequests)[number]
 type SmokeAssistantProfileRequestKind = 'NEW_SPECIALIZATION' | 'EDIT_EXISTING' | 'NARROW_ACCESS'
 type SmokeAssistantProfileRequestStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'ACTIVATED'
+type SmokeAssistantProfileRequestDiffRow = {
+  field_key: string
+  label: string
+  current_value: string
+  next_value: string
+}
 type SmokeAssistantProfileRequestRow = {
   request_id: number
   status: SmokeAssistantProfileRequestStatus
@@ -81,6 +94,7 @@ type SmokeAssistantProfileRequestRow = {
   rejection_reason: string | null
   linked_agent_id: string | null
   linked_revision_id: number | null
+  applied_diff_summary: SmokeAssistantProfileRequestDiffRow[]
   requested_at: string
   requested_by: string
   reviewed_at: string | null
@@ -287,15 +301,49 @@ function plainTextFromWikiMarkdown(markdown: string): string {
     .trim()
 }
 
-function parseWikiMarkdownLinks(markdown: string): Array<{ label: string; target: string }> {
-  const links: Array<{ label: string; target: string }> = []
+function wikiLinkSnippet(markdown: string, matchIndex: number, matchLength: number, label: string, target: string): string {
+  const lineStart = markdown.lastIndexOf('\n', matchIndex - 1) + 1
+  const lineEndIndex = markdown.indexOf('\n', matchIndex + matchLength)
+  const lineEnd = lineEndIndex >= 0 ? lineEndIndex : markdown.length
+  const context = plainTextFromWikiMarkdown(markdown.slice(lineStart, lineEnd))
+
+  if (!context) {
+    return label || target
+  }
+
+  if (context.length <= 180) {
+    return context
+  }
+
+  const normalizedContext = context.toLowerCase()
+  const candidates = [label, target].map((value) => value.trim().toLowerCase()).filter(Boolean)
+  const firstMatchIndex = candidates.reduce<number | null>((bestIndex, candidate) => {
+    const nextIndex = normalizedContext.indexOf(candidate)
+    if (nextIndex < 0) {
+      return bestIndex
+    }
+    return bestIndex === null || nextIndex < bestIndex ? nextIndex : bestIndex
+  }, null) ?? 0
+  const start = Math.max(0, firstMatchIndex - 60)
+  const end = Math.min(context.length, start + 180)
+  const sliceStart = Math.max(0, end - 180)
+  const snippet = context.slice(sliceStart, end).trim()
+
+  return `${sliceStart > 0 ? '...' : ''}${snippet}${end < context.length ? '...' : ''}` || label || target
+}
+
+function parseWikiMarkdownLinks(markdown: string): Array<{ label: string; target: string; snippet: string }> {
+  const links: Array<{ label: string; target: string; snippet: string }> = []
   const linkPattern = /\[\[([^[\]|]+)\|([^[\]]+)\]\]|\[\[([^[\]]+)\]\]/g
 
   for (const match of markdown.matchAll(linkPattern)) {
     if (typeof match[1] === 'string' && typeof match[2] === 'string') {
+      const label = match[1].trim()
+      const target = match[2].trim()
       links.push({
-        label: match[1].trim(),
-        target: match[2].trim(),
+        label,
+        target,
+        snippet: wikiLinkSnippet(markdown, match.index ?? 0, match[0].length, label, target),
       })
       continue
     }
@@ -305,6 +353,7 @@ function parseWikiMarkdownLinks(markdown: string): Array<{ label: string; target
       links.push({
         label,
         target: label,
+        snippet: wikiLinkSnippet(markdown, match.index ?? 0, match[0].length, label, label),
       })
     }
   }
@@ -712,6 +761,19 @@ async function startMockApiServer(
   const promptNavigationOutcomeRequests: RecordedRequest[] = []
   const unexpectedRequests: RecordedRequest[] = []
   const tradeRows: SmokeTradeRow[] = trades.map((trade) => ({ ...trade }))
+  const truckMovementSummaries: DeliveryTruckMovementSummaryRecord[] = smokeTruckMovementSummaries.map((movement) => ({
+    ...movement,
+    tracking_health: movement.tracking_health ? { ...movement.tracking_health } : movement.tracking_health,
+  }))
+  const truckMovementRows: DeliveryTruckMovementRecord[] = smokeTruckMovements.map((movement) => ({
+    ...movement,
+    tracking_health: movement.tracking_health ? { ...movement.tracking_health } : movement.tracking_health,
+    stops: movement.stops.map((stop) => ({ ...stop })),
+  }))
+  const truckTrackingSignalRows: DeliveryTrackingSignalRecord[] = smokeTruckTrackingSignals.map((signal) => ({
+    ...signal,
+    raw_payload: { ...signal.raw_payload },
+  }))
   const wikiPageRows: SmokeWikiPageRow[] = wikiPages.map(cloneWikiPage)
   const wikiPageRevisionsByPageId = new Map<string, SmokeWikiPageRevisionRow[]>(
     wikiPageRows.map((page, index) => [
@@ -819,6 +881,7 @@ async function startMockApiServer(
       requested_action_types: [...request.requested_action_types],
       requested_skills: [...request.requested_skills],
       expected_outputs: [...request.expected_outputs],
+      applied_diff_summary: request.applied_diff_summary.map((diffRow) => ({ ...diffRow })),
       stop_conditions: [...request.stop_conditions],
       success_metrics: [...request.success_metrics],
       proposed_eval_cases: [...request.proposed_eval_cases],
@@ -827,6 +890,54 @@ async function startMockApiServer(
 
   const assistantAgentOverrides = new Map<string, Record<string, unknown>>()
   let nextAssistantAgentRevisionId = 7001
+
+  const smokeProfileRequestDiffFields = [
+    ['status', 'Status'],
+    ['authority_ceiling', 'Authority ceiling'],
+    ['human_owner_role', 'Human owner role'],
+    ['allowed_workspaces', 'Allowed workspaces'],
+    ['capabilities', 'Capabilities'],
+    ['skills', 'Skills'],
+    ['allowed_tools', 'Allowed tools'],
+    ['allowed_action_types', 'Allowed action types'],
+    ['orchestration_pattern', 'Orchestration pattern'],
+    ['parent_agent_id', 'Parent agent'],
+    ['managed_agent_ids', 'Managed agents'],
+    ['delegation_guidance', 'Delegation guidance'],
+    ['system_prompt', 'System prompt'],
+  ] as const
+
+  function formatSmokeProfileRequestDiffValue(value: unknown): string {
+    if (Array.isArray(value)) {
+      return value.length > 0 ? value.map((entry) => String(entry)).join(', ') : 'None'
+    }
+    if (value === null || value === undefined || value === '') {
+      return 'None'
+    }
+    if (typeof value === 'string' && value.length > 160) {
+      return `${value.slice(0, 157)}...`
+    }
+    return String(value)
+  }
+
+  function buildSmokeProfileRequestDiff(
+    before: Record<string, unknown>,
+    after: Record<string, unknown>,
+  ): SmokeAssistantProfileRequestDiffRow[] {
+    return smokeProfileRequestDiffFields.flatMap(([fieldKey, label]) => {
+      const currentValue = before[fieldKey]
+      const nextValue = after[fieldKey]
+      if (JSON.stringify(currentValue ?? null) === JSON.stringify(nextValue ?? null)) {
+        return []
+      }
+      return [{
+        field_key: fieldKey,
+        label,
+        current_value: formatSmokeProfileRequestDiffValue(currentValue),
+        next_value: formatSmokeProfileRequestDiffValue(nextValue),
+      }]
+    })
+  }
 
   function currentAssistantAgent(agentId: string) {
     const fixtureAgent = assistantAdminAgents.find((agent) => agent.agent_id === agentId)
@@ -1551,6 +1662,7 @@ async function startMockApiServer(
         rejection_reason: null,
         linked_agent_id: null,
         linked_revision_id: null,
+        applied_diff_summary: [],
         requested_at: now,
         requested_by: smokeSession.user.user_id,
         reviewed_at: null,
@@ -1805,24 +1917,75 @@ async function startMockApiServer(
 
       const payload = await readJsonBody(request)
       assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+      const requestedAgentId = normalizeOptionalText(payload.agent_id)
+      const previewAgent = requestedAgentId ? currentAssistantAgent(requestedAgentId) : null
+      const previewSections = [
+        {
+          key: 'system-mission',
+          title: 'System Mission',
+          source: 'system',
+          scope: 'SYSTEM',
+          kind: 'IMMUTABLE',
+          freshness: 'STATIC',
+          owner: 'Platform',
+          contract_key: 'assistant-prompt-foundation',
+          contract_version: 1,
+          content: 'Answer with grounded operational context and stage reviewable actions only.',
+        },
+        {
+          key: 'workspace',
+          title: 'Admin Workspace',
+          source: 'workspace',
+          scope: 'REQUEST',
+          kind: 'GENERATED',
+          freshness: 'REQUEST',
+          owner: 'Application Shell',
+          content: 'Admin workspace smoke context.',
+        },
+        ...(previewAgent
+          ? [
+              {
+                key: 'managed-agent',
+                title: `${previewAgent.name} profile`,
+                source: 'agent',
+                scope: 'AGENT',
+                kind: 'CONFIGURABLE',
+                freshness: 'STATIC',
+                owner: previewAgent.human_owner_role ?? 'Operations Lead',
+                owner_reference: previewAgent.agent_id,
+                contract_key: 'assistant-agent-profile',
+                contract_version: previewAgent.version,
+                content: [
+                  `role_key: ${previewAgent.role_key ?? 'none'}`,
+                  `profile_kind: ${previewAgent.profile_kind}`,
+                  `authority: ${previewAgent.authority_ceiling ?? 'none'}`,
+                  `skills: ${previewAgent.skills.join(', ') || 'none'}`,
+                ].join('\n'),
+              },
+            ]
+          : []),
+        {
+          key: 'data-inventory',
+          title: 'Live Data Inventory',
+          source: 'data',
+          scope: 'RUNTIME',
+          kind: 'GENERATED',
+          freshness: 'LIVE',
+          uses_fallback: true,
+          content: 'Smoke inventory uses deterministic fixture counts.',
+        },
+      ]
 
       writeJson(response, {
-        agent_id: null,
-        agent_name: null,
-        agent_role_key: null,
-        agent_profile_kind: null,
+        agent_id: previewAgent?.agent_id ?? null,
+        agent_name: previewAgent?.name ?? null,
+        agent_role_key: previewAgent?.role_key ?? null,
+        agent_profile_kind: previewAgent?.profile_kind ?? null,
         provider: 'openai',
         model: 'gpt-5.4',
         generated_at: assistantRunRecordedAt,
         warnings: [],
-        sections: [
-          {
-            key: 'workspace',
-            title: 'Workspace',
-            source: 'workspace',
-            content: 'Assistant workspace smoke context.',
-          },
-        ],
+        sections: previewSections,
         rendered_system_prompt: 'Answer with grounded operational context and stage reviewable actions only.',
       })
       return
@@ -1982,6 +2145,19 @@ async function startMockApiServer(
         has_unpublished_revision: nextStatus === 'DRAFT',
       }
       assistantAgentOverrides.set(agentId, updatedAgent)
+      const profileRequestId = normalizeOptionalNumber(record.profile_request_id)
+      if (profileRequestId !== null && updatedAgent.published_revision_id) {
+        const profileRequestIndex = assistantProfileRequestRows.findIndex(
+          (requestRow) => requestRow.request_id === profileRequestId,
+        )
+        if (profileRequestIndex >= 0) {
+          assistantProfileRequestRows[profileRequestIndex] = {
+            ...assistantProfileRequestRows[profileRequestIndex],
+            applied_diff_summary: buildSmokeProfileRequestDiff(currentAgent, updatedAgent),
+            linked_agent_id: agentId,
+          }
+        }
+      }
       writeJson(response, cloneAssistantAgent(updatedAgent))
       return
     }
@@ -2144,11 +2320,18 @@ async function startMockApiServer(
         return
       }
       const now = '2026-04-11T09:13:00Z'
+      const fixtureLinkedAgent = assistantAdminAgents.find((agent) => agent.agent_id === linkedAgentId)
       const updatedRequest: SmokeAssistantProfileRequestRow = {
         ...currentRequest,
         status: 'ACTIVATED',
         linked_agent_id: linkedAgentId,
         linked_revision_id: linkedRevisionId,
+        applied_diff_summary:
+          currentRequest.applied_diff_summary.length > 0
+            ? [...currentRequest.applied_diff_summary]
+            : fixtureLinkedAgent
+              ? buildSmokeProfileRequestDiff(cloneAssistantAgent(fixtureLinkedAgent), linkedAgent)
+              : [],
         activated_at: now,
         activated_by: normalizedReviewText(activationRecord.activated_by) ?? smokeSession.user.user_id,
         updated_at: now,
@@ -3448,12 +3631,69 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/truck-tracking/exceptions' && method === 'GET') {
+      const includeClear = url.searchParams.get('include_clear') === 'true'
+      const severity = url.searchParams.get('severity')
+      const parsedLimit = Number(url.searchParams.get('limit') ?? '50')
+      const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 50
+      const rows: DeliveryTruckTrackingExceptionRecord[] = truckMovementSummaries
+        .flatMap((movement) => {
+          const trackingHealth = movement.tracking_health
+          const delivery = smokeDeliveries.find((row) => row.delivery_id === movement.delivery_id)
+          if (!trackingHealth || !delivery) {
+            return []
+          }
+          if (severity) {
+            if (trackingHealth.exception_severity !== severity) {
+              return []
+            }
+          } else if (!includeClear && trackingHealth.exception_severity === 'CLEAR') {
+            return []
+          }
+          return [
+            {
+              delivery_id: delivery.delivery_id,
+              trade_id: delivery.trade_id,
+              leg_no: delivery.leg_no,
+              external_trade_id: delivery.external_trade_id,
+              book: delivery.book,
+              portfolio: delivery.portfolio,
+              counterparty: delivery.counterparty,
+              commodity_class: delivery.commodity_class,
+              commodity: delivery.commodity,
+              transport_mode: delivery.transport_mode,
+              execution_status: delivery.execution_status,
+              delivery_start: delivery.delivery_start,
+              delivery_end: delivery.delivery_end,
+              location_code: delivery.location_code,
+              origin_location_code: delivery.origin_location_code,
+              destination_location_code: delivery.destination_location_code,
+              operations_owner: delivery.operations_owner,
+              movement,
+              tracking_health: trackingHealth,
+            },
+          ]
+        })
+        .sort((left, right) => {
+          const severityOrder = { ACTION_REQUIRED: 0, WATCH: 1, CLEAR: 2 }
+          const leftSeverity = severityOrder[left.tracking_health.exception_severity] ?? 99
+          const rightSeverity = severityOrder[right.tracking_health.exception_severity] ?? 99
+          if (leftSeverity !== rightSeverity) {
+            return leftSeverity - rightSeverity
+          }
+          return left.trade_id.localeCompare(right.trade_id) || left.movement.sequence_no - right.movement.sequence_no
+        })
+        .slice(0, limit)
+      writeJson(response, rows)
+      return
+    }
+
     const truckMovementListMatch = /^\/deliveries\/([^/]+)\/truck-movements$/.exec(url.pathname)
     if (truckMovementListMatch && method === 'GET') {
       const deliveryId = decodeURIComponent(truckMovementListMatch[1])
       writeJson(
         response,
-        smokeTruckMovementSummaries.filter((movement) => movement.delivery_id === deliveryId),
+        truckMovementSummaries.filter((movement) => movement.delivery_id === deliveryId),
       )
       return
     }
@@ -3461,12 +3701,234 @@ async function startMockApiServer(
     const truckMovementDetailMatch = /^\/truck-movements\/([^/]+)$/.exec(url.pathname)
     if (truckMovementDetailMatch && method === 'GET') {
       const movementId = decodeURIComponent(truckMovementDetailMatch[1])
-      const movement = smokeTruckMovements.find((row) => row.movement_id === movementId)
+      const movement = truckMovementRows.find((row) => row.movement_id === movementId)
       if (!movement) {
         writeJson(response, { detail: 'Truck movement not found' }, 404)
         return
       }
       writeJson(response, movement)
+      return
+    }
+
+    const truckTrackingHealthMatch = /^\/truck-movements\/([^/]+)\/tracking-health$/.exec(url.pathname)
+    if (truckTrackingHealthMatch && method === 'GET') {
+      const movementId = decodeURIComponent(truckTrackingHealthMatch[1])
+      const movement = truckMovementRows.find((row) => row.movement_id === movementId)
+      if (!movement?.tracking_health) {
+        writeJson(response, { detail: 'Truck movement not found' }, 404)
+        return
+      }
+      writeJson(response, movement.tracking_health)
+      return
+    }
+
+    const truckTrackingSignalsMatch = /^\/truck-movements\/([^/]+)\/tracking-signals$/.exec(url.pathname)
+    if (truckTrackingSignalsMatch && method === 'GET') {
+      const movementId = decodeURIComponent(truckTrackingSignalsMatch[1])
+      writeJson(
+        response,
+        truckTrackingSignalRows
+          .filter((signal) => signal.movement_id === movementId)
+          .sort((left, right) => {
+            const rightTime = new Date(right.occurred_at).getTime()
+            const leftTime = new Date(left.occurred_at).getTime()
+            if (rightTime !== leftTime) {
+              return rightTime - leftTime
+            }
+            return right.signal_id - left.signal_id
+          }),
+      )
+      return
+    }
+
+    if (truckTrackingSignalsMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const movementId = decodeURIComponent(truckTrackingSignalsMatch[1])
+      const movement = truckMovementRows.find((row) => row.movement_id === movementId)
+      const movementSummary = truckMovementSummaries.find((row) => row.movement_id === movementId)
+      if (!movement || !movementSummary) {
+        writeJson(response, { detail: 'Truck movement not found' }, 404)
+        return
+      }
+
+      const payload = (await readJsonBody(request)) as Record<string, unknown>
+      const textValue = (value: unknown): string | null =>
+        typeof value === 'string' && value.trim() ? value.trim() : null
+      const numericValue = (value: unknown): number | null => {
+        const parsedValue = typeof value === 'number' ? value : Number(value)
+        return Number.isFinite(parsedValue) ? parsedValue : null
+      }
+      const sourceSystem = (textValue(payload.source_system) ?? 'TRUCK_MANUAL_DISPATCH').toUpperCase()
+      const sourceEventId = textValue(payload.source_event_id)
+      const duplicateSignal =
+        sourceEventId === null
+          ? null
+          : truckTrackingSignalRows.find(
+              (signal) =>
+                signal.movement_id === movementId &&
+                signal.source_system === sourceSystem &&
+                signal.source_event_id === sourceEventId,
+            )
+      if (duplicateSignal) {
+        writeJson(response, {
+          ingest_status: 'DUPLICATE',
+          duplicate: true,
+          signal: duplicateSignal,
+          movement: movementSummary,
+        })
+        return
+      }
+
+      const requestedStopId = textValue(payload.stop_id)
+      const locationCode = textValue(payload.location_code)
+      let matchedStop = requestedStopId
+        ? movement.stops.find((stop) => stop.stop_id === requestedStopId) ?? null
+        : null
+      let processingStatus: DeliveryTrackingSignalRecord['processing_status'] = 'MATCHED'
+      let processingError: string | null = null
+      let matchConfidence = numericValue(payload.match_confidence)
+
+      if (requestedStopId && !matchedStop) {
+        processingStatus = 'REJECTED'
+        processingError = `Truck stop '${requestedStopId}' was not found.`
+        matchConfidence = 0
+      } else if (matchedStop) {
+        matchConfidence = matchConfidence ?? 1
+      } else if (locationCode) {
+        const matchingStops = movement.stops.filter(
+          (stop) =>
+            stop.location_code === locationCode &&
+            stop.status !== 'SKIPPED' &&
+            stop.status !== 'CANCELLED',
+        )
+        if (matchingStops.length === 1) {
+          matchedStop = matchingStops[0]
+          matchConfidence = matchConfidence ?? 0.75
+        } else {
+          processingStatus = 'UNRESOLVED'
+          processingError =
+            matchingStops.length > 1
+              ? `Location '${locationCode}' matched multiple active truck stops.`
+              : `Location '${locationCode}' did not match an active truck stop.`
+        }
+      } else {
+        matchConfidence = matchConfidence ?? 0.5
+      }
+
+      const rawPayloadCandidate = payload.raw_payload
+      const rawPayload =
+        rawPayloadCandidate && typeof rawPayloadCandidate === 'object' && !Array.isArray(rawPayloadCandidate)
+          ? { ...(rawPayloadCandidate as Record<string, unknown>) }
+          : {}
+      const etaAtDestination = textValue(payload.eta_at_destination)
+      if (etaAtDestination) {
+        rawPayload.eta_at_destination = etaAtDestination
+      }
+      const occurredAt = textValue(payload.occurred_at) ?? '2026-05-10T10:00:00Z'
+      const nextSignal: DeliveryTrackingSignalRecord = {
+        signal_id:
+          Math.max(0, ...truckTrackingSignalRows.map((signal) => signal.signal_id)) + 1,
+        delivery_id: movement.delivery_id,
+        movement_id: movement.movement_id,
+        stop_id: matchedStop?.stop_id ?? null,
+        source_system: sourceSystem,
+        source_event_id: sourceEventId,
+        signal_type: (textValue(payload.signal_type) ?? 'POSITION').toUpperCase(),
+        occurred_at: occurredAt,
+        received_at: '2026-05-10T10:01:00Z',
+        latitude: numericValue(payload.latitude),
+        longitude: numericValue(payload.longitude),
+        location_code: locationCode,
+        external_status: textValue(payload.external_status),
+        normalized_status: textValue(payload.normalized_status)?.toUpperCase() ?? null,
+        match_confidence: matchConfidence,
+        dedupe_key: `${sourceSystem}:smoke-${sourceEventId ?? truckTrackingSignalRows.length + 1}`,
+        processing_status: processingStatus,
+        processing_error: processingError,
+        raw_payload: rawPayload,
+      }
+      truckTrackingSignalRows.unshift(nextSignal)
+
+      if (processingStatus !== 'REJECTED') {
+        movementSummary.last_signal_at = occurredAt
+        movement.last_signal_at = occurredAt
+        if (etaAtDestination) {
+          movementSummary.current_eta_at_destination = etaAtDestination
+          movement.current_eta_at_destination = etaAtDestination
+        }
+        const nextTrackingHealth = {
+          ...(movementSummary.tracking_health ?? {
+            last_evaluated_at: '2026-05-10T10:01:00Z',
+            eta_status: 'UNKNOWN',
+            eta_status_reason: 'Tracking health fixture unavailable.',
+            tracking_freshness_status: 'FRESH',
+            tracking_freshness_reason: 'Last tracking signal is current.',
+            dwell_status: 'NOT_DWELLING',
+            dwell_status_reason: 'Truck is not currently arrived or working at an active stop.',
+            exception_severity: 'CLEAR' as const,
+            primary_exception: null,
+            stale_after_minutes: 240,
+            dwell_threshold_minutes: 120,
+            destination_stop_id: null,
+            current_stop_id: null,
+            minutes_since_last_signal: 0,
+            current_dwell_minutes: null,
+            eta_late_minutes: null,
+          }),
+          last_evaluated_at: '2026-05-10T10:01:00Z',
+          eta_status: 'ON_TIME',
+          eta_status_reason: 'Current destination ETA is inside the planned arrival window.',
+          tracking_freshness_status: 'FRESH',
+          tracking_freshness_reason: 'Last tracking signal is current.',
+          exception_severity: 'CLEAR' as const,
+          primary_exception: null,
+          minutes_since_last_signal: 0,
+          eta_late_minutes: null,
+        }
+        movementSummary.tracking_health = nextTrackingHealth
+        movement.tracking_health = nextTrackingHealth
+        movementSummary.updated_at = '2026-05-10T10:01:00Z'
+        movement.updated_at = '2026-05-10T10:01:00Z'
+        movementSummary.version += 1
+        movement.version += 1
+      }
+
+      writeJson(
+        response,
+        {
+          ingest_status: 'CREATED',
+          duplicate: false,
+          signal: nextSignal,
+          movement: movementSummary,
+        },
+        201,
+      )
+      return
+    }
+
+    const truckCheckpointReverseMatch = /^\/truck-stops\/([^/]+)\/checkpoints\/(\d+)\/reverse$/.exec(url.pathname)
+    if (truckCheckpointReverseMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      await readJsonBody(request)
+      const stopId = decodeURIComponent(truckCheckpointReverseMatch[1])
+      const eventId = Number(truckCheckpointReverseMatch[2])
+      if (stopId === 'STOP-SMOKE-1' && eventId === 3) {
+        writeJson(
+          response,
+          {
+            detail:
+              'DEPARTED_PICKUP cannot be reversed while downstream truck stop STOP-SMOKE-2 has active progress. Reverse or correct downstream stop progress first.',
+          },
+          422,
+        )
+        return
+      }
+
+      writeJson(response, { detail: 'Truck checkpoint event not found' }, 404)
       return
     }
 

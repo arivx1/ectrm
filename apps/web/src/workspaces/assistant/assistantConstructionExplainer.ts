@@ -29,11 +29,20 @@ export type AssistantConstructionExplainerSourceGroup = {
   titles: string[]
 }
 
+export type AssistantConstructionExplainerProvenanceRow = {
+  key: string
+  title: string
+  sourceLabel: string
+  details: string[]
+  usesFallback: boolean
+}
+
 export type AssistantConstructionExplainer = {
   heading: string
   summary: string
   cards: AssistantConstructionExplainerCard[]
   sourceGroups: AssistantConstructionExplainerSourceGroup[]
+  provenanceRows: AssistantConstructionExplainerProvenanceRow[]
 }
 
 type BuildAssistantConstructionExplainerInput = {
@@ -160,6 +169,42 @@ function groupPromptSections(
   })
 }
 
+function formatPromptSectionDetail(value: string | number | null | undefined): string | null {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+  return String(value)
+}
+
+function summarizePromptSectionProvenance(
+  sections: AssistantPromptSection[],
+): AssistantConstructionExplainerProvenanceRow[] {
+  return sections.map((section) => {
+    const contract =
+      section.contract_key && section.contract_version
+        ? `${section.contract_key} v${section.contract_version}`
+        : section.contract_key
+    const details = [
+      SOURCE_LABELS[section.source],
+      formatPromptSectionDetail(section.scope),
+      formatPromptSectionDetail(section.kind),
+      section.freshness ? `freshness ${section.freshness}` : null,
+      section.owner ? `owner ${section.owner}` : null,
+      section.owner_reference ? `ref ${section.owner_reference}` : null,
+      contract ? `contract ${contract}` : null,
+      section.merge_strategy ? `merge ${section.merge_strategy}` : null,
+    ].filter((detail): detail is string => Boolean(detail))
+
+    return {
+      key: section.key,
+      title: section.title,
+      sourceLabel: SOURCE_LABELS[section.source],
+      details,
+      usesFallback: Boolean(section.uses_fallback),
+    }
+  })
+}
+
 function summarizeHierarchy(activeAgent: AssistantAgent | null, agentRoster: AssistantAgent[]): string[] {
   if (!activeAgent) {
     return ['No named parent or subordinate hierarchy applies while the platform foundation is selected.']
@@ -199,6 +244,7 @@ export function buildAssistantConstructionExplainer({
   agentRoster,
 }: BuildAssistantConstructionExplainerInput): AssistantConstructionExplainer {
   const sourceGroups = groupPromptSections(activeGroundingSections)
+  const provenanceRows = summarizePromptSectionProvenance(activeGroundingSections)
   const provider = selectedRun?.provider ?? promptPreview?.provider ?? 'Runtime default'
   const model = selectedRun?.model ?? promptPreview?.model ?? 'Preview unavailable'
   const workspace = selectedRun?.workspace ?? 'assistant'
@@ -235,6 +281,7 @@ export function buildAssistantConstructionExplainer({
     heading,
     summary,
     sourceGroups,
+    provenanceRows,
     cards: [
       {
         key: 'request-lens',

@@ -216,6 +216,84 @@ describe('terminal command search', () => {
     expect(result.action.handoff?.source).toBe('terminal')
   })
 
+  test('routes workspace and price-index lookups with safe terminal handoffs', () => {
+    const workspaceState = resolveTerminalCommandSearchState({
+      query: 'workspace: live desk',
+      isLoading: false,
+      trades: SAMPLE_TRADES,
+      counterparties: SAMPLE_COUNTERPARTIES,
+      commodities: SAMPLE_COMMODITIES,
+      priceIndices: SAMPLE_PRICE_INDICES,
+    })
+
+    expect(workspaceState.status).toBe('results')
+    if (workspaceState.status !== 'results') {
+      return
+    }
+
+    const workspaceResult = workspaceState.groups[0]?.results[0]
+    assert.ok(workspaceResult)
+    expect(workspaceResult.title).toBe('Live Desk')
+    expect(workspaceResult.action).toEqual({
+      kind: 'view',
+      view: 'dashboard',
+      handoff: null,
+    })
+
+    const priceIndexState = resolveTerminalCommandSearchState({
+      query: 'px: henry',
+      isLoading: false,
+      trades: SAMPLE_TRADES,
+      counterparties: SAMPLE_COUNTERPARTIES,
+      commodities: SAMPLE_COMMODITIES,
+      priceIndices: SAMPLE_PRICE_INDICES,
+    })
+
+    expect(priceIndexState.status).toBe('results')
+    if (priceIndexState.status !== 'results') {
+      return
+    }
+
+    const priceIndexResult = priceIndexState.groups[0]?.results[0]
+    assert.ok(priceIndexResult)
+    expect(priceIndexResult.title).toBe('Henry Hub Daily')
+    expect(priceIndexResult.action.kind).toBe('reference_record')
+    if (priceIndexResult.action.kind !== 'reference_record') {
+      return
+    }
+    expect(priceIndexResult.action.recordKind).toBe('price_index')
+    expect(priceIndexResult.action.referenceTab).toBe('price-indices')
+    expect(priceIndexResult.action.recordCode).toBe('HENRY_DA')
+    expect(priceIndexResult.action.handoff).toMatchObject({
+      source: 'terminal',
+      focus: {
+        type: 'reference_record',
+        id: 'HENRY_DA',
+        label: 'Henry Hub Daily',
+      },
+      filter: 'HENRY_DA',
+    })
+  })
+
+  test('blocks terminal-mode mutation verbs even when they look like layout or watchlist commands', () => {
+    const state = resolveTerminalCommandSearchState({
+      query: 'save market overview watchlist',
+      isLoading: false,
+      trades: SAMPLE_TRADES,
+      counterparties: SAMPLE_COUNTERPARTIES,
+      commodities: SAMPLE_COMMODITIES,
+      priceIndices: SAMPLE_PRICE_INDICES,
+    })
+
+    expect(state).toEqual({
+      status: 'unsupported',
+      title: 'Terminal search is navigation only',
+      detail:
+        '"save" looks like a business action. Use terminal search to open the right workspace or record first, then make the change there.',
+      scope: null,
+    })
+  })
+
   test('returns a loading state when data-backed scopes are still hydrating', () => {
     const state = resolveTerminalCommandSearchState({
       query: 'trade: TRD-1001',

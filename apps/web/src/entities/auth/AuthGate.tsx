@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
-import authGateBarrelLogoUrl from '../../assets/auth-gate-logo-barrel.png'
+import authGateCornLogoUrl from '../../assets/auth-gate-logo-corn.png'
 import authGateLogoUrl from '../../assets/auth-gate-logo.png'
+import authGateRocksLogoUrl from '../../assets/auth-gate-logo-rocks.png'
+import authGateTransmissionLogoUrl from '../../assets/auth-gate-logo-transmission.png'
 import {
   bootstrapAdminSession,
   createAuthSession,
@@ -34,7 +36,16 @@ type AuthAction = 'login' | 'single-user' | 'bootstrap' | null
 type AuthGateTimeOfDay = 'sunrise' | 'daytime' | 'sunset' | 'night'
 
 const AUTH_GATE_BACKGROUND_REFRESH_MS = 60 * 1000
+const AUTH_GATE_BACKGROUND_TRANSITION_MS = 1200
 const AUTH_GATE_BACKGROUND_SEQUENCE: AuthGateTimeOfDay[] = ['sunrise', 'daytime', 'sunset', 'night']
+const AUTH_GATE_LOGO_FLIP_INTERVAL_MS = 5 * 1000
+const AUTH_GATE_LOGO_FLIP_DURATION_MS = 760
+const AUTH_GATE_LOGO_QUEUE = [
+  authGateLogoUrl,
+  authGateCornLogoUrl,
+  authGateTransmissionLogoUrl,
+  authGateRocksLogoUrl,
+]
 
 function getAuthGateTimeOfDay(date = new Date()): AuthGateTimeOfDay {
   const hour = date.getHours()
@@ -87,7 +98,13 @@ export function AuthGate({
   const [serverSettings, setServerSettings] = useState<PublicRuntimeSettings | null>(null)
   const [serverSettingsError, setServerSettingsError] = useState('')
   const [timeOfDay, setTimeOfDay] = useState<AuthGateTimeOfDay>(() => getAuthGateTimeOfDay())
-  const [timeSkipActive, setTimeSkipActive] = useState(false)
+  const [previousTimeOfDay, setPreviousTimeOfDay] = useState<AuthGateTimeOfDay | null>(null)
+  const [backgroundCycleActive, setBackgroundCycleActive] = useState(false)
+  const [currentLogoIndex, setCurrentLogoIndex] = useState(0)
+  const [logoFlipActive, setLogoFlipActive] = useState(false)
+  const authPanelRef = useRef<HTMLElement | null>(null)
+  const backgroundTransitionTimeoutRef = useRef<number | null>(null)
+  const logoFlipTimeoutRef = useRef<number | null>(null)
   const bootstrapAdminHashTargeted =
     typeof window !== 'undefined' &&
     window.location.hash.replace(/^#/, '').trim() === 'bootstrap-admin'
@@ -95,6 +112,34 @@ export function AuthGate({
     expanded: bootstrapExpanded,
     setExpanded: setBootstrapExpanded,
   } = usePersistentCollapsibleCardState('auth-gate.bootstrap-admin', bootstrapAdminHashTargeted)
+  const startLogoFlip = useCallback(() => {
+    if (logoFlipTimeoutRef.current !== null) {
+      return
+    }
+
+    setLogoFlipActive(true)
+    logoFlipTimeoutRef.current = window.setTimeout(() => {
+      setCurrentLogoIndex((current) => (current + 1) % AUTH_GATE_LOGO_QUEUE.length)
+      setLogoFlipActive(false)
+      logoFlipTimeoutRef.current = null
+    }, AUTH_GATE_LOGO_FLIP_DURATION_MS)
+  }, [])
+  const transitionBackground = useCallback((nextTimeOfDay: AuthGateTimeOfDay) => {
+    if (nextTimeOfDay === timeOfDay) {
+      return
+    }
+
+    setPreviousTimeOfDay(timeOfDay)
+    setTimeOfDay(nextTimeOfDay)
+
+    if (backgroundTransitionTimeoutRef.current !== null) {
+      window.clearTimeout(backgroundTransitionTimeoutRef.current)
+    }
+    backgroundTransitionTimeoutRef.current = window.setTimeout(() => {
+      setPreviousTimeOfDay(null)
+      backgroundTransitionTimeoutRef.current = null
+    }, AUTH_GATE_BACKGROUND_TRANSITION_MS)
+  }, [timeOfDay])
 
   useEffect(() => {
     let cancelled = false
@@ -123,13 +168,34 @@ export function AuthGate({
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
-      if (!timeSkipActive) {
-        setTimeOfDay(getAuthGateTimeOfDay())
+      if (!backgroundCycleActive) {
+        transitionBackground(getAuthGateTimeOfDay())
       }
     }, AUTH_GATE_BACKGROUND_REFRESH_MS)
 
     return () => window.clearInterval(intervalId)
-  }, [timeSkipActive])
+  }, [backgroundCycleActive, transitionBackground])
+
+  useEffect(() => {
+    return () => {
+      if (backgroundTransitionTimeoutRef.current !== null) {
+        window.clearTimeout(backgroundTransitionTimeoutRef.current)
+        backgroundTransitionTimeoutRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const intervalId = window.setInterval(startLogoFlip, AUTH_GATE_LOGO_FLIP_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(intervalId)
+      if (logoFlipTimeoutRef.current !== null) {
+        window.clearTimeout(logoFlipTimeoutRef.current)
+        logoFlipTimeoutRef.current = null
+      }
+    }
+  }, [startLogoFlip])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -236,26 +302,53 @@ export function AuthGate({
     })
   }
 
-  function handleTimeSkip() {
-    setTimeSkipActive(true)
-    setTimeOfDay((current) => getNextAuthGateTimeOfDay(current))
+  function advanceBackground() {
+    setBackgroundCycleActive(true)
+    transitionBackground(getNextAuthGateTimeOfDay(timeOfDay))
   }
 
+  function handleStageClick(event: React.MouseEvent<HTMLElement>) {
+    const target = event.target
+    if (target instanceof Node && authPanelRef.current?.contains(target)) {
+      return
+    }
+
+    advanceBackground()
+  }
+
+  const nextLogoIndex = (currentLogoIndex + 1) % AUTH_GATE_LOGO_QUEUE.length
+
   return (
-    <main className={`auth-gate-stage auth-gate-stage-${timeOfDay}`}>
+    <main className={`auth-gate-stage auth-gate-stage-${timeOfDay}`} onClick={handleStageClick}>
+      <div className="auth-gate-background-stack" aria-hidden="true">
+        {previousTimeOfDay ? (
+          <div
+            key={`previous-${previousTimeOfDay}`}
+            className={`auth-gate-background-layer auth-gate-background-layer-previous auth-gate-stage-${previousTimeOfDay}`}
+          />
+        ) : null}
+        <div
+          key={`current-${timeOfDay}`}
+          className={`auth-gate-background-layer auth-gate-background-layer-current auth-gate-stage-${timeOfDay}`}
+        />
+      </div>
       <section className="auth-gate-frame">
         <header className="auth-gate-wordmark" aria-label="Strata">
           <span className="brand-mark">Strata</span>
         </header>
 
-        <section className="surface auth-gate-panel">
+        <section ref={authPanelRef} className="surface auth-gate-panel">
           <div className="auth-gate-panel-head">
-            <div className="auth-gate-orb" aria-hidden="true">
-              <div className="auth-gate-logo-flip">
-                <img className="auth-gate-orb-logo auth-gate-logo-face" src={authGateLogoUrl} alt="" />
+            <div className="auth-gate-orb" aria-hidden="true" onPointerEnter={startLogoFlip}>
+              <div className={`auth-gate-logo-flip${logoFlipActive ? ' is-flipping' : ''}`}>
+                <img
+                  className="auth-gate-orb-logo auth-gate-logo-face"
+                  src={AUTH_GATE_LOGO_QUEUE[currentLogoIndex]}
+                  alt=""
+                />
                 <img
                   className="auth-gate-orb-logo auth-gate-logo-face auth-gate-logo-face-back"
-                  src={authGateBarrelLogoUrl}
+                  src={AUTH_GATE_LOGO_QUEUE[nextLogoIndex]}
                   alt=""
                 />
               </div>
@@ -321,11 +414,12 @@ export function AuthGate({
             <button
               id="single-user-sign-in"
               type="button"
-              className="button button-primary"
+              className="button button-primary auth-gate-sso-button"
               onClick={() => void handleSingleSignOn()}
               disabled={authLoading}
             >
-              Single Sign On
+              <span className="auth-gate-keyhole" aria-hidden="true" />
+              <span>Single Sign On</span>
             </button>
           </div>
 
@@ -436,9 +530,6 @@ export function AuthGate({
         </section>
       </section>
 
-      <button type="button" className="auth-gate-time-skip" onClick={handleTimeSkip}>
-        Time Skip
-      </button>
     </main>
   )
 }

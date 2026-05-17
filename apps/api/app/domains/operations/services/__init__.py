@@ -17,8 +17,11 @@ from apps.api.app.domains.operations.services.truck_tracking import cancel_deliv
 from apps.api.app.domains.operations.services.truck_tracking import create_delivery_truck_movement
 from apps.api.app.domains.operations.services.truck_tracking import create_delivery_truck_stop
 from apps.api.app.domains.operations.services.truck_tracking import get_delivery_truck_movement
+from apps.api.app.domains.operations.services.truck_tracking import get_delivery_truck_movement_tracking_health
 from apps.api.app.domains.operations.services.truck_tracking import list_delivery_truck_movements
+from apps.api.app.domains.operations.services.truck_tracking import list_delivery_truck_tracking_signals
 from apps.api.app.domains.operations.services.truck_tracking import record_delivery_truck_stop_checkpoint
+from apps.api.app.domains.operations.services.truck_tracking import record_delivery_truck_tracking_signal
 from apps.api.app.domains.operations.services.truck_tracking import reverse_delivery_truck_stop_checkpoint
 from apps.api.app.domains.operations.services.truck_tracking import skip_delivery_truck_stop
 from apps.api.app.domains.operations.services.truck_tracking import update_delivery_truck_movement
@@ -42,6 +45,8 @@ __all__ = [
     "update_delivery_truck_detail",
     "list_delivery_truck_movements",
     "get_delivery_truck_movement",
+    "get_delivery_truck_movement_tracking_health",
+    "list_delivery_truck_tracking_signals",
     "create_delivery_truck_movement",
     "update_delivery_truck_movement",
     "cancel_delivery_truck_movement",
@@ -50,6 +55,7 @@ __all__ = [
     "skip_delivery_truck_stop",
     "cancel_delivery_truck_stop",
     "record_delivery_truck_stop_checkpoint",
+    "record_delivery_truck_tracking_signal",
     "reverse_delivery_truck_stop_checkpoint",
     "build_workspace_bootstrap_summary",
 ]

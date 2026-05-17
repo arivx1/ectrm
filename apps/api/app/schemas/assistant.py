@@ -1607,6 +1607,13 @@ class AssistantAgentProfileRequestActivation(BaseModel):
         return normalized
 
 
+class AssistantAgentProfileRequestDiffOut(BaseModel):
+    field_key: str
+    label: str
+    current_value: str
+    next_value: str
+
+
 class AssistantAgentProfileRequestOut(BaseModel):
     request_id: int
     status: AssistantAgentProfileRequestStatus
@@ -1631,6 +1638,7 @@ class AssistantAgentProfileRequestOut(BaseModel):
     rejection_reason: Optional[str]
     linked_agent_id: Optional[str]
     linked_revision_id: Optional[int]
+    applied_diff_summary: list[AssistantAgentProfileRequestDiffOut] = Field(default_factory=list)
     requested_at: datetime
     requested_by: str
     reviewed_at: Optional[datetime]

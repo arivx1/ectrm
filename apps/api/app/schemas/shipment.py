@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DeliverySchedulingWorkflowItemOut(BaseModel):
@@ -124,6 +124,25 @@ class DeliveryTruckStopOut(BaseModel):
     version: int
 
 
+class DeliveryTruckMovementTrackingHealthOut(BaseModel):
+    last_evaluated_at: datetime
+    eta_status: str
+    eta_status_reason: str
+    tracking_freshness_status: str
+    tracking_freshness_reason: str
+    dwell_status: str
+    dwell_status_reason: str
+    exception_severity: str
+    primary_exception: Optional[str]
+    stale_after_minutes: int
+    dwell_threshold_minutes: int
+    destination_stop_id: Optional[str]
+    current_stop_id: Optional[str]
+    minutes_since_last_signal: Optional[int]
+    current_dwell_minutes: Optional[int]
+    eta_late_minutes: Optional[int]
+
+
 class DeliveryTruckMovementSummaryOut(BaseModel):
     movement_id: str
     delivery_id: str
@@ -142,6 +161,7 @@ class DeliveryTruckMovementSummaryOut(BaseModel):
     current_location_code: Optional[str]
     last_signal_at: Optional[datetime]
     current_eta_at_destination: Optional[datetime]
+    tracking_health: DeliveryTruckMovementTrackingHealthOut
     hold_reason_code: Optional[str]
     hold_reason_code_source: str
     stop_count: int
@@ -169,6 +189,57 @@ class DeliveryTruckMovementOut(DeliveryTruckMovementSummaryOut):
     truck_ticket_number: Optional[str]
     truck_ticket_number_source: str
     stops: list[DeliveryTruckStopOut]
+
+
+class DeliveryTruckTrackingExceptionOut(BaseModel):
+    delivery_id: str
+    trade_id: str
+    leg_no: Optional[int]
+    external_trade_id: Optional[str]
+    book: str
+    portfolio: Optional[str]
+    counterparty: Optional[str]
+    commodity_class: str
+    commodity: str
+    transport_mode: str
+    execution_status: str
+    delivery_start: Optional[date]
+    delivery_end: Optional[date]
+    location_code: Optional[str]
+    origin_location_code: Optional[str]
+    destination_location_code: Optional[str]
+    operations_owner: Optional[str]
+    movement: DeliveryTruckMovementSummaryOut
+    tracking_health: DeliveryTruckMovementTrackingHealthOut
+
+
+class DeliveryTrackingSignalOut(BaseModel):
+    signal_id: int
+    delivery_id: Optional[str]
+    movement_id: Optional[str]
+    stop_id: Optional[str]
+    source_system: str
+    source_event_id: Optional[str]
+    signal_type: str
+    occurred_at: datetime
+    received_at: datetime
+    latitude: Optional[float]
+    longitude: Optional[float]
+    location_code: Optional[str]
+    external_status: Optional[str]
+    normalized_status: Optional[str]
+    match_confidence: Optional[float]
+    dedupe_key: str
+    processing_status: str
+    processing_error: Optional[str]
+    raw_payload: dict[str, Any]
+
+
+class DeliveryTrackingSignalIngestResultOut(BaseModel):
+    ingest_status: str
+    duplicate: bool
+    signal: DeliveryTrackingSignalOut
+    movement: DeliveryTruckMovementSummaryOut
 
 
 class DeliveryObligationOut(BaseModel):
@@ -502,6 +573,23 @@ class DeliveryTruckStopCheckpointReverseWrite(BaseModel):
     reversal_reason: str
     reversed_at: Optional[datetime] = None
     notes: Optional[str] = None
+
+
+class DeliveryTrackingSignalWrite(BaseModel):
+    source_system: Optional[str] = None
+    source_event_id: Optional[str] = None
+    signal_type: str
+    occurred_at: datetime
+    received_at: Optional[datetime] = None
+    stop_id: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    location_code: Optional[str] = None
+    external_status: Optional[str] = None
+    normalized_status: Optional[str] = None
+    match_confidence: Optional[float] = None
+    eta_at_destination: Optional[datetime] = None
+    raw_payload: dict[str, Any] = Field(default_factory=dict)
 
 
 ShipmentOut = DeliveryObligationOut

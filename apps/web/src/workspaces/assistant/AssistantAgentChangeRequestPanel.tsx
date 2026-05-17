@@ -664,6 +664,16 @@ export function AssistantAgentChangeRequestPanel({
                 ) : request.status === 'APPROVED' ? (
                   <small>Approved. Admin must save a linked agent revision before marking it applied.</small>
                 ) : null}
+                {request.applied_diff_summary.length > 0 ? (
+                  <div className="assistant-profile-request-review-note">
+                    <strong>Applied configuration changes</strong>
+                    {request.applied_diff_summary.slice(0, 4).map((diffRow) => (
+                      <p key={`${request.request_id}-${diffRow.field_key}`}>
+                        <strong>{diffRow.label}:</strong> {diffRow.current_value} {'->'} {diffRow.next_value}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
                 {request.linked_agent_id || request.target_agent_id ? (
                   <div className="toolbar">
                     <button

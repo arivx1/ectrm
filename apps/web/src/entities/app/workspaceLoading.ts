@@ -160,6 +160,7 @@ type StartHereOverlayArgs = {
   hasAuthSession: boolean
   hasStartHereOnboarding: boolean
   hasStartHereReturnIntent: boolean
+  hasRouteHandoff?: boolean
   authInterruptionReason: string | null
   hasAuthInterruptionResume: boolean
   usesTerminalMode: boolean
@@ -170,6 +171,7 @@ export function shouldPresentStartHereOverlay({
   hasAuthSession,
   hasStartHereOnboarding,
   hasStartHereReturnIntent,
+  hasRouteHandoff = false,
   authInterruptionReason,
   hasAuthInterruptionResume,
   usesTerminalMode,
@@ -177,7 +179,7 @@ export function shouldPresentStartHereOverlay({
   return (
     hasAuthSession &&
     hasStartHereOnboarding &&
-    !(hasStartHereReturnIntent || usesTerminalMode) &&
+    !(hasStartHereReturnIntent || hasRouteHandoff || usesTerminalMode) &&
     currentView !== 'prompt' &&
     currentView !== 'settings' &&
     currentView !== 'messages' &&

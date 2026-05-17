@@ -13,10 +13,22 @@ import {
 } from '../../entities/wiki/api'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { buildWikiDescendantIdSet, buildWikiPageTree, filterWikiPageTree } from './wikiTree'
-import { parseWikiMarkdownLinks } from './wikiMarkdown'
+import { parseWikiMarkdownLinks, rewriteWikiMarkdownLinkTarget } from './wikiMarkdown'
+import {
+  DEFAULT_WIKI_PAGE_TEMPLATE_KEY,
+  WIKI_PAGE_TEMPLATES,
+  buildWikiPageTemplateDraft,
+  resolveWikiPageTemplate,
+  type WikiPageTemplateKey,
+} from './wikiTemplates'
 
 export type WikiBacklink = {
   page: WikiPageSummary
+  mentions: Array<{
+    label: string
+    target: string
+    snippet: string
+  }>
   labels: string[]
 }
 
@@ -31,6 +43,14 @@ function describeError(error: unknown): string {
 
 function normalizeWikiLinkTarget(target: string): string {
   return target.trim().toLowerCase()
+}
+
+function unresolvedLinkKey(link: WikiUnresolvedLink): string {
+  return `${normalizeWikiLinkTarget(link.target)}:${normalizeWikiLinkTarget(link.label)}`
+}
+
+function titleFromUnresolvedLink(link: WikiUnresolvedLink): string {
+  return (link.label === link.target ? link.label : link.target).trim()
 }
 
 function resolvePageFromLookup(
@@ -93,9 +113,13 @@ export function useWikiDocumentController({
   const [titleDraft, setTitleDraft] = useState('')
   const [parentDraft, setParentDraft] = useState('')
   const [contentDraft, setContentDraft] = useState('')
+  const [newPageTemplateKey, setNewPageTemplateKey] = useState<WikiPageTemplateKey>(
+    DEFAULT_WIKI_PAGE_TEMPLATE_KEY,
+  )
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [creatingParentId, setCreatingParentId] = useState<string | null>(null)
+  const [creatingUnresolvedLinkKey, setCreatingUnresolvedLinkKey] = useState<string | null>(null)
   const [archivingPageId, setArchivingPageId] = useState<string | null>(null)
   const [restoringArchivedPageId, setRestoringArchivedPageId] = useState<string | null>(null)
   const [restoringRevisionId, setRestoringRevisionId] = useState<number | null>(null)
@@ -136,6 +160,10 @@ export function useWikiDocumentController({
     () => activePages.filter((page) => page.page_id !== selectedPageId),
     [activePages, selectedPageId],
   )
+  const selectedNewPageTemplate = useMemo(
+    () => resolveWikiPageTemplate(newPageTemplateKey),
+    [newPageTemplateKey],
+  )
   const pageLinkLookup = useMemo(() => {
     const lookup = new Map<string, WikiPageSummary>()
     pages.forEach((page) => {
@@ -152,22 +180,28 @@ export function useWikiDocumentController({
     return pages
       .filter((page) => page.page_id !== selectedPageId)
       .map((page) => {
-        const labels = new Set<string>()
+        const mentions = new Map<string, { label: string; target: string; snippet: string }>()
         const links = page.links ?? []
 
         links.forEach((link) => {
           const linkedPage = resolvePageFromLookup(pageLinkLookup, link.target)
           if (linkedPage?.page_id === selectedPageId) {
-            labels.add(link.label || link.target)
+            const label = link.label || link.target
+            const target = link.target
+            const snippet = link.snippet?.trim() || page.summary
+            const mentionKey = `${normalizeWikiLinkTarget(label)}:${normalizeWikiLinkTarget(target)}:${snippet}`
+            mentions.set(mentionKey, { label, target, snippet })
           }
         })
 
+        const backlinkMentions = [...mentions.values()]
         return {
           page,
-          labels: [...labels],
+          mentions: backlinkMentions,
+          labels: backlinkMentions.map((mention) => mention.label || mention.target),
         }
       })
-      .filter((backlink) => backlink.labels.length > 0)
+      .filter((backlink) => backlink.mentions.length > 0)
   }, [pageLinkLookup, pages, selectedPageId])
   const selectedPageUnresolvedLinks = useMemo<WikiUnresolvedLink[]>(() => {
     if (!selectedPage) {
@@ -180,7 +214,7 @@ export function useWikiDocumentController({
         return
       }
 
-      const key = `${normalizeWikiLinkTarget(link.target)}:${normalizeWikiLinkTarget(link.label)}`
+      const key = unresolvedLinkKey(link)
       if (!unresolvedLinks.has(key)) {
         unresolvedLinks.set(key, link)
       }
@@ -358,7 +392,10 @@ export function useWikiDocumentController({
     }
   }
 
-  async function handleCreatePage(parentPageId: string | null) {
+  async function handleCreatePage(
+    parentPageId: string | null,
+    templateKey: WikiPageTemplateKey = newPageTemplateKey,
+  ) {
     if (!authSession) {
       return
     }
@@ -371,18 +408,76 @@ export function useWikiDocumentController({
     setNotice('')
 
     try {
+      const template = resolveWikiPageTemplate(templateKey)
+      const templateDraft = buildWikiPageTemplateDraft(template.key)
       const createdPage = await createWikiPage(apiBase, authSession.accessToken, {
-        title: 'Untitled Page',
+        title: templateDraft.title,
         parent_page_id: parentPageId,
-        content_markdown: '',
+        content_markdown: templateDraft.contentMarkdown,
       })
-      setNotice(parentPageId ? 'Created a child wiki page.' : 'Created a new wiki page.')
+      setNotice(
+        template.key === DEFAULT_WIKI_PAGE_TEMPLATE_KEY
+          ? parentPageId
+            ? 'Created a child wiki page.'
+            : 'Created a new wiki page.'
+          : parentPageId
+            ? `Created a child wiki page from the ${template.label} template.`
+            : `Created a new wiki page from the ${template.label} template.`,
+      )
       hydrateSelectedPage(createdPage)
       setPages(await fetchWikiPageIndex(apiBase, accessToken))
     } catch (nextError: unknown) {
       setError(describeError(nextError))
     } finally {
       setCreatingParentId(null)
+    }
+  }
+
+  async function handleCreatePageFromUnresolvedLink(link: WikiUnresolvedLink) {
+    if (!authSession || !selectedPage || selectedPage.is_archived) {
+      return
+    }
+
+    if (resolvePageFromLookup(pageLinkLookup, link.target)) {
+      setError('That wiki link already resolves to an existing page.')
+      return
+    }
+
+    const pageTitle = titleFromUnresolvedLink(link)
+    if (!pageTitle) {
+      setError('Choose a non-empty wiki link title before creating a page.')
+      return
+    }
+
+    const linkKey = unresolvedLinkKey(link)
+    setCreatingUnresolvedLinkKey(linkKey)
+    setError('')
+    setNotice('')
+
+    try {
+      const createdPage = await createWikiPage(apiBase, authSession.accessToken, {
+        title: pageTitle,
+        parent_page_id: selectedPage.page_id,
+        content_markdown: '',
+      })
+      const nextContentDraft = rewriteWikiMarkdownLinkTarget(
+        contentDraft,
+        link,
+        createdPage.page_id,
+      )
+      const updatedPage = await updateWikiPage(apiBase, authSession.accessToken, selectedPage.page_id, {
+        title: titleDraft,
+        parent_page_id: parentDraft || null,
+        content_markdown: nextContentDraft,
+      })
+
+      hydrateSelectedPage(updatedPage)
+      setPages(await fetchWikiPageIndex(apiBase, accessToken))
+      setNotice(`Created '${createdPage.title}' and saved a stable wiki link.`)
+    } catch (nextError: unknown) {
+      setError(describeError(nextError))
+    } finally {
+      setCreatingUnresolvedLinkKey(null)
     }
   }
 
@@ -513,12 +608,14 @@ export function useWikiDocumentController({
     archivedPages,
     contentDraft,
     creatingParentId,
+    creatingUnresolvedLinkKey,
     dirty,
     error,
     filteredActiveTree,
     filteredArchivedTree,
     handleArchivePage,
     handleCreatePage,
+    handleCreatePageFromUnresolvedLink,
     handleResetDraft,
     handleRestoreArchivedPage,
     handleRestoreRevision,
@@ -529,6 +626,8 @@ export function useWikiDocumentController({
     hasRankedSearchQuery,
     loading,
     mentionablePages,
+    newPageTemplateKey,
+    newPageTemplates: WIKI_PAGE_TEMPLATES,
     notice,
     pages,
     parentDraft,
@@ -544,11 +643,13 @@ export function useWikiDocumentController({
     selectedPage,
     selectedPageBacklinks,
     selectedPageId,
+    selectedNewPageTemplate,
     selectedPageUnresolvedLinks,
     setContentDraft,
     setError,
     setNotice,
     setParentDraft,
+    setNewPageTemplateKey,
     setSearchQuery,
     setShowArchived,
     setTitleDraft,

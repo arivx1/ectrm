@@ -108,6 +108,7 @@ type AssetMapPanelProps = {
 };
 
 type MapLibreModule = typeof import("maplibre-gl");
+type AssetMapLibreMap = InstanceType<MapLibreModule["Map"]>;
 
 const ASSET_GEOMETRY_SOURCE_ID = "asset-geometry-source";
 const ASSET_GEOMETRY_FILL_LAYER_ID = "asset-geometry-fill-layer";
@@ -894,15 +895,35 @@ function formatWeatherOverlayStateLabel(params: {
 }
 
 function setMapLayerVisibility(
-  map: InstanceType<MapLibreModule["Map"]>,
+  map: AssetMapLibreMap,
   layerId: string,
   visible: boolean,
 ): void {
-  if (!map.getLayer(layerId)) {
+  if (!hasMapLayer(map, layerId)) {
     return;
   }
 
-  map.setLayoutProperty(layerId, "visibility", visible ? "visible" : "none");
+  try {
+    map.setLayoutProperty(layerId, "visibility", visible ? "visible" : "none");
+  } catch {
+    // MapLibre can clear its style object during React route unmount cleanup.
+  }
+}
+
+function hasMapLayer(map: AssetMapLibreMap, layerId: string): boolean {
+  try {
+    return Boolean(map.getLayer(layerId));
+  } catch {
+    return false;
+  }
+}
+
+function resetMapCursor(map: AssetMapLibreMap): void {
+  try {
+    map.getCanvas().style.cursor = "";
+  } catch {
+    // The canvas may already be detached while effects are cleaning up.
+  }
 }
 
 function clampMapCanvasHeight(
@@ -2678,11 +2699,15 @@ export function AssetMapCanvas({
 
     return () => {
       layerIds.forEach((layerId) => {
+        if (!hasMapLayer(map, layerId)) {
+          return;
+        }
+
         map.off("click", layerId, handleRailRouteClick as never);
         map.off("mouseenter", layerId, handleMouseEnter);
         map.off("mouseleave", layerId, handleMouseLeave);
       });
-      map.getCanvas().style.cursor = "";
+      resetMapCursor(map);
     };
   }, [ready]);
 
@@ -2702,7 +2727,7 @@ export function AssetMapCanvas({
       });
     }
 
-    if (!map.getLayer(WEATHER_RADAR_LAYER_ID)) {
+    if (!hasMapLayer(map, WEATHER_RADAR_LAYER_ID)) {
       map.addLayer(
         {
           id: WEATHER_RADAR_LAYER_ID,
@@ -2712,7 +2737,7 @@ export function AssetMapCanvas({
             "raster-opacity": weatherOverlayOpacities.radar,
           },
         },
-        map.getLayer(ASSET_GEOMETRY_FILL_LAYER_ID)
+        hasMapLayer(map, ASSET_GEOMETRY_FILL_LAYER_ID)
           ? ASSET_GEOMETRY_FILL_LAYER_ID
           : undefined,
       );
@@ -2732,7 +2757,7 @@ export function AssetMapCanvas({
     }
 
     const map = mapRef.current;
-    const beforeLayerId = map.getLayer(ASSET_GEOMETRY_FILL_LAYER_ID)
+    const beforeLayerId = hasMapLayer(map, ASSET_GEOMETRY_FILL_LAYER_ID)
       ? ASSET_GEOMETRY_FILL_LAYER_ID
       : undefined;
 
@@ -2762,7 +2787,7 @@ export function AssetMapCanvas({
         });
       }
 
-      if (!map.getLayer(glowLayerId)) {
+      if (!hasMapLayer(map, glowLayerId)) {
         map.addLayer(
           {
             id: glowLayerId,
@@ -2789,7 +2814,7 @@ export function AssetMapCanvas({
         );
       }
 
-      if (!map.getLayer(pointLayerId)) {
+      if (!hasMapLayer(map, pointLayerId)) {
         map.addLayer(
           {
             id: pointLayerId,
@@ -2868,7 +2893,7 @@ export function AssetMapCanvas({
       });
     }
 
-    if (!map.getLayer(windPointLayerId)) {
+    if (!hasMapLayer(map, windPointLayerId)) {
       map.addLayer(
         {
           id: windPointLayerId,
@@ -2896,7 +2921,7 @@ export function AssetMapCanvas({
       );
     }
 
-    if (!map.getLayer(WEATHER_WIND_VECTOR_LAYER_ID)) {
+    if (!hasMapLayer(map, WEATHER_WIND_VECTOR_LAYER_ID)) {
       map.addLayer(
         {
           id: WEATHER_WIND_VECTOR_LAYER_ID,
@@ -3001,7 +3026,7 @@ export function AssetMapCanvas({
     };
 
     layerIds.forEach((layerId) => {
-      if (!map.getLayer(layerId)) {
+      if (!hasMapLayer(map, layerId)) {
         return;
       }
 
@@ -3012,7 +3037,7 @@ export function AssetMapCanvas({
 
     return () => {
       layerIds.forEach((layerId) => {
-        if (!map.getLayer(layerId)) {
+        if (!hasMapLayer(map, layerId)) {
           return;
         }
 
@@ -3020,7 +3045,7 @@ export function AssetMapCanvas({
         map.off("mouseenter", layerId, handleMouseEnter);
         map.off("mouseleave", layerId, handleMouseLeave);
       });
-      map.getCanvas().style.cursor = "";
+      resetMapCursor(map);
     };
   }, [ready]);
 

@@ -277,6 +277,10 @@
   gap: 0.55rem;
 }
 
+.messaging-desk-message.is-compact {
+  gap: 0.75rem;
+}
+
 .messaging-desk-message-head {
   display: flex;
   flex-wrap: wrap;
@@ -294,10 +298,84 @@
   color: #66717c;
 }
 
+.messaging-desk-message-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.65rem;
+  padding: 0.18rem 0.58rem;
+  border-radius: 999px;
+  background: rgba(18, 124, 108, 0.1);
+  color: #127c6c;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 700;
+}
+
 .messaging-desk-message-body p {
   margin: 0;
   color: #304658;
   line-height: 1.65;
+}
+
+.messaging-desk-mention {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.6rem;
+  padding: 0.08rem 0.4rem;
+  border-radius: 0.6rem;
+  background: rgba(88, 165, 255, 0.12);
+  color: #1f5eaa;
+  font-weight: 700;
+}
+
+.messaging-desk-message-deleted,
+.messaging-desk-thread-empty {
+  color: #66717c;
+  font-style: italic;
+}
+
+.messaging-desk-message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.messaging-desk-message-actions .button {
+  min-height: 2rem;
+  padding: 0.25rem 0.7rem;
+}
+
+.messaging-desk-message-actions small,
+.messaging-desk-message-meta {
+  color: #66717c;
+}
+
+.messaging-desk-inline-editor,
+.messaging-desk-thread-panel,
+.messaging-desk-thread-composer {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.messaging-desk-inline-editor textarea,
+.messaging-desk-thread-composer textarea {
+  width: 100%;
+  min-height: 5.5rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.85rem;
+  resize: vertical;
+  color: #13293d;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.messaging-desk-inline-editor-actions,
+.messaging-desk-thread-composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  justify-content: flex-end;
 }
 
 .messaging-desk-attachment,
@@ -343,16 +421,27 @@
   gap: 0.45rem;
 }
 
-.messaging-desk-reactions span {
+.messaging-desk-reaction {
   display: inline-flex;
   align-items: center;
   min-height: 1.85rem;
   padding: 0.22rem 0.65rem;
+  border: 1px solid rgba(18, 124, 108, 0.12);
   border-radius: 999px;
   background: rgba(18, 124, 108, 0.08);
   color: #127c6c;
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+.messaging-desk-reaction.is-busy {
+  opacity: 0.72;
+}
+
+.messaging-desk-reaction-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
 }
 
 .messaging-desk-composer {
@@ -386,9 +475,69 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
+}
+
+.messaging-desk-composer-tools button {
+  min-height: 1.95rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
   color: #66717c;
   font-size: 0.82rem;
   font-weight: 700;
+}
+
+.messaging-desk-composer-palette,
+.messaging-desk-composer-attachment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.messaging-desk-composer-palette button {
+  min-height: 1.95rem;
+  padding: 0.2rem 0.7rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #304658;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.messaging-desk-composer-attachment {
+  justify-content: space-between;
+  padding: 0.7rem 0.85rem;
+  border: 1px dashed rgba(45, 116, 196, 0.32);
+  border-radius: 0.95rem;
+  background: rgba(88, 165, 255, 0.06);
+}
+
+.messaging-desk-composer-attachment div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.messaging-desk-composer-attachment span,
+.messaging-desk-composer-attachment small {
+  color: #66717c;
+}
+
+.messaging-desk-composer-attachment strong {
+  color: #13293d;
+}
+
+.messaging-desk-hidden-file-input {
+  display: none;
+}
+
+.messaging-desk-thread-pill {
+  margin: 0;
+  color: #1f5eaa;
+  font-size: 0.85rem;
+  line-height: 1.55;
 }
 
 .messaging-desk-composer textarea {
@@ -440,6 +589,13 @@
   display: grid;
   gap: 0.7rem;
   padding: 1rem;
+}
+
+.messaging-desk-thread-replies {
+  display: grid;
+  gap: 0.9rem;
+  padding-top: 0.15rem;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
 }
 
 .messaging-desk-context-card > strong,

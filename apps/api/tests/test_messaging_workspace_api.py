@@ -190,6 +190,175 @@ class MessagingWorkspaceApiTests(unittest.TestCase):
         self.assertEqual(payload["created_by_user_id"], "mia.chen")
         self.assertEqual(payload["created_by_role"], "OPERATIONS")
 
+    def test_post_can_persist_attachment_metadata(self) -> None:
+        response = self.client.post(
+            "/messages/workspace/posts",
+            json={
+                "conversation_id": "counterparty-email",
+                "body": "Attached the revised timing note for review.",
+                "attachment": {
+                    "label": "Attachment",
+                    "title": "timing-note.pdf",
+                    "summary": "application/pdf • 42 KB",
+                    "footnote": "Added from the desk composer.",
+                },
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["attachment"]["title"], "timing-note.pdf")
+
+        reload_response = self.client.get("/messages/workspace")
+        self.assertEqual(reload_response.status_code, 200)
+        conversation = next(
+            item
+            for item in reload_response.json()["conversations"]
+            if item["conversation_id"] == "counterparty-email"
+        )
+        reloaded_message = conversation["timeline"][-1]
+        self.assertEqual(reloaded_message["attachment"]["summary"], "application/pdf • 42 KB")
+
+    def test_thread_reply_persists_parent_metadata_and_root_reply_count(self) -> None:
+        root_response = self.client.post(
+            "/messages/workspace/posts",
+            json={
+                "conversation_id": "counterparty-email",
+                "body": "Desk is reviewing the revised nomination window.",
+            },
+        )
+        self.assertEqual(root_response.status_code, 201)
+        root_payload = root_response.json()
+
+        reply_response = self.client.post(
+            "/messages/workspace/posts",
+            json={
+                "conversation_id": "counterparty-email",
+                "body": "Threaded follow-up keeps settlement context attached.",
+                "parent_message_id": root_payload["message_id"],
+            },
+        )
+        self.assertEqual(reply_response.status_code, 201)
+        reply_payload = reply_response.json()
+        self.assertEqual(reply_payload["parent_message_id"], root_payload["message_id"])
+        self.assertEqual(reply_payload["thread_root_message_id"], root_payload["message_id"])
+
+        reload_response = self.client.get("/messages/workspace")
+        self.assertEqual(reload_response.status_code, 200)
+        conversation = next(
+            item
+            for item in reload_response.json()["conversations"]
+            if item["conversation_id"] == "counterparty-email"
+        )
+        reloaded_root = next(
+            item for item in conversation["timeline"] if item["id"] == root_payload["message_id"]
+        )
+        reloaded_reply = next(
+            item for item in conversation["timeline"] if item["id"] == reply_payload["message_id"]
+        )
+
+        self.assertEqual(reloaded_root["reply_count"], 1)
+        self.assertEqual(reloaded_root["thread_participants"], ["Guest Operator"])
+        self.assertEqual(reloaded_reply["parent_message_id"], root_payload["message_id"])
+        self.assertEqual(reloaded_reply["thread_root_message_id"], root_payload["message_id"])
+
+    def test_signed_in_author_can_pin_edit_and_delete_their_own_message(self) -> None:
+        self._bootstrap_admin()
+        self._create_user(
+            user_id="ops.author",
+            email="ops-author@example.com",
+            display_name="Ops Author",
+            role="OPS_ADMIN",
+        )
+        access_token = self._login(identifier="ops.author")
+
+        create_response = self.client.post(
+            "/messages/workspace/posts",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "conversation_id": "ops-follow-through",
+                "body": "Queue note that still needs confirmation.",
+            },
+        )
+        self.assertEqual(create_response.status_code, 201)
+        message_id = create_response.json()["message_id"]
+
+        pin_response = self.client.patch(
+            f"/messages/workspace/posts/{message_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"pinned": True},
+        )
+        self.assertEqual(pin_response.status_code, 200)
+        self.assertIsNotNone(pin_response.json()["pinned_at"])
+
+        edit_response = self.client.patch(
+            f"/messages/workspace/posts/{message_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"body": "Queue note updated with the latest desk confirmation."},
+        )
+        self.assertEqual(edit_response.status_code, 200)
+        self.assertEqual(edit_response.json()["body"], "Queue note updated with the latest desk confirmation.")
+        self.assertIsNotNone(edit_response.json()["edited_at"])
+
+        delete_response = self.client.patch(
+            f"/messages/workspace/posts/{message_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"deleted": True},
+        )
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(delete_response.json()["body"], "")
+        self.assertIsNotNone(delete_response.json()["deleted_at"])
+        self.assertIsNone(delete_response.json()["pinned_at"])
+
+        reload_response = self.client.get("/messages/workspace")
+        self.assertEqual(reload_response.status_code, 200)
+        conversation = next(
+            item
+            for item in reload_response.json()["conversations"]
+            if item["conversation_id"] == "ops-follow-through"
+        )
+        reloaded_message = next(item for item in conversation["timeline"] if item["id"] == message_id)
+        self.assertEqual(reloaded_message["body"], [])
+        self.assertIsNotNone(reloaded_message["deleted_at"])
+
+    def test_signed_in_user_can_update_message_reactions(self) -> None:
+        self._bootstrap_admin()
+        self._create_user(
+            user_id="ops.reactor",
+            email="ops-reactor@example.com",
+            display_name="Ops Reactor",
+            role="OPS_ADMIN",
+        )
+        access_token = self._login(identifier="ops.reactor")
+
+        create_response = self.client.post(
+            "/messages/workspace/posts",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "conversation_id": "ectrm-assistant",
+                "body": "Watching this lane.",
+            },
+        )
+        self.assertEqual(create_response.status_code, 201)
+        message_id = create_response.json()["message_id"]
+
+        reaction_response = self.client.patch(
+            f"/messages/workspace/posts/{message_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"reactions": ["👍", "👀"]},
+        )
+        self.assertEqual(reaction_response.status_code, 200)
+        self.assertEqual(reaction_response.json()["reactions"], ["👍", "👀"])
+
+        reload_response = self.client.get("/messages/workspace")
+        self.assertEqual(reload_response.status_code, 200)
+        conversation = next(
+            item
+            for item in reload_response.json()["conversations"]
+            if item["conversation_id"] == "ectrm-assistant"
+        )
+        reloaded_message = next(item for item in conversation["timeline"] if item["id"] == message_id)
+        self.assertEqual(reloaded_message["reactions"], ["👍", "👀"])
+
     def test_assistant_post_requires_authenticated_session_and_persists_run_provenance(self) -> None:
         unauthorized_response = self.client.post(
             "/messages/workspace/posts",

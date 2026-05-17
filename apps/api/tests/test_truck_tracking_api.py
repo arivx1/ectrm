@@ -490,7 +490,18 @@ class TruckTrackingApiTests(unittest.TestCase):
             self.assertEqual(len(checkpoint_events), 3)
             self.assertEqual(checkpoint_events[0].source, "TRUCK_MANUAL_DISPATCH")
             self.assertIn("ARRIVED_PICKUP", checkpoint_events[0].reference_code)
+            departed_pickup_event_id = checkpoint_events[1].id
             destination_event_id = checkpoint_events[2].id
+
+        blocked_departure_reversal = self.client.post(
+            f"/truck-stops/{pickup_stop_id}/checkpoints/{departed_pickup_event_id}/reverse",
+            json={
+                "reversal_reason": "Departure was posted against the wrong pickup timestamp.",
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(blocked_departure_reversal.status_code, 422)
+        self.assertIn("downstream truck stop", blocked_departure_reversal.json()["detail"])
 
         reverse_destination = self.client.post(
             f"/truck-stops/{destination_stop_id}/checkpoints/{destination_event_id}/reverse",
@@ -518,3 +529,348 @@ class TruckTrackingApiTests(unittest.TestCase):
             )
             self.assertEqual(reversal_event.reversal_of_event_id, destination_event_id)
             self.assertEqual(reversal_event.source, "TRUCK_MANUAL_DISPATCH")
+
+        reverse_departed_pickup = self.client.post(
+            f"/truck-stops/{pickup_stop_id}/checkpoints/{departed_pickup_event_id}/reverse",
+            json={
+                "reversal_reason": "Departure was posted against the wrong pickup timestamp.",
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(reverse_departed_pickup.status_code, 201)
+        reverse_departed_body = reverse_departed_pickup.json()
+        self.assertEqual(reverse_departed_body["status"], "AT_STOP")
+        self.assertEqual(reverse_departed_body["current_stop_sequence"], 1)
+        self.assertEqual(reverse_departed_body["stops"][0]["status"], "ARRIVED")
+        self.assertIsNone(reverse_departed_body["stops"][0]["actual_departed_at"])
+        self.assertEqual(reverse_departed_body["stops"][1]["status"], "PLANNED")
+
+    def test_records_idempotent_truck_tracking_signals_without_business_milestones(self) -> None:
+        self._create_user(
+            user_id="ops.signal",
+            email="ops.signal@example.com",
+            display_name="Ops Signal",
+            role="OPERATIONS",
+        )
+        ops_token = self._login(identifier="ops.signal")
+        self._seed_trade()
+        self._sync_deliveries(ops_token)
+        self._promote_delivery_to_truck(ops_token)
+
+        create_response = self.client.post(
+            "/deliveries/DLV-T-TRUCK-1/truck-movements",
+            json={
+                "sequence_no": 1,
+                "external_load_reference": "LOAD-TRACK-1",
+                "stops": [
+                    {
+                        "stop_type": "PICKUP",
+                        "location_code": "MIDLAND",
+                    },
+                    {
+                        "stop_type": "DROPOFF",
+                        "location_code": "CUSHING",
+                    },
+                ],
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(create_response.status_code, 201)
+        movement_body = create_response.json()
+        movement_id = movement_body["movement_id"]
+        pickup_stop_id = movement_body["stops"][0]["stop_id"]
+
+        matched_signal = self.client.post(
+            f"/truck-movements/{movement_id}/tracking-signals",
+            json={
+                "source_system": "manual_dispatch",
+                "source_event_id": "CALL-1",
+                "signal_type": "position",
+                "occurred_at": "2026-05-18T08:10:00Z",
+                "location_code": "MIDLAND",
+                "external_status": "Driver checked in near the pickup.",
+                "normalized_status": "at_stop",
+                "raw_payload": {
+                    "dispatcher_note": "Driver called from Midland gate.",
+                },
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(matched_signal.status_code, 201)
+        matched_signal_body = matched_signal.json()
+        self.assertFalse(matched_signal_body["duplicate"])
+        self.assertEqual(matched_signal_body["ingest_status"], "CREATED")
+        self.assertEqual(matched_signal_body["signal"]["source_system"], "MANUAL_DISPATCH")
+        self.assertEqual(matched_signal_body["signal"]["signal_type"], "POSITION")
+        self.assertEqual(matched_signal_body["signal"]["processing_status"], "MATCHED")
+        self.assertEqual(matched_signal_body["signal"]["stop_id"], pickup_stop_id)
+        self.assertEqual(matched_signal_body["signal"]["match_confidence"], 0.75)
+        self.assertEqual(matched_signal_body["movement"]["last_signal_at"], "2026-05-18T08:10:00Z")
+
+        duplicate_signal = self.client.post(
+            f"/truck-movements/{movement_id}/tracking-signals",
+            json={
+                "source_system": "manual_dispatch",
+                "source_event_id": "CALL-1",
+                "signal_type": "position",
+                "occurred_at": "2026-05-18T08:10:00Z",
+                "location_code": "MIDLAND",
+                "external_status": "Driver checked in near the pickup.",
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(duplicate_signal.status_code, 200)
+        duplicate_signal_body = duplicate_signal.json()
+        self.assertTrue(duplicate_signal_body["duplicate"])
+        self.assertEqual(duplicate_signal_body["ingest_status"], "DUPLICATE")
+        self.assertEqual(
+            duplicate_signal_body["signal"]["signal_id"],
+            matched_signal_body["signal"]["signal_id"],
+        )
+
+        eta_signal = self.client.post(
+            f"/truck-movements/{movement_id}/tracking-signals",
+            json={
+                "source_system": "telematics_demo",
+                "source_event_id": "GPS-ETA-1",
+                "signal_type": "ETA_UPDATE",
+                "occurred_at": "2026-05-18T09:00:00Z",
+                "eta_at_destination": "2026-05-19T15:00:00Z",
+                "latitude": 35.5,
+                "longitude": -97.2,
+                "raw_payload": {
+                    "provider": "demo",
+                },
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(eta_signal.status_code, 201)
+        eta_signal_body = eta_signal.json()
+        self.assertEqual(eta_signal_body["signal"]["processing_status"], "MATCHED")
+        self.assertIsNone(eta_signal_body["signal"]["stop_id"])
+        self.assertEqual(eta_signal_body["movement"]["last_signal_at"], "2026-05-18T09:00:00Z")
+        self.assertEqual(eta_signal_body["movement"]["current_eta_at_destination"], "2026-05-19T15:00:00Z")
+        self.assertEqual(eta_signal_body["signal"]["raw_payload"]["eta_at_destination"], "2026-05-19T15:00:00+00:00")
+
+        rejected_signal = self.client.post(
+            f"/truck-movements/{movement_id}/tracking-signals",
+            json={
+                "source_system": "telematics_demo",
+                "source_event_id": "GPS-BAD-STOP",
+                "signal_type": "POSITION",
+                "occurred_at": "2026-05-18T10:00:00Z",
+                "stop_id": "TS-DOES-NOT-EXIST",
+                "raw_payload": {
+                    "provider": "demo",
+                    "stop_reference": "TS-DOES-NOT-EXIST",
+                },
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(rejected_signal.status_code, 201)
+        rejected_signal_body = rejected_signal.json()
+        self.assertEqual(rejected_signal_body["signal"]["processing_status"], "REJECTED")
+        self.assertIn("was not found", rejected_signal_body["signal"]["processing_error"])
+        self.assertEqual(rejected_signal_body["movement"]["last_signal_at"], "2026-05-18T09:00:00Z")
+
+        list_signals = self.client.get(
+            f"/truck-movements/{movement_id}/tracking-signals",
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(list_signals.status_code, 200)
+        self.assertEqual(len(list_signals.json()), 3)
+
+        with self.SessionLocal() as session:
+            self.assertEqual(session.query(DeliveryTrackingSignal).count(), 3)
+            self.assertEqual(session.query(DeliveryEvent).count(), 0)
+            movement = session.get(DeliveryTruckMovement, movement_id)
+            self.assertIsNotNone(movement)
+            assert movement is not None
+            self.assertEqual(
+                movement.last_signal_at.replace(tzinfo=timezone.utc),
+                datetime(2026, 5, 18, 9, 0, tzinfo=timezone.utc),
+            )
+            self.assertEqual(
+                movement.current_eta_at_destination.replace(tzinfo=timezone.utc),
+                datetime(2026, 5, 19, 15, 0, tzinfo=timezone.utc),
+            )
+
+    def test_classifies_truck_tracking_health_eta_stale_and_dwell_exceptions(self) -> None:
+        self._create_user(
+            user_id="ops.health",
+            email="ops.health@example.com",
+            display_name="Ops Health",
+            role="OPERATIONS",
+        )
+        ops_token = self._login(identifier="ops.health")
+        self._seed_trade()
+        self._sync_deliveries(ops_token)
+        self._promote_delivery_to_truck(ops_token)
+
+        create_response = self.client.post(
+            "/deliveries/DLV-T-TRUCK-1/truck-movements",
+            json={
+                "sequence_no": 1,
+                "status": "ASSIGNED",
+                "stops": [
+                    {
+                        "stop_type": "PICKUP",
+                        "location_code": "MIDLAND",
+                        "planned_arrival_start": "2026-05-18T08:00:00Z",
+                        "planned_arrival_end": "2026-05-18T08:30:00Z",
+                        "planned_departure_end": "2026-05-18T09:15:00Z",
+                    },
+                    {
+                        "stop_type": "DROPOFF",
+                        "location_code": "CUSHING",
+                        "planned_arrival_start": "2026-05-18T15:00:00Z",
+                        "planned_arrival_end": "2026-05-18T16:00:00Z",
+                    },
+                ],
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(create_response.status_code, 201)
+        movement_body = create_response.json()
+        movement_id = movement_body["movement_id"]
+        pickup_stop_id = movement_body["stops"][0]["stop_id"]
+
+        missing_health = self.client.get(
+            f"/truck-movements/{movement_id}/tracking-health",
+            params={"as_of": "2026-05-18T07:00:00Z"},
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(missing_health.status_code, 200)
+        missing_health_body = missing_health.json()
+        self.assertEqual(missing_health_body["tracking_freshness_status"], "MISSING")
+        self.assertEqual(missing_health_body["eta_status"], "MISSING_ETA")
+        self.assertEqual(missing_health_body["exception_severity"], "WATCH")
+        self.assertEqual(missing_health_body["primary_exception"], "MISSING_TRACKING_SIGNAL")
+
+        on_time_signal = self.client.post(
+            f"/truck-movements/{movement_id}/tracking-signals",
+            json={
+                "source_system": "telematics_demo",
+                "source_event_id": "GPS-HEALTH-1",
+                "signal_type": "ETA_UPDATE",
+                "occurred_at": "2026-05-18T08:00:00Z",
+                "eta_at_destination": "2026-05-18T15:30:00Z",
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(on_time_signal.status_code, 201)
+
+        fresh_health = self.client.get(
+            f"/truck-movements/{movement_id}/tracking-health",
+            params={"as_of": "2026-05-18T10:00:00Z"},
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(fresh_health.status_code, 200)
+        fresh_health_body = fresh_health.json()
+        self.assertEqual(fresh_health_body["tracking_freshness_status"], "FRESH")
+        self.assertEqual(fresh_health_body["minutes_since_last_signal"], 120)
+        self.assertEqual(fresh_health_body["eta_status"], "ON_TIME")
+        self.assertEqual(fresh_health_body["exception_severity"], "CLEAR")
+
+        clear_exception_list = self.client.get(
+            "/truck-tracking/exceptions",
+            params={"as_of": "2026-05-18T10:00:00Z"},
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(clear_exception_list.status_code, 200)
+        self.assertEqual(clear_exception_list.json(), [])
+
+        include_clear_exception_list = self.client.get(
+            "/truck-tracking/exceptions",
+            params={"as_of": "2026-05-18T10:00:00Z", "include_clear": "true"},
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(include_clear_exception_list.status_code, 200)
+        include_clear_body = include_clear_exception_list.json()
+        self.assertEqual(len(include_clear_body), 1)
+        self.assertEqual(include_clear_body[0]["delivery_id"], "DLV-T-TRUCK-1")
+        self.assertEqual(include_clear_body[0]["tracking_health"]["exception_severity"], "CLEAR")
+
+        stale_health = self.client.get(
+            f"/truck-movements/{movement_id}/tracking-health",
+            params={"as_of": "2026-05-18T13:00:00Z"},
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(stale_health.status_code, 200)
+        stale_health_body = stale_health.json()
+        self.assertEqual(stale_health_body["tracking_freshness_status"], "STALE")
+        self.assertEqual(stale_health_body["minutes_since_last_signal"], 300)
+        self.assertEqual(stale_health_body["primary_exception"], "STALE_TRACKING")
+        self.assertEqual(stale_health_body["exception_severity"], "ACTION_REQUIRED")
+
+        at_risk_signal = self.client.post(
+            f"/truck-movements/{movement_id}/tracking-signals",
+            json={
+                "source_system": "telematics_demo",
+                "source_event_id": "GPS-HEALTH-2",
+                "signal_type": "ETA_UPDATE",
+                "occurred_at": "2026-05-18T13:30:00Z",
+                "eta_at_destination": "2026-05-18T17:00:00Z",
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(at_risk_signal.status_code, 201)
+
+        at_risk_health = self.client.get(
+            f"/truck-movements/{movement_id}/tracking-health",
+            params={"as_of": "2026-05-18T14:00:00Z"},
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(at_risk_health.status_code, 200)
+        at_risk_health_body = at_risk_health.json()
+        self.assertEqual(at_risk_health_body["eta_status"], "AT_RISK")
+        self.assertEqual(at_risk_health_body["eta_late_minutes"], 60)
+        self.assertEqual(at_risk_health_body["primary_exception"], "ETA_AT_RISK")
+        self.assertEqual(at_risk_health_body["exception_severity"], "WATCH")
+
+        watch_exception_list = self.client.get(
+            "/truck-tracking/exceptions",
+            params={"as_of": "2026-05-18T14:00:00Z", "severity": "WATCH"},
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(watch_exception_list.status_code, 200)
+        watch_exception_body = watch_exception_list.json()
+        self.assertEqual(len(watch_exception_body), 1)
+        self.assertEqual(watch_exception_body[0]["trade_id"], "T-TRUCK-1")
+        self.assertEqual(watch_exception_body[0]["movement"]["movement_id"], movement_id)
+        self.assertEqual(watch_exception_body[0]["tracking_health"]["primary_exception"], "ETA_AT_RISK")
+
+        arrived_pickup = self.client.post(
+            f"/truck-stops/{pickup_stop_id}/checkpoints",
+            json={
+                "checkpoint_code": "ARRIVED_PICKUP",
+                "occurred_at": "2026-05-18T08:30:00Z",
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(arrived_pickup.status_code, 201)
+
+        dwell_health = self.client.get(
+            f"/truck-movements/{movement_id}/tracking-health",
+            params={"as_of": "2026-05-18T14:30:00Z"},
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(dwell_health.status_code, 200)
+        dwell_health_body = dwell_health.json()
+        self.assertEqual(dwell_health_body["dwell_status"], "OVER_DWELL")
+        self.assertEqual(dwell_health_body["current_dwell_minutes"], 360)
+        self.assertEqual(dwell_health_body["primary_exception"], "OVER_DWELL")
+        self.assertEqual(dwell_health_body["exception_severity"], "ACTION_REQUIRED")
+
+        action_exception_list = self.client.get(
+            "/truck-tracking/exceptions",
+            params={"as_of": "2026-05-18T14:30:00Z"},
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(action_exception_list.status_code, 200)
+        action_exception_body = action_exception_list.json()
+        self.assertEqual(len(action_exception_body), 1)
+        self.assertEqual(action_exception_body[0]["delivery_id"], "DLV-T-TRUCK-1")
+        self.assertEqual(action_exception_body[0]["counterparty"], "SHELL_TRADING")
+        self.assertEqual(action_exception_body[0]["tracking_health"]["primary_exception"], "OVER_DWELL")
+        self.assertEqual(action_exception_body[0]["tracking_health"]["exception_severity"], "ACTION_REQUIRED")

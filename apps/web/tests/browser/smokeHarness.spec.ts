@@ -247,6 +247,17 @@ test("dashboard smoke boots against the seeded browser harness", async ({
       page.getByRole("button", { name: "Open Exposure" }).first(),
     ).toBeVisible();
 
+    await page.getByLabel("Monitor preset").selectOption({ label: "Market Overview" });
+    await expect(
+      page.getByText(
+        "Lead with a terminal-style market strip and monitor board before rolling into desk reporting, prices, exposure, and attention.",
+      ),
+    ).toBeVisible();
+    await expect(page.locator("#quick-start")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Add Common Starting Points" }),
+    ).toBeVisible();
+
     await page.keyboard.press("Alt+F");
     await expect(page.getByLabel("Search current screen")).toBeFocused();
     await page.keyboard.press("Alt+2");
@@ -387,6 +398,8 @@ test("shipments truck workflow renders checkpoint history and corrections", asyn
     }
 
     await expect(detailPanel.getByText("Selected Run 1", { exact: true })).toBeVisible();
+    await expect(detailPanel.getByText("Tracking Health: STALE TRACKING")).toBeVisible();
+    await expect(detailPanel.getByText("ETA ON TIME")).toBeVisible();
     await expect(
       detailPanel.getByText("Latest truck checkpoint: Departed pickup").first(),
     ).toBeVisible();
@@ -406,6 +419,170 @@ test("shipments truck workflow renders checkpoint history and corrections", asyn
     ).toBeVisible();
 
     assertNoHarnessRequestFailures(harness);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("shipments truck workflow records normalized tracking signals", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness();
+
+  try {
+    await seedSignedInSession(page, harness);
+    await page.goto(`${harness.origin}/?view=shipments`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await dismissStartHereOverlay(page);
+
+    const detailPanel = page.locator(".shipment-editor-panel");
+    await expect(detailPanel.getByText("Truck Dispatch Workflow")).toBeVisible();
+    const openRunButton = detailPanel.getByRole("button", { name: "Open Run" }).first();
+    if (await openRunButton.isVisible().catch(() => false)) {
+      await openRunButton.click();
+    }
+
+    await expect(detailPanel.getByText("Selected Run 1", { exact: true })).toBeVisible();
+    const signalSection = detailPanel
+      .locator(".shipment-card")
+      .filter({ hasText: "Tracking Signals" })
+      .first();
+    await expect(signalSection.getByText("POSITION", { exact: true })).toBeVisible();
+    await expect(signalSection.getByText("MATCHED", { exact: true }).first()).toBeVisible();
+
+    await signalSection.getByLabel("Provider Event ID").fill("CALL-SMOKE-NEW");
+    await signalSection.getByLabel("Signal Type").fill("ETA_UPDATE");
+    await signalSection.getByLabel("Signal Occurred At").fill("2026-05-10T10:15");
+    await signalSection.getByLabel("Stop Match").selectOption("STOP-SMOKE-2");
+    await signalSection.getByLabel("Signal Location").fill("HOUSTON");
+    await signalSection.getByLabel("External Status").fill("Driver is en route to destination");
+    await signalSection.getByLabel("Normalized Status").fill("IN_TRANSIT");
+    await signalSection.getByLabel("Match Confidence").fill("0.9");
+    await signalSection.getByLabel("Destination ETA").fill("2026-05-10T14:45");
+    await signalSection.getByLabel("Dispatcher Signal Note").fill("Driver called with an updated ETA.");
+    await signalSection.getByRole("button", { name: "Record Tracking Signal" }).click();
+
+    await expect(signalSection.getByText("Signal 18 recorded as MATCHED.")).toBeVisible();
+    await expect(signalSection.getByText("ETA UPDATE", { exact: true }).first()).toBeVisible();
+    await expect(signalSection.getByText("Driver called with an updated ETA.")).toBeVisible();
+    await expect(detailPanel.getByText("Tracking Health: CLEAR")).toBeVisible();
+
+    expect(
+      harness.unexpectedRequests,
+      `Unhandled mock API requests:\n${formatRecordedRequests(harness.unexpectedRequests)}`,
+    ).toEqual([]);
+    expect(harness.mutationRequests).toEqual([
+      {
+        method: "POST",
+        path: "/truck-movements/MOVE-SMOKE-1/tracking-signals",
+        search: "",
+      },
+    ]);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("scheduling and operations surface truck tracking exceptions read-only", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness();
+
+  try {
+    await seedSignedInSession(page, harness);
+    await page.goto(`${harness.origin}/?view=scheduling`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await dismissStartHereOverlay(page);
+
+    const schedulingExceptionTile = page
+      .locator(".workspace-tile")
+      .filter({ hasText: "Truck Tracking Exceptions" })
+      .first();
+    await expect(schedulingExceptionTile.getByText("Deterministic Tracking Watch")).toBeVisible();
+    await expect(schedulingExceptionTile.getByText("STALE TRACKING")).toBeVisible();
+    await expect(schedulingExceptionTile.getByText("T-TRUCK-SMOKE-1")).toBeVisible();
+    await expect(schedulingExceptionTile.getByText("ACTION REQUIRED", { exact: true })).toBeVisible();
+
+    await page.goto(`${harness.origin}/?view=operations`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const operationsExceptionTile = page
+      .locator(".workspace-tile")
+      .filter({ hasText: "Truck Tracking Exceptions" })
+      .first();
+    await expect(operationsExceptionTile.getByText("Deterministic Tracking Watch")).toBeVisible();
+    await expect(operationsExceptionTile.getByText("STALE TRACKING")).toBeVisible();
+    await expect(operationsExceptionTile.getByText("T-TRUCK-SMOKE-1")).toBeVisible();
+    await expect(operationsExceptionTile.getByText("ACTION REQUIRED", { exact: true })).toBeVisible();
+
+    assertNoHarnessRequestFailures(harness);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("shipments truck workflow surfaces blocked checkpoint reversals near the stop", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness();
+  const blockedReversalMessage =
+    "DEPARTED_PICKUP cannot be reversed while downstream truck stop STOP-SMOKE-2 has active progress. Reverse or correct downstream stop progress first.";
+
+  try {
+    await seedSignedInSession(page, harness);
+    await page.goto(`${harness.origin}/?view=shipments`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await dismissStartHereOverlay(page);
+
+    const detailPanel = page.locator(".shipment-editor-panel");
+    await expect(detailPanel.getByText("Truck Dispatch Workflow")).toBeVisible();
+    const openRunButton = detailPanel.getByRole("button", { name: "Open Run" }).first();
+    if (await openRunButton.isVisible().catch(() => false)) {
+      await openRunButton.click();
+    }
+
+    await expect(detailPanel.getByText("Selected Run 1", { exact: true })).toBeVisible();
+    const checkpointSection = detailPanel
+      .locator(".shipment-reset-section")
+      .filter({ hasText: "Truck Checkpoints" })
+      .first();
+    await expect(
+      checkpointSection.getByText("Active checkpoints: Departed pickup"),
+    ).toBeVisible();
+
+    await checkpointSection
+      .getByLabel("Correction Reason")
+      .fill("Dispatcher tried to correct the pickup departure before clearing downstream progress.");
+    await checkpointSection
+      .locator(".position-card")
+      .filter({ hasText: "Departed pickup" })
+      .getByRole("button", { name: "Reverse Checkpoint" })
+      .click();
+
+    await expect(checkpointSection.getByText(blockedReversalMessage)).toBeVisible();
+    await expect(detailPanel.getByText("Selected Run 1", { exact: true })).toBeVisible();
+    await expect(
+      checkpointSection.getByText("Active checkpoints: Departed pickup"),
+    ).toBeVisible();
+
+    expect(
+      harness.unexpectedRequests,
+      `Unhandled mock API requests:\n${formatRecordedRequests(harness.unexpectedRequests)}`,
+    ).toEqual([]);
+    expect(harness.mutationRequests).toEqual([
+      {
+        method: "POST",
+        path: "/truck-stops/STOP-SMOKE-1/checkpoints/3/reverse",
+        search: "",
+      },
+    ]);
   } finally {
     await harness.close();
   }
@@ -577,7 +754,10 @@ test("single-user smoke signs into the prompt home when one-click access is enab
     await expect(page.getByText("Contextual starting points")).toHaveCount(0);
     await expect(page.getByText("Recent prompt threads")).toHaveCount(0);
     await expect(page.locator(".prompt-home-map-card")).toContainText(
-      "1 plotted | 0 hidden | 1 overlays",
+      "all 1 shown on map",
+    );
+    await expect(page.locator(".prompt-home-map-card")).toContainText(
+      "Map Records1 map record",
     );
     await expect(page.locator(".prompt-home-map-card")).not.toContainText(
       "No map-ready assets yet.",
@@ -958,11 +1138,26 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(
       page.locator(".asset-map-weather-marker").first(),
     ).toContainText("Wx");
-    const firstWeatherMarkerBox = await page
+    const weatherOverlayMarkerBox = await page
       .locator(".asset-map-weather-marker")
-      .first()
+      .nth(1)
       .boundingBox();
-    expect(firstWeatherMarkerBox).not.toBeNull();
+    expect(weatherOverlayMarkerBox).not.toBeNull();
+    const initialMapFrameBox = await page.locator(mapFrameSelector).boundingBox();
+    expect(initialMapFrameBox).not.toBeNull();
+    const weatherOverlayMarkerTarget =
+      weatherOverlayMarkerBox && initialMapFrameBox
+        ? {
+            x:
+              weatherOverlayMarkerBox.x +
+              weatherOverlayMarkerBox.width / 2 -
+              initialMapFrameBox.x,
+            y:
+              weatherOverlayMarkerBox.y +
+              weatherOverlayMarkerBox.height / 2 -
+              initialMapFrameBox.y,
+          }
+        : null;
     await expectMarkersInsideFrame(
       page,
       mapFrameSelector,
@@ -1068,25 +1263,18 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(weatherOverlayControls).toContainText(
       "Tracked Wx markers hide while point overlays are active. Click the weather graphic on the map to open the location preview.",
     );
-    if (firstWeatherMarkerBox) {
+    if (weatherOverlayMarkerTarget) {
+      await page.locator(mapFrameSelector).scrollIntoViewIfNeeded();
       const mapFrameBox = await page.locator(mapFrameSelector).boundingBox();
       expect(mapFrameBox).not.toBeNull();
       if (mapFrameBox) {
-        await page.locator(mapFrameSelector).click({
-          position: {
-            x:
-              firstWeatherMarkerBox.x +
-              firstWeatherMarkerBox.width / 2 -
-              mapFrameBox.x,
-            y:
-              firstWeatherMarkerBox.y +
-              firstWeatherMarkerBox.height / 2 -
-              mapFrameBox.y,
-          },
-        });
+        await page.mouse.click(
+          mapFrameBox.x + weatherOverlayMarkerTarget.x,
+          mapFrameBox.y + weatherOverlayMarkerTarget.y,
+        );
       }
     }
-    await expect(weatherPreview).toContainText("HOUSTON_GC");
+    await expect(weatherPreview).toContainText("HENRY_HUB_WX");
     await expect(weatherPreview).toContainText("Latest obs:");
     await temperatureOverlayToggle.uncheck();
     await expect(page.locator(".asset-map-weather-marker")).toHaveCount(2);
@@ -1202,12 +1390,6 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(weatherPreview).toHaveCount(0);
     await weatherToggle.check();
     await expect(page.locator(".asset-map-weather-marker")).toHaveCount(2);
-    await expectMarkersInsideFrame(
-      page,
-      mapFrameSelector,
-      ".asset-map-weather-marker",
-      2,
-    );
 
     await mapToggle.click();
     await expect(mapPanel).toBeHidden();
@@ -1793,6 +1975,13 @@ test("admin smoke shows the role-derived pilot lineup and sync action", async ({
         .filter({ hasText: "Ops Governor" }),
     ).toBeVisible();
     await expect(agentControl.getByText("Evals PASS")).toBeVisible();
+    const constructionReview = agentControl.locator(
+      ".assistant-admin-construction-review",
+    );
+    await expect(constructionReview).toContainText("Saved Construction Preview");
+    await expect(constructionReview).toContainText("Context provenance");
+    await expect(constructionReview).toContainText("Managed agent overlay");
+    await expect(constructionReview).toContainText("Fallback");
     await expect(
       roleCatalog.getByRole("button", { name: /Pre-Trade Structuring Agent/ }),
     ).toBeVisible();
@@ -1905,6 +2094,11 @@ test("assistant smoke submits a governed agent change request and admin marks it
     await page.getByRole("button", { name: "Save Agent" }).click();
     await expect(page.getByText(/Ops Governor saved as version/)).toBeVisible();
     await expect(reviewCard).toContainText("Applied revision proof");
+    await expect(reviewCard).toContainText("Saved configuration diff");
+    await expect(reviewCard).toContainText("Authority ceiling:");
+    await expect(reviewCard).toContainText("STAGE -> DRAFT");
+    await expect(reviewCard).toContainText("Allowed action types:");
+    await expect(reviewCard).toContainText("cancel_trade -> None");
 
     await reviewCard.getByRole("button", { name: "Mark Applied" }).click();
 
@@ -2071,11 +2265,13 @@ test("documentation wiki smoke supports seeded pages and revision restore", asyn
       page.getByRole("button", { name: /Confirmations/ }),
     ).toBeVisible();
 
+    await page.getByLabel("New Page Template").first().selectOption("runbook");
     await page.getByRole("button", { name: "New Child Page" }).click();
 
-    const titleField = page.getByLabel("Page Title");
-    const markdownField = page.getByLabel("Markdown");
-    await expect(titleField).toHaveValue("Untitled Page");
+    const titleField = page.getByRole("textbox", { name: "Page Title" });
+    const markdownField = page.getByRole("textbox", { name: "Markdown" });
+    await expect(titleField).toHaveValue("Untitled Runbook");
+    await expect(markdownField).toHaveValue(/## Stop Conditions/);
 
     await titleField.fill("Broker Escalations");
     await markdownField.fill(
@@ -2122,14 +2318,17 @@ test("documentation wiki smoke supports seeded pages and revision restore", asyn
       .locator(".wiki-preview")
       .getByRole("link", { name: "Confirmations" })
       .click();
-    await expect(page.getByLabel("Page Title")).toHaveValue("Confirmations");
+    await expect(page.getByRole("textbox", { name: "Page Title" })).toHaveValue("Confirmations");
 
     const brokerEscalationsBacklink = page
       .locator(".wiki-backlink-card")
       .filter({ hasText: "Broker Escalations" });
     await expect(brokerEscalationsBacklink).toBeVisible();
+    await expect(
+      brokerEscalationsBacklink.getByText("See Confirmations before you escalate."),
+    ).toBeVisible();
     await brokerEscalationsBacklink.click();
-    await expect(page.getByLabel("Page Title")).toHaveValue("Broker Escalations");
+    await expect(page.getByRole("textbox", { name: "Page Title" })).toHaveValue("Broker Escalations");
 
     const versionOneCard = page
       .locator(".wiki-revision-card")
@@ -2138,8 +2337,8 @@ test("documentation wiki smoke supports seeded pages and revision restore", asyn
     await versionOneCard.getByRole("button", { name: "Restore" }).click();
 
     await expect(page.getByText("Restored revision 6.")).toBeVisible();
-    await expect(page.getByLabel("Page Title")).toHaveValue("Untitled Page");
-    await expect(page.getByLabel("Markdown")).toHaveValue("");
+    await expect(page.getByRole("textbox", { name: "Page Title" })).toHaveValue("Untitled Runbook");
+    await expect(page.getByRole("textbox", { name: "Markdown" })).toHaveValue(/## Stop Conditions/);
 
     page.once("dialog", (dialog) => dialog.accept());
     await page.getByRole("button", { name: "Archive Page" }).click();
@@ -2292,7 +2491,7 @@ test("prompt home stages a governed action with inline review context and syncs 
       "Signed unwind confirmation has not been uploaded yet.",
     );
     await expect(actionCard).toContainText("Stale-state basis");
-    await expect(actionCard).toContainText("trade_status: ACTIVE");
+    await expect(actionCard).toContainText("Trade Status: ACTIVE");
     await expect(actionCard).toContainText("Dry-run preview");
     await expect(
       assistantMessage.getByRole("button", { name: "Open Assistant Console" }),

@@ -335,6 +335,8 @@ describe('LibraryWorkspace', () => {
       createFolder: () => ({ ok: true }),
       moveFolder: () => ({ ok: true }),
       copyFolder: () => ({ ok: true }),
+      renameFolder: () => ({ ok: true }),
+      deleteFolder: () => ({ ok: true }),
       assignDocumentToFolder: () => undefined,
       assignDocumentsToFolder: () => undefined,
     })
@@ -364,5 +366,94 @@ describe('LibraryWorkspace', () => {
     expect(markup).toContain('Set document type for 225186 VESSEL NOMINATION')
     expect(markup).toContain('Delivery Confirmation')
     expect(markup).toContain('<option value="UNKNOWN" selected="">Unknown</option>')
+  })
+
+  it('renders a per-folder action menu trigger for custom library folders', () => {
+    useDocumentIngestionControllerMock.mockReturnValue(buildController())
+    useDocumentLibraryFolderStateMock.mockReturnValue({
+      folders: [
+        {
+          id: 'credit-docs',
+          name: 'Credit Docs',
+          createdAt: '2026-05-15T10:00:00Z',
+          parentFolderId: null,
+        },
+      ],
+      assignments: {
+        'DOC-225186': 'credit-docs',
+      },
+      createFolder: () => ({ ok: true }),
+      moveFolder: () => ({ ok: true }),
+      copyFolder: () => ({ ok: true }),
+      renameFolder: () => ({ ok: true }),
+      deleteFolder: () => ({ ok: true }),
+      assignDocumentToFolder: () => undefined,
+      assignDocumentsToFolder: () => undefined,
+    })
+
+    const markup = renderToStaticMarkup(
+      createElement(LibraryWorkspace, {
+        authSession: {
+          accessToken: 'token',
+          refreshToken: 'refresh',
+          expiresAt: '2026-05-16T22:00:00Z',
+          user: {
+            id: 'doc_admin',
+            email: 'doc_admin@example.com',
+            name: 'Doc Admin',
+            role: 'OPS_ADMIN',
+          },
+        },
+        formatDate: (value: string | null | undefined) => value ?? '',
+        onOpenOperationsWorkspace: () => undefined,
+      }),
+    )
+
+    expect(markup).toContain('Credit Docs')
+    expect(markup).toContain('Open folder menu for Credit Docs')
+    expect(markup).toContain('aria-haspopup="menu"')
+  })
+
+  it('renders a selected file page with upload provenance and activity', () => {
+    useDocumentIngestionControllerMock.mockReturnValue(
+      buildController({
+        documents: [
+          buildDocument({
+            created_by: 'ops_admin',
+            updated_by: 'ops_reviewer',
+            updated_at: '2026-05-16T18:00:00Z',
+            review_status: 'VERIFIED',
+            reviewed_at: '2026-05-16T18:00:00Z',
+            reviewed_by: 'ops_reviewer',
+          }),
+        ],
+      }),
+    )
+
+    const markup = renderToStaticMarkup(
+      createElement(LibraryWorkspace, {
+        authSession: {
+          accessToken: 'token',
+          refreshToken: 'refresh',
+          expiresAt: '2026-05-16T22:00:00Z',
+          user: {
+            id: 'doc_admin',
+            email: 'doc_admin@example.com',
+            name: 'Doc Admin',
+            role: 'OPS_ADMIN',
+          },
+        },
+        activeDocumentId: 'DOC-225186',
+        formatDate: (value: string | null | undefined) => value ?? '',
+        onOpenOperationsWorkspace: () => undefined,
+      }),
+    )
+
+    expect(markup).toContain('Back to Library')
+    expect(markup).toContain('Activity Log')
+    expect(markup).toContain('Authenticated PDF upload')
+    expect(markup).toContain('Uploaded By')
+    expect(markup).toContain('ops_admin')
+    expect(markup).toContain('Open Source PDF')
   })
 })

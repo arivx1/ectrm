@@ -122,6 +122,11 @@ export function normalizePromptNavigationIntent(
     return null
   }
 
+  const focus = normalizePromptNavigationFocus(value.focus)
+  if (value.focus !== undefined && value.focus !== null && !focus) {
+    return null
+  }
+
   const sourceRunId =
     normalizeOptionalFiniteNumber(value.sourceRunId) ??
     normalizeOptionalFiniteNumber(value.source_run_id) ??
@@ -144,7 +149,7 @@ export function normalizePromptNavigationIntent(
     label: normalizeOptionalText(value.label),
     rationale: normalizeOptionalText(value.rationale),
     filter: normalizeOptionalText(value.filter),
-    focus: normalizePromptNavigationFocus(value.focus),
+    focus,
     inspectorTab:
       normalizeInspectorTab(value.inspectorTab) ??
       normalizeInspectorTab(value.tradeInspectorTab) ??

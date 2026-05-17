@@ -9,10 +9,12 @@ from apps.api.app.domains.messages.services.workspace import (
     create_messaging_workspace_post,
     list_messaging_workspace_state,
     to_messaging_workspace_message_out,
+    update_messaging_workspace_post,
 )
 from apps.api.app.schemas.messaging import (
     MessagingWorkspaceMessageOut,
     MessagingWorkspacePostCreate,
+    MessagingWorkspacePostUpdate,
     MessagingWorkspaceStateOut,
 )
 
@@ -35,6 +37,27 @@ def create_workspace_post(
     try:
         record = create_messaging_workspace_post(
             db,
+            payload=payload,
+            actor_id=getattr(request.state, "actor_id", None),
+            session_id=getattr(request.state, "session_id", None),
+            actor_role=getattr(request.state, "actor_role", None),
+        )
+    except MessagingWorkspaceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return to_messaging_workspace_message_out(record)
+
+
+@router.patch("/workspace/posts/{message_id}", response_model=MessagingWorkspaceMessageOut)
+def update_workspace_post(
+    message_id: str,
+    payload: MessagingWorkspacePostUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> MessagingWorkspaceMessageOut:
+    try:
+        record = update_messaging_workspace_post(
+            db,
+            message_id=message_id,
             payload=payload,
             actor_id=getattr(request.state, "actor_id", None),
             session_id=getattr(request.state, "session_id", None),

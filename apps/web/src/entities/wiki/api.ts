@@ -15,6 +15,7 @@ export type WikiPageRevision = {
 export type WikiPageLink = {
   label: string
   target: string
+  snippet?: string
 }
 
 export type WikiPageSummary = {

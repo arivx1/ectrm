@@ -43,6 +43,8 @@ def upgrade() -> None:
         sa.Column("conversation_id", sa.String(length=64), nullable=False),
         sa.Column("item_kind", sa.String(length=16), nullable=False),
         sa.Column("source", sa.String(length=16), nullable=False),
+        sa.Column("parent_message_id", sa.String(length=64), nullable=True),
+        sa.Column("thread_root_message_id", sa.String(length=64), nullable=True),
         sa.Column("body", sa.Text(), nullable=False),
         sa.Column("system_label", sa.String(length=160), nullable=True),
         sa.Column("system_detail", sa.Text(), nullable=True),
@@ -59,12 +61,29 @@ def upgrade() -> None:
         sa.Column("created_by_user_id", sa.String(length=128), nullable=True),
         sa.Column("created_by_session_id", sa.String(length=128), nullable=True),
         sa.Column("created_by_role", sa.String(length=64), nullable=True),
+        sa.Column("edited_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("edited_by_user_id", sa.String(length=128), nullable=True),
+        sa.Column("edited_by_session_id", sa.String(length=128), nullable=True),
+        sa.Column("edited_by_role", sa.String(length=64), nullable=True),
+        sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("deleted_by_user_id", sa.String(length=128), nullable=True),
+        sa.Column("deleted_by_session_id", sa.String(length=128), nullable=True),
+        sa.Column("deleted_by_role", sa.String(length=64), nullable=True),
+        sa.Column("pinned_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("pinned_by_user_id", sa.String(length=128), nullable=True),
+        sa.Column("pinned_by_session_id", sa.String(length=128), nullable=True),
+        sa.Column("pinned_by_role", sa.String(length=64), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_index(
         "ix_messaging_workspace_messages_conversation_id",
         "messaging_workspace_messages",
         ["conversation_id"],
+    )
+    op.create_index(
+        "ix_messaging_workspace_messages_thread_root_message_id",
+        "messaging_workspace_messages",
+        ["thread_root_message_id"],
     )
     op.create_index(
         "ix_messaging_workspace_messages_created_at",
@@ -75,6 +94,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_messaging_workspace_messages_created_at", table_name="messaging_workspace_messages")
+    op.drop_index(
+        "ix_messaging_workspace_messages_thread_root_message_id",
+        table_name="messaging_workspace_messages",
+    )
     op.drop_index("ix_messaging_workspace_messages_conversation_id", table_name="messaging_workspace_messages")
     op.drop_table("messaging_workspace_messages")
     op.drop_table("messaging_workspace_conversations")

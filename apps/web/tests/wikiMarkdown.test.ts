@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseWikiMarkdownLinks, renderWikiMarkdownHtml } from '../src/workspaces/docs/wikiMarkdown'
+import {
+  findActiveWikiPageMention,
+  parseWikiMarkdownLinks,
+  renderWikiMarkdownHtml,
+  replaceActiveWikiPageMention,
+  rewriteWikiMarkdownLinkTarget,
+} from '../src/workspaces/docs/wikiMarkdown'
 
 describe('renderWikiMarkdownHtml', () => {
   it('renders headings, lists, and code safely', () => {
@@ -61,5 +67,72 @@ describe('parseWikiMarkdownLinks', () => {
       { label: 'Confirmations', target: 'Confirmations' },
       { label: 'Queue Runbook', target: 'wiki-settlement' },
     ])
+  })
+})
+
+describe('rewriteWikiMarkdownLinkTarget', () => {
+  it('rewrites matching unresolved title links to stable page IDs', () => {
+    const markdown = 'See [[Missing Runbook]] and [[Other Page]]. Also [[Missing Runbook]].'
+
+    expect(
+      rewriteWikiMarkdownLinkTarget(
+        markdown,
+        { label: 'Missing Runbook', target: 'Missing Runbook' },
+        'wiki-missing-runbook',
+      ),
+    ).toBe(
+      'See [[Missing Runbook|wiki-missing-runbook]] and [[Other Page]]. Also [[Missing Runbook|wiki-missing-runbook]].',
+    )
+  })
+
+  it('preserves custom labels while replacing missing targets', () => {
+    const markdown = 'Escalate with [[cash checklist|Settlement Handoff]].'
+
+    expect(
+      rewriteWikiMarkdownLinkTarget(
+        markdown,
+        { label: 'cash checklist', target: 'Settlement Handoff' },
+        'wiki-settlement-handoff',
+      ),
+    ).toBe('Escalate with [[cash checklist|wiki-settlement-handoff]].')
+  })
+})
+
+describe('wiki page mention helpers', () => {
+  it('detects an open wiki mention before the cursor', () => {
+    expect(findActiveWikiPageMention('See [[Conf', 10)).toEqual({
+      startIndex: 4,
+      endIndex: 10,
+      query: 'Conf',
+      label: null,
+    })
+  })
+
+  it('preserves a custom label when replacing an active mention', () => {
+    const mention = findActiveWikiPageMention('See [[queue owner|Conf before escalation', 22)
+
+    expect(mention).toEqual({
+      startIndex: 4,
+      endIndex: 22,
+      query: 'Conf',
+      label: 'queue owner',
+    })
+
+    expect(
+      replaceActiveWikiPageMention(
+        'See [[queue owner|Conf before escalation',
+        mention!,
+        { title: 'Confirmations', pageId: 'wiki-confirmations' },
+      ),
+    ).toEqual({
+      markdown: 'See [[queue owner|wiki-confirmations]] before escalation',
+      cursorIndex: 38,
+    })
+  })
+
+  it('ignores closed, multiline, and malformed mention fragments', () => {
+    expect(findActiveWikiPageMention('See [[Confirmations]] now', 21)).toBeNull()
+    expect(findActiveWikiPageMention('See [[Confirmations\nnext', 24)).toBeNull()
+    expect(findActiveWikiPageMention('See [[A|B|C', 11)).toBeNull()
   })
 })

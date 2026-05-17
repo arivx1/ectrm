@@ -8,7 +8,10 @@ from sqlalchemy.orm import Session
 from apps.api.app.domains.admin.services.mutation_provenance import record_mutation_provenance
 from apps.api.app.domains.assistant.services.chat import AssistantServiceError
 from apps.api.app.domains.assistant.services.eval_gates import evaluate_agent_eval_gate
-from apps.api.app.domains.assistant.services.agent_revisions import normalize_agent_revision_payload
+from apps.api.app.domains.assistant.services.agent_revisions import (
+    build_agent_revision_diff_summary,
+    normalize_agent_revision_payload,
+)
 from apps.api.app.domains.assistant.services.role_archetypes import get_role_archetype
 from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
@@ -18,6 +21,7 @@ from apps.api.app.schemas.assistant import (
     AssistantAgentProfileRequestActivation,
     AssistantAgentProfileRequestCreate,
     AssistantAgentProfileRequestDecision,
+    AssistantAgentProfileRequestDiffOut,
     AssistantAgentProfileRequestOut,
     AssistantAgentProfileRequestSubmit,
 )
@@ -333,6 +337,7 @@ def to_profile_request_out(record: AssistantAgentProfileRequest) -> AssistantAge
         rejection_reason=record.rejection_reason,
         linked_agent_id=record.linked_agent_id,
         linked_revision_id=record.linked_revision_id,
+        applied_diff_summary=[],
         requested_at=record.requested_at,
         requested_by=record.requested_by,
         reviewed_at=record.reviewed_at,
@@ -341,6 +346,59 @@ def to_profile_request_out(record: AssistantAgentProfileRequest) -> AssistantAge
         activated_by=record.activated_by,
         updated_at=record.updated_at,
     )
+
+
+def build_profile_request_revision_diff(
+    db: Session,
+    record: AssistantAgentProfileRequest,
+) -> list[dict[str, str]]:
+    revision = _resolve_profile_request_revision(db, record)
+    if revision is None:
+        return []
+    previous_revision = db.scalars(
+        select(AssistantAgentRevision)
+        .where(AssistantAgentRevision.agent_id == revision.agent_id)
+        .where(AssistantAgentRevision.version < revision.version)
+        .order_by(AssistantAgentRevision.version.desc(), AssistantAgentRevision.revision_id.desc())
+        .limit(1)
+    ).first()
+    baseline_payload = previous_revision.payload if previous_revision is not None else None
+    return build_agent_revision_diff_summary(baseline_payload, revision.payload)
+
+
+def to_profile_request_out_with_diff(
+    db: Session,
+    record: AssistantAgentProfileRequest,
+) -> AssistantAgentProfileRequestOut:
+    result = to_profile_request_out(record)
+    result.applied_diff_summary = [
+        AssistantAgentProfileRequestDiffOut.model_validate(row)
+        for row in build_profile_request_revision_diff(db, record)
+    ]
+    return result
+
+
+def _resolve_profile_request_revision(
+    db: Session,
+    record: AssistantAgentProfileRequest,
+) -> AssistantAgentRevision | None:
+    if record.linked_revision_id is not None:
+        revision = db.get(AssistantAgentRevision, record.linked_revision_id)
+        if revision is not None:
+            return revision
+
+    linked_agent_id = record.linked_agent_id or record.target_agent_id or record.requested_agent_id
+    if not linked_agent_id:
+        return None
+    linked_agent = db.get(AssistantAgent, linked_agent_id)
+    if linked_agent is None or linked_agent.profile_request_id != record.request_id:
+        return None
+    if linked_agent.published_revision_id is None:
+        return None
+    revision = db.get(AssistantAgentRevision, linked_agent.published_revision_id)
+    if revision is None or revision.agent_id != linked_agent.agent_id:
+        return None
+    return revision
 
 
 def _get_profile_request_or_error(db: Session, request_id: int) -> AssistantAgentProfileRequest:

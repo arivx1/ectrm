@@ -1,5 +1,6 @@
 import {
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useEffect,
@@ -17,7 +18,12 @@ import type { StoredAuthSession } from '../../shared/mutation'
 import userManualMarkdown from '../../../../../docs/user-manual.md?raw'
 import { filterGuideSections, parseMarkdownDocument } from './guideDocument'
 import { RoadmapDocument, RoadmapSidebar } from './RoadmapDocument'
-import { renderWikiMarkdownHtml } from './wikiMarkdown'
+import {
+  type ActiveWikiPageMention,
+  findActiveWikiPageMention,
+  renderWikiMarkdownHtml,
+  replaceActiveWikiPageMention,
+} from './wikiMarkdown'
 import { useWikiDocumentController } from './useWikiDocumentController'
 import type { WikiPageTreeItem } from './wikiTree'
 
@@ -217,6 +223,8 @@ const MANUAL_SEARCH_SUGGESTIONS = [
   'pricing mismatch',
 ] as const
 
+const MAX_WIKI_MENTION_SUGGESTIONS = 6
+
 const DOCUMENT_ORDER: DocumentationDocumentKey[] = ['guide', 'wiki', 'roadmap']
 
 const DOCUMENT_DEFINITIONS: Record<
@@ -286,6 +294,29 @@ export function DocumentationWorkspace({
     authSession,
     enabled: activeDocumentKey === 'wiki',
   })
+  const [wikiMentionCursorIndex, setWikiMentionCursorIndex] = useState(0)
+  const activeWikiMention = useMemo(
+    () =>
+      wiki.selectedPage?.is_archived
+        ? null
+        : findActiveWikiPageMention(wiki.contentDraft, wikiMentionCursorIndex),
+    [wiki.contentDraft, wiki.selectedPage?.is_archived, wikiMentionCursorIndex],
+  )
+  const wikiMentionSuggestions = useMemo(
+    () =>
+      activeWikiMention
+        ? filterWikiMentionSuggestions(wiki.mentionablePages, activeWikiMention.query).slice(
+            0,
+            MAX_WIKI_MENTION_SUGGESTIONS,
+          )
+        : [],
+    [activeWikiMention, wiki.mentionablePages],
+  )
+  const [selectedWikiMentionIndex, setSelectedWikiMentionIndex] = useState(0)
+
+  useEffect(() => {
+    setSelectedWikiMentionIndex(0)
+  }, [activeWikiMention?.query, activeWikiMention?.startIndex])
 
   function handleWikiPreviewLinkClick(
     event: ReactMouseEvent<HTMLDivElement>,
@@ -305,10 +336,33 @@ export function DocumentationWorkspace({
     void wiki.handleSelectPage(pageId)
   }
 
-  function insertWikiPageMention(page: WikiPageSummary) {
+  function focusWikiEditorAt(cursorIndex: number) {
+    const textarea = wikiEditorTextareaRef.current
+    if (!textarea) {
+      return
+    }
+
+    window.requestAnimationFrame(() => {
+      textarea.focus()
+      textarea.setSelectionRange(cursorIndex, cursorIndex)
+      setWikiMentionCursorIndex(cursorIndex)
+    })
+  }
+
+  function insertWikiPageMention(page: WikiPageSummary, mention: ActiveWikiPageMention | null = activeWikiMention) {
     const mentionMarkup = `[[${page.title}|${page.page_id}]]`
     const textarea = wikiEditorTextareaRef.current
     const currentValue = wiki.contentDraft
+
+    if (mention) {
+      const replacement = replaceActiveWikiPageMention(currentValue, mention, {
+        pageId: page.page_id,
+        title: page.title,
+      })
+      wiki.setContentDraft(replacement.markdown)
+      focusWikiEditorAt(replacement.cursorIndex)
+      return
+    }
 
     if (!textarea) {
       wiki.setContentDraft(
@@ -330,11 +384,37 @@ export function DocumentationWorkspace({
     const nextCursorPosition = prefix.length + insertedText.length
 
     wiki.setContentDraft(nextValue)
+    focusWikiEditorAt(nextCursorPosition)
+  }
 
-    window.requestAnimationFrame(() => {
-      textarea.focus()
-      textarea.setSelectionRange(nextCursorPosition, nextCursorPosition)
-    })
+  function handleWikiMarkdownKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (!activeWikiMention || wikiMentionSuggestions.length === 0) {
+      return
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setSelectedWikiMentionIndex((currentIndex) => (
+        currentIndex + 1 >= wikiMentionSuggestions.length ? 0 : currentIndex + 1
+      ))
+      return
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setSelectedWikiMentionIndex((currentIndex) => (
+        currentIndex - 1 < 0 ? wikiMentionSuggestions.length - 1 : currentIndex - 1
+      ))
+      return
+    }
+
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault()
+      insertWikiPageMention(
+        wikiMentionSuggestions[selectedWikiMentionIndex] ?? wikiMentionSuggestions[0],
+        activeWikiMention,
+      )
+    }
   }
 
   function handleWorkspaceLinkClick(
@@ -651,7 +731,12 @@ export function DocumentationWorkspace({
         ) : (
           renderWikiContent({
             wiki,
+            activeWikiMention,
+            selectedWikiMentionIndex,
+            wikiMentionSuggestions,
             wikiEditorTextareaRef,
+            onMarkdownKeyDown: handleWikiMarkdownKeyDown,
+            onMarkdownSelect: (textarea) => setWikiMentionCursorIndex(textarea.selectionStart),
             onInsertWikiPageMention: insertWikiPageMention,
             onPreviewLinkClick: handleWikiPreviewLinkClick,
           })
@@ -724,15 +809,25 @@ export function DocumentationWorkspace({
 
 function renderWikiContent({
   wiki,
+  activeWikiMention,
+  selectedWikiMentionIndex,
+  wikiMentionSuggestions,
   wikiEditorTextareaRef,
+  onMarkdownKeyDown,
+  onMarkdownSelect,
   onInsertWikiPageMention,
   onPreviewLinkClick,
 }: {
   wiki: ReturnType<typeof useWikiDocumentController>
+  activeWikiMention: ActiveWikiPageMention | null
+  selectedWikiMentionIndex: number
+  wikiMentionSuggestions: WikiPageSummary[]
   wikiEditorTextareaRef: {
     current: HTMLTextAreaElement | null
   }
-  onInsertWikiPageMention: (page: WikiPageSummary) => void
+  onMarkdownKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void
+  onMarkdownSelect: (textarea: HTMLTextAreaElement) => void
+  onInsertWikiPageMention: (page: WikiPageSummary, mention?: ActiveWikiPageMention | null) => void
   onPreviewLinkClick: (event: ReactMouseEvent<HTMLDivElement>) => void
 }) {
   if (!wiki.hasAuth) {
@@ -768,6 +863,7 @@ function renderWikiContent({
       <article className="surface docs-section empty-state">
         <strong>No wiki pages exist yet.</strong>
         <p>Start with a root page for your desk handbook, process notes, or handoff runbooks.</p>
+        {renderWikiTemplatePicker({ wiki })}
         <button
           type="button"
           className="button button-secondary"
@@ -821,6 +917,7 @@ function renderWikiContent({
         </div>
 
         <div className="wiki-editor-toolbar">
+          {renderWikiTemplatePicker({ wiki, compact: true })}
           <button
             type="button"
             className="button button-ghost"
@@ -916,7 +1013,7 @@ function renderWikiContent({
                 onChange={(event) => {
                   const nextPage = wiki.mentionablePages.find((page) => page.page_id === event.target.value)
                   if (nextPage) {
-                    onInsertWikiPageMention(nextPage)
+                    onInsertWikiPageMention(nextPage, null)
                   }
                   event.target.value = ''
                 }}
@@ -935,15 +1032,58 @@ function renderWikiContent({
 
             <label className="field wiki-editor-field">
               <span>Markdown</span>
-              <textarea
-                className="control wiki-editor-textarea"
-                ref={wikiEditorTextareaRef}
-                value={wiki.contentDraft}
-                disabled={wiki.selectedPage.is_archived}
-                onChange={(event) => wiki.setContentDraft(event.target.value)}
-                rows={22}
-                placeholder="# Confirmations&#10;&#10;- Review the incoming PDF&#10;- Compare economics to the booked trade&#10;- Log every mismatch before escalating"
-              />
+              <div className="wiki-editor-textarea-shell">
+                <textarea
+                  className="control wiki-editor-textarea"
+                  ref={wikiEditorTextareaRef}
+                  value={wiki.contentDraft}
+                  disabled={wiki.selectedPage.is_archived}
+                  onChange={(event) => {
+                    wiki.setContentDraft(event.target.value)
+                    onMarkdownSelect(event.target)
+                  }}
+                  onClick={(event) => onMarkdownSelect(event.currentTarget)}
+                  onKeyDown={onMarkdownKeyDown}
+                  onKeyUp={(event) => onMarkdownSelect(event.currentTarget)}
+                  onSelect={(event) => onMarkdownSelect(event.currentTarget)}
+                  rows={22}
+                  placeholder="# Confirmations&#10;&#10;- Review the incoming PDF&#10;- Compare economics to the booked trade&#10;- Log every mismatch before escalating"
+                />
+                {activeWikiMention ? (
+                  <div className="wiki-mention-menu" role="listbox" aria-label="Wiki page suggestions">
+                    <div className="wiki-mention-menu-head">
+                      <span className="eyebrow">Wiki Link</span>
+                      <strong>
+                        {activeWikiMention.query
+                          ? `Matches for "${activeWikiMention.query}"`
+                          : 'Link a page'}
+                      </strong>
+                    </div>
+                    {wikiMentionSuggestions.length > 0 ? (
+                      wikiMentionSuggestions.map((page, index) => (
+                        <button
+                          key={page.page_id}
+                          type="button"
+                          role="option"
+                          aria-selected={selectedWikiMentionIndex === index}
+                          className={`wiki-mention-option ${selectedWikiMentionIndex === index ? 'is-active' : ''}`}
+                          onMouseDown={(event) => {
+                            event.preventDefault()
+                            onInsertWikiPageMention(page)
+                          }}
+                        >
+                          <strong>{page.title}</strong>
+                          <small>{page.summary}</small>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="wiki-mention-empty">
+                        No page matches yet. Keep the draft link and use Create Page from unresolved links.
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
             </label>
           </section>
 
@@ -992,11 +1132,27 @@ function renderWikiContent({
         {wiki.selectedPageUnresolvedLinks.length > 0 ? (
           <div className="feedback-banner feedback-banner-error wiki-link-warning">
             <strong>Unresolved links</strong>
-            <div className="chip-row">
+            <p>Create the missing page to turn the draft reference into a stable page ID link.</p>
+            <div className="wiki-unresolved-link-list">
               {wiki.selectedPageUnresolvedLinks.map((link) => (
-                <span key={`${link.target}-${link.label}`} className="entity-chip entity-chip-soft">
-                  {link.label === link.target ? link.target : `${link.label} -> ${link.target}`}
-                </span>
+                <div key={wikiUnresolvedLinkKey(link)} className="wiki-unresolved-link-card">
+                  <span className="entity-chip entity-chip-soft">
+                    {link.label === link.target ? link.target : `${link.label} -> ${link.target}`}
+                  </span>
+                  <button
+                    type="button"
+                    className="button button-ghost"
+                    disabled={
+                      wiki.selectedPage?.is_archived ||
+                      wiki.creatingUnresolvedLinkKey === wikiUnresolvedLinkKey(link)
+                    }
+                    onClick={() => void wiki.handleCreatePageFromUnresolvedLink(link)}
+                  >
+                    {wiki.creatingUnresolvedLinkKey === wikiUnresolvedLinkKey(link)
+                      ? 'Creating Page...'
+                      : 'Create Page'}
+                  </button>
+                </div>
               ))}
             </div>
           </div>
@@ -1013,7 +1169,24 @@ function renderWikiContent({
               >
                 <span>{backlink.page.is_archived ? 'Archived backlink' : 'Backlink'}</span>
                 <strong>{backlink.page.title}</strong>
-                <small>{backlink.labels.join(', ')}</small>
+                <div className="chip-row">
+                  {backlink.mentions.map((mention) => (
+                    <span
+                      key={`${backlink.page.page_id}-${mention.label}-${mention.target}-${mention.snippet}`}
+                      className="entity-chip entity-chip-soft"
+                    >
+                      {mention.label}
+                    </span>
+                  ))}
+                </div>
+                {backlink.mentions.slice(0, 2).map((mention) => (
+                  <small
+                    key={`${backlink.page.page_id}-${mention.label}-${mention.target}-${mention.snippet}-snippet`}
+                    className="wiki-backlink-snippet"
+                  >
+                    {mention.snippet}
+                  </small>
+                ))}
               </button>
             ))
           ) : (
@@ -1072,6 +1245,71 @@ function renderWikiContent({
   )
 }
 
+function wikiUnresolvedLinkKey(link: { label: string; target: string }): string {
+  return `${link.target.trim().toLowerCase()}:${link.label.trim().toLowerCase()}`
+}
+
+function renderWikiTemplatePicker({
+  wiki,
+  compact = false,
+}: {
+  wiki: ReturnType<typeof useWikiDocumentController>
+  compact?: boolean
+}) {
+  return (
+    <label className={`field wiki-template-picker ${compact ? 'wiki-template-picker-compact' : ''}`}>
+      <span>New Page Template</span>
+      <select
+        className="control"
+        value={wiki.newPageTemplateKey}
+        onChange={(event) => wiki.setNewPageTemplateKey(event.target.value as typeof wiki.newPageTemplateKey)}
+      >
+        {wiki.newPageTemplates.map((template) => (
+          <option key={template.key} value={template.key}>
+            {template.label}
+          </option>
+        ))}
+      </select>
+      <small>{wiki.selectedNewPageTemplate.description}</small>
+    </label>
+  )
+}
+
+function normalizeWikiMentionSearch(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function filterWikiMentionSuggestions(pages: WikiPageSummary[], query: string): WikiPageSummary[] {
+  const normalizedQuery = normalizeWikiMentionSearch(query)
+  if (!normalizedQuery) {
+    return pages
+  }
+
+  return pages
+    .map((page) => {
+      const normalizedTitle = normalizeWikiMentionSearch(page.title)
+      const normalizedSummary = normalizeWikiMentionSearch(page.summary)
+      const normalizedPageId = normalizeWikiMentionSearch(page.page_id)
+
+      if (normalizedTitle.startsWith(normalizedQuery)) {
+        return { page, score: 0 }
+      }
+      if (normalizedTitle.includes(normalizedQuery)) {
+        return { page, score: 1 }
+      }
+      if (normalizedPageId.includes(normalizedQuery)) {
+        return { page, score: 2 }
+      }
+      if (normalizedSummary.includes(normalizedQuery)) {
+        return { page, score: 3 }
+      }
+      return null
+    })
+    .filter((match): match is { page: WikiPageSummary; score: number } => match !== null)
+    .sort((left, right) => left.score - right.score || left.page.title.localeCompare(right.page.title))
+    .map((match) => match.page)
+}
+
 function renderWikiSidebar({
   wiki,
 }: {
@@ -1109,6 +1347,8 @@ function renderWikiSidebar({
           placeholder="Confirmations, settlement, mismatch..."
         />
       </label>
+
+      {renderWikiTemplatePicker({ wiki })}
 
       <button
         type="button"

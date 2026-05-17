@@ -131,6 +131,23 @@ export function AssistantConstructionExplainerPanel({
           ) : (
             <small>Prompt sections will appear here after the runtime builds a preview or you inspect a stored run.</small>
           )}
+          {explainer.provenanceRows.length > 0 ? (
+            <div className="assistant-construction-provenance-list">
+              <strong>Context provenance</strong>
+              {explainer.provenanceRows.slice(0, 8).map((row) => (
+                <div key={row.key} className="assistant-construction-provenance-row">
+                  <div className="assistant-provider-head">
+                    <strong>{row.title}</strong>
+                    {row.usesFallback ? <span>Fallback</span> : <span>{row.sourceLabel}</span>}
+                  </div>
+                  <small>{row.details.join(' · ')}</small>
+                </div>
+              ))}
+              {explainer.provenanceRows.length > 8 ? (
+                <small>{explainer.provenanceRows.length - 8} additional prompt sections are included in the rendered preview.</small>
+              ) : null}
+            </div>
+          ) : null}
         </article>
       </div>
     </div>

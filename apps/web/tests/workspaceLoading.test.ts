@@ -409,3 +409,19 @@ test('shouldPresentStartHereOverlay suppresses the signed-in onboarding overlay 
     false,
   )
 })
+
+test('shouldPresentStartHereOverlay suppresses onboarding during focused route handoffs', () => {
+  assert.equal(
+    shouldPresentStartHereOverlay({
+      currentView: 'operations',
+      hasAuthSession: true,
+      hasStartHereOnboarding: true,
+      hasStartHereReturnIntent: false,
+      hasRouteHandoff: true,
+      authInterruptionReason: null,
+      hasAuthInterruptionResume: false,
+      usesTerminalMode: false,
+    }),
+    false,
+  )
+})

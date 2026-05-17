@@ -7,6 +7,7 @@ import {
   buildDocumentLibraryFolderCounts,
   buildDocumentLibraryFolderTree,
   filterDocumentLibraryDocuments,
+  sortDocumentLibraryKindOptions,
 } from '../src/workspaces/library/libraryWorkspaceSupport'
 
 function buildDocumentUnderstanding(
@@ -101,6 +102,61 @@ function buildDocument(overrides: Partial<DocumentIngestionRecord> = {}): Docume
 }
 
 describe('document library helpers', () => {
+  it('sorts document type options alphabetically by label for the library picker', () => {
+    const sortedLabels = sortDocumentLibraryKindOptions([
+      {
+        document_kind: 'UNKNOWN',
+        label: 'Unknown',
+        document_family: 'GENERAL',
+        description: 'Unclassified',
+        review_guidance: 'Review manually.',
+        linkage_summary: 'Manual review',
+        record_targets: [],
+        matching_keys: [],
+        header_fields: [],
+        table_templates: [],
+      },
+      {
+        document_kind: 'LETTER_OF_CREDIT',
+        label: 'Letter of Credit',
+        document_family: 'SETTLEMENT',
+        description: 'Credit instrument.',
+        review_guidance: 'Review credit details.',
+        linkage_summary: 'Link to trade or settlement.',
+        record_targets: [],
+        matching_keys: [],
+        header_fields: [],
+        table_templates: [],
+      },
+      {
+        document_kind: 'BILL_OF_LADING',
+        label: 'Bill of Lading',
+        document_family: 'LOGISTICS',
+        description: 'Shipment document.',
+        review_guidance: 'Review shipment references.',
+        linkage_summary: 'Link to delivery.',
+        record_targets: [],
+        matching_keys: [],
+        header_fields: [],
+        table_templates: [],
+      },
+      {
+        document_kind: 'DEAL_RECAP',
+        label: 'Deal Recap',
+        document_family: 'TRADE_EXECUTION',
+        description: 'Commercial recap.',
+        review_guidance: 'Review trade economics.',
+        linkage_summary: 'Link to trade.',
+        record_targets: [],
+        matching_keys: [],
+        header_fields: [],
+        table_templates: [],
+      },
+    ]).map((entry) => entry.label)
+
+    expect(sortedLabels).toEqual(['Bill of Lading', 'Deal Recap', 'Letter of Credit', 'Unknown'])
+  })
+
   it('builds collection counts from review, linkage, processing, and error state', () => {
     const documents = [
       buildDocument(),

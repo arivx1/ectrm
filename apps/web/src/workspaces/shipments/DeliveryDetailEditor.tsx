@@ -95,13 +95,13 @@ type DeliveryDetailEditorProps = {
     deliveryId: string,
     stopId: string,
     payload: RecordDeliveryTruckStopCheckpointInput,
-  ) => Promise<void>
+  ) => Promise<string | null>
   onReverseTruckStopCheckpoint: (
     deliveryId: string,
     stopId: string,
     eventId: number,
     payload: ReverseDeliveryTruckStopCheckpointInput,
-  ) => Promise<void>
+  ) => Promise<string | null>
   onCreateEvent: (deliveryId: string, payload: CreateDeliveryEventInput) => Promise<void>
 }
 

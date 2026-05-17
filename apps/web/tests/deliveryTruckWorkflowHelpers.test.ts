@@ -13,6 +13,8 @@ import {
   buildTruckDetailPayload,
   buildTruckMovementCreatePayload,
   buildTruckMovementUpdatePayload,
+  buildTruckTrackingSignalDraft,
+  buildTruckTrackingSignalPayload,
   buildTruckStopUpdatePayload,
   checkpointOptionsForStop,
   describeTruckCheckpointTimelineEvent,
@@ -655,5 +657,66 @@ describe('delivery truck workflow helpers', () => {
         reversalReason: 'Wrong stop.',
       }).payload,
     ).toEqual({ reversal_reason: 'Wrong stop.' })
+  })
+
+  it('seeds and builds manual truck tracking signal payloads as evidence', () => {
+    const movement = buildMovement({
+      current_eta_at_destination: '2026-05-10T14:30:00Z',
+    })
+    const draft = {
+      ...buildTruckTrackingSignalDraft(movement),
+      sourceSystem: ' manual_dispatch ',
+      sourceEventId: 'CALL-1',
+      signalType: ' eta_update ',
+      occurredAt: '2026-05-10T10:00',
+      stopId: 'STOP-1',
+      locationCode: 'MIDLAND',
+      externalStatus: 'Driver called from gate',
+      normalizedStatus: ' at_stop ',
+      matchConfidence: '0.75',
+      etaAtDestination: '2026-05-10T14:45',
+      dispatcherNote: 'Driver called from gate.',
+    }
+    const result = buildTruckTrackingSignalPayload(draft)
+
+    expect(buildTruckTrackingSignalDraft(movement)).toEqual(
+      expect.objectContaining({
+        sourceSystem: 'TRUCK_MANUAL_DISPATCH',
+        signalType: 'POSITION',
+        locationCode: 'MIDLAND',
+      }),
+    )
+    expect(result.validationMessage).toBeNull()
+    expect(result.payload).toEqual({
+      source_system: 'MANUAL_DISPATCH',
+      source_event_id: 'CALL-1',
+      signal_type: 'ETA_UPDATE',
+      occurred_at: new Date('2026-05-10T10:00').toISOString(),
+      stop_id: 'STOP-1',
+      location_code: 'MIDLAND',
+      external_status: 'Driver called from gate',
+      normalized_status: 'AT_STOP',
+      match_confidence: 0.75,
+      eta_at_destination: new Date('2026-05-10T14:45').toISOString(),
+      raw_payload: {
+        dispatcher_note: 'Driver called from gate.',
+      },
+    })
+  })
+
+  it('validates required truck tracking signal fields and confidence bounds', () => {
+    expect(
+      buildTruckTrackingSignalPayload({
+        ...buildTruckTrackingSignalDraft(),
+        signalType: '',
+      }).validationMessage,
+    ).toBe('Tracking signal type is required.')
+
+    expect(
+      buildTruckTrackingSignalPayload({
+        ...buildTruckTrackingSignalDraft(),
+        matchConfidence: '1.5',
+      }).validationMessage,
+    ).toBe('Tracking signal match confidence must be between 0 and 1.')
   })
 })
