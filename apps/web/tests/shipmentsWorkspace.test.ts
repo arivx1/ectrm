@@ -6,6 +6,7 @@ import { test } from 'vitest'
 
 import type { DeliveryRecord } from '../src/shared/models'
 import { DeliveryWorkspace } from '../src/workspaces/shipments/ShipmentWorkspace'
+import { truckCheckpointReferenceCode } from '../src/workspaces/shipments/deliveryTruckWorkflowHelpers'
 
 function buildDelivery(overrides: Partial<DeliveryRecord>): DeliveryRecord {
   return {
@@ -208,6 +209,16 @@ test('deliveries workspace applies map-sourced rail-route focus before local tex
       onSaveDeliveryLogisticsDetails: async () => undefined,
       onSaveDeliveryPipelineDetails: async () => undefined,
       onSaveDeliveryPowerDetails: async () => undefined,
+      onSaveDeliveryTruckDetails: async () => undefined,
+      onCreateDeliveryTruckMovement: async () => undefined,
+      onSaveDeliveryTruckMovement: async () => undefined,
+      onCancelDeliveryTruckMovement: async () => undefined,
+      onCreateDeliveryTruckStop: async () => undefined,
+      onSaveDeliveryTruckStop: async () => undefined,
+      onSkipDeliveryTruckStop: async () => undefined,
+      onCancelDeliveryTruckStop: async () => undefined,
+      onRecordDeliveryTruckStopCheckpoint: async () => undefined,
+      onReverseDeliveryTruckStopCheckpoint: async () => undefined,
       onCreateDeliveryEvent: async () => undefined,
     }),
   )
@@ -219,4 +230,172 @@ test('deliveries workspace applies map-sourced rail-route focus before local tex
   assert.doesNotMatch(markup, /DLV-2002/)
   assert.doesNotMatch(markup, /TRD-2002/)
   assert.match(markup, /Show Full Board/)
+})
+
+test('deliveries workspace renders the truck dispatch editor for truck deliveries', () => {
+  const arrivedPickupReference = truckCheckpointReferenceCode({
+    checkpointCode: 'ARRIVED_PICKUP',
+    movementId: 'MOVE-1',
+    stopId: 'STOP-1',
+  })
+  const departedPickupReference = truckCheckpointReferenceCode({
+    checkpointCode: 'DEPARTED_PICKUP',
+    movementId: 'MOVE-1',
+    stopId: 'STOP-1',
+  })
+  const markup = renderToStaticMarkup(
+    createElement(DeliveryWorkspace, {
+      authSession: null,
+      routeHandoff: null,
+      globalFilter: '',
+      commodities: [
+        {
+          code: 'WTI',
+          name: 'WTI',
+          description: 'Test crude commodity',
+          is_active: true,
+          commodity_class: 'CRUDE_OIL',
+          allowed_transport_modes: ['TRUCK'],
+        },
+      ],
+      deliveries: [
+        buildDelivery({
+          delivery_id: 'DLV-TRUCK-3003',
+          trade_id: 'TRD-TRUCK-3003',
+          transport_mode: 'TRUCK',
+          carrier_name: 'Acme Hauling',
+          rail_route_code: null,
+          rail_line_code: null,
+          railroad_code: null,
+          truck_detail: {
+            delivery_id: 'DLV-TRUCK-3003',
+            target_run_count: 2,
+            dispatcher_owner: 'Dispatch West',
+            tracking_provider: 'MANUAL',
+            tracking_policy: 'Call every two hours',
+            default_carrier_name: 'Acme Hauling',
+            default_carrier_name_source: 'MANUAL',
+            default_external_carrier_reference: 'BROKER-17',
+            default_external_carrier_reference_source: 'MANUAL',
+            equipment_type: 'TANK_TRUCK',
+            equipment_type_source: 'MANUAL',
+            origin_geofence_code: 'MIDLAND_GF',
+            origin_geofence_code_source: 'MANUAL',
+            destination_geofence_code: 'HOUSTON_GF',
+            destination_geofence_code_source: 'MANUAL',
+            created_at: '2026-05-08T12:00:00Z',
+            created_by: 'ops@example.com',
+            updated_at: '2026-05-08T12:00:00Z',
+            updated_by: 'ops@example.com',
+            version: 1,
+          },
+          truck_movement_count: 1,
+          active_truck_movement_count: 1,
+          event_count: 3,
+          latest_event_type: 'CHECKPOINT_RECORDED',
+          latest_event_at: '2026-05-10T09:00:00Z',
+          delivery_events: [
+            {
+              event_id: 3,
+              delivery_id: 'DLV-TRUCK-3003',
+              trade_id: 'TRD-TRUCK-3003',
+              leg_no: null,
+              event_type: 'CHECKPOINT_RECORDED',
+              execution_status: 'IN_PROGRESS',
+              occurred_at: '2026-05-10T09:00:00Z',
+              reversal_of_event_id: null,
+              reversal_reason: null,
+              location_code: 'MIDLAND',
+              reference_code: departedPickupReference,
+              source: 'TRUCK_MANUAL_DISPATCH',
+              notes: 'Driver departed pickup.',
+              created_at: '2026-05-10T09:00:00Z',
+              created_by: 'ops@example.com',
+              updated_at: '2026-05-10T09:00:00Z',
+              updated_by: 'ops@example.com',
+              version: 1,
+            },
+            {
+              event_id: 2,
+              delivery_id: 'DLV-TRUCK-3003',
+              trade_id: 'TRD-TRUCK-3003',
+              leg_no: null,
+              event_type: 'EVENT_REVERSED',
+              execution_status: 'IN_PROGRESS',
+              occurred_at: '2026-05-10T08:30:00Z',
+              reversal_of_event_id: 1,
+              reversal_reason: 'Arrival was posted with the wrong time.',
+              location_code: null,
+              reference_code: null,
+              source: 'TRUCK_MANUAL_DISPATCH',
+              notes: null,
+              created_at: '2026-05-10T08:30:00Z',
+              created_by: 'ops@example.com',
+              updated_at: '2026-05-10T08:30:00Z',
+              updated_by: 'ops@example.com',
+              version: 1,
+            },
+            {
+              event_id: 1,
+              delivery_id: 'DLV-TRUCK-3003',
+              trade_id: 'TRD-TRUCK-3003',
+              leg_no: null,
+              event_type: 'CHECKPOINT_RECORDED',
+              execution_status: 'IN_PROGRESS',
+              occurred_at: '2026-05-10T08:15:00Z',
+              reversal_of_event_id: null,
+              reversal_reason: null,
+              location_code: 'MIDLAND',
+              reference_code: arrivedPickupReference,
+              source: 'TRUCK_MANUAL_DISPATCH',
+              notes: 'Driver checked in.',
+              created_at: '2026-05-10T08:15:00Z',
+              created_by: 'ops@example.com',
+              updated_at: '2026-05-10T08:15:00Z',
+              updated_by: 'ops@example.com',
+              version: 1,
+            },
+          ],
+        }),
+      ],
+      operationalResourceDescriptors: [],
+      formatCommodityClass: (value: string) => value,
+      formatDate: (value: string | null | undefined) => value ?? 'n/a',
+      formatDateOnly: (value: string | null | undefined) => value ?? 'n/a',
+      formatNumber: (value: number | null) => (value == null ? '—' : String(value)),
+      deliveryMutationError: '',
+      deliveryMutationPendingId: null,
+      deliverySyncError: '',
+      deliverySyncSuccess: '',
+      deliveriesSyncing: false,
+      onOpenTrade: () => undefined,
+      onClearHandoff: () => undefined,
+      onSyncDeliveriesFromTrades: async () => undefined,
+      onSaveDelivery: async () => undefined,
+      onSaveDeliveryLogisticsDetails: async () => undefined,
+      onSaveDeliveryPipelineDetails: async () => undefined,
+      onSaveDeliveryPowerDetails: async () => undefined,
+      onSaveDeliveryTruckDetails: async () => undefined,
+      onCreateDeliveryTruckMovement: async () => undefined,
+      onSaveDeliveryTruckMovement: async () => undefined,
+      onCancelDeliveryTruckMovement: async () => undefined,
+      onCreateDeliveryTruckStop: async () => undefined,
+      onSaveDeliveryTruckStop: async () => undefined,
+      onSkipDeliveryTruckStop: async () => undefined,
+      onCancelDeliveryTruckStop: async () => undefined,
+      onRecordDeliveryTruckStopCheckpoint: async () => undefined,
+      onReverseDeliveryTruckStopCheckpoint: async () => undefined,
+      onCreateDeliveryEvent: async () => undefined,
+    }),
+  )
+
+  assert.match(markup, /Truck Dispatch Workflow/)
+  assert.match(markup, /Create Truck Run/)
+  assert.match(markup, /Truck Run Queue/)
+  assert.match(markup, /Save Truck Defaults/)
+  assert.match(markup, /Latest truck checkpoint: Departed pickup/)
+  assert.match(markup, /Truck checkpoint: Departed pickup/)
+  assert.match(markup, /Truck checkpoint correction: Arrived pickup/)
+  assert.match(markup, /Corrected truck checkpoint: Arrived pickup/)
+  assert.match(markup, /Correction/)
 })

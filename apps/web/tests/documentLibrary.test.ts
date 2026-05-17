@@ -45,6 +45,15 @@ function buildDocumentUnderstanding(
       content_feature_count: 2,
       learning_version: 'content-similarity-v1',
     },
+    deterministic_assessment: {
+      assessment_version: 'deterministic-score-v1',
+      document_kind: 'TRADE_CONFIRMATION',
+      document_subtype: null,
+      confidence: 0.8,
+      matched_by: 'page_consensus:trade_confirmation',
+      supporting_evidence: ['2 of 2 pages scored as Trade Confirmation deterministically.'],
+      conflicts: [],
+    },
     ...overrides,
   }
 }

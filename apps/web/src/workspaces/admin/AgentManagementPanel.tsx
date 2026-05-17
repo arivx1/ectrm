@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   acceptAdminAssistantAgentHealthWorkPackage,
+  activateAssistantAgentProfileRequest,
   approveAssistantAgentProfileRequest,
   buildAssistantAgentDraft,
   createAssistantAgentProfileRequest,
@@ -73,6 +74,7 @@ import type {
   AssistantAgentEvalGateStatus,
   AssistantAgentOrchestrationPattern,
   AssistantAgentProfileKind,
+  AssistantAgentProfileRequestKind,
   AssistantAgentProfileRequest,
   AssistantAgentRoleArchetype,
   AssistantAgentScope,
@@ -272,19 +274,92 @@ function normalizeAgentEvalPayload(form: AgentEvalForm): UpdateAssistantAgentEva
 
 function normalizeProfileRequestPayload(form: ProfileRequestForm): CreateAssistantAgentProfileRequestInput {
   return {
+    request_kind: 'NEW_SPECIALIZATION',
+    target_agent_id: null,
     requested_agent_id: form.requested_agent_id.trim() || null,
+    change_summary: form.proposed_mission.trim() || null,
     business_problem: form.business_problem.trim(),
     proposed_mission: form.proposed_mission.trim(),
     human_owner_role: form.human_owner_role.trim(),
     requested_workspaces: form.requested_workspaces,
     work_objects: splitLines(form.work_objects),
     requested_inputs_tools: form.requested_inputs_tools,
+    requested_action_types: [],
+    requested_skills: [],
     expected_outputs: splitLines(form.expected_outputs),
     requested_authority_ceiling: form.requested_authority_ceiling,
     stop_conditions: splitLines(form.stop_conditions),
     success_metrics: splitLines(form.success_metrics),
     proposed_eval_cases: splitLines(form.proposed_eval_cases),
   }
+}
+
+function applyProfileRequestToAgentForm(
+  current: AgentForm,
+  request: AssistantAgentProfileRequest,
+): AgentForm {
+  return {
+    ...current,
+    specialization_summary: request.proposed_mission,
+    human_owner_role: request.human_owner_role || current.human_owner_role,
+    authority_ceiling: request.requested_authority_ceiling,
+    activation_notes: request.approval_notes
+      ? `Approved profile request #${request.request_id}: ${request.approval_notes}`
+      : `Approved profile request #${request.request_id}.`,
+    profile_request_id: request.request_id,
+    capabilities: capabilitiesForProfileRequest(request),
+    allowed_workspaces:
+      request.requested_workspaces.length > 0 ? [...request.requested_workspaces] : current.allowed_workspaces,
+    skills: [...request.requested_skills],
+    allowed_tools: [...request.requested_inputs_tools],
+    allowed_action_types: [...request.requested_action_types],
+  }
+}
+
+function capabilitiesForProfileRequest(
+  request: AssistantAgentProfileRequest,
+): AssistantAgentCapability[] {
+  if (request.requested_authority_ceiling === 'OBSERVE') {
+    return ['READ']
+  }
+  if (request.requested_authority_ceiling === 'EXPLAIN') {
+    return ['READ', 'EXPLAIN']
+  }
+  if (request.requested_action_types.length > 0 && request.requested_authority_ceiling === 'STAGE') {
+    return ['READ', 'EXPLAIN', 'DRAFT', 'ACTION']
+  }
+  if (
+    request.requested_action_types.length > 0 &&
+    (request.requested_authority_ceiling === 'EXECUTE' ||
+      request.requested_authority_ceiling === 'EXTERNAL_COMMIT')
+  ) {
+    return ['READ', 'EXPLAIN', 'DRAFT', 'ACTION']
+  }
+  return ['READ', 'EXPLAIN', 'DRAFT']
+}
+
+function getProfileRequestLinkedAgent(
+  request: AssistantAgentProfileRequest,
+  agents: AssistantAdminAgent[],
+): AssistantAdminAgent | null {
+  const linkedAgentId = request.linked_agent_id || request.target_agent_id || request.requested_agent_id
+  if (!linkedAgentId) {
+    return null
+  }
+  return agents.find((agent) => agent.agent_id === linkedAgentId) ?? null
+}
+
+function getPublishedProfileRequestRevisionId(
+  request: AssistantAgentProfileRequest,
+  agent: AssistantAdminAgent | null,
+): number | null {
+  if (request.linked_revision_id) {
+    return request.linked_revision_id
+  }
+  if (!agent || agent.profile_request_id !== request.request_id) {
+    return null
+  }
+  return agent.published_revision_id ?? null
 }
 
 function hasAdministrativeAccess(session: StoredAuthSession | null): boolean {
@@ -618,6 +693,16 @@ function profileRequestStatusTone(
   return 'planned'
 }
 
+function profileRequestKindLabel(kind: AssistantAgentProfileRequestKind): string {
+  if (kind === 'EDIT_EXISTING') {
+    return 'Edit existing agent'
+  }
+  if (kind === 'NARROW_ACCESS') {
+    return 'Narrow access'
+  }
+  return 'New specialization'
+}
+
 function titleFromAgentId(agentId: string | null): string {
   if (!agentId) {
     return ''
@@ -635,13 +720,18 @@ function renderPromptList(title: string, values: readonly string[]): string {
 
 function buildPromptFromProfileRequest(request: AssistantAgentProfileRequest): string {
   return [
-    `You are ${titleFromAgentId(request.requested_agent_id) || 'a specialized managed agent'} inside the ECTRM operator console.`,
+    `You are ${
+      titleFromAgentId(request.requested_agent_id || request.target_agent_id) || 'a specialized managed agent'
+    } inside the ECTRM operator console.`,
+    request.change_summary ? `Requested change: ${request.change_summary}` : '',
     `Business problem: ${request.business_problem}`,
     `Mission: ${request.proposed_mission}`,
     renderPromptList('Expected outputs', request.expected_outputs),
     renderPromptList('Stop conditions', request.stop_conditions),
     renderPromptList('Success metrics', request.success_metrics),
-  ].join('\n\n')
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 }
 
 function describeEffectivePolicy(agent: AssistantAdminAgent): string {
@@ -2257,6 +2347,49 @@ export function AgentManagementPanel({
     }
   }
 
+  async function handleActivateProfileRequest(request: AssistantAgentProfileRequest) {
+    const linkedAgentId = request.linked_agent_id || request.target_agent_id
+    if (!linkedAgentId) {
+      setAgentFlash({
+        tone: 'error',
+        message: 'Choose or link an agent before marking this request as applied.',
+      })
+      return
+    }
+    const linkedAgent = getProfileRequestLinkedAgent(request, agentRecords)
+    const linkedRevisionId = getPublishedProfileRequestRevisionId(request, linkedAgent)
+    if (!linkedAgent || linkedAgent.profile_request_id !== request.request_id || !linkedRevisionId) {
+      setAgentFlash({
+        tone: 'error',
+        message:
+          'Save the approved request into the linked agent first. Mark Applied requires a published revision that carries this profile request ID.',
+      })
+      return
+    }
+
+    setDecidingProfileRequestId(request.request_id)
+    setAgentFlash(null)
+
+    try {
+      await activateAssistantAgentProfileRequest(appConfig.apiBase, request.request_id, {
+        linked_agent_id: linkedAgentId,
+        linked_revision_id: linkedRevisionId,
+      })
+      await refreshAgents(linkedAgentId)
+      setAgentFlash({
+        tone: 'success',
+        message: `Profile request #${request.request_id} is now marked as applied to ${linkedAgentId} via revision #${linkedRevisionId}.`,
+      })
+    } catch (error) {
+      setAgentFlash({
+        tone: 'error',
+        message: error instanceof Error ? error.message : 'Could not mark profile request as applied.',
+      })
+    } finally {
+      setDecidingProfileRequestId(null)
+    }
+  }
+
   function handleApplyProfileRequestToDraft(request: AssistantAgentProfileRequest) {
     if (request.status === 'ACTIVATED' && request.linked_agent_id) {
       setSelectedAgentId(request.linked_agent_id)
@@ -2270,6 +2403,34 @@ export function AgentManagementPanel({
       setAgentFlash({
         tone: 'error',
         message: 'Only approved custom profile requests can be loaded into a draft.',
+      })
+      return
+    }
+
+    if (request.request_kind !== 'NEW_SPECIALIZATION') {
+      const targetAgentId = request.target_agent_id
+      if (!targetAgentId) {
+        setAgentFlash({
+          tone: 'error',
+          message: 'This change request is missing a target agent.',
+        })
+        return
+      }
+      const targetAgent = agentRecords.find((agent) => agent.agent_id === targetAgentId) ?? null
+      if (!targetAgent) {
+        setSelectedAgentId(targetAgentId)
+        setAgentFlash({
+          tone: 'success',
+          message: `Opened target agent ${targetAgentId}; load the latest record before reviewing request #${request.request_id}.`,
+        })
+        return
+      }
+
+      setSelectedAgentId(targetAgent.agent_id)
+      setEditForm(applyProfileRequestToAgentForm(toAgentForm(targetAgent), request))
+      setAgentFlash({
+        tone: 'success',
+        message: `Loaded request #${request.request_id} into the review draft for ${targetAgent.name}.`,
       })
       return
     }
@@ -3534,21 +3695,45 @@ export function AgentManagementPanel({
                     <p>Requests appear here before they can become active custom profiles.</p>
                   </div>
                 ) : (
-                  profileRequests.map((request) => (
+                  profileRequests.map((request) => {
+                    const linkedAgent = getProfileRequestLinkedAgent(request, agentRecords)
+                    const linkedRevisionId = getPublishedProfileRequestRevisionId(request, linkedAgent)
+                    const readyToMarkApplied = Boolean(
+                      request.status === 'APPROVED' &&
+                        request.request_kind !== 'NEW_SPECIALIZATION' &&
+                        linkedAgent &&
+                        linkedAgent.profile_request_id === request.request_id &&
+                        linkedRevisionId,
+                    )
+                    return (
                     <article key={request.request_id} className="assistant-profile-request-card">
                       <div className="assistant-provider-head">
                         <strong>
                           #{request.request_id}{' '}
-                          {titleFromAgentId(request.requested_agent_id) || 'Custom specialization'}
+                          {titleFromAgentId(request.requested_agent_id || request.target_agent_id) ||
+                            'Custom specialization'}
                         </strong>
                         <span className={`status-pill status-pill-${profileRequestStatusTone(request.status)}`}>
                           {request.status}
                         </span>
                       </div>
+                      <small>
+                        {profileRequestKindLabel(request.request_kind)}
+                        {request.target_agent_id ? ` · target ${titleFromAgentId(request.target_agent_id)}` : ''}
+                      </small>
+                      {request.change_summary ? <p>{request.change_summary}</p> : null}
                       <p>{request.business_problem}</p>
                       <small>
                         {request.human_owner_role} · {request.requested_authority_ceiling} ·{' '}
                         {request.requested_workspaces.map((workspace) => workspaceLabel(workspace)).join(' · ')}
+                      </small>
+                      <small>
+                        {request.requested_skills.length} skill
+                        {request.requested_skills.length === 1 ? '' : 's'} ·{' '}
+                        {request.requested_inputs_tools.length} tool
+                        {request.requested_inputs_tools.length === 1 ? '' : 's'} ·{' '}
+                        {request.requested_action_types.length} action
+                        {request.requested_action_types.length === 1 ? '' : 's'}
                       </small>
                       <small>
                         {request.proposed_eval_cases.length} eval case
@@ -3556,6 +3741,16 @@ export function AgentManagementPanel({
                         {request.requested_by}
                         {request.reviewed_by ? ` · reviewed by ${request.reviewed_by}` : ''}
                       </small>
+                      {linkedRevisionId ? (
+                        <small>
+                          Applied revision proof: {linkedAgent?.name ?? request.linked_agent_id} revision #
+                          {linkedRevisionId}
+                        </small>
+                      ) : request.status === 'APPROVED' && request.request_kind !== 'NEW_SPECIALIZATION' ? (
+                        <small>
+                          Save the review draft into the target agent before marking this request applied.
+                        </small>
+                      ) : null}
 
                       {request.status === 'REQUESTED' ? (
                         <div className="assistant-profile-request-decision-grid">
@@ -3626,12 +3821,26 @@ export function AgentManagementPanel({
                             className="button button-secondary"
                             onClick={() => handleApplyProfileRequestToDraft(request)}
                           >
-                            {request.status === 'ACTIVATED' ? 'Open Linked Agent' : 'Load Builder Draft'}
+                            {request.status === 'ACTIVATED'
+                              ? 'Open Linked Agent'
+                              : request.request_kind === 'NEW_SPECIALIZATION'
+                                ? 'Load Builder Draft'
+                                : 'Load Review Draft'}
                           </button>
+                          {request.status === 'APPROVED' && request.request_kind !== 'NEW_SPECIALIZATION' ? (
+                            <button
+                              type="button"
+                              className="button button-ghost"
+                              disabled={decidingProfileRequestId === request.request_id || !readyToMarkApplied}
+                              onClick={() => void handleActivateProfileRequest(request)}
+                            >
+                              Mark Applied
+                            </button>
+                          ) : null}
                         </div>
                       ) : null}
                     </article>
-                  ))
+                  )})
                 )}
               </div>
             </div>

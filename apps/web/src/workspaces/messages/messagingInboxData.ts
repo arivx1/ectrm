@@ -1,5 +1,8 @@
 import type { PromptHomeCounts } from '../prompt/promptHomeStarters'
-import type { MessagingWorkspaceMessageRecord } from '../../entities/messages/api'
+import type {
+  MessagingWorkspaceConversationRecord,
+  MessagingWorkspaceMessageRecord,
+} from '../../entities/messages/api'
 
 export type MessagingInboxMessageType =
   | 'Email'
@@ -100,6 +103,28 @@ export type MessagingWorkspacePost = {
   author: MessagingWorkspaceMember
   timestamp: string
   body: string
+}
+
+function formatMessageTimestamp(value: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
+function normalizeAssistantWorkspace(value: string): MessagingAssistantWorkspace {
+  switch (value) {
+    case 'assistant':
+    case 'operations':
+    case 'settlement':
+    case 'dashboard':
+    case 'trades':
+    case 'risk':
+    case 'reports':
+      return value
+    default:
+      return 'assistant'
+  }
 }
 
 function formatCountLabel(
@@ -212,6 +237,82 @@ export function buildMessagingWorkspacePostFromRecord(
     timestamp,
     body: record.body,
   }
+}
+
+export function buildMessagingWorkspaceChannelsFromRecords(
+  records: MessagingWorkspaceConversationRecord[],
+): MessagingWorkspaceChannel[] {
+  return [...records]
+    .sort((left, right) => left.sort_order - right.sort_order)
+    .map((record) => ({
+      id: record.conversation_id,
+      section: record.section,
+      kind: record.kind,
+      label: record.label,
+      preview: record.preview,
+      timestamp: record.latest_activity_at ? formatMessageTimestamp(record.latest_activity_at) : '',
+      unreadCount: record.unread_count,
+      description: record.description,
+      topic: record.topic,
+      connectedWorkspace: record.connected_workspace,
+      assistantWorkspace: normalizeAssistantWorkspace(record.assistant_workspace),
+      composerHint: record.composer_hint,
+      highlights: record.highlights,
+      metrics: record.metrics.map((metric) => ({
+        label: metric.label,
+        value: metric.value,
+      })),
+      members: record.members.map((member) => ({
+        name: member.name,
+        title: member.title,
+        presence: member.presence,
+        initials: member.initials,
+        tone: member.tone,
+      })),
+      timeline: record.timeline.flatMap<MessagingWorkspaceTimelineItem>((item) => {
+        if (item.kind === 'system') {
+          return item.label && item.detail
+            ? [
+                {
+                  id: item.id,
+                  kind: 'system' as const,
+                  label: item.label,
+                  detail: item.detail,
+                },
+              ]
+            : []
+        }
+
+        if (!item.author) {
+          return []
+        }
+
+        return [
+          {
+            id: item.id,
+            kind: 'message' as const,
+            author: {
+              name: item.author.name,
+              title: item.author.title,
+              presence: item.author.presence,
+              initials: item.author.initials,
+              tone: item.author.tone,
+            },
+            timestamp: formatMessageTimestamp(item.created_at),
+            body: item.body,
+            reactions: item.reactions.length > 0 ? item.reactions : undefined,
+            attachment: item.attachment
+              ? {
+                  label: item.attachment.label,
+                  title: item.attachment.title,
+                  summary: item.attachment.summary,
+                  footnote: item.attachment.footnote,
+                }
+              : null,
+          },
+        ]
+      }),
+    }))
 }
 
 export function buildMessagingWorkspaceChannels(

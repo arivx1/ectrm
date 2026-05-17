@@ -39,6 +39,7 @@ vi.mock('../src/shared/api.ts', () => ({
 import {
   approveAssistantActionRequest,
   acceptAdminAssistantAgentHealthWorkPackage,
+  activateAssistantAgentProfileRequest,
   approveAssistantAgentProfileRequest,
   buildAssistantAgentDraft,
   createAssistantAgent,
@@ -62,12 +63,14 @@ import {
   publishAssistantAgentRevision,
   listAssistantActionRequests,
   listAssistantConversations,
+  listAssistantProfileRequests,
   listAssistantPromptRouteRecommendations,
   previewAssistantPromptContext,
   rejectAssistantActionRequest,
   rejectAssistantAgentProfileRequest,
   runAssistantAgentEval,
   runAssistantAgentEvalSuite,
+  submitAssistantAgentProfileRequest,
   simulateAssistantAgentPolicy,
   streamAssistantResponse,
   submitAssistantPromptNavigationOutcome,
@@ -1164,13 +1167,17 @@ test('createAssistantAgentProfileRequest posts requested_by from mutation contex
   postJsonMock.mockResolvedValueOnce(expected)
 
   const payload = await createAssistantAgentProfileRequest('http://api.test', {
+    request_kind: 'NEW_SPECIALIZATION',
     requested_agent_id: 'weather-dispatch-analyst',
+    change_summary: 'Need a weather-focused specialization.',
     business_problem: 'Weather exceptions need triage.',
     proposed_mission: 'Explain weather exposure and stage narrow follow-up.',
     human_owner_role: 'Operations Lead',
     requested_workspaces: ['assistant', 'operations'],
     work_objects: ['workflow item'],
     requested_inputs_tools: ['list_workflow_items'],
+    requested_action_types: [],
+    requested_skills: [],
     expected_outputs: ['Exception summary'],
     requested_authority_ceiling: 'STAGE',
     stop_conditions: ['Evidence is stale.'],
@@ -1182,13 +1189,18 @@ test('createAssistantAgentProfileRequest posts requested_by from mutation contex
   const [url, body, init] = postJsonMock.mock.calls[0]
   assert.equal(url, 'http://api.test/admin/assistant/profile-requests')
   assert.deepEqual(body, {
+    request_kind: 'NEW_SPECIALIZATION',
+    target_agent_id: null,
     requested_agent_id: 'weather-dispatch-analyst',
+    change_summary: 'Need a weather-focused specialization.',
     business_problem: 'Weather exceptions need triage.',
     proposed_mission: 'Explain weather exposure and stage narrow follow-up.',
     human_owner_role: 'Operations Lead',
     requested_workspaces: ['assistant', 'operations'],
     work_objects: ['workflow item'],
     requested_inputs_tools: ['list_workflow_items'],
+    requested_action_types: [],
+    requested_skills: [],
     expected_outputs: ['Exception summary'],
     requested_authority_ceiling: 'STAGE',
     stop_conditions: ['Evidence is stale.'],
@@ -1200,10 +1212,73 @@ test('createAssistantAgentProfileRequest posts requested_by from mutation contex
   assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
 })
 
+test('listAssistantProfileRequests reads the current user request queue with auth', async () => {
+  fetchJsonMock.mockResolvedValueOnce([{ request_id: 31, status: 'REQUESTED' }])
+
+  const payload = await listAssistantProfileRequests('http://api.test', {
+    accessToken: 'reader-token',
+    status: 'REQUESTED',
+    limit: 8,
+    offset: 4,
+  })
+
+  assert.deepEqual(payload, [{ request_id: 31, status: 'REQUESTED' }])
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/assistant/profile-requests?status=REQUESTED&limit=8&offset=4')
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer reader-token')
+})
+
+test('submitAssistantAgentProfileRequest posts the governed user request payload', async () => {
+  postJsonMock.mockResolvedValueOnce({ request_id: 32, status: 'REQUESTED' })
+
+  await submitAssistantAgentProfileRequest('http://api.test', {
+    request_kind: 'NARROW_ACCESS',
+    target_agent_id: 'risk-ops',
+    change_summary: 'Narrow Risk Ops to read-only desk review.',
+    business_problem: 'The workflow no longer needs staged actions.',
+    proposed_mission: 'Focus on read-only desk triage.',
+    human_owner_role: 'Risk Manager',
+    requested_workspaces: ['assistant'],
+    requested_inputs_tools: ['trade_lookup'],
+    requested_action_types: [],
+    requested_skills: [],
+    expected_outputs: ['Review-ready summary'],
+    requested_authority_ceiling: 'EXPLAIN',
+    stop_conditions: ['Stop if authority would expand.'],
+    success_metrics: ['Reduce unnecessary access.'],
+    proposed_eval_cases: ['Blocks staged actions.'],
+  })
+
+  assert.equal(postJsonMock.mock.calls[0][0], 'http://api.test/assistant/profile-requests')
+  assert.deepEqual(postJsonMock.mock.calls[0][1], {
+    request_kind: 'NARROW_ACCESS',
+    target_agent_id: 'risk-ops',
+    requested_agent_id: null,
+    change_summary: 'Narrow Risk Ops to read-only desk review.',
+    business_problem: 'The workflow no longer needs staged actions.',
+    proposed_mission: 'Focus on read-only desk triage.',
+    human_owner_role: 'Risk Manager',
+    requested_workspaces: ['assistant'],
+    work_objects: [],
+    requested_inputs_tools: ['trade_lookup'],
+    requested_action_types: [],
+    requested_skills: [],
+    expected_outputs: ['Review-ready summary'],
+    requested_authority_ceiling: 'EXPLAIN',
+    stop_conditions: ['Stop if authority would expand.'],
+    success_metrics: ['Reduce unnecessary access.'],
+    proposed_eval_cases: ['Blocks staged actions.'],
+  })
+  const headers = new Headers((postJsonMock.mock.calls[0][2] as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer mutation-token')
+})
+
 test('approve and reject profile request helpers post reviewer decisions', async () => {
   postJsonMock
     .mockResolvedValueOnce({ request_id: 12, status: 'APPROVED' })
     .mockResolvedValueOnce({ request_id: 13, status: 'REJECTED' })
+    .mockResolvedValueOnce({ request_id: 14, status: 'ACTIVATED' })
 
   await approveAssistantAgentProfileRequest('http://api.test', 12, {
     approval_notes: 'Owner and eval reviewed.',
@@ -1211,6 +1286,10 @@ test('approve and reject profile request helpers post reviewer decisions', async
   await rejectAssistantAgentProfileRequest('http://api.test', 13, {
     reviewed_by: 'risk-owner',
     rejection_reason: 'Scope is too broad.',
+  })
+  await activateAssistantAgentProfileRequest('http://api.test', 14, {
+    linked_agent_id: 'risk-ops',
+    linked_revision_id: 22,
   })
 
   assert.equal(
@@ -1228,6 +1307,15 @@ test('approve and reject profile request helpers post reviewer decisions', async
   assert.deepEqual(postJsonMock.mock.calls[1][1], {
     reviewed_by: 'risk-owner',
     rejection_reason: 'Scope is too broad.',
+  })
+  assert.equal(
+    postJsonMock.mock.calls[2][0],
+    'http://api.test/admin/assistant/profile-requests/14/activate',
+  )
+  assert.deepEqual(postJsonMock.mock.calls[2][1], {
+    activated_by: 'assistant_user',
+    linked_agent_id: 'risk-ops',
+    linked_revision_id: 22,
   })
 })
 

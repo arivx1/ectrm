@@ -121,14 +121,23 @@ class MessagingWorkspaceApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return response.json()["access_token"]
 
-    def test_workspace_state_seeds_default_conversations_and_returns_empty_message_list(self) -> None:
+    def test_workspace_state_seeds_default_conversations_and_returns_durable_starter_threads(self) -> None:
         response = self.client.get("/messages/workspace")
         self.assertEqual(response.status_code, 200)
 
         payload = response.json()
         self.assertEqual(len(payload["conversations"]), 5)
-        self.assertEqual(payload["conversations"][0]["conversation_id"], "ectrm-assistant")
-        self.assertEqual(payload["messages"], [])
+        assistant_conversation = payload["conversations"][0]
+        self.assertEqual(assistant_conversation["conversation_id"], "ectrm-assistant")
+        self.assertEqual(assistant_conversation["timeline"][0]["kind"], "system")
+        self.assertEqual(
+            assistant_conversation["timeline"][0]["detail"],
+            "Action draft AR-204 moved into governed review.",
+        )
+        self.assertEqual(
+            assistant_conversation["timeline"][1]["attachment"]["title"],
+            "AR-204 governed action draft",
+        )
 
     def test_guest_post_persists_and_reloads(self) -> None:
         post_response = self.client.post(
@@ -146,18 +155,15 @@ class MessagingWorkspaceApiTests(unittest.TestCase):
         reload_response = self.client.get("/messages/workspace")
         self.assertEqual(reload_response.status_code, 200)
         payload = reload_response.json()
-        self.assertEqual(len(payload["messages"]), 1)
-        self.assertEqual(payload["messages"][0]["body"], "Hello from the public desk lane.")
         assistant_conversation = next(
             conversation
             for conversation in payload["conversations"]
             if conversation["conversation_id"] == "ectrm-assistant"
         )
-        self.assertEqual(assistant_conversation["message_count"], 1)
-        self.assertEqual(
-            assistant_conversation["latest_message_preview"],
-            "Hello from the public desk lane.",
-        )
+        self.assertEqual(assistant_conversation["preview"], "Hello from the public desk lane.")
+        self.assertEqual(assistant_conversation["timeline"][-1]["kind"], "message")
+        self.assertEqual(assistant_conversation["timeline"][-1]["author"]["name"], "Guest Operator")
+        self.assertEqual(assistant_conversation["timeline"][-1]["body"], ["Hello from the public desk lane."])
 
     def test_signed_in_post_uses_authenticated_display_name(self) -> None:
         self._bootstrap_admin()
@@ -238,8 +244,11 @@ class MessagingWorkspaceApiTests(unittest.TestCase):
 
             payload = response.json()
             self.assertEqual(len(payload["conversations"]), 5)
-            self.assertEqual(payload["messages"], [])
-            self.assertEqual(payload["conversations"][0]["message_count"], 0)
+            self.assertEqual(payload["conversations"][0]["timeline"][0]["kind"], "system")
+            self.assertEqual(
+                payload["conversations"][0]["timeline"][0]["detail"],
+                "Action draft AR-204 moved into governed review.",
+            )
         finally:
             MessagingWorkspaceConversation.__table__.create(bind=self.engine, checkfirst=True)
             MessagingWorkspaceMessage.__table__.create(bind=self.engine, checkfirst=True)

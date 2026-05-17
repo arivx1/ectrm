@@ -8,6 +8,7 @@ import type {
   DeliveryRecord,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import { describeTruckCheckpointTimelineEvent } from './deliveryTruckWorkflowHelpers'
 
 type DeliveryEventTimelineEditorProps = {
   authSession: StoredAuthSession | null
@@ -178,9 +179,25 @@ function payloadMatchesLatestEvent(
   )
 }
 
-function eventSummary(event: DeliveryEventRecord): string {
+function eventTitle(delivery: DeliveryRecord, event: DeliveryEventRecord): string {
+  return describeTruckCheckpointTimelineEvent(delivery, event)?.title ?? formatEnumLabel(event.event_type)
+}
+
+function eventSummary(delivery: DeliveryRecord, event: DeliveryEventRecord): string {
+  const truckCheckpoint = describeTruckCheckpointTimelineEvent(delivery, event)
+  if (truckCheckpoint) {
+    return truckCheckpoint.summary
+  }
   const summaryParts = [event.location_code, event.reference_code, event.source].filter(Boolean)
   return summaryParts.length > 0 ? summaryParts.join(' • ') : `Logged by ${event.created_by}`
+}
+
+function eventBody(delivery: DeliveryRecord, event: DeliveryEventRecord): string {
+  const truckCheckpoint = describeTruckCheckpointTimelineEvent(delivery, event)
+  if (truckCheckpoint?.correction_reason) {
+    return truckCheckpoint.correction_reason
+  }
+  return event.notes?.trim() || `Recorded by ${event.created_by}`
 }
 
 export function DeliveryEventTimelineEditor({
@@ -345,24 +362,33 @@ export function DeliveryEventTimelineEditor({
 
       {delivery.delivery_events.length > 0 ? (
         <div className="timeline timeline-large">
-          {delivery.delivery_events.map((event) => (
-            <article key={event.event_id} className="timeline-item timeline-item-card">
-              <div className="timeline-dot" />
-              <div className="timeline-body">
-                <div className="timeline-head">
-                  <strong>{formatEnumLabel(event.event_type)}</strong>
-                  <span>{formatDate(event.occurred_at)}</span>
+          {delivery.delivery_events.map((event) => {
+            const truckCheckpoint = describeTruckCheckpointTimelineEvent(delivery, event)
+            return (
+              <article key={event.event_id} className="timeline-item timeline-item-card">
+                <div className="timeline-dot" />
+                <div className="timeline-body">
+                  <div className="timeline-head">
+                    <strong>{eventTitle(delivery, event)}</strong>
+                    <span>{formatDate(event.occurred_at)}</span>
+                  </div>
+                  <div className="timeline-summary-row">
+                    <span className={`status-pill status-pill-${executionStatusTone(event.execution_status)}`}>
+                      {formatEnumLabel(event.execution_status)}
+                    </span>
+                    {truckCheckpoint?.is_reversed ? (
+                      <span className="status-pill status-pill-blocked">Corrected</span>
+                    ) : null}
+                    {truckCheckpoint?.kind === 'correction' ? (
+                      <span className="status-pill status-pill-blocked">Correction</span>
+                    ) : null}
+                    <span className="timeline-meta">{eventSummary(delivery, event)}</span>
+                  </div>
+                  <p>{eventBody(delivery, event)}</p>
                 </div>
-                <div className="timeline-summary-row">
-                  <span className={`status-pill status-pill-${executionStatusTone(event.execution_status)}`}>
-                    {formatEnumLabel(event.execution_status)}
-                  </span>
-                  <span className="timeline-meta">{eventSummary(event)}</span>
-                </div>
-                <p>{event.notes?.trim() || `Recorded by ${event.created_by}`}</p>
-              </div>
-            </article>
-          ))}
+              </article>
+            )
+          })}
         </div>
       ) : (
         <p className="workflow-editor-note">No execution milestones have been logged yet for this delivery.</p>

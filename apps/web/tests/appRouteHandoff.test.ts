@@ -161,6 +161,39 @@ test('assistant route handoffs round-trip focused workspace context', () => {
   })
 })
 
+test('terminal route handoffs preserve market-instrument focus', () => {
+  const params = new URLSearchParams()
+  writeAppRouteHandoff(params, {
+    source: 'terminal',
+    tradeId: 'price_index:HH_IFERC',
+    focus: {
+      type: 'market_instrument',
+      id: 'price_index:HH_IFERC',
+      label: 'Henry Hub IFERC',
+    },
+    tradeInspectorTab: null,
+    eventType: null,
+    label: 'Open Henry Hub IFERC brief',
+    rationale: null,
+    filter: 'HH_IFERC',
+    sourceRunId: null,
+    sourceConversationId: null,
+    sourceActionRequestId: null,
+  })
+
+  assert.equal(
+    params.toString(),
+    'handoff=terminal&focusType=market_instrument&focusId=price_index%3AHH_IFERC&focusLabel=Henry+Hub+IFERC&handoffLabel=Open+Henry+Hub+IFERC+brief&focusFilter=HH_IFERC',
+  )
+  const handoff = readAppRouteHandoff(params)
+  assert.equal(getAppRouteHandoffTradeId(handoff), null)
+  assert.deepEqual(describeAppRouteHandoff(handoff, 'dashboard'), {
+    title: 'Open Henry Hub IFERC brief',
+    detail:
+      'Terminal search opened with market instrument Henry Hub IFERC in focus. Clear the focus when you are ready to widen back to the full workspace.',
+  })
+})
+
 test('map route handoffs preserve rail-route focus for the deliveries board', () => {
   const params = new URLSearchParams()
   writeAppRouteHandoff(
@@ -248,6 +281,60 @@ test('reference route handoffs preserve rail-route focus for the scheduling boar
     title: 'Open scheduling for BNSF_WAHA_TO_HSC',
     detail:
       'This workspace started focused on the selected reference-data rail route so you can review the matching scheduling rows before widening back to the full board.',
+  })
+})
+
+test('terminal route handoffs preserve focused report context', () => {
+  const params = new URLSearchParams()
+  writeAppRouteHandoff(params, {
+    source: 'terminal',
+    tradeId: 'reports-credit',
+    focus: {
+      type: 'report',
+      id: 'reports-credit',
+      label: 'Counterparty Credit Report',
+    },
+    tradeInspectorTab: null,
+    eventType: null,
+    label: 'Open Counterparty Credit Report',
+    rationale:
+      'Terminal search opened the Reports workspace on this module so you can review the matching analysis without hunting through the full report grid.',
+    filter: 'reports-credit',
+    sourceRunId: null,
+    sourceConversationId: null,
+    sourceActionRequestId: null,
+  })
+
+  assert.equal(
+    params.toString(),
+    'handoff=terminal&focusType=report&focusId=reports-credit&focusLabel=Counterparty+Credit+Report&handoffLabel=Open+Counterparty+Credit+Report&handoffReason=Terminal+search+opened+the+Reports+workspace+on+this+module+so+you+can+review+the+matching+analysis+without+hunting+through+the+full+report+grid.&focusFilter=reports-credit',
+  )
+
+  const handoff = readAppRouteHandoff(params)
+  assert.deepEqual(handoff, {
+    source: 'terminal',
+    tradeId: 'reports-credit',
+    focus: {
+      type: 'report',
+      id: 'reports-credit',
+      label: 'Counterparty Credit Report',
+    },
+    tradeInspectorTab: null,
+    eventType: null,
+    label: 'Open Counterparty Credit Report',
+    rationale:
+      'Terminal search opened the Reports workspace on this module so you can review the matching analysis without hunting through the full report grid.',
+    filter: 'reports-credit',
+    sourceRunId: null,
+    sourceConversationId: null,
+    sourceActionRequestId: null,
+  })
+  assert.equal(getAppRouteHandoffFilterValue(handoff), 'reports-credit')
+  assert.equal(getAppRouteHandoffTradeId(handoff), null)
+  assert.deepEqual(describeAppRouteHandoff(handoff, 'reports'), {
+    title: 'Open Counterparty Credit Report',
+    detail:
+      'Terminal search opened the Reports workspace on this module so you can review the matching analysis without hunting through the full report grid.',
   })
 })
 

@@ -249,8 +249,10 @@ export type WorkspaceViewRenderContext = {
   hrefForView: ReturnType<typeof useAppRouteState>['hrefForView']
   handleRoadmapPublished: ReturnType<typeof useAppShellState>['handleRoadmapPublished']
   roadmapRefreshVersion: ReturnType<typeof useAppShellState>['roadmapRefreshVersion']
+  selectedMessagingConversationId: ReturnType<typeof useAppRouteState>['selectedMessagingConversationId']
   selectedTradeId: ReturnType<typeof useAppRouteState>['selectedTradeId']
   setInspectorTab: ReturnType<typeof useAppShellState>['setInspectorTab']
+  setSelectedMessagingConversationId: ReturnType<typeof useAppRouteState>['setSelectedMessagingConversationId']
   setSelectedTradeId: ReturnType<typeof useAppRouteState>['setSelectedTradeId']
   shell: Pick<ReturnType<typeof useAppShellState>, 'eventFilter' | 'inspectorTab' | 'setEventFilter'>
   summary: ReturnType<typeof useAppWorkspaceSummary>
@@ -1054,9 +1056,11 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <DashboardWorkspace
         authSession={context.workspaceData.authSession}
+        routeHandoff={context.routeHandoff}
         globalFilter={GLOBAL_FILTER_DISABLED}
         onOpenView={context.navigateToView}
         onOpenTrade={context.navigateToTrade}
+        onClearHandoff={() => context.replaceView('dashboard', null)}
         appLoading={context.workspaceData.appLoading}
         activeTrades={context.summary.activeTrades}
         dashboardSummary={context.workspaceData.workspaceBootstrapSummary?.dashboard ?? null}
@@ -1360,6 +1364,16 @@ export const WORKSPACE_RENDERERS: Record<
         onSaveDeliveryLogisticsDetails={context.workspaceData.handleUpdateDeliveryLogisticsDetails}
         onSaveDeliveryPipelineDetails={context.workspaceData.handleUpdateDeliveryPipelineDetails}
         onSaveDeliveryPowerDetails={context.workspaceData.handleUpdateDeliveryPowerDetails}
+        onSaveDeliveryTruckDetails={context.workspaceData.handleUpdateDeliveryTruckDetails}
+        onCreateDeliveryTruckMovement={context.workspaceData.handleCreateDeliveryTruckMovement}
+        onSaveDeliveryTruckMovement={context.workspaceData.handleUpdateDeliveryTruckMovement}
+        onCancelDeliveryTruckMovement={context.workspaceData.handleCancelDeliveryTruckMovement}
+        onCreateDeliveryTruckStop={context.workspaceData.handleCreateDeliveryTruckStop}
+        onSaveDeliveryTruckStop={context.workspaceData.handleUpdateDeliveryTruckStop}
+        onSkipDeliveryTruckStop={context.workspaceData.handleSkipDeliveryTruckStop}
+        onCancelDeliveryTruckStop={context.workspaceData.handleCancelDeliveryTruckStop}
+        onRecordDeliveryTruckStopCheckpoint={context.workspaceData.handleRecordDeliveryTruckStopCheckpoint}
+        onReverseDeliveryTruckStopCheckpoint={context.workspaceData.handleReverseDeliveryTruckStopCheckpoint}
         onCreateDeliveryEvent={context.workspaceData.handleCreateDeliveryEvent}
       />
     ),
@@ -1490,6 +1504,8 @@ export const WORKSPACE_RENDERERS: Record<
         onOpenAssistant={() => context.navigateToView('assistant')}
         onOpenOperations={() => context.navigateToView('operations')}
         onOpenSettlement={() => context.navigateToView('settlement')}
+        selectedConversationId={context.selectedMessagingConversationId}
+        onSelectConversation={context.setSelectedMessagingConversationId}
       />
     ),
   },

@@ -61,6 +61,7 @@ import {
 import { useVoiceComposer } from '../../shared/voiceComposer'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import { AssistantAgentDirectoryPanel } from './AssistantAgentDirectoryPanel'
+import { AssistantAgentChangeRequestPanel } from './AssistantAgentChangeRequestPanel'
 import { AssistantConstructionExplainerPanel } from './AssistantConstructionExplainerPanel'
 import { buildAssistantAgentAccessSummary } from './assistantWorkspaceAccessSummary'
 
@@ -1600,6 +1601,14 @@ export function AssistantWorkspace({
               </div>
 
               <AssistantAgentDirectoryPanel
+                agents={agents}
+                runtimeSettings={runtimeSettings}
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={setSelectedAgentId}
+              />
+
+              <AssistantAgentChangeRequestPanel
+                authSession={authSession}
                 agents={agents}
                 runtimeSettings={runtimeSettings}
                 selectedAgentId={selectedAgentId}

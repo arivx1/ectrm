@@ -492,4 +492,16 @@ class DeliveryTruckStopCancelWrite(BaseModel):
     cancel_reason: str
 
 
+class DeliveryTruckStopCheckpointWrite(BaseModel):
+    checkpoint_code: str
+    occurred_at: datetime
+    notes: Optional[str] = None
+
+
+class DeliveryTruckStopCheckpointReverseWrite(BaseModel):
+    reversal_reason: str
+    reversed_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
 ShipmentOut = DeliveryObligationOut

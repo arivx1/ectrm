@@ -7,21 +7,109 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;')
 }
 
-function formatInline(text: string): string {
-  let html = escapeHtml(text)
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
-  html = html.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
-    '<a class="docs-link" href="$2" target="_blank" rel="noreferrer">$1</a>',
-  )
+export type ResolvedWikiPageLink = {
+  pageId: string
+  title: string
+  isArchived: boolean
+}
+
+export type ParsedWikiPageLink = {
+  label: string
+  target: string
+}
+
+type RenderWikiMarkdownOptions = {
+  resolvePageLink?: (target: string) => ResolvedWikiPageLink | null
+}
+
+const wikiPageLinkPattern = /\[\[([^[\]|]+)\|([^[\]]+)\]\]|\[\[([^[\]]+)\]\]/g
+
+export function parseWikiMarkdownLinks(markdown: string): ParsedWikiPageLink[] {
+  const links: ParsedWikiPageLink[] = []
+
+  for (const match of markdown.matchAll(wikiPageLinkPattern)) {
+    if (typeof match[1] === 'string' && typeof match[2] === 'string') {
+      links.push({
+        label: match[1].trim(),
+        target: match[2].trim(),
+      })
+      continue
+    }
+
+    if (typeof match[3] === 'string') {
+      const label = match[3].trim()
+      links.push({
+        label,
+        target: label,
+      })
+    }
+  }
+
+  return links
+}
+
+function renderResolvedWikiPageLink(
+  label: string,
+  target: string,
+  options: RenderWikiMarkdownOptions,
+): string {
+  const normalizedLabel = label.trim()
+  const normalizedTarget = target.trim()
+  const resolvedPage = options.resolvePageLink?.(normalizedTarget) ?? null
+
+  if (!resolvedPage) {
+    return `<span class="wiki-page-link wiki-page-link-missing">${escapeHtml(normalizedLabel)}</span>`
+  }
+
+  const className = resolvedPage.isArchived
+    ? 'wiki-page-link wiki-page-link-archived'
+    : 'wiki-page-link'
+  const title = resolvedPage.isArchived
+    ? `${resolvedPage.title} (archived)`
+    : resolvedPage.title
+
+  return `<a class="${className}" href="#" data-wiki-page-id="${escapeHtml(
+    resolvedPage.pageId,
+  )}" title="${escapeHtml(title)}">${escapeHtml(normalizedLabel)}</a>`
+}
+
+function formatInline(text: string, options: RenderWikiMarkdownOptions): string {
+  const tokenPattern =
+    /`([^`]+)`|\[\[([^[\]|]+)\|([^[\]]+)\]\]|\[\[([^[\]]+)\]\]|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g
+  let html = ''
+  let nextStartIndex = 0
+
+  for (const match of text.matchAll(tokenPattern)) {
+    const matchIndex = match.index ?? 0
+    html += escapeHtml(text.slice(nextStartIndex, matchIndex))
+
+    if (typeof match[1] === 'string') {
+      html += `<code>${escapeHtml(match[1])}</code>`
+    } else if (typeof match[2] === 'string' && typeof match[3] === 'string') {
+      html += renderResolvedWikiPageLink(match[2], match[3], options)
+    } else if (typeof match[4] === 'string') {
+      html += renderResolvedWikiPageLink(match[4], match[4], options)
+    } else if (typeof match[5] === 'string' && typeof match[6] === 'string') {
+      html += `<a class="docs-link" href="${escapeHtml(match[6])}" target="_blank" rel="noreferrer">${escapeHtml(
+        match[5],
+      )}</a>`
+    }
+
+    nextStartIndex = matchIndex + match[0].length
+  }
+
+  html += escapeHtml(text.slice(nextStartIndex))
   return html
 }
 
-function renderParagraph(lines: string[]): string {
-  return `<p>${formatInline(lines.join(' '))}</p>`
+function renderParagraph(lines: string[], options: RenderWikiMarkdownOptions): string {
+  return `<p>${formatInline(lines.join(' '), options)}</p>`
 }
 
-export function renderWikiMarkdownHtml(markdown: string): string {
+export function renderWikiMarkdownHtml(
+  markdown: string,
+  options: RenderWikiMarkdownOptions = {},
+): string {
   const lines = markdown.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
   const blocks: string[] = []
   let paragraphLines: string[] = []
@@ -34,7 +122,7 @@ export function renderWikiMarkdownHtml(markdown: string): string {
     if (paragraphLines.length === 0) {
       return
     }
-    blocks.push(renderParagraph(paragraphLines))
+    blocks.push(renderParagraph(paragraphLines, options))
     paragraphLines = []
   }
 
@@ -47,7 +135,7 @@ export function renderWikiMarkdownHtml(markdown: string): string {
     const className = listType === 'ordered' ? 'docs-list docs-list-ordered' : 'docs-list'
     blocks.push(
       `<${tagName} class="${className}">${listItems
-        .map((item) => `<li>${formatInline(item)}</li>`)
+        .map((item) => `<li>${formatInline(item, options)}</li>`)
         .join('')}</${tagName}>`,
     )
     listItems = []
@@ -94,7 +182,7 @@ export function renderWikiMarkdownHtml(markdown: string): string {
       flushParagraph()
       flushList()
       const level = Math.min(4, headingMatch[1].length + 1)
-      blocks.push(`<h${level}>${formatInline(headingMatch[2])}</h${level}>`)
+      blocks.push(`<h${level}>${formatInline(headingMatch[2], options)}</h${level}>`)
       continue
     }
 
@@ -124,7 +212,7 @@ export function renderWikiMarkdownHtml(markdown: string): string {
     if (quoteMatch) {
       flushParagraph()
       flushList()
-      blocks.push(`<blockquote class="wiki-quote">${formatInline(quoteMatch[1])}</blockquote>`)
+      blocks.push(`<blockquote class="wiki-quote">${formatInline(quoteMatch[1], options)}</blockquote>`)
       continue
     }
 

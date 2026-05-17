@@ -163,6 +163,9 @@ function SortableTileCard({
   return (
     <section
       ref={setNodeRef}
+      id={tile.id}
+      tabIndex={-1}
+      data-terminal-shortcut-target="workspace-tile"
       style={style}
       className={`surface workspace-tile workspace-tile-span-${tile.span ?? 'full'} ${isDragging ? 'is-dragging' : ''}`}
     >

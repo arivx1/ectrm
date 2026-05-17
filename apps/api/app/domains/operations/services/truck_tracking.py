@@ -10,12 +10,18 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.domains.operations.services.audit_events import append_trade_audit_event
 from apps.api.app.domains.operations.services.shipments import _apply_model_changes
+from apps.api.app.domains.operations.services.shipments import _active_business_delivery_events
 from apps.api.app.domains.operations.services.shipments import _coerce_utc
+from apps.api.app.domains.operations.services.shipments import _delivery_events_by_delivery_id
+from apps.api.app.domains.operations.services.shipments import _delivery_event_sort_key
 from apps.api.app.domains.operations.services.shipments import _load_active_delivery_record
 from apps.api.app.domains.operations.services.shipments import _normalize_optional_text
 from apps.api.app.domains.operations.services.shipments import _normalize_required_text
 from apps.api.app.domains.operations.services.shipments import _require_transport_mode
 from apps.api.app.domains.operations.services.shipments import _touch_audited_record
+from apps.api.app.domains.operations.services.shipments import append_delivery_event
+from apps.api.app.domains.operations.services.shipments import reverse_delivery_event
+from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_logistics_detail import DeliveryLogisticsDetail
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.delivery_truck_detail import DeliveryTruckDetail
@@ -25,11 +31,16 @@ from apps.api.app.models.trade import Trade
 from apps.api.app.schemas.shipment import DeliveryTruckMovementOut
 from apps.api.app.schemas.shipment import DeliveryTruckMovementSummaryOut
 from apps.api.app.schemas.shipment import DeliveryTruckStopOut
+from apps.api.app.shared.enums import DeliveryEventType
 from apps.api.app.shared.enums import DeliveryFieldSource
 from apps.api.app.shared.enums import TransportMode
+from apps.api.app.shared.enums import TruckCheckpointCode
 from apps.api.app.shared.enums import TruckMovementStatus
 from apps.api.app.shared.enums import TruckStopStatus
 from apps.api.app.shared.enums import TruckStopType
+
+TRUCK_CHECKPOINT_EVENT_SOURCE = "TRUCK_MANUAL_DISPATCH"
+TRUCK_CHECKPOINT_STATUS_REASON_PREFIX = "Truck checkpoint"
 
 STOP_TERMINAL_STATUSES = {
     TruckStopStatus.SKIPPED.value,
@@ -102,6 +113,17 @@ def _validate_truck_stop_type(value: object | None) -> TruckStopType:
         valid_values = ", ".join(stop_type.value for stop_type in TruckStopType)
         raise ValueError(
             f"Truck stop type '{normalized or value}' is invalid. Expected one of: {valid_values}."
+        ) from exc
+
+
+def _validate_truck_checkpoint_code(value: object | None) -> TruckCheckpointCode:
+    normalized = str(value or "").strip().upper()
+    try:
+        return TruckCheckpointCode(normalized)
+    except ValueError as exc:
+        valid_values = ", ".join(checkpoint.value for checkpoint in TruckCheckpointCode)
+        raise ValueError(
+            f"Truck checkpoint code '{normalized or value}' is invalid. Expected one of: {valid_values}."
         ) from exc
 
 
@@ -428,6 +450,186 @@ def _load_truck_stop(
         raise LookupError(f"Truck stop '{stop_id}' was not found.")
     movement, delivery, trade = _load_truck_movement(db, movement_id=stop.movement_id)
     return stop, movement, delivery, trade
+
+
+def _truck_checkpoint_reference_code(
+    *,
+    checkpoint_code: TruckCheckpointCode,
+    movement_id: str,
+    stop_id: str,
+) -> str:
+    return f"TRUCK:{checkpoint_code.value}:M:{movement_id}:S:{stop_id}"
+
+
+def _truck_checkpoint_code_from_reference(
+    reference_code: str | None,
+    *,
+    movement_id: str,
+    stop_id: str,
+) -> TruckCheckpointCode | None:
+    if not reference_code:
+        return None
+    for checkpoint_code in TruckCheckpointCode:
+        if reference_code == _truck_checkpoint_reference_code(
+            checkpoint_code=checkpoint_code,
+            movement_id=movement_id,
+            stop_id=stop_id,
+        ):
+            return checkpoint_code
+    return None
+
+
+def _truck_stop_checkpoint_events(
+    db: Session,
+    *,
+    delivery_id: str,
+    movement_id: str,
+    stop_id: str,
+    active_only: bool,
+) -> list[DeliveryEvent]:
+    delivery_events = _delivery_events_by_delivery_id(db, delivery_ids=[delivery_id]).get(delivery_id, [])
+    candidate_events = _active_business_delivery_events(delivery_events) if active_only else delivery_events
+    return [
+        event
+        for event in candidate_events
+        if event.event_type == DeliveryEventType.CHECKPOINT_RECORDED.value
+        and event.source == TRUCK_CHECKPOINT_EVENT_SOURCE
+        and _truck_checkpoint_code_from_reference(
+            event.reference_code,
+            movement_id=movement_id,
+            stop_id=stop_id,
+        )
+        is not None
+    ]
+
+
+def _validate_checkpoint_stop_type(
+    *,
+    stop: DeliveryTruckStop,
+    checkpoint_code: TruckCheckpointCode,
+) -> None:
+    if checkpoint_code in {TruckCheckpointCode.ARRIVED_PICKUP, TruckCheckpointCode.DEPARTED_PICKUP}:
+        if stop.stop_type != TruckStopType.PICKUP.value:
+            raise ValueError(f"{checkpoint_code.value} can only be recorded against a PICKUP truck stop.")
+        return
+    if checkpoint_code == TruckCheckpointCode.ARRIVED_DESTINATION:
+        if stop.stop_type != TruckStopType.DROPOFF.value:
+            raise ValueError("ARRIVED_DESTINATION can only be recorded against a DROPOFF truck stop.")
+        return
+    raise ValueError(f"Truck checkpoint code '{checkpoint_code.value}' is not supported.")
+
+
+def _validate_checkpoint_sequence(
+    *,
+    stop: DeliveryTruckStop,
+    movement: DeliveryTruckMovement,
+    stops: list[DeliveryTruckStop],
+    checkpoint_code: TruckCheckpointCode,
+) -> None:
+    if stop.status in STOP_TERMINAL_STATUSES:
+        raise ValueError("Truck checkpoints cannot be recorded against skipped or cancelled stops.")
+    if movement.status == TruckMovementStatus.CANCELLED.value:
+        raise ValueError("Truck checkpoints cannot be recorded against a cancelled truck movement.")
+
+    active_stops = _active_stops(stops)
+    earlier_active_stops = [
+        candidate
+        for candidate in active_stops
+        if candidate.stop_sequence < stop.stop_sequence
+    ]
+    if checkpoint_code == TruckCheckpointCode.ARRIVED_DESTINATION and any(
+        candidate.status != TruckStopStatus.DEPARTED.value for candidate in earlier_active_stops
+    ):
+        raise ValueError("Destination arrival cannot be recorded until earlier active truck stops have departed.")
+
+
+def _checkpoint_projection_values(
+    *,
+    stop: DeliveryTruckStop,
+    active_events: list[DeliveryEvent],
+) -> dict[str, object | None]:
+    ordered_events = sorted(active_events, key=_delivery_event_sort_key)
+    active_codes = [
+        _truck_checkpoint_code_from_reference(
+            event.reference_code,
+            movement_id=stop.movement_id,
+            stop_id=stop.stop_id,
+        )
+        for event in ordered_events
+    ]
+    event_by_code = {
+        checkpoint_code: event
+        for checkpoint_code, event in zip(active_codes, ordered_events)
+        if checkpoint_code is not None
+    }
+
+    if stop.stop_type == TruckStopType.PICKUP.value:
+        departed_event = event_by_code.get(TruckCheckpointCode.DEPARTED_PICKUP)
+        arrived_event = event_by_code.get(TruckCheckpointCode.ARRIVED_PICKUP)
+        if departed_event is not None:
+            arrived_at = _coerce_utc(arrived_event.occurred_at) if arrived_event is not None else _coerce_utc(departed_event.occurred_at)
+            return {
+                "status": TruckStopStatus.DEPARTED.value,
+                "status_reason": f"{TRUCK_CHECKPOINT_STATUS_REASON_PREFIX} {TruckCheckpointCode.DEPARTED_PICKUP.value}",
+                "actual_arrived_at": arrived_at,
+                "actual_departed_at": _coerce_utc(departed_event.occurred_at),
+            }
+        if arrived_event is not None:
+            return {
+                "status": TruckStopStatus.ARRIVED.value,
+                "status_reason": f"{TRUCK_CHECKPOINT_STATUS_REASON_PREFIX} {TruckCheckpointCode.ARRIVED_PICKUP.value}",
+                "actual_arrived_at": _coerce_utc(arrived_event.occurred_at),
+                "actual_departed_at": None,
+            }
+
+    if stop.stop_type == TruckStopType.DROPOFF.value:
+        arrived_event = event_by_code.get(TruckCheckpointCode.ARRIVED_DESTINATION)
+        if arrived_event is not None:
+            return {
+                "status": TruckStopStatus.ARRIVED.value,
+                "status_reason": f"{TRUCK_CHECKPOINT_STATUS_REASON_PREFIX} {TruckCheckpointCode.ARRIVED_DESTINATION.value}",
+                "actual_arrived_at": _coerce_utc(arrived_event.occurred_at),
+                "actual_departed_at": None,
+            }
+
+    return {
+        "status": TruckStopStatus.PLANNED.value,
+        "status_reason": None,
+        "actual_arrived_at": None,
+        "actual_departed_at": None,
+    }
+
+
+def _apply_stop_checkpoint_projection(
+    db: Session,
+    *,
+    stop: DeliveryTruckStop,
+    movement: DeliveryTruckMovement,
+    actor_id: str,
+    reference_time: datetime,
+) -> list[DeliveryTruckStop]:
+    active_events = _truck_stop_checkpoint_events(
+        db,
+        delivery_id=movement.delivery_id,
+        movement_id=movement.movement_id,
+        stop_id=stop.stop_id,
+        active_only=True,
+    )
+    if _apply_model_changes(
+        stop,
+        _checkpoint_projection_values(stop=stop, active_events=active_events),
+    ):
+        _touch_audited_record(stop, actor_id=actor_id, reference_time=reference_time)
+
+    stops = _movement_stops_by_id(db, movement_ids=[movement.movement_id]).get(movement.movement_id, [])
+    ordered_stops = _validate_movement_stop_set(stops)
+    _refresh_movement_projection(
+        movement,
+        stops=ordered_stops,
+        actor_id=actor_id,
+        reference_time=reference_time,
+    )
+    return ordered_stops
 
 
 def _build_create_stop_sequence_plan(
@@ -1208,5 +1410,165 @@ def cancel_delivery_truck_stop(
         movement=movement_out,
         causation_id=f"delivery:{movement.delivery_id}:truck-movement:{movement.movement_id}:stop-cancelled",
         request_payload={"cancel_reason": normalized_reason},
+    )
+    return movement_out
+
+
+def record_delivery_truck_stop_checkpoint(
+    db: Session,
+    *,
+    stop_id: str,
+    actor_id: str,
+    checkpoint_code: object | None,
+    occurred_at: object | None,
+    notes: object | None = None,
+    now: datetime | None = None,
+) -> DeliveryTruckMovementOut:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    stop, movement, _delivery, trade = _load_truck_stop(db, stop_id=stop_id)
+    stops = _movement_stops_by_id(db, movement_ids=[movement.movement_id]).get(movement.movement_id, [])
+    normalized_checkpoint_code = _validate_truck_checkpoint_code(checkpoint_code)
+    normalized_occurred_at = _normalize_optional_datetime(
+        occurred_at,
+        label="Truck checkpoint occurred at",
+    )
+    if normalized_occurred_at is None:
+        raise ValueError("Truck checkpoint occurred at is required.")
+    _validate_checkpoint_stop_type(stop=stop, checkpoint_code=normalized_checkpoint_code)
+    _validate_checkpoint_sequence(
+        stop=stop,
+        movement=movement,
+        stops=stops,
+        checkpoint_code=normalized_checkpoint_code,
+    )
+
+    reference_code = _truck_checkpoint_reference_code(
+        checkpoint_code=normalized_checkpoint_code,
+        movement_id=movement.movement_id,
+        stop_id=stop.stop_id,
+    )
+    duplicate_event = next(
+        (
+            event
+            for event in _truck_stop_checkpoint_events(
+                db,
+                delivery_id=movement.delivery_id,
+                movement_id=movement.movement_id,
+                stop_id=stop.stop_id,
+                active_only=True,
+            )
+            if event.reference_code == reference_code
+        ),
+        None,
+    )
+    if duplicate_event is not None:
+        raise ValueError(
+            f"Truck checkpoint {normalized_checkpoint_code.value} is already active for stop {stop.stop_id}."
+        )
+
+    append_delivery_event(
+        db,
+        delivery_id=movement.delivery_id,
+        actor_id=actor_id,
+        event_type=DeliveryEventType.CHECKPOINT_RECORDED.value,
+        occurred_at=normalized_occurred_at,
+        location_code=stop.location_code,
+        reference_code=reference_code,
+        source=TRUCK_CHECKPOINT_EVENT_SOURCE,
+        notes=_normalize_optional_text(notes),
+        now=reference_time,
+    )
+    ordered_stops = _apply_stop_checkpoint_projection(
+        db,
+        stop=stop,
+        movement=movement,
+        actor_id=actor_id,
+        reference_time=reference_time,
+    )
+    db.flush()
+    movement_out = _movement_to_out(movement, stops=ordered_stops)
+    _append_truck_movement_audit(
+        db,
+        trade_id=trade.trade_id,
+        actor_id=actor_id,
+        event_type="TradeDeliveryTruckCheckpointRecorded",
+        movement=movement_out,
+        causation_id=(
+            f"delivery:{movement.delivery_id}:truck-movement:{movement.movement_id}:"
+            f"stop:{stop.stop_id}:checkpoint"
+        ),
+        request_payload={
+            "checkpoint_code": normalized_checkpoint_code.value,
+            "occurred_at": normalized_occurred_at,
+            "notes": _normalize_optional_text(notes),
+        },
+    )
+    return movement_out
+
+
+def reverse_delivery_truck_stop_checkpoint(
+    db: Session,
+    *,
+    stop_id: str,
+    event_id: int,
+    actor_id: str,
+    reversal_reason: object | None,
+    reversed_at: datetime | None = None,
+    notes: object | None = None,
+    now: datetime | None = None,
+) -> DeliveryTruckMovementOut:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    stop, movement, _delivery, trade = _load_truck_stop(db, stop_id=stop_id)
+    all_stop_events = _truck_stop_checkpoint_events(
+        db,
+        delivery_id=movement.delivery_id,
+        movement_id=movement.movement_id,
+        stop_id=stop.stop_id,
+        active_only=False,
+    )
+    target_event = next((event for event in all_stop_events if event.id == event_id), None)
+    if target_event is None:
+        raise LookupError(f"Truck checkpoint event {event_id} was not found on stop {stop_id}.")
+    if target_event.event_type != DeliveryEventType.CHECKPOINT_RECORDED.value:
+        raise ValueError(f"Delivery event {event_id} is not a truck checkpoint event.")
+    if target_event.reversal_of_event_id is not None or target_event.event_type == DeliveryEventType.EVENT_REVERSED.value:
+        raise ValueError(f"Delivery event {event_id} is already a reversal entry and cannot be reversed.")
+
+    reverse_delivery_event(
+        db,
+        delivery_id=movement.delivery_id,
+        event_id=event_id,
+        actor_id=actor_id,
+        reversal_reason=reversal_reason,
+        reversed_at=reversed_at,
+        source=TRUCK_CHECKPOINT_EVENT_SOURCE,
+        notes=_normalize_optional_text(notes),
+        now=reference_time,
+    )
+    ordered_stops = _apply_stop_checkpoint_projection(
+        db,
+        stop=stop,
+        movement=movement,
+        actor_id=actor_id,
+        reference_time=reference_time,
+    )
+    db.flush()
+    movement_out = _movement_to_out(movement, stops=ordered_stops)
+    _append_truck_movement_audit(
+        db,
+        trade_id=trade.trade_id,
+        actor_id=actor_id,
+        event_type="TradeDeliveryTruckCheckpointReversed",
+        movement=movement_out,
+        causation_id=(
+            f"delivery:{movement.delivery_id}:truck-movement:{movement.movement_id}:"
+            f"stop:{stop.stop_id}:checkpoint-reversal"
+        ),
+        request_payload={
+            "event_id": event_id,
+            "reversal_reason": reversal_reason,
+            "reversed_at": reversed_at,
+            "notes": _normalize_optional_text(notes),
+        },
     )
     return movement_out

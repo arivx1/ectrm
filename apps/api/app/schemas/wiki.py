@@ -23,11 +23,17 @@ class WikiPageRevisionOut(BaseModel):
     restored_from_revision_id: int | None
 
 
+class WikiPageLinkOut(BaseModel):
+    label: str
+    target: str
+
+
 class WikiPageSummaryOut(BaseModel):
     page_id: str
     parent_page_id: str | None
     title: str
     summary: str
+    links: list[WikiPageLinkOut] = Field(default_factory=list)
     child_count: int
     word_count: int
     sort_order: int
@@ -35,6 +41,9 @@ class WikiPageSummaryOut(BaseModel):
     created_by: str
     updated_at: datetime
     updated_by: str
+    is_archived: bool
+    archived_at: datetime | None
+    archived_by: str | None
     version: int
 
 
@@ -45,6 +54,20 @@ class WikiPageDetailOut(WikiPageSummaryOut):
 
 class WikiPageIndexOut(BaseModel):
     pages: list[WikiPageSummaryOut] = Field(default_factory=list)
+
+
+class WikiPageSearchResultOut(BaseModel):
+    page: WikiPageSummaryOut
+    score: float
+    snippet: str
+    matched_terms: list[str] = Field(default_factory=list)
+    match_reasons: list[str] = Field(default_factory=list)
+
+
+class WikiPageSearchOut(BaseModel):
+    query: str
+    result_count: int
+    results: list[WikiPageSearchResultOut] = Field(default_factory=list)
 
 
 class WikiPageCreate(BaseModel):

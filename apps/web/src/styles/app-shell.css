@@ -404,6 +404,404 @@
   white-space: nowrap;
 }
 
+.terminal-command-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  min-width: min(100%, 18rem);
+  padding: 0.72rem 0.9rem;
+  border-radius: 1rem;
+  text-align: left;
+}
+
+.terminal-command-trigger-mobile {
+  min-width: 0;
+  padding-inline: 0.82rem;
+}
+
+.terminal-command-trigger-copy {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.terminal-command-trigger-copy strong {
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.terminal-command-trigger-copy small {
+  color: #66717c;
+  line-height: 1.35;
+}
+
+.terminal-command-trigger-shortcut {
+  white-space: nowrap;
+  color: #7a848e;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.terminal-shortcut-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.72rem 0.82rem;
+  border-radius: 1rem;
+}
+
+.terminal-shortcut-trigger kbd,
+.terminal-shortcut-card kbd,
+.terminal-shortcut-workspace-row kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.8rem;
+  padding: 0.24rem 0.46rem;
+  border: 1px solid rgba(18, 42, 56, 0.12);
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.84);
+  color: #13293d;
+  font: 700 0.72rem/1.2 "IBM Plex Mono", "SFMono-Regular", monospace;
+  box-shadow: inset 0 -1px 0 rgba(18, 42, 56, 0.08);
+}
+
+.terminal-command-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 4.5rem 1rem 1rem;
+}
+
+.terminal-shortcut-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 31;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 4.5rem 1rem 1rem;
+}
+
+.terminal-command-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(18, 42, 56, 0.44);
+  backdrop-filter: blur(10px);
+}
+
+.terminal-command-dialog {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 0.95rem;
+  width: min(52rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 6rem);
+  padding: 1rem;
+  overflow: hidden;
+}
+
+.terminal-shortcut-dialog {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 1rem;
+  width: min(58rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 6rem);
+  padding: 1rem;
+  overflow: auto;
+}
+
+.terminal-command-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.terminal-command-head-copy {
+  display: grid;
+  gap: 0.22rem;
+  min-width: 0;
+}
+
+.terminal-command-head-copy strong {
+  color: #13293d;
+  font-size: 1.08rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.terminal-command-head-copy p {
+  color: #66717c;
+  line-height: 1.5;
+}
+
+.terminal-command-input-shell {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.82rem 0.9rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.terminal-command-prompt {
+  color: #127c6c;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.terminal-command-input {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #13293d;
+  font: inherit;
+  line-height: 1.4;
+  outline: none;
+}
+
+.terminal-command-input::placeholder {
+  color: #7a848e;
+}
+
+.terminal-command-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.terminal-command-hints span {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.36rem 0.62rem;
+  border-radius: 999px;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  background: rgba(255, 255, 255, 0.7);
+  color: #66717c;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.terminal-command-results {
+  display: grid;
+  gap: 0.9rem;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+.terminal-command-group {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.terminal-command-group-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.terminal-command-group-head strong {
+  color: #13293d;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.terminal-command-group-head small {
+  color: #7a848e;
+  font-size: 0.74rem;
+}
+
+.terminal-command-group-results {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.terminal-command-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.9rem;
+  width: 100%;
+  padding: 0.88rem 0.95rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.72);
+  text-align: left;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
+.terminal-command-result:hover,
+.terminal-command-result.is-active {
+  transform: translateY(-1px);
+  border-color: rgba(18, 124, 108, 0.22);
+  background: linear-gradient(135deg, rgba(18, 124, 108, 0.08), rgba(255, 255, 255, 0.9));
+  box-shadow: 0 18px 40px rgba(17, 30, 41, 0.08);
+}
+
+.terminal-command-result-copy {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.terminal-command-result-copy strong {
+  color: #13293d;
+  font-size: 0.96rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.terminal-command-result-copy p {
+  margin: 0;
+  color: #66717c;
+  line-height: 1.45;
+}
+
+.terminal-command-result-kind {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.62rem;
+  border-radius: 999px;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  background: rgba(18, 42, 56, 0.04);
+  color: #5f6a74;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.terminal-command-state {
+  padding: 1rem;
+}
+
+.terminal-command-state strong {
+  color: #13293d;
+}
+
+.terminal-command-state-loading {
+  border-color: rgba(18, 124, 108, 0.18);
+}
+
+.terminal-command-state-unsupported {
+  border-color: rgba(154, 67, 56, 0.18);
+}
+
+.terminal-command-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.terminal-command-footer small {
+  color: #66717c;
+  line-height: 1.45;
+}
+
+.terminal-shortcut-grid,
+.terminal-shortcut-workspace-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.terminal-shortcut-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.terminal-shortcut-card,
+.terminal-shortcut-workspace-row,
+.terminal-shortcut-workspaces {
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.terminal-shortcut-card,
+.terminal-shortcut-workspaces {
+  padding: 0.9rem;
+}
+
+.terminal-shortcut-card {
+  display: grid;
+  gap: 0.72rem;
+}
+
+.terminal-shortcut-card-copy {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.terminal-shortcut-card-copy span {
+  color: #66717c;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.terminal-shortcut-card-copy strong,
+.terminal-shortcut-workspace-row strong {
+  color: #13293d;
+}
+
+.terminal-shortcut-card-copy p,
+.terminal-shortcut-card small,
+.terminal-shortcut-workspace-row p {
+  margin: 0;
+  color: #66717c;
+  line-height: 1.45;
+}
+
+.terminal-shortcut-key-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.terminal-shortcut-workspaces {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.terminal-shortcut-workspace-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.terminal-shortcut-workspace-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: start;
+  padding: 0.75rem;
+}
+
 .app-shell.app-shell-terminal-mode {
   grid-template-columns: 16.5rem minmax(0, 1fr);
 }
@@ -482,6 +880,104 @@
 .app-shell-terminal-mode .workspace-topbar-token {
   min-width: min(100%, 14rem);
   padding: 0.62rem 0.72rem;
+}
+
+.app-shell-terminal-mode .terminal-command-trigger {
+  border-color: rgba(126, 154, 184, 0.18);
+  background: linear-gradient(180deg, rgba(13, 24, 37, 0.98), rgba(8, 15, 24, 0.98));
+  color: var(--terminal-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.app-shell-terminal-mode .terminal-shortcut-trigger {
+  border-color: rgba(126, 154, 184, 0.18);
+  background: rgba(10, 18, 28, 0.9);
+  color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .terminal-command-trigger-copy small,
+.app-shell-terminal-mode .terminal-command-trigger-shortcut {
+  color: var(--terminal-muted);
+}
+
+.app-shell-terminal-mode .terminal-command-overlay,
+.app-shell-terminal-mode .terminal-shortcut-overlay {
+  padding-top: 4rem;
+}
+
+.app-shell-terminal-mode .terminal-command-backdrop {
+  background: rgba(3, 8, 14, 0.72);
+}
+
+.app-shell-terminal-mode .terminal-command-dialog,
+.app-shell-terminal-mode .terminal-shortcut-dialog {
+  border-color: var(--terminal-line-strong);
+  background:
+    radial-gradient(circle at top right, rgba(78, 167, 255, 0.14), transparent 30%),
+    linear-gradient(180deg, rgba(11, 20, 31, 0.98), rgba(8, 15, 24, 0.99));
+  box-shadow: var(--terminal-shadow);
+}
+
+.app-shell-terminal-mode .terminal-command-head-copy strong,
+.app-shell-terminal-mode .terminal-command-result-copy strong,
+.app-shell-terminal-mode .terminal-command-group-head strong,
+.app-shell-terminal-mode .terminal-shortcut-card-copy strong,
+.app-shell-terminal-mode .terminal-shortcut-workspace-row strong {
+  color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .terminal-command-head-copy p,
+.app-shell-terminal-mode .terminal-command-result-copy p,
+.app-shell-terminal-mode .terminal-command-footer small,
+.app-shell-terminal-mode .terminal-command-group-head small,
+.app-shell-terminal-mode .terminal-command-state p,
+.app-shell-terminal-mode .terminal-shortcut-card-copy p,
+.app-shell-terminal-mode .terminal-shortcut-card small,
+.app-shell-terminal-mode .terminal-shortcut-card-copy span,
+.app-shell-terminal-mode .terminal-shortcut-workspace-row p {
+  color: var(--terminal-muted);
+}
+
+.app-shell-terminal-mode .terminal-command-input-shell,
+.app-shell-terminal-mode .terminal-command-hints span,
+.app-shell-terminal-mode .terminal-command-result,
+.app-shell-terminal-mode .terminal-command-result-kind,
+.app-shell-terminal-mode .terminal-shortcut-card,
+.app-shell-terminal-mode .terminal-shortcut-workspace-row,
+.app-shell-terminal-mode .terminal-shortcut-workspaces,
+.app-shell-terminal-mode .terminal-shortcut-trigger kbd,
+.app-shell-terminal-mode .terminal-shortcut-card kbd,
+.app-shell-terminal-mode .terminal-shortcut-workspace-row kbd {
+  border-color: var(--terminal-line);
+  background: rgba(10, 18, 28, 0.9);
+}
+
+.app-shell-terminal-mode .terminal-command-prompt {
+  color: var(--terminal-accent-strong);
+}
+
+.app-shell-terminal-mode .terminal-command-input {
+  color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .terminal-command-input::placeholder,
+.app-shell-terminal-mode .terminal-command-hints span,
+.app-shell-terminal-mode .terminal-command-result-kind,
+.app-shell-terminal-mode .terminal-shortcut-trigger kbd,
+.app-shell-terminal-mode .terminal-shortcut-card kbd,
+.app-shell-terminal-mode .terminal-shortcut-workspace-row kbd {
+  color: var(--terminal-dim);
+}
+
+.app-shell-terminal-mode .terminal-command-result:hover,
+.app-shell-terminal-mode .terminal-command-result.is-active {
+  border-color: rgba(61, 214, 160, 0.24);
+  background: linear-gradient(180deg, rgba(13, 31, 44, 0.98), rgba(8, 18, 27, 0.98));
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.28);
+}
+
+.app-shell-terminal-mode .terminal-command-state strong {
+  color: var(--terminal-text);
 }
 
 .app-shell-terminal-mode .hero {

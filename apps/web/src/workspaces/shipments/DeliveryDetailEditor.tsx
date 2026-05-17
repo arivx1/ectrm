@@ -1,11 +1,21 @@
 import { useEffect, useState } from 'react'
 
 import type {
+  CancelDeliveryTruckMovementInput,
+  CancelDeliveryTruckStopInput,
   CreateDeliveryEventInput,
+  DeliveryTruckMovementCreateInput,
+  DeliveryTruckStopCreateInput,
+  RecordDeliveryTruckStopCheckpointInput,
+  ReverseDeliveryTruckStopCheckpointInput,
+  SkipDeliveryTruckStopInput,
   UpdateDeliveryInput,
   UpdateDeliveryLogisticsDetailInput,
   UpdateDeliveryPipelineDetailInput,
   UpdateDeliveryPowerDetailInput,
+  UpdateDeliveryTruckDetailInput,
+  UpdateDeliveryTruckMovementInput,
+  UpdateDeliveryTruckStopInput,
 } from '../../entities/shipments/api'
 import type {
   DeliveryExecutionStatus,
@@ -21,6 +31,7 @@ import {
 } from '../../shared/transportModes'
 import { DeliveryEventTimelineEditor } from './DeliveryEventTimelineEditor'
 import { DeliveryModeDetailEditor } from './DeliveryModeDetailEditor'
+import { DeliveryTruckWorkflowEditor } from './DeliveryTruckWorkflowEditor'
 import {
   buildSharedDeliveryResetOptions,
   normalizedNullableText,
@@ -45,6 +56,52 @@ type DeliveryDetailEditorProps = {
     payload: UpdateDeliveryPipelineDetailInput,
   ) => Promise<void>
   onSavePowerDetails: (deliveryId: string, payload: UpdateDeliveryPowerDetailInput) => Promise<void>
+  onSaveTruckDetails: (deliveryId: string, payload: UpdateDeliveryTruckDetailInput) => Promise<void>
+  onCreateTruckMovement: (
+    deliveryId: string,
+    payload: DeliveryTruckMovementCreateInput,
+  ) => Promise<void>
+  onSaveTruckMovement: (
+    deliveryId: string,
+    movementId: string,
+    payload: UpdateDeliveryTruckMovementInput,
+  ) => Promise<void>
+  onCancelTruckMovement: (
+    deliveryId: string,
+    movementId: string,
+    payload: CancelDeliveryTruckMovementInput,
+  ) => Promise<void>
+  onCreateTruckStop: (
+    deliveryId: string,
+    movementId: string,
+    payload: DeliveryTruckStopCreateInput,
+  ) => Promise<void>
+  onSaveTruckStop: (
+    deliveryId: string,
+    stopId: string,
+    payload: UpdateDeliveryTruckStopInput,
+  ) => Promise<void>
+  onSkipTruckStop: (
+    deliveryId: string,
+    stopId: string,
+    payload: SkipDeliveryTruckStopInput,
+  ) => Promise<void>
+  onCancelTruckStop: (
+    deliveryId: string,
+    stopId: string,
+    payload: CancelDeliveryTruckStopInput,
+  ) => Promise<void>
+  onRecordTruckStopCheckpoint: (
+    deliveryId: string,
+    stopId: string,
+    payload: RecordDeliveryTruckStopCheckpointInput,
+  ) => Promise<void>
+  onReverseTruckStopCheckpoint: (
+    deliveryId: string,
+    stopId: string,
+    eventId: number,
+    payload: ReverseDeliveryTruckStopCheckpointInput,
+  ) => Promise<void>
   onCreateEvent: (deliveryId: string, payload: CreateDeliveryEventInput) => Promise<void>
 }
 
@@ -214,6 +271,16 @@ export function DeliveryDetailEditor({
   onSaveLogisticsDetails,
   onSavePipelineDetails,
   onSavePowerDetails,
+  onSaveTruckDetails,
+  onCreateTruckMovement,
+  onSaveTruckMovement,
+  onCancelTruckMovement,
+  onCreateTruckStop,
+  onSaveTruckStop,
+  onSkipTruckStop,
+  onCancelTruckStop,
+  onRecordTruckStopCheckpoint,
+  onReverseTruckStopCheckpoint,
   onCreateEvent,
 }: DeliveryDetailEditorProps) {
   const [draft, setDraft] = useState<DeliveryDetailDraft>(() => buildDraft(delivery))
@@ -540,6 +607,25 @@ export function DeliveryDetailEditor({
           onSavePowerDetails={onSavePowerDetails}
         />
       )}
+
+      {delivery.transport_mode === 'TRUCK' ? (
+        <DeliveryTruckWorkflowEditor
+          authSession={authSession}
+          delivery={delivery}
+          savingDeliveryId={savingDeliveryId}
+          formatDate={formatDate}
+          onSaveTruckDetails={onSaveTruckDetails}
+          onCreateTruckMovement={onCreateTruckMovement}
+          onSaveTruckMovement={onSaveTruckMovement}
+          onCancelTruckMovement={onCancelTruckMovement}
+          onCreateTruckStop={onCreateTruckStop}
+          onSaveTruckStop={onSaveTruckStop}
+          onSkipTruckStop={onSkipTruckStop}
+          onCancelTruckStop={onCancelTruckStop}
+          onRecordTruckStopCheckpoint={onRecordTruckStopCheckpoint}
+          onReverseTruckStopCheckpoint={onReverseTruckStopCheckpoint}
+        />
+      ) : null}
 
       <DeliveryEventTimelineEditor
         authSession={authSession}

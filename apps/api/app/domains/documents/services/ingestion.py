@@ -33,6 +33,8 @@ from .document_ingestion_analysis import build_page_warnings
 from .document_ingestion_analysis import classify_document_page
 from .document_ingestion_analysis import extract_document_header_fields
 from .document_ingestion_analysis import extract_document_table_blocks
+from .document_classification_scoring import score_document_page_classification
+from .document_classification_scoring import serialize_deterministic_assessment
 from .document_classification_learning import apply_learned_classification_override
 from .document_classification_learning import initialize_page_classification_payload
 from .document_classification_learning import record_page_classification_correction
@@ -699,13 +701,20 @@ def _populate_page_analysis(
                 text_source = "ocr"
                 ocr_warnings = ["OCR fallback extracted text from the rendered page image.", *ocr_warnings]
 
-    classification = classify_document_page(filename, raw_text)
-    header_fields = extract_document_header_fields(
+    table_blocks = extract_document_table_blocks(raw_text, text_source=text_source)
+    deterministic_assessment = score_document_page_classification(
+        filename=filename,
+        raw_text=raw_text,
+        text_source=text_source,
+        table_blocks=table_blocks,
+        image_has_visible_content=image_has_visible_content,
+    )
+    classification = deterministic_assessment.classification
+    header_fields = list(deterministic_assessment.header_fields) or extract_document_header_fields(
         classification.document_kind,
         raw_text,
         text_source=text_source,
     )
-    table_blocks = extract_document_table_blocks(raw_text, text_source=text_source)
     extraction_status = "FAILED" if extraction_errors else "ANALYZED"
 
     page_record.classification_status = "ANALYZED"
@@ -724,6 +733,7 @@ def _populate_page_analysis(
         document_subtype=classification.document_subtype,
         confidence=classification.confidence,
         source="heuristic",
+        deterministic_assessment=serialize_deterministic_assessment(deterministic_assessment),
     )
     page_record.header_fields = header_fields
     page_record.table_blocks = table_blocks

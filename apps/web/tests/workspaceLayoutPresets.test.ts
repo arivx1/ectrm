@@ -36,9 +36,10 @@ describe('workspace layout presets', () => {
       'dashboard',
       [
         tileSpec('desk-snapshot'),
-        tileSpec('market-prices'),
+        tileSpec('market-prices', ['full', 'wide', 'half']),
         tileSpec('position-snapshot', ['full', 'wide', 'half']),
         tileSpec('operational-attention', ['full', 'wide', 'half', 'side']),
+        tileSpec('watchlist-alerts', ['full', 'wide', 'half', 'side']),
         tileSpec('recent-timeline', ['full', 'wide', 'half', 'side']),
         tileSpec('market-context'),
         tileSpec('weather-intelligence'),
@@ -49,21 +50,24 @@ describe('workspace layout presets', () => {
     const preset = presets.find((candidate) => candidate.id === 'market-overview')
     expect(preset).not.toBeNull()
     expect(preset?.layout.order).toEqual([
-      'desk-snapshot',
+      'watchlist-alerts',
       'market-prices',
       'position-snapshot',
       'operational-attention',
-      'recent-timeline',
       'market-context',
+      'desk-snapshot',
+      'recent-timeline',
       'weather-intelligence',
     ])
     expect(preset?.layout.hidden).toEqual([])
     expect(preset?.layout.spans).toEqual({
       'desk-snapshot': 'wide',
-      'market-prices': 'wide',
+      'market-context': 'wide',
+      'market-prices': 'half',
       'operational-attention': 'side',
       'position-snapshot': 'half',
       'recent-timeline': 'half',
+      'watchlist-alerts': 'side',
     })
   })
 
@@ -148,5 +152,6 @@ describe('workspace layout presets', () => {
     assert.match(markup, /Monitor preset/)
     assert.match(markup, /Personal layout/)
     assert.match(markup, /Market Overview/)
+    assert.match(markup, /id="desk-snapshot"/)
   })
 })

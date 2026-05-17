@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apps.api.app.models.event import Base
@@ -14,13 +14,18 @@ class MessagingWorkspaceMessage(Base):
 
     message_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     conversation_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    item_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="message")
     source: Mapped[str] = mapped_column(String(16), nullable=False)
-    body: Mapped[str] = mapped_column(Text, nullable=False)
-    author_name: Mapped[str] = mapped_column(String(160), nullable=False)
-    author_title: Mapped[str] = mapped_column(String(160), nullable=False)
-    author_presence: Mapped[str] = mapped_column(String(160), nullable=False)
-    author_initials: Mapped[str] = mapped_column(String(8), nullable=False)
-    author_tone: Mapped[str] = mapped_column(String(16), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    system_label: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    system_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    author_name: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    author_title: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    author_presence: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    author_initials: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    author_tone: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    reactions: Mapped[Optional[list[str]]] = mapped_column(JSON, nullable=True)
+    attachment_payload: Mapped[Optional[dict[str, str]]] = mapped_column(JSON, nullable=True)
     assistant_run_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     assistant_agent_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     assistant_agent_name: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)

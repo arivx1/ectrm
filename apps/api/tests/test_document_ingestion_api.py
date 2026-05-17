@@ -28,6 +28,7 @@ from sqlalchemy.pool import StaticPool
 
 from apps.api.app.config import settings
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.documents.services.document_classification_scoring import score_document_page_classification
 from apps.api.app.domains.documents.services.document_processor import _build_openai_text_format
 from apps.api.app.domains.documents.services.document_processor import _generate_openai_document_analysis
 from apps.api.app.domains.documents.services.document_processor import DocumentProcessorOutcome
@@ -565,6 +566,36 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(len(table_blocks), 2)
         self.assertEqual(table_blocks[0]["columns"], ["product", "qty", "amount"])
         self.assertEqual(table_blocks[1]["rows"][0]["fee"], "Terminal")
+
+    def test_deterministic_scoring_uses_schema_evidence_and_reports_conflicts(self) -> None:
+        text = """
+        Invoice
+        Invoice Number: INV-1007
+        Invoice Date: 2026-04-06
+        Counterparty: Shell Trading
+        Total Amount: USD 79250
+
+        Description  Quantity  Line Amount
+        WTI April  1000  79250
+        """
+        table_blocks = extract_document_table_blocks(text, text_source="ocr")
+
+        assessment = score_document_page_classification(
+            filename="scan-1007.pdf",
+            raw_text=text,
+            text_source="ocr",
+            table_blocks=table_blocks,
+        )
+
+        self.assertEqual(assessment.document_kind, "INVOICE")
+        self.assertGreaterEqual(assessment.confidence, 0.6)
+        self.assertTrue(
+            any("Matched required invoice fields" in evidence for evidence in assessment.supporting_evidence)
+        )
+        self.assertTrue(
+            any("Parsed table columns align with the line items layout" in evidence for evidence in assessment.supporting_evidence)
+        )
+        self.assertTrue(any("OCR fallback was required" in conflict for conflict in assessment.conflicts))
 
     def test_schema_registry_exposes_supported_document_contracts(self) -> None:
         admin_token = self._bootstrap_admin()
@@ -1963,6 +1994,9 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(page_understanding["classification_evidence"]["system_document_kind"], "INVOICE")
         self.assertEqual(page_understanding["content_fingerprint"]["filename_signature"], "invoice packet")
         self.assertGreater(page_understanding["content_fingerprint"]["content_feature_count"], 0)
+        self.assertEqual(page_understanding["deterministic_assessment"]["document_kind"], "INVOICE")
+        self.assertGreater(page_understanding["deterministic_assessment"]["confidence"], 0.7)
+        self.assertTrue(page_understanding["deterministic_assessment"]["supporting_evidence"])
 
         self.assertEqual(document_understanding["bundle_version"], "document-understanding-v1")
         self.assertEqual(document_understanding["page_count"], 1)
@@ -1978,6 +2012,8 @@ class DocumentIngestionApiTests(unittest.TestCase):
         )
         self.assertGreater(document_understanding["content_fingerprint"]["content_feature_count"], 0)
         self.assertEqual(document_understanding["content_fingerprint"]["filename_signature"], "invoice packet")
+        self.assertEqual(document_understanding["deterministic_assessment"]["document_kind"], "INVOICE")
+        self.assertTrue(document_understanding["deterministic_assessment"]["supporting_evidence"])
 
     def test_document_response_includes_existing_record_linkage_candidates(self) -> None:
         admin_token = self._bootstrap_admin()

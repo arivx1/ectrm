@@ -11,6 +11,7 @@ MessagingWorkspaceConversationSection = Literal["Starred", "Channels", "Follow-u
 MessagingWorkspaceConversationKind = Literal["channel", "dm"]
 MessagingWorkspaceMemberTone = Literal["desk", "human", "ops", "system"]
 MessagingWorkspacePostSource = Literal["human", "assistant"]
+MessagingWorkspaceTimelineItemKind = Literal["system", "message"]
 
 
 class MessagingWorkspaceMemberOut(BaseModel):
@@ -21,7 +22,31 @@ class MessagingWorkspaceMemberOut(BaseModel):
     tone: MessagingWorkspaceMemberTone
 
 
-class MessagingWorkspaceConversationSummaryOut(BaseModel):
+class MessagingWorkspaceAttachmentOut(BaseModel):
+    label: str
+    title: str
+    summary: str
+    footnote: str
+
+
+class MessagingWorkspaceMetricOut(BaseModel):
+    label: str
+    value: str
+
+
+class MessagingWorkspaceTimelineItemOut(BaseModel):
+    id: str
+    kind: MessagingWorkspaceTimelineItemKind
+    created_at: datetime
+    label: str | None = None
+    detail: str | None = None
+    author: MessagingWorkspaceMemberOut | None = None
+    body: list[str] = Field(default_factory=list)
+    reactions: list[str] = Field(default_factory=list)
+    attachment: MessagingWorkspaceAttachmentOut | None = None
+
+
+class MessagingWorkspaceConversationOut(BaseModel):
     conversation_id: str
     section: MessagingWorkspaceConversationSection
     kind: MessagingWorkspaceConversationKind
@@ -32,9 +57,13 @@ class MessagingWorkspaceConversationSummaryOut(BaseModel):
     topic: str
     composer_hint: str
     sort_order: int
-    message_count: int = 0
-    latest_message_preview: str | None = None
-    latest_message_at: datetime | None = None
+    preview: str
+    unread_count: int = 0
+    latest_activity_at: datetime | None = None
+    highlights: list[str] = Field(default_factory=list)
+    metrics: list[MessagingWorkspaceMetricOut] = Field(default_factory=list)
+    members: list[MessagingWorkspaceMemberOut] = Field(default_factory=list)
+    timeline: list[MessagingWorkspaceTimelineItemOut] = Field(default_factory=list)
 
 
 class MessagingWorkspaceMessageOut(BaseModel):
@@ -53,8 +82,7 @@ class MessagingWorkspaceMessageOut(BaseModel):
 
 
 class MessagingWorkspaceStateOut(BaseModel):
-    conversations: list[MessagingWorkspaceConversationSummaryOut] = Field(default_factory=list)
-    messages: list[MessagingWorkspaceMessageOut] = Field(default_factory=list)
+    conversations: list[MessagingWorkspaceConversationOut] = Field(default_factory=list)
 
 
 class MessagingWorkspacePostCreate(BaseModel):

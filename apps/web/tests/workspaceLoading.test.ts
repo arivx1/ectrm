@@ -278,13 +278,13 @@ test('shouldPresentSettingsSignInState treats auth redirects into Settings as a 
   )
 })
 
-test('shouldPresentSignedOutAuthGate keeps the public prompt surfaces reachable while protecting signed-out workspaces', () => {
+test('shouldPresentSignedOutAuthGate locks every signed-out route behind the auth gate', () => {
   assert.equal(
     shouldPresentSignedOutAuthGate({
       currentView: 'guide',
       hasAuthSession: false,
     }),
-    false,
+    true,
   )
 
   assert.equal(
@@ -292,7 +292,7 @@ test('shouldPresentSignedOutAuthGate keeps the public prompt surfaces reachable 
       currentView: 'prompt',
       hasAuthSession: false,
     }),
-    false,
+    true,
   )
 
   assert.equal(
@@ -300,7 +300,7 @@ test('shouldPresentSignedOutAuthGate keeps the public prompt surfaces reachable 
       currentView: 'messages',
       hasAuthSession: false,
     }),
-    false,
+    true,
   )
 
   assert.equal(
@@ -328,7 +328,7 @@ test('shouldPresentSignedOutAuthGate keeps the public prompt surfaces reachable 
   )
 })
 
-test('shouldPresentStartHereOverlay keeps prompt-style public workspaces clear of the signed-out onboarding overlay', () => {
+test('shouldPresentStartHereOverlay stays hidden until a session is authenticated', () => {
   assert.equal(
     shouldPresentStartHereOverlay({
       currentView: 'dashboard',
@@ -339,7 +339,7 @@ test('shouldPresentStartHereOverlay keeps prompt-style public workspaces clear o
       hasAuthInterruptionResume: false,
       usesTerminalMode: false,
     }),
-    true,
+    false,
   )
 
   assert.equal(
@@ -370,15 +370,15 @@ test('shouldPresentStartHereOverlay keeps prompt-style public workspaces clear o
 
   assert.equal(
     shouldPresentStartHereOverlay({
-      currentView: 'messages',
+      currentView: 'dashboard',
       hasAuthSession: true,
       hasStartHereOnboarding: true,
-      hasStartHereReturnIntent: true,
+      hasStartHereReturnIntent: false,
       authInterruptionReason: null,
       hasAuthInterruptionResume: false,
       usesTerminalMode: false,
     }),
-    false,
+    true,
   )
 })
 
@@ -406,6 +406,6 @@ test('shouldPresentStartHereOverlay suppresses the signed-in onboarding overlay 
       hasAuthInterruptionResume: false,
       usesTerminalMode: true,
     }),
-    true,
+    false,
   )
 })

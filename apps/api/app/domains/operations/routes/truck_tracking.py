@@ -12,6 +12,8 @@ from apps.api.app.domains.operations.services.truck_tracking import create_deliv
 from apps.api.app.domains.operations.services.truck_tracking import create_delivery_truck_stop
 from apps.api.app.domains.operations.services.truck_tracking import get_delivery_truck_movement
 from apps.api.app.domains.operations.services.truck_tracking import list_delivery_truck_movements
+from apps.api.app.domains.operations.services.truck_tracking import record_delivery_truck_stop_checkpoint
+from apps.api.app.domains.operations.services.truck_tracking import reverse_delivery_truck_stop_checkpoint
 from apps.api.app.domains.operations.services.truck_tracking import skip_delivery_truck_stop
 from apps.api.app.domains.operations.services.truck_tracking import update_delivery_truck_movement
 from apps.api.app.domains.operations.services.truck_tracking import update_delivery_truck_stop
@@ -21,6 +23,8 @@ from apps.api.app.schemas.shipment import DeliveryTruckMovementOut
 from apps.api.app.schemas.shipment import DeliveryTruckMovementSummaryOut
 from apps.api.app.schemas.shipment import DeliveryTruckMovementUpdate
 from apps.api.app.schemas.shipment import DeliveryTruckStopCancelWrite
+from apps.api.app.schemas.shipment import DeliveryTruckStopCheckpointReverseWrite
+from apps.api.app.schemas.shipment import DeliveryTruckStopCheckpointWrite
 from apps.api.app.schemas.shipment import DeliveryTruckStopCreate
 from apps.api.app.schemas.shipment import DeliveryTruckStopSkipWrite
 from apps.api.app.schemas.shipment import DeliveryTruckStopUpdate
@@ -232,6 +236,60 @@ def post_truck_stop_cancel(
     )
 
 
+@router.post(
+    "/truck-stops/{stop_id}/checkpoints",
+    response_model=DeliveryTruckMovementOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_truck_stop_checkpoint(
+    stop_id: str,
+    payload: DeliveryTruckStopCheckpointWrite,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DeliveryTruckMovementOut:
+    return execute_operational_mutation(
+        TRUCK_TRACKING_MUTATION_SPEC,
+        request,
+        db,
+        lambda actor: record_delivery_truck_stop_checkpoint(
+            db,
+            stop_id=stop_id,
+            actor_id=actor.actor_id,
+            checkpoint_code=payload.checkpoint_code,
+            occurred_at=payload.occurred_at,
+            notes=payload.notes,
+        ),
+    )
+
+
+@router.post(
+    "/truck-stops/{stop_id}/checkpoints/{event_id}/reverse",
+    response_model=DeliveryTruckMovementOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_truck_stop_checkpoint_reversal(
+    stop_id: str,
+    event_id: int,
+    payload: DeliveryTruckStopCheckpointReverseWrite,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DeliveryTruckMovementOut:
+    return execute_operational_mutation(
+        TRUCK_TRACKING_MUTATION_SPEC,
+        request,
+        db,
+        lambda actor: reverse_delivery_truck_stop_checkpoint(
+            db,
+            stop_id=stop_id,
+            event_id=event_id,
+            actor_id=actor.actor_id,
+            reversal_reason=payload.reversal_reason,
+            reversed_at=payload.reversed_at,
+            notes=payload.notes,
+        ),
+    )
+
+
 __all__ = [
     "router",
     "list_truck_movements_for_delivery",
@@ -243,4 +301,6 @@ __all__ = [
     "patch_truck_stop",
     "post_truck_stop_skip",
     "post_truck_stop_cancel",
+    "post_truck_stop_checkpoint",
+    "post_truck_stop_checkpoint_reversal",
 ]

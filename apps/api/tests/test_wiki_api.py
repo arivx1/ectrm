@@ -138,6 +138,7 @@ class WikiApiTests(unittest.TestCase):
         root_page_id = root_payload["page_id"]
         self.assertEqual(root_payload["title"], "Desk Handbook")
         self.assertEqual(root_payload["child_count"], 0)
+        self.assertFalse(root_payload["is_archived"])
         self.assertEqual(root_payload["version"], 1)
         self.assertEqual(root_payload["recent_revisions"][0]["change_summary"][0], "Created wiki page.")
 
@@ -194,6 +195,248 @@ class WikiApiTests(unittest.TestCase):
         self.assertEqual(
             restored_payload["recent_revisions"][0]["change_summary"][0],
             f"Restored from revision {created_revision_id}.",
+        )
+
+    def test_wiki_page_archive_and_restore(self) -> None:
+        admin_session = self._bootstrap_admin()
+        admin_token = admin_session["access_token"]
+
+        create_root = self.client.post(
+            "/wiki/pages",
+            json={"title": "Desk Handbook", "content_markdown": "See [[Confirmations]]."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(create_root.status_code, 201)
+        root_page_id = create_root.json()["page_id"]
+
+        create_child = self.client.post(
+            "/wiki/pages",
+            json={"title": "Confirmations", "parent_page_id": root_page_id, "content_markdown": "Runbook"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(create_child.status_code, 201)
+        child_page_id = create_child.json()["page_id"]
+
+        archive_response = self.client.post(
+            f"/wiki/pages/{root_page_id}/archive",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(archive_response.status_code, 200)
+        archived_root = archive_response.json()
+        self.assertTrue(archived_root["is_archived"])
+        self.assertIsNotNone(archived_root["archived_at"])
+        self.assertEqual(archived_root["archived_by"], "ops_admin")
+        self.assertEqual(
+            archived_root["recent_revisions"][0]["change_summary"][0],
+            "Archived page.",
+        )
+
+        active_index = self.client.get(
+            "/wiki/pages",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(active_index.status_code, 200)
+        self.assertEqual(active_index.json()["pages"], [])
+
+        all_pages_index = self.client.get(
+            "/wiki/pages?include_archived=true",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(all_pages_index.status_code, 200)
+        indexed_pages = {page["page_id"]: page for page in all_pages_index.json()["pages"]}
+        self.assertTrue(indexed_pages[root_page_id]["is_archived"])
+        self.assertTrue(indexed_pages[child_page_id]["is_archived"])
+
+        archived_update = self.client.patch(
+            f"/wiki/pages/{root_page_id}",
+            json={"title": "Archived Handbook"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(archived_update.status_code, 422)
+        self.assertIn("must be restored before editing", archived_update.json()["detail"])
+
+        unarchive_response = self.client.post(
+            f"/wiki/pages/{root_page_id}/unarchive",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(unarchive_response.status_code, 200)
+        restored_root = unarchive_response.json()
+        self.assertFalse(restored_root["is_archived"])
+        self.assertIsNone(restored_root["archived_at"])
+        self.assertIsNone(restored_root["archived_by"])
+        self.assertEqual(
+            restored_root["recent_revisions"][0]["change_summary"][0],
+            "Restored page from archive.",
+        )
+
+        restored_index = self.client.get(
+            "/wiki/pages",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(restored_index.status_code, 200)
+        self.assertEqual(len(restored_index.json()["pages"]), 2)
+
+    def test_wiki_page_search_ranks_title_content_links_and_archive_filter(self) -> None:
+        admin_session = self._bootstrap_admin()
+        admin_token = admin_session["access_token"]
+
+        root_response = self.client.post(
+            "/wiki/pages",
+            json={"title": "Desk Handbook", "content_markdown": "Operating notes."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(root_response.status_code, 201)
+        root_page_id = root_response.json()["page_id"]
+
+        settlement_response = self.client.post(
+            "/wiki/pages",
+            json={
+                "title": "Settlement Runbook",
+                "parent_page_id": root_page_id,
+                "content_markdown": "Cash handoff notes for invoices, payments, and settlement blockers.",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(settlement_response.status_code, 201)
+
+        confirmations_response = self.client.post(
+            "/wiki/pages",
+            json={
+                "title": "Confirmations",
+                "parent_page_id": root_page_id,
+                "content_markdown": "Compare the PDF, then see [[Cash Handoff|settlement-runbook]] before escalation.",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(confirmations_response.status_code, 201)
+
+        archived_response = self.client.post(
+            "/wiki/pages",
+            json={
+                "title": "Legacy Cash Notes",
+                "content_markdown": "Archived legacy cash process that should not appear by default.",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(archived_response.status_code, 201)
+        archived_page_id = archived_response.json()["page_id"]
+        archive_response = self.client.post(
+            f"/wiki/pages/{archived_page_id}/archive",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(archive_response.status_code, 200)
+
+        cash_response = self.client.get(
+            "/wiki/pages/search?q=cash%20handoff&limit=5",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(cash_response.status_code, 200)
+        cash_payload = cash_response.json()
+        self.assertEqual(cash_payload["query"], "cash handoff")
+        self.assertGreaterEqual(cash_payload["result_count"], 2)
+        self.assertEqual(cash_payload["results"][0]["page"]["title"], "Settlement Runbook")
+        self.assertIn("cash", cash_payload["results"][0]["snippet"].lower())
+        self.assertNotIn("Legacy Cash Notes", [result["page"]["title"] for result in cash_payload["results"]])
+
+        link_response = self.client.get(
+            "/wiki/pages/search?q=settlement-runbook&limit=5",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(link_response.status_code, 200)
+        link_payload = link_response.json()
+        self.assertEqual(link_payload["results"][0]["page"]["title"], "Confirmations")
+        self.assertIn("wiki link", link_payload["results"][0]["match_reasons"])
+
+        archived_search_response = self.client.get(
+            "/wiki/pages/search?q=legacy%20cash&include_archived=true",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(archived_search_response.status_code, 200)
+        self.assertIn(
+            "Legacy Cash Notes",
+            [result["page"]["title"] for result in archived_search_response.json()["results"]],
+        )
+
+    def test_wiki_page_rename_rewrites_title_links_to_stable_targets(self) -> None:
+        admin_session = self._bootstrap_admin()
+        admin_token = admin_session["access_token"]
+
+        root_response = self.client.post(
+            "/wiki/pages",
+            json={"title": "Desk Handbook", "content_markdown": "Root"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(root_response.status_code, 201)
+        root_page_id = root_response.json()["page_id"]
+
+        target_response = self.client.post(
+            "/wiki/pages",
+            json={
+                "title": "Confirmations",
+                "parent_page_id": root_page_id,
+                "content_markdown": "Runbook",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(target_response.status_code, 201)
+        target_page_id = target_response.json()["page_id"]
+
+        source_response = self.client.post(
+            "/wiki/pages",
+            json={
+                "title": "Broker Escalations",
+                "parent_page_id": root_page_id,
+                "content_markdown": (
+                    "See [[Confirmations]], [[Queue Runbook|Confirmations]], "
+                    "and [[Confirmations|missing-page-id]]."
+                ),
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(source_response.status_code, 201)
+        source_page_id = source_response.json()["page_id"]
+
+        first_rename_response = self.client.patch(
+            f"/wiki/pages/{target_page_id}",
+            json={"title": "Confirmations Runbook"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(first_rename_response.status_code, 200)
+
+        source_detail_response = self.client.get(
+            f"/wiki/pages/{source_page_id}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(source_detail_response.status_code, 200)
+        first_rewritten_content = source_detail_response.json()["content_markdown"]
+        self.assertIn(f"[[Confirmations Runbook|{target_page_id}]]", first_rewritten_content)
+        self.assertIn(f"[[Queue Runbook|{target_page_id}]]", first_rewritten_content)
+        self.assertIn("[[Confirmations|missing-page-id]]", first_rewritten_content)
+
+        second_rename_response = self.client.patch(
+            f"/wiki/pages/{target_page_id}",
+            json={"title": "Final Confirmations"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(second_rename_response.status_code, 200)
+
+        source_detail_response = self.client.get(
+            f"/wiki/pages/{source_page_id}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(source_detail_response.status_code, 200)
+        second_rewritten_payload = source_detail_response.json()
+        self.assertIn(
+            f"[[Final Confirmations|{target_page_id}]]",
+            second_rewritten_payload["content_markdown"],
+        )
+        self.assertIn(
+            f"[[Queue Runbook|{target_page_id}]]",
+            second_rewritten_payload["content_markdown"],
+        )
+        self.assertEqual(
+            second_rewritten_payload["recent_revisions"][0]["change_summary"][0],
+            "Updated wiki links for renamed page 'Final Confirmations'.",
         )
 
     def test_wiki_prevents_parent_cycles(self) -> None:

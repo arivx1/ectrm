@@ -1,4 +1,4 @@
-.PHONY: dev db-up db-down api-install api-dev api-test api-mcp-test api-assistant-evals api-codex-smoke api-contract-refresh api-contract-check web-install web-build web-lint web-test web-smoke-install web-smoke-install-ci web-smoke-test verify verify-wave0 rebuild-trades rebuild-positions rebuild-all audit-trade-projections clean-trade-projections
+.PHONY: dev db-up db-down api-install api-dev api-test api-mcp-test api-assistant-evals api-document-classification-evals api-codex-smoke api-contract-refresh api-contract-check web-install web-build web-lint web-test web-smoke-install web-smoke-install-ci web-smoke-test verify verify-wave0 rebuild-trades rebuild-positions rebuild-all audit-trade-projections clean-trade-projections
 
 VENV_PYTHON := ./.venv/bin/python
 WEB_DIR := apps/web
@@ -32,6 +32,10 @@ api-mcp-test:
 api-assistant-evals:
 	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)
 	PYTHONPATH=. $(VENV_PYTHON) -m unittest apps.api.tests.test_assistant_evals
+
+api-document-classification-evals:
+	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)
+	PYTHONPATH=. $(VENV_PYTHON) apps/api/scripts/run_document_classification_evals.py --check
 
 api-codex-smoke:
 	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)

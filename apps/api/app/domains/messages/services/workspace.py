@@ -7,15 +7,19 @@ import uuid
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.operations.services import build_workspace_bootstrap_summary
 from apps.api.app.models.messaging_workspace_conversation import MessagingWorkspaceConversation
 from apps.api.app.models.messaging_workspace_message import MessagingWorkspaceMessage
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.schemas.messaging import (
-    MessagingWorkspaceConversationSummaryOut,
+    MessagingWorkspaceAttachmentOut,
+    MessagingWorkspaceConversationOut,
     MessagingWorkspaceMemberOut,
     MessagingWorkspaceMessageOut,
+    MessagingWorkspaceMetricOut,
     MessagingWorkspacePostCreate,
     MessagingWorkspaceStateOut,
+    MessagingWorkspaceTimelineItemOut,
 )
 
 
@@ -24,6 +28,37 @@ class MessagingWorkspaceError(RuntimeError):
         super().__init__(detail)
         self.status_code = status_code
         self.detail = detail
+
+
+@dataclass(frozen=True)
+class MessagingWorkspaceSeedMember:
+    name: str
+    title: str
+    presence: str
+    initials: str
+    tone: str
+
+
+@dataclass(frozen=True)
+class MessagingWorkspaceSeedAttachment:
+    label: str
+    title: str
+    summary: str
+    footnote: str
+
+
+@dataclass(frozen=True)
+class MessagingWorkspaceSeedTimelineItem:
+    message_id: str
+    kind: str
+    created_at: datetime
+    source: str
+    body: str = ""
+    label: str | None = None
+    detail: str | None = None
+    author: MessagingWorkspaceSeedMember | None = None
+    reactions: tuple[str, ...] = ()
+    attachment: MessagingWorkspaceSeedAttachment | None = None
 
 
 @dataclass(frozen=True)
@@ -38,6 +73,77 @@ class MessagingWorkspaceSeedConversation:
     topic: str
     composer_hint: str
     sort_order: int
+    unread_count: int
+    timeline: tuple[MessagingWorkspaceSeedTimelineItem, ...]
+
+
+@dataclass(frozen=True)
+class MessagingWorkspaceCounts:
+    open_work_items: int | None = None
+    operations_queue_items: int | None = None
+    settlement_queue_items: int | None = None
+    pending_invoices: int | None = None
+    payments_due: int | None = None
+    attention_items: int | None = None
+    stale_pricing_items: int | None = None
+    pending_pricing_trades: int | None = None
+    pending_settlement_trades: int | None = None
+
+
+ECTRM_DESK = MessagingWorkspaceSeedMember(
+    name="ECTRM Desk",
+    title="System notification",
+    presence="Watching the desk",
+    initials="EC",
+    tone="desk",
+)
+MIA_CHEN = MessagingWorkspaceSeedMember(
+    name="Mia Chen",
+    title="Scheduler",
+    presence="Online",
+    initials="MC",
+    tone="human",
+)
+APPROVALS_BOT = MessagingWorkspaceSeedMember(
+    name="Approvals Bot",
+    title="Action request lane",
+    presence="Reviewing",
+    initials="AB",
+    tone="system",
+)
+NORTHSHORE = MessagingWorkspaceSeedMember(
+    name="Northshore LNG",
+    title="Counterparty contact",
+    presence="Awaiting reply",
+    initials="NL",
+    tone="human",
+)
+OPS_QUEUE = MessagingWorkspaceSeedMember(
+    name="Operations Queue",
+    title="Desk queue digest",
+    presence="Tracking handoffs",
+    initials="OQ",
+    tone="ops",
+)
+SETTLEMENT_CONTROL = MessagingWorkspaceSeedMember(
+    name="Settlement Control",
+    title="Cash and invoice follow-through",
+    presence="Monitoring",
+    initials="SC",
+    tone="ops",
+)
+DASHBOARD_ATTENTION = MessagingWorkspaceSeedMember(
+    name="Dashboard Attention",
+    title="Desk signal feed",
+    presence="Flagging exceptions",
+    initials="DA",
+    tone="system",
+)
+
+
+def build_seed_timestamp(local_hour: int, minute: int) -> datetime:
+    # Seeded desk examples are authored in Eastern time and stored in UTC.
+    return datetime(2026, 5, 16, local_hour + 4, minute, tzinfo=timezone.utc)
 
 
 DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS: tuple[MessagingWorkspaceSeedConversation, ...] = (
@@ -52,6 +158,52 @@ DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS: tuple[MessagingWorkspaceSeedConversat
         topic="Keep governed assistant activity in the same feed as desk work, approval follow-through, and counterparty context.",
         composer_hint="Reply here to keep assistant guidance threaded beside the operational follow-up it affects.",
         sort_order=10,
+        unread_count=1,
+        timeline=(
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="assistant-day",
+                kind="system",
+                source="SYSTEM",
+                created_at=build_seed_timestamp(13, 5),
+                label="Today",
+                detail="Action draft AR-204 moved into governed review.",
+            ),
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="assistant-msg-1",
+                kind="message",
+                source="SYSTEM",
+                created_at=build_seed_timestamp(13, 7),
+                author=ECTRM_DESK,
+                body=(
+                    "Assistant staged a governed action draft for the Northshore timing exception.\n\n"
+                    "The recommendation keeps approval, provenance, and rollback expectations attached to the proposed workflow item."
+                ),
+                reactions=("ack 3", "needs review 1"),
+                attachment=MessagingWorkspaceSeedAttachment(
+                    label="Action draft",
+                    title="AR-204 governed action draft",
+                    summary="Owner: Desk Ops. Stop conditions: missing counterparty confirmation, settlement conflict, or delivery variance without explanation.",
+                    footnote="Open Assistant Console for prompt context, evidence, and the approval record.",
+                ),
+            ),
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="assistant-msg-2",
+                kind="message",
+                source="HUMAN",
+                created_at=build_seed_timestamp(13, 12),
+                author=MIA_CHEN,
+                body="Keep this threaded with the nomination conversation so Operations can react without switching screens.",
+                reactions=("aligned 2",),
+            ),
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="assistant-msg-3",
+                kind="message",
+                source="SYSTEM",
+                created_at=build_seed_timestamp(13, 14),
+                author=APPROVALS_BOT,
+                body="Approval packet is ready with owner, inputs, outputs, stop conditions, audit hooks, and rollback notes.",
+            ),
+        ),
     ),
     MessagingWorkspaceSeedConversation(
         conversation_id="counterparty-email",
@@ -64,6 +216,51 @@ DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS: tuple[MessagingWorkspaceSeedConversat
         topic="Use this lane for external timing notes, commercial clarifications, and the handoff back into operations or settlement.",
         composer_hint="Reply with desk confirmation or route the lane into Operations without losing the message context.",
         sort_order=20,
+        unread_count=2,
+        timeline=(
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="northshore-day",
+                kind="system",
+                source="SYSTEM",
+                created_at=build_seed_timestamp(14, 55),
+                label="Today",
+                detail="Northshore revised the delivery note and requested confirmation.",
+            ),
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="northshore-msg-1",
+                kind="message",
+                source="HUMAN",
+                created_at=build_seed_timestamp(14, 57),
+                author=NORTHSHORE,
+                body=(
+                    "We revised the delivery window for the next nomination cycle and need desk confirmation before 3 PM.\n\n"
+                    "Please keep the commercial note attached if Operations needs the full context."
+                ),
+                attachment=MessagingWorkspaceSeedAttachment(
+                    label="Attached note",
+                    title="Northshore revised delivery window",
+                    summary="Updated timing note captures the revised slot, nomination checkpoint, and counterparty ask for same-day confirmation.",
+                    footnote="This prototype keeps the attachment summary inside the same conversation stream.",
+                ),
+            ),
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="northshore-msg-2",
+                kind="message",
+                source="HUMAN",
+                created_at=build_seed_timestamp(15, 1),
+                author=MIA_CHEN,
+                body="I can take this into the operations lane as soon as the desk confirms we should accept the revised timing.",
+                reactions=("on it 1",),
+            ),
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="northshore-msg-3",
+                kind="message",
+                source="OPS",
+                created_at=build_seed_timestamp(15, 4),
+                author=SETTLEMENT_CONTROL,
+                body="Flagging that one payment due item may move if the revised window changes the invoice sequence.",
+            ),
+        ),
     ),
     MessagingWorkspaceSeedConversation(
         conversation_id="ops-follow-through",
@@ -76,6 +273,37 @@ DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS: tuple[MessagingWorkspaceSeedConversat
         topic="Keep confirmations, delivery blockers, and queue digests readable in the same conversation surface as email and assistant follow-up.",
         composer_hint="Use this lane to leave handoff notes before opening the work queue for a specific blocker.",
         sort_order=30,
+        unread_count=0,
+        timeline=(
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="ops-day",
+                kind="system",
+                source="SYSTEM",
+                created_at=build_seed_timestamp(14, 46),
+                label="Today",
+                detail="Daily work queue digest posted to the desk lane.",
+            ),
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="ops-msg-1",
+                kind="message",
+                source="OPS",
+                created_at=build_seed_timestamp(14, 48),
+                author=OPS_QUEUE,
+                body=(
+                    "Queue work is easier to review when it stays in one desk lane instead of splitting across launcher cards.\n\n"
+                    "Operators can leave handoff notes here before opening the deeper workboard controls."
+                ),
+            ),
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="ops-msg-2",
+                kind="message",
+                source="HUMAN",
+                created_at=build_seed_timestamp(14, 52),
+                author=MIA_CHEN,
+                body="If this looked more like Slack, I would handle queue review here first and then jump into the workboard only when I need the record-level controls.",
+                reactions=("yes 4",),
+            ),
+        ),
     ),
     MessagingWorkspaceSeedConversation(
         conversation_id="desk-attention",
@@ -88,6 +316,37 @@ DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS: tuple[MessagingWorkspaceSeedConversat
         topic="Treat pricing gaps, exposure signals, and exceptions as one shared lane so triage decisions stay visible.",
         composer_hint="Keep notes on risk triage here, then open Home or Risk when the thread needs deeper analysis.",
         sort_order=40,
+        unread_count=1,
+        timeline=(
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="attention-day",
+                kind="system",
+                source="SYSTEM",
+                created_at=build_seed_timestamp(14, 32),
+                label="Today",
+                detail="Desk attention summary refreshed from dashboard signals.",
+            ),
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="attention-msg-1",
+                kind="message",
+                source="SYSTEM",
+                created_at=build_seed_timestamp(14, 34),
+                author=DASHBOARD_ATTENTION,
+                body=(
+                    "Pricing and exposure issues land here like shared messages instead of disconnected alert tiles.\n\n"
+                    "This keeps the desk triage story visible before anyone opens the deeper risk workflows."
+                ),
+                reactions=("watching 2",),
+            ),
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="attention-msg-2",
+                kind="message",
+                source="SYSTEM",
+                created_at=build_seed_timestamp(14, 37),
+                author=ECTRM_DESK,
+                body="If the risk story is clearer in this format, we can keep issue triage visible before routing into the deeper workspace.",
+            ),
+        ),
     ),
     MessagingWorkspaceSeedConversation(
         conversation_id="settlement-control",
@@ -100,6 +359,34 @@ DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS: tuple[MessagingWorkspaceSeedConversat
         topic="Use direct messages for focused invoice and payment coordination without losing the surrounding desk conversation.",
         composer_hint="Keep invoice and payment clarifications visible here before opening the settlement workspace.",
         sort_order=50,
+        unread_count=0,
+        timeline=(
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="settlement-day",
+                kind="system",
+                source="SYSTEM",
+                created_at=build_seed_timestamp(14, 17),
+                label="Earlier today",
+                detail="Settlement follow-up split from the Northshore thread for cash coordination.",
+            ),
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="settlement-msg-1",
+                kind="message",
+                source="OPS",
+                created_at=build_seed_timestamp(14, 19),
+                author=SETTLEMENT_CONTROL,
+                body="Before we issue the next invoice handoff, confirm whether the revised Northshore timing should delay the settlement sequence.",
+            ),
+            MessagingWorkspaceSeedTimelineItem(
+                message_id="settlement-msg-2",
+                kind="message",
+                source="HUMAN",
+                created_at=build_seed_timestamp(14, 24),
+                author=MIA_CHEN,
+                body="I will update this lane once Operations confirms the delivery window. That way settlement does not have to chase the queue separately.",
+                reactions=("thanks 1",),
+            ),
+        ),
     ),
 )
 
@@ -111,14 +398,114 @@ def build_member_initials(label: str) -> str:
     return "".join(part[0].upper() for part in parts[:2])
 
 
-def messaging_workspace_tables_available(db: Session) -> bool:
-    inspector = inspect(db.get_bind())
-    return inspector.has_table(MessagingWorkspaceConversation.__tablename__) and inspector.has_table(
-        MessagingWorkspaceMessage.__tablename__
+def normalize_timestamp(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def format_count_label(value: int | None, singular: str, plural: str | None = None) -> str:
+    plural = plural or f"{singular}s"
+    if value is None:
+        return f"No {plural} loaded"
+    noun = singular if value == 1 else plural
+    return f"{value:,} {noun}"
+
+
+def format_count_value(value: int | None, fallback: str = "n/a") -> str:
+    return f"{value:,}" if value is not None else fallback
+
+
+def build_todo_detail(counts: MessagingWorkspaceCounts) -> str:
+    total_sentence = (
+        f"{format_count_label(counts.open_work_items, 'open work item')} "
+        f"{'is' if counts.open_work_items == 1 else 'are'} currently tracked across the app."
+        if counts.open_work_items is not None
+        else "Open work items will appear here once queue data is loaded."
+    )
+    operations_sentence = (
+        f"{format_count_label(counts.operations_queue_items, 'operations queue item')} "
+        f"{'sits' if counts.operations_queue_items == 1 else 'sit'} in operations."
+        if counts.operations_queue_items is not None
+        else "Operations queue counts are not loaded yet."
+    )
+    settlement_sentence = (
+        f"{format_count_label(counts.settlement_queue_items, 'settlement queue item')} "
+        f"{'sits' if counts.settlement_queue_items == 1 else 'sit'} in settlement."
+        if counts.settlement_queue_items is not None
+        else "Settlement queue counts are not loaded yet."
+    )
+    return f"{total_sentence} {operations_sentence} {settlement_sentence}"
+
+
+def build_issue_detail(counts: MessagingWorkspaceCounts) -> str:
+    attention_sentence = (
+        f"{format_count_label(counts.attention_items, 'attention item')} "
+        f"{'is' if counts.attention_items == 1 else 'are'} surfaced for review right now."
+        if counts.attention_items is not None
+        else "Attention items will appear here once the dashboard summary is loaded."
+    )
+    stale_pricing_sentence = (
+        f"{format_count_label(counts.stale_pricing_items, 'stale pricing item')} "
+        f"{'is' if counts.stale_pricing_items == 1 else 'are'} tied to pricing follow-through."
+        if counts.stale_pricing_items is not None
+        else "Pricing follow-through counts are not loaded yet."
+    )
+    return f"{attention_sentence} {stale_pricing_sentence}"
+
+
+def build_workspace_counts(db: Session) -> MessagingWorkspaceCounts:
+    try:
+        summary = build_workspace_bootstrap_summary(db)
+    except Exception:
+        # Messaging should stay readable even if unrelated workspace summary
+        # tables are behind the current code in a local environment.
+        return MessagingWorkspaceCounts()
+
+    trades = summary.get("trades", {}) if isinstance(summary, dict) else {}
+    work_items = summary.get("work_items", {}) if isinstance(summary, dict) else {}
+    dashboard = summary.get("dashboard", {}) if isinstance(summary, dict) else {}
+    attention = dashboard.get("attention", {}) if isinstance(dashboard, dict) else {}
+    settlement = summary.get("settlement", {}) if isinstance(summary, dict) else {}
+
+    return MessagingWorkspaceCounts(
+        open_work_items=int(work_items["total_count"]) if "total_count" in work_items else None,
+        operations_queue_items=(
+            int(work_items["operations_queue_count"])
+            if "operations_queue_count" in work_items
+            else None
+        ),
+        settlement_queue_items=(
+            int(work_items["settlement_queue_count"])
+            if "settlement_queue_count" in work_items
+            else None
+        ),
+        pending_invoices=(
+            int(settlement["invoice_pending_count"])
+            if "invoice_pending_count" in settlement
+            else None
+        ),
+        payments_due=int(settlement["payment_due_count"]) if "payment_due_count" in settlement else None,
+        attention_items=int(attention["total_count"]) if "total_count" in attention else None,
+        stale_pricing_items=(
+            int(attention["stale_pricing_count"])
+            if "stale_pricing_count" in attention
+            else None
+        ),
+        pending_pricing_trades=(
+            int(trades["pending_pricing_count"])
+            if "pending_pricing_count" in trades
+            else None
+        ),
+        pending_settlement_trades=(
+            int(trades["pending_settlement_count"])
+            if "pending_settlement_count" in trades
+            else None
+        ),
     )
 
 
-def build_default_messaging_workspace_conversations() -> list[MessagingWorkspaceConversation]:
+def build_default_messaging_workspace_conversation_records() -> list[MessagingWorkspaceConversation]:
     now = datetime.now(timezone.utc)
     return [
         MessagingWorkspaceConversation(
@@ -133,40 +520,120 @@ def build_default_messaging_workspace_conversations() -> list[MessagingWorkspace
             composer_hint=definition.composer_hint,
             sort_order=definition.sort_order,
             created_at=now,
-            updated_at=now,
+            updated_at=definition.timeline[-1].created_at if definition.timeline else now,
         )
         for definition in DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS
     ]
 
 
+def build_default_messaging_workspace_message_records() -> list[MessagingWorkspaceMessage]:
+    records: list[MessagingWorkspaceMessage] = []
+    for definition in DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS:
+        for item in definition.timeline:
+            records.append(build_seed_message_record(definition.conversation_id, item))
+    return records
+
+
+def build_seed_message_record(
+    conversation_id: str,
+    item: MessagingWorkspaceSeedTimelineItem,
+) -> MessagingWorkspaceMessage:
+    attachment_payload = None
+    if item.attachment is not None:
+        attachment_payload = {
+            "label": item.attachment.label,
+            "title": item.attachment.title,
+            "summary": item.attachment.summary,
+            "footnote": item.attachment.footnote,
+        }
+
+    return MessagingWorkspaceMessage(
+        message_id=item.message_id,
+        conversation_id=conversation_id,
+        item_kind=item.kind.upper(),
+        source=item.source,
+        body=item.body,
+        system_label=item.label,
+        system_detail=item.detail,
+        author_name=item.author.name if item.author is not None else None,
+        author_title=item.author.title if item.author is not None else None,
+        author_presence=item.author.presence if item.author is not None else None,
+        author_initials=item.author.initials if item.author is not None else None,
+        author_tone=item.author.tone if item.author is not None else None,
+        reactions=list(item.reactions) if item.reactions else None,
+        attachment_payload=attachment_payload,
+        assistant_run_id=None,
+        assistant_agent_id=None,
+        assistant_agent_name=None,
+        created_by_user_id=None,
+        created_by_session_id=None,
+        created_by_role=None,
+        created_at=item.created_at,
+    )
+
+
+def messaging_workspace_tables_available(db: Session) -> bool:
+    inspector = inspect(db.get_bind())
+    return inspector.has_table(MessagingWorkspaceConversation.__tablename__) and inspector.has_table(
+        MessagingWorkspaceMessage.__tablename__
+    )
+
+
 def ensure_messaging_workspace_conversations(db: Session) -> list[MessagingWorkspaceConversation]:
     if not messaging_workspace_tables_available(db):
-        return build_default_messaging_workspace_conversations()
+        return build_default_messaging_workspace_conversation_records()
 
-    existing_records = db.execute(select(MessagingWorkspaceConversation)).scalars().all()
-    existing_by_id = {record.conversation_id: record for record in existing_records}
+    definitions_by_id = {
+        definition.conversation_id: definition
+        for definition in DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS
+    }
+    existing_conversations = db.execute(select(MessagingWorkspaceConversation)).scalars().all()
+    existing_by_id = {record.conversation_id: record for record in existing_conversations}
+    existing_messages = db.execute(select(MessagingWorkspaceMessage.message_id)).scalars().all()
+    existing_message_ids = set(existing_messages)
     now = datetime.now(timezone.utc)
     created = False
 
     for definition in DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS:
         if definition.conversation_id in existing_by_id:
             continue
-        record = MessagingWorkspaceConversation(
-            conversation_id=definition.conversation_id,
-            section=definition.section,
-            kind=definition.kind,
-            label=definition.label,
-            connected_workspace=definition.connected_workspace,
-            assistant_workspace=definition.assistant_workspace,
-            description=definition.description,
-            topic=definition.topic,
-            composer_hint=definition.composer_hint,
-            sort_order=definition.sort_order,
-            created_at=now,
-            updated_at=now,
+        db.add(
+            MessagingWorkspaceConversation(
+                conversation_id=definition.conversation_id,
+                section=definition.section,
+                kind=definition.kind,
+                label=definition.label,
+                connected_workspace=definition.connected_workspace,
+                assistant_workspace=definition.assistant_workspace,
+                description=definition.description,
+                topic=definition.topic,
+                composer_hint=definition.composer_hint,
+                sort_order=definition.sort_order,
+                created_at=now,
+                updated_at=definition.timeline[-1].created_at if definition.timeline else now,
+            )
         )
-        db.add(record)
         created = True
+
+    if created:
+        db.flush()
+        existing_conversations = db.execute(select(MessagingWorkspaceConversation)).scalars().all()
+        existing_by_id = {record.conversation_id: record for record in existing_conversations}
+
+    for definition in DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS:
+        conversation = existing_by_id[definition.conversation_id]
+        latest_seed_activity = normalize_timestamp(conversation.updated_at)
+        for item in definition.timeline:
+            if item.message_id in existing_message_ids:
+                latest_seed_activity = max(latest_seed_activity, item.created_at)
+                continue
+            db.add(build_seed_message_record(definition.conversation_id, item))
+            existing_message_ids.add(item.message_id)
+            latest_seed_activity = max(latest_seed_activity, item.created_at)
+            created = True
+
+        if latest_seed_activity > normalize_timestamp(conversation.updated_at):
+            conversation.updated_at = latest_seed_activity
 
     if created:
         db.commit()
@@ -180,17 +647,28 @@ def ensure_messaging_workspace_conversations(db: Session) -> list[MessagingWorks
 
 
 def list_messaging_workspace_state(db: Session) -> MessagingWorkspaceStateOut:
+    workspace_counts = build_workspace_counts(db)
     tables_available = messaging_workspace_tables_available(db)
-    conversations = ensure_messaging_workspace_conversations(db)
+
     if not tables_available:
+        seed_conversations = build_default_messaging_workspace_conversation_records()
+        seed_messages = build_default_messaging_workspace_message_records()
+        messages_by_conversation_id: dict[str, list[MessagingWorkspaceMessage]] = {}
+        for record in seed_messages:
+            messages_by_conversation_id.setdefault(record.conversation_id, []).append(record)
+
         return MessagingWorkspaceStateOut(
             conversations=[
-                to_messaging_workspace_conversation_summary_out(record, [])
-                for record in conversations
-            ],
-            messages=[],
+                to_messaging_workspace_conversation_out(
+                    record,
+                    messages_by_conversation_id.get(record.conversation_id, []),
+                    workspace_counts=workspace_counts,
+                )
+                for record in seed_conversations
+            ]
         )
 
+    conversations = ensure_messaging_workspace_conversations(db)
     messages = db.execute(
         select(MessagingWorkspaceMessage).order_by(
             MessagingWorkspaceMessage.created_at.asc(),
@@ -204,13 +682,13 @@ def list_messaging_workspace_state(db: Session) -> MessagingWorkspaceStateOut:
 
     return MessagingWorkspaceStateOut(
         conversations=[
-            to_messaging_workspace_conversation_summary_out(
+            to_messaging_workspace_conversation_out(
                 record,
                 messages_by_conversation_id.get(record.conversation_id, []),
+                workspace_counts=workspace_counts,
             )
             for record in conversations
-        ],
-        messages=[to_messaging_workspace_message_out(record) for record in messages],
+        ]
     )
 
 
@@ -250,13 +728,18 @@ def create_messaging_workspace_post(
     record = MessagingWorkspaceMessage(
         message_id=str(uuid.uuid4()),
         conversation_id=conversation.conversation_id,
+        item_kind="MESSAGE",
         source=payload.source.upper(),
         body=payload.body,
+        system_label=None,
+        system_detail=None,
         author_name=author.name,
         author_title=author.title,
         author_presence=author.presence,
         author_initials=author.initials,
         author_tone=author.tone,
+        reactions=None,
+        attachment_payload=None,
         assistant_run_id=payload.assistant_run_id,
         assistant_agent_id=payload.assistant_agent_id,
         assistant_agent_name=payload.assistant_agent_name,
@@ -272,22 +755,24 @@ def create_messaging_workspace_post(
     return record
 
 
-def to_messaging_workspace_conversation_summary_out(
+def to_messaging_workspace_conversation_out(
     record: MessagingWorkspaceConversation,
     messages: list[MessagingWorkspaceMessage],
-) -> MessagingWorkspaceConversationSummaryOut:
-    latest_message = messages[-1] if messages else None
-    latest_preview = None
-    if latest_message is not None:
-        latest_preview = next(
-            (
-                paragraph.strip()
-                for paragraph in latest_message.body.splitlines()
-                if paragraph.strip()
-            ),
-            None,
-        )
-    return MessagingWorkspaceConversationSummaryOut(
+    *,
+    workspace_counts: MessagingWorkspaceCounts,
+) -> MessagingWorkspaceConversationOut:
+    timeline = [to_messaging_workspace_timeline_item_out(message) for message in messages]
+    latest_item = timeline[-1] if timeline else None
+    preview = build_preview_for_timeline_item(latest_item) or record.description
+    members: list[MessagingWorkspaceMemberOut] = []
+    for item in timeline:
+        if item.author is None:
+            continue
+        if any(member.name == item.author.name for member in members):
+            continue
+        members.append(item.author)
+
+    return MessagingWorkspaceConversationOut(
         conversation_id=record.conversation_id,
         section=record.section,
         kind=record.kind,
@@ -298,10 +783,137 @@ def to_messaging_workspace_conversation_summary_out(
         topic=record.topic,
         composer_hint=record.composer_hint,
         sort_order=record.sort_order,
-        message_count=len(messages),
-        latest_message_preview=latest_preview,
-        latest_message_at=latest_message.created_at if latest_message is not None else None,
+        preview=preview,
+        unread_count=build_unread_count(record.conversation_id),
+        latest_activity_at=latest_item.created_at if latest_item is not None else None,
+        highlights=build_conversation_highlights(record.conversation_id, workspace_counts),
+        metrics=build_conversation_metrics(record.conversation_id, workspace_counts),
+        members=members,
+        timeline=timeline,
     )
+
+
+def build_preview_for_timeline_item(item: MessagingWorkspaceTimelineItemOut | None) -> str | None:
+    if item is None:
+        return None
+    if item.kind == "system":
+        return item.detail
+    return next((paragraph for paragraph in item.body if paragraph.strip()), None)
+
+
+def build_unread_count(conversation_id: str) -> int:
+    for definition in DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS:
+        if definition.conversation_id == conversation_id:
+            return definition.unread_count
+    return 0
+
+
+def build_conversation_highlights(
+    conversation_id: str,
+    counts: MessagingWorkspaceCounts,
+) -> list[str]:
+    if conversation_id == "ectrm-assistant":
+        return [
+            "Action draft AR-204 is staged for review.",
+            "Prompt context and tool evidence are ready in the assistant console.",
+        ]
+    if conversation_id == "counterparty-email":
+        return [
+            "Counterparty deadline: confirm by 3 PM.",
+            "Revised delivery window can flow straight into Operations once acknowledged.",
+        ]
+    if conversation_id == "ops-follow-through":
+        return [
+            build_todo_detail(counts),
+            "Older unresolved operations work can rise first without leaving the messaging surface.",
+        ]
+    if conversation_id == "desk-attention":
+        return [
+            build_issue_detail(counts),
+            "Pricing and exposure signals become easier to scan when they share the same visual language as chat.",
+        ]
+    if conversation_id == "settlement-control":
+        return [
+            f"{format_count_label(counts.pending_invoices, 'pending invoice')} waiting for settlement review.",
+            f"{format_count_label(counts.payments_due, 'payment due item')} tied to cash follow-through.",
+        ]
+    return []
+
+
+def build_conversation_metrics(
+    conversation_id: str,
+    counts: MessagingWorkspaceCounts,
+) -> list[MessagingWorkspaceMetricOut]:
+    if conversation_id == "ectrm-assistant":
+        return [
+            MessagingWorkspaceMetricOut(label="Governed drafts", value="1 new"),
+            MessagingWorkspaceMetricOut(label="Desk attention", value=format_count_value(counts.attention_items)),
+            MessagingWorkspaceMetricOut(label="Open work", value=format_count_value(counts.open_work_items)),
+        ]
+    if conversation_id == "counterparty-email":
+        return [
+            MessagingWorkspaceMetricOut(label="Ops queue", value=format_count_value(counts.operations_queue_items)),
+            MessagingWorkspaceMetricOut(label="Settlement queue", value=format_count_value(counts.settlement_queue_items)),
+            MessagingWorkspaceMetricOut(label="Payments due", value=format_count_value(counts.payments_due)),
+        ]
+    if conversation_id == "ops-follow-through":
+        return [
+            MessagingWorkspaceMetricOut(label="Open work", value=format_count_value(counts.open_work_items)),
+            MessagingWorkspaceMetricOut(label="Ops queue", value=format_count_value(counts.operations_queue_items)),
+            MessagingWorkspaceMetricOut(label="Settlement queue", value=format_count_value(counts.settlement_queue_items)),
+        ]
+    if conversation_id == "desk-attention":
+        return [
+            MessagingWorkspaceMetricOut(label="Attention", value=format_count_value(counts.attention_items)),
+            MessagingWorkspaceMetricOut(label="Stale pricing", value=format_count_value(counts.stale_pricing_items)),
+            MessagingWorkspaceMetricOut(label="Pending pricing", value=format_count_value(counts.pending_pricing_trades)),
+        ]
+    if conversation_id == "settlement-control":
+        return [
+            MessagingWorkspaceMetricOut(label="Pending invoices", value=format_count_value(counts.pending_invoices)),
+            MessagingWorkspaceMetricOut(label="Payments due", value=format_count_value(counts.payments_due)),
+            MessagingWorkspaceMetricOut(label="Pending settlement", value=format_count_value(counts.pending_settlement_trades)),
+        ]
+    return []
+
+
+def to_messaging_workspace_timeline_item_out(
+    record: MessagingWorkspaceMessage,
+) -> MessagingWorkspaceTimelineItemOut:
+    attachment = None
+    if isinstance(record.attachment_payload, dict):
+        attachment = MessagingWorkspaceAttachmentOut(
+            label=str(record.attachment_payload.get("label", "")),
+            title=str(record.attachment_payload.get("title", "")),
+            summary=str(record.attachment_payload.get("summary", "")),
+            footnote=str(record.attachment_payload.get("footnote", "")),
+        )
+
+    author = None
+    if record.author_name and record.author_title and record.author_presence and record.author_initials and record.author_tone:
+        author = MessagingWorkspaceMemberOut(
+            name=record.author_name,
+            title=record.author_title,
+            presence=record.author_presence,
+            initials=record.author_initials,
+            tone=record.author_tone,
+        )
+
+    return MessagingWorkspaceTimelineItemOut(
+        id=record.message_id,
+        kind=record.item_kind.lower(),
+        created_at=normalize_timestamp(record.created_at),
+        label=record.system_label,
+        detail=record.system_detail,
+        author=author,
+        body=format_message_body(record.body),
+        reactions=list(record.reactions or []),
+        attachment=attachment,
+    )
+
+
+def format_message_body(body: str) -> list[str]:
+    return [paragraph.strip() for paragraph in body.split("\n\n") if paragraph.strip()]
 
 
 def to_messaging_workspace_message_out(record: MessagingWorkspaceMessage) -> MessagingWorkspaceMessageOut:
@@ -311,11 +923,11 @@ def to_messaging_workspace_message_out(record: MessagingWorkspaceMessage) -> Mes
         source=record.source.lower(),
         body=record.body,
         author=MessagingWorkspaceMemberOut(
-            name=record.author_name,
-            title=record.author_title,
-            presence=record.author_presence,
-            initials=record.author_initials,
-            tone=record.author_tone,
+            name=record.author_name or "Unknown author",
+            title=record.author_title or "Messaging author",
+            presence=record.author_presence or "Unknown",
+            initials=record.author_initials or build_member_initials(record.author_name or "Unknown author"),
+            tone=(record.author_tone or "human"),
         ),
         assistant_run_id=record.assistant_run_id,
         assistant_agent_id=record.assistant_agent_id,
@@ -323,7 +935,7 @@ def to_messaging_workspace_message_out(record: MessagingWorkspaceMessage) -> Mes
         created_by_user_id=record.created_by_user_id,
         created_by_session_id=record.created_by_session_id,
         created_by_role=record.created_by_role,
-        created_at=record.created_at,
+        created_at=normalize_timestamp(record.created_at),
     )
 
 

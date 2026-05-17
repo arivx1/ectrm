@@ -103,6 +103,13 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .desk-headline-toolbar,
+  .watchlist-alert-stat-grid,
+  .market-monitor-section-grid,
+  .instrument-brief-section-grid {
+    grid-template-columns: 1fr;
+  }
+
   .field-wide {
     grid-column: span 1;
   }
@@ -145,12 +152,40 @@
     gap: 0.75rem;
   }
 
+  .market-monitor-strip-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .market-monitor-focus-row,
+  .market-monitor-priority-row,
+  .desk-headline-row,
+  .watchlist-alert-head,
+  .watchlist-alert-row,
+  .market-monitor-strip-head,
+  .instrument-brief-head,
+  .instrument-brief-row {
+    flex-direction: column;
+  }
+
+  .market-monitor-focus-meta,
+  .market-monitor-priority-meta,
+  .desk-headline-meta,
+  .watchlist-alert-row-meta,
+  .instrument-brief-row-meta {
+    justify-items: start;
+    text-align: left;
+  }
+
   .workspace-topbar-actions {
     justify-content: flex-start;
   }
 
   .workspace-topbar-token {
     width: 100%;
+  }
+
+  .terminal-command-trigger-shortcut {
+    display: none;
   }
 
   .trade-form-overview-head,
@@ -257,6 +292,24 @@
   .hero-badge {
     min-width: 0;
   }
+
+  .terminal-command-overlay {
+    padding-top: 5.25rem;
+  }
+
+  .terminal-shortcut-overlay {
+    padding-top: 5.25rem;
+  }
+
+  .terminal-command-dialog {
+    width: min(100%, calc(100vw - 1.2rem));
+    max-height: calc(100vh - 6.4rem);
+  }
+
+  .terminal-shortcut-dialog {
+    width: min(100%, calc(100vw - 1.2rem));
+    max-height: calc(100vh - 6.4rem);
+  }
 }
 
 @media (max-width: 720px) {
@@ -354,6 +407,28 @@
 
   .workspace-tile-controls {
     justify-items: start;
+  }
+
+  .terminal-command-head,
+  .terminal-command-result,
+  .terminal-command-footer {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .terminal-command-hints {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .terminal-shortcut-grid,
+  .terminal-shortcut-workspace-list,
+  .terminal-shortcut-workspace-row {
+    grid-template-columns: 1fr;
+  }
+
+  .terminal-command-result-kind {
+    justify-self: flex-start;
   }
 
   .admin-run-meta {

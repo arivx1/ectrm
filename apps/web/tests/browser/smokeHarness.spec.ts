@@ -53,22 +53,21 @@ async function selectExactSearchValue(
 }
 
 async function signInFromPromptHome(page: Page): Promise<void> {
-  await expect(page.getByLabel("Operator prompt")).toBeVisible();
-  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  const authGate = page.locator(".auth-gate-stage");
+  await expect(authGate).toBeVisible();
+  await expect(page.getByLabel("Operator prompt")).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Use local OPS_ADMIN session" }),
+    authGate.getByRole("button", { name: "Single Sign On" }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Use local OPS_ADMIN session" })
-    .click();
+  await authGate.getByRole("button", { name: "Single Sign On" }).click();
+  await expect(authGate).toBeHidden();
   await expect(page.getByText("Signed in as Ops Admin")).toBeVisible();
 }
 
 async function signOutFromPromptHome(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Sign Out" }).click();
-  await expect(
-    page.getByRole("button", { name: "Sign In", exact: true }),
-  ).toBeVisible();
+  await expect(page.locator(".auth-gate-stage")).toBeVisible();
+  await expect(page.getByLabel("Operator prompt")).toHaveCount(0);
 }
 
 async function installSpeechSynthesisRecorder(page: Page): Promise<void> {
@@ -235,9 +234,49 @@ test("dashboard smoke boots against the seeded browser harness", async ({
 
     await dismissStartHereOverlay(page);
 
+    await expect(page.getByText("Market Monitor Board")).toBeVisible();
+    await expect(page.getByText("Desk Headlines")).toBeVisible();
+    await expect(page.getByText("Pricing gap on T-AMEND-100")).toBeVisible();
+    await expect(page.getByText("Watchlist Alerts")).toBeVisible();
+    await expect(page.getByText(/Pricing exceptions:/)).toBeVisible();
+    await page.getByRole("button", { name: "Save Watchlist" }).click();
+    await expect(page.getByText("Saved terminal watchlist", { exact: true })).toBeVisible();
+    await expect(page.getByText("Instrument Brief")).toBeVisible();
     await expect(page.getByText("Common Starting Points")).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Open Exposure" }).first(),
+    ).toBeVisible();
+
+    await page.keyboard.press("Alt+F");
+    await expect(page.getByLabel("Search current screen")).toBeFocused();
+    await page.keyboard.press("Alt+2");
+    await expect(page).toHaveURL(/view=dashboard/);
+
+    await page.keyboard.press("Control+K");
+    await expect(
+      page.getByRole("dialog", { name: "Open a workspace or record" }),
+    ).toBeVisible();
+    await page.getByLabel("Search terminal navigation targets").fill("risk");
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/view=risk/);
+    await page.keyboard.press("Alt+1");
+    await expect(page).toHaveURL(/view=dashboard/);
+    await expect(page.getByText("Market Monitor Board")).toBeVisible();
+
+    await page.keyboard.press("?");
+    await expect(page.getByRole("dialog", { name: "Terminal Shortcuts" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Terminal Shortcuts" })).toBeHidden();
+
+    const gasFocusRow = page
+      .locator(".market-monitor-focus-row")
+      .filter({ hasText: "NATURAL GAS" });
+    await expect(gasFocusRow).toBeVisible();
+    await gasFocusRow.getByRole("button", { name: "Open Brief" }).click();
+    await expect(page).toHaveURL(/focusType=market_instrument/);
+    await expect(page.getByText("Commodity Class Brief")).toBeVisible();
+    await expect(
+      page.locator("#instrument-brief").getByText("T-AMEND-100", { exact: true }),
     ).toBeVisible();
 
     assertNoHarnessRequestFailures(harness);
@@ -293,6 +332,78 @@ test("dashboard candidate drilldowns hand off into focused operations context", 
     ).toBeVisible();
     await expect(handoffBanner.getByText("Trade: T-AMEND-100")).toBeVisible();
     await expect(handoffBanner.getByText("Filter: 41")).toBeVisible();
+
+    assertNoHarnessRequestFailures(harness);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("shipments truck workflow renders checkpoint history and corrections", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness();
+
+  try {
+    await seedSignedInSession(page, harness);
+    await page.goto(`${harness.origin}/?view=shipments`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await dismissStartHereOverlay(page);
+
+    const deliveryQueue = page.locator(".shipment-queue-stack");
+    const detailPanel = page.locator(".shipment-editor-panel");
+    const timeline = detailPanel.locator(".timeline");
+
+    await expect(page.getByText("Cross-Mode Delivery Board")).toBeVisible();
+    await expect(deliveryQueue.getByText("T-TRUCK-SMOKE-1").first()).toBeVisible();
+    await expect(
+      deliveryQueue.getByText("Latest truck checkpoint: Departed pickup").first(),
+    ).toBeVisible();
+    await expect(detailPanel.getByText("Truck Dispatch Workflow")).toBeVisible();
+    await expect(timeline.getByText("Truck checkpoint: Departed pickup")).toBeVisible();
+    await expect(
+      timeline.getByText("Truck checkpoint correction: Arrived pickup"),
+    ).toBeVisible();
+
+    const correctedCheckpoint = timeline
+      .locator(".timeline-item-card")
+      .filter({ hasText: "Corrected truck checkpoint: Arrived pickup" });
+    await expect(correctedCheckpoint.getByText("Corrected", { exact: true })).toBeVisible();
+    await expect(
+      timeline.getByText("Arrival was posted with the wrong time.").first(),
+    ).toBeVisible();
+
+    const runQueue = detailPanel
+      .locator(".shipment-card")
+      .filter({ hasText: "Truck Run Queue" })
+      .first();
+    await expect(runQueue.getByText("Run 1", { exact: true }).first()).toBeVisible();
+    await expect(runQueue.getByText("Departed pickup").first()).toBeVisible();
+    const openRunButton = detailPanel.getByRole("button", { name: "Open Run" }).first();
+    if (await openRunButton.isVisible().catch(() => false)) {
+      await openRunButton.click();
+    }
+
+    await expect(detailPanel.getByText("Selected Run 1", { exact: true })).toBeVisible();
+    await expect(
+      detailPanel.getByText("Latest truck checkpoint: Departed pickup").first(),
+    ).toBeVisible();
+
+    const checkpointSection = detailPanel
+      .locator(".shipment-reset-section")
+      .filter({ hasText: "Truck Checkpoints" })
+      .first();
+    await expect(
+      checkpointSection.getByText("Active checkpoints: Departed pickup"),
+    ).toBeVisible();
+    await expect(
+      checkpointSection
+        .locator(".position-card")
+        .filter({ hasText: "Departed pickup" })
+        .getByRole("button", { name: "Reverse Checkpoint" }),
+    ).toBeVisible();
 
     assertNoHarnessRequestFailures(harness);
   } finally {
@@ -445,15 +556,11 @@ test("single-user smoke signs into the prompt home when one-click access is enab
       waitUntil: "domcontentloaded",
     });
 
-    await expect(page.locator(".workspace-topbar-prompt")).toBeVisible();
+    await expect(page.locator(".auth-gate-stage")).toBeVisible();
+    await expect(page.locator(".workspace-topbar-prompt")).toHaveCount(0);
     await expect(page.locator(".hero")).toHaveCount(0);
     await expect(page.locator(".nav-global-filter")).toHaveCount(0);
-    await expect(page.getByLabel("Operator prompt")).toBeVisible();
-    await expect(
-      page.getByText(
-        "You can draft the prompt here. We will only send it after you sign in.",
-      ),
-    ).toBeVisible();
+    await expect(page.getByLabel("Operator prompt")).toHaveCount(0);
     await signInFromPromptHome(page);
 
     await expect(page.getByLabel("Operator prompt")).toBeVisible();
@@ -1230,33 +1337,38 @@ test("prompt home collapse state survives sign-out and sign-in", async ({
   }
 });
 
-test("signed-out prompt draft resumes and sends after sign-in", async ({
+test("stored signed-out prompt draft resumes and sends after sign-in", async ({
   page,
 }) => {
   const harness = await startSmokeHarness({ singleUserAuthEnabled: true });
 
   try {
     await seedApiBaseOverride(page, harness);
+    await page.addInitScript(() => {
+      window.localStorage.setItem(
+        "ectrm.prompt-resume-intent",
+        JSON.stringify({
+          draft: "Where should I handle the confirmation blocker?",
+          submitAfterSignIn: true,
+          createdAt: "2026-05-16T12:00:00.000Z",
+        }),
+      );
+    });
     await page.goto(harness.origin, {
       waitUntil: "domcontentloaded",
     });
 
-    await expect(page.getByLabel("Operator prompt")).toBeVisible();
-    await page
-      .getByLabel("Operator prompt")
-      .fill("Where should I handle the confirmation blocker?");
-    await page.getByRole("button", { name: "Sign In to Send Prompt" }).click();
-
-    await expect(page).toHaveURL(/view=settings/);
+    await expect(page.locator(".auth-gate-stage")).toBeVisible();
+    await expect(page.getByLabel("Operator prompt")).toHaveCount(0);
     await expect(
       page.getByText("After sign-in, sending your prompt:"),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Use local OPS_ADMIN session" }),
+      page.getByRole("button", { name: "Single Sign On" }),
     ).toBeVisible();
 
     await page
-      .getByRole("button", { name: "Use local OPS_ADMIN session" })
+      .getByRole("button", { name: "Single Sign On" })
       .click();
 
     await expect(page).toHaveURL(/^(?!.*view=settings).*$/);
@@ -1676,7 +1788,9 @@ test("admin smoke shows the role-derived pilot lineup and sync action", async ({
       agentControl.getByText("Role profiles", { exact: true }),
     ).toBeVisible();
     await expect(
-      agentControl.getByRole("button", { name: /Ops Governor/ }),
+      agentControl
+        .locator(".assistant-admin-agent-card")
+        .filter({ hasText: "Ops Governor" }),
     ).toBeVisible();
     await expect(agentControl.getByText("Evals PASS")).toBeVisible();
     await expect(
@@ -1709,7 +1823,128 @@ test("admin smoke shows the role-derived pilot lineup and sync action", async ({
   }
 });
 
-test("signed-out start-here routes trade capture intent into the auth gate", async ({
+test("assistant smoke submits a governed agent change request and admin marks it applied", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness();
+
+  try {
+    await seedSignedInSession(page, harness);
+    await page.goto(`${harness.origin}/?view=assistant`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await dismissStartHereOverlay(page);
+
+    const agentDirectory = page.locator(".assistant-agent-directory");
+    await expect(agentDirectory).toBeVisible();
+    await agentDirectory
+      .getByRole("button", { name: /Ops Governor/ })
+      .click();
+
+    const changePanel = page.locator(".assistant-agent-change-panel");
+    await expect(changePanel.getByText("Suggest agent changes")).toBeVisible();
+    await changePanel.getByRole("button", { name: "Narrow access" }).click();
+    await changePanel.getByLabel("Requested authority").selectOption("DRAFT");
+    await changePanel.getByRole("button", { name: "Admin Console" }).click();
+    await changePanel.getByRole("button", { name: "Cancel trade" }).click();
+    await changePanel
+      .locator("label.field")
+      .filter({ has: page.getByText("Change summary", { exact: true }) })
+      .locator("textarea")
+      .fill("Narrow Ops Governor to draft authority for trade review.");
+    await changePanel
+      .locator("label.field")
+      .filter({ has: page.getByText("Business problem", { exact: true }) })
+      .locator("textarea")
+      .fill("The current smoke workflow needs reviewable guidance, not staged cancellation authority.");
+    await changePanel
+      .locator("label.field")
+      .filter({ has: page.getByText("Proposed mission", { exact: true }) })
+      .locator("textarea")
+      .fill("Keep Ops Governor focused on explaining trade blockers before any action staging.");
+
+    await changePanel.getByRole("button", { name: "Submit request" }).click();
+
+    await expect(
+      changePanel.getByText("Change request #9001 is queued for admin review."),
+    ).toBeVisible();
+    const submittedRequestCard = changePanel
+      .locator(".assistant-agent-request-card")
+      .filter({ hasText: "#9001 Ops Governor" });
+    await expect(submittedRequestCard).toBeVisible();
+    await expect(submittedRequestCard).toContainText("Narrow access");
+    await expect(submittedRequestCard).toContainText("REQUESTED");
+
+    await page.goto(`${harness.origin}/?view=admin`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const profileRequestPanel = page.locator(".assistant-profile-request-panel");
+    const reviewCard = profileRequestPanel
+      .locator(".assistant-profile-request-card")
+      .filter({ hasText: "#9001 Ops Governor" });
+    await expect(reviewCard).toBeVisible();
+    await expect(reviewCard).toContainText("Narrow access");
+    await expect(reviewCard).toContainText("target Ops Governor");
+
+    await reviewCard
+      .getByPlaceholder("Owner, prompt, tools/actions, and eval cases reviewed.")
+      .fill("Approved narrower authority for the smoke request.");
+    await reviewCard.getByRole("button", { name: "Approve" }).click();
+
+    await expect(reviewCard).toContainText("APPROVED");
+    await expect(
+      reviewCard.getByText("Approved narrower authority for the smoke request."),
+    ).toBeVisible();
+    await reviewCard.getByRole("button", { name: "Load Review Draft" }).click();
+    await expect(
+      page.getByText("Loaded request #9001 into the review draft for Ops Governor."),
+    ).toBeVisible();
+    await expect(reviewCard.getByRole("button", { name: "Mark Applied" })).toBeDisabled();
+    await page.getByRole("button", { name: "Save Agent" }).click();
+    await expect(page.getByText(/Ops Governor saved as version/)).toBeVisible();
+    await expect(reviewCard).toContainText("Applied revision proof");
+
+    await reviewCard.getByRole("button", { name: "Mark Applied" }).click();
+
+    await expect(reviewCard).toContainText("ACTIVATED");
+    await expect(
+      page.getByText(/Profile request #9001 is now marked as applied to ops-governor via revision #/),
+    ).toBeVisible();
+
+    expect(
+      harness.unexpectedRequests,
+      `Unhandled mock API requests:\n${formatRecordedRequests(harness.unexpectedRequests)}`,
+    ).toHaveLength(0);
+    expect(harness.mutationRequests).toEqual([
+      {
+        method: "POST",
+        path: "/assistant/profile-requests",
+        search: "",
+      },
+      {
+        method: "POST",
+        path: "/admin/assistant/profile-requests/9001/approve",
+        search: "",
+      },
+      {
+        method: "PUT",
+        path: "/admin/assistant/agents/ops-governor",
+        search: "",
+      },
+      {
+        method: "POST",
+        path: "/admin/assistant/profile-requests/9001/activate",
+        search: "",
+      },
+    ]);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("signed-out dashboard renders only the auth gate", async ({
   page,
 }) => {
   const harness = await startSmokeHarness();
@@ -1721,27 +1956,12 @@ test("signed-out start-here routes trade capture intent into the auth gate", asy
     });
 
     const startHereOverlay = page.locator(".start-here-dialog");
-    await expect(startHereOverlay).toBeVisible();
-    await expect(
-      startHereOverlay.getByRole("button", {
-        name: "Sign In for Trade Capture",
-      }),
-    ).toBeVisible();
-
-    await startHereOverlay
-      .getByRole("button", { name: "Sign In for Trade Capture" })
-      .click();
-
-    await expect(page).toHaveURL(/view=settings/);
-    await expect(startHereOverlay).toBeHidden();
-
     const authGate = page.locator(".auth-gate-stage");
     await expect(authGate).toBeVisible();
-    await expect(
-      authGate.getByText(
-        "After sign-in, opening Trade Capture. We'll take you straight there after authentication succeeds.",
-      ),
-    ).toBeVisible();
+    await expect(startHereOverlay).toHaveCount(0);
+    await expect(page.locator(".side-rail")).toHaveCount(0);
+    await expect(page.locator(".mobile-topbar")).toHaveCount(0);
+    await expect(page.getByLabel("Operator prompt")).toHaveCount(0);
     await expect(authGate.getByLabel("User ID or Email")).toBeVisible();
     await expect(
       authGate.getByRole("button", { name: "Enter Console" }),
@@ -1765,13 +1985,8 @@ test("signed-in start-here stays hidden after the user's first-login session", a
     });
 
     const startHereOverlay = page.locator(".start-here-dialog");
-    await expect(startHereOverlay).toBeVisible();
-    await startHereOverlay
-      .getByRole("button", { name: "Open How It Works" })
-      .click();
-
-    await expect(page).toHaveURL(/view=guide/);
-    await expect(startHereOverlay).toBeHidden();
+    await expect(page.locator(".auth-gate-stage")).toBeVisible();
+    await expect(startHereOverlay).toHaveCount(0);
 
     await page.evaluate(() => {
       window.localStorage.setItem(
@@ -1867,6 +2082,9 @@ test("documentation wiki smoke supports seeded pages and revision restore", asyn
       [
         "# Broker Escalations",
         "",
+        "See [[Confirmations|wiki-confirmations]] before you escalate.",
+        "Track [[Missing Runbook]] if the route is not documented yet.",
+        "",
         "- Start in Operations.",
         "- Capture the blocker owner.",
         "- Escalate with trade and counterparty context.",
@@ -1876,6 +2094,10 @@ test("documentation wiki smoke supports seeded pages and revision restore", asyn
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect(page.getByText("Saved wiki changes.")).toBeVisible();
     await expect(titleField).toHaveValue("Broker Escalations");
+    await expect(page.getByText("Unresolved links")).toBeVisible();
+    await expect(
+      page.locator(".wiki-link-warning").getByText("Missing Runbook"),
+    ).toBeVisible();
 
     await page.reload({ waitUntil: "domcontentloaded" });
     const startHereOverlay = page.locator(".start-here-dialog");
@@ -1896,6 +2118,19 @@ test("documentation wiki smoke supports seeded pages and revision restore", asyn
     await createdPageTreeButton.click();
     await searchPagesField.fill("");
 
+    await page
+      .locator(".wiki-preview")
+      .getByRole("link", { name: "Confirmations" })
+      .click();
+    await expect(page.getByLabel("Page Title")).toHaveValue("Confirmations");
+
+    const brokerEscalationsBacklink = page
+      .locator(".wiki-backlink-card")
+      .filter({ hasText: "Broker Escalations" });
+    await expect(brokerEscalationsBacklink).toBeVisible();
+    await brokerEscalationsBacklink.click();
+    await expect(page.getByLabel("Page Title")).toHaveValue("Broker Escalations");
+
     const versionOneCard = page
       .locator(".wiki-revision-card")
       .filter({ hasText: "Version 1" });
@@ -1906,7 +2141,22 @@ test("documentation wiki smoke supports seeded pages and revision restore", asyn
     await expect(page.getByLabel("Page Title")).toHaveValue("Untitled Page");
     await expect(page.getByLabel("Markdown")).toHaveValue("");
 
-    expect(harness.mutationRequests).toHaveLength(3);
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Archive Page" }).click();
+    await expect(page.getByText("Archived this wiki page.")).toBeVisible();
+    await expect(
+      page.getByText("This page is archived and read-only until you restore it."),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Archived Pages" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Restore Page" }).click();
+    await expect(
+      page.getByText("Restored this wiki page from archive."),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Archive Page" })).toBeVisible();
+
+    expect(harness.mutationRequests).toHaveLength(5);
     expect(harness.mutationRequests[0]).toEqual({
       method: "POST",
       path: "/wiki/pages",
@@ -1922,6 +2172,16 @@ test("documentation wiki smoke supports seeded pages and revision restore", asyn
       /^\/wiki\/pages\/wiki-page-\d{4}\/revisions\/6\/restore$/,
     );
     expect(harness.mutationRequests[2]?.search).toBe("");
+    expect(harness.mutationRequests[3]).toEqual({
+      method: "POST",
+      path: "/wiki/pages/wiki-page-0006/archive",
+      search: "",
+    });
+    expect(harness.mutationRequests[4]).toEqual({
+      method: "POST",
+      path: "/wiki/pages/wiki-page-0006/unarchive",
+      search: "",
+    });
     expect(
       harness.unexpectedRequests,
       `Unhandled mock API requests:\n${formatRecordedRequests(

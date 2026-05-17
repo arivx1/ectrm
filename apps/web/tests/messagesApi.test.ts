@@ -15,8 +15,47 @@ test('loadMessagingWorkspaceState targets the public messaging workspace endpoin
     requests.push({ url: String(input), init })
     return new Response(
       JSON.stringify({
-        conversations: [],
-        messages: [],
+        conversations: [
+          {
+            conversation_id: 'ectrm-assistant',
+            section: 'Starred',
+            kind: 'channel',
+            label: '#ectrm-assistant',
+            connected_workspace: 'Assistant Console',
+            assistant_workspace: 'assistant',
+            description: 'Governed assistant drafts stay here.',
+            topic: 'Keep governed assistant activity in one lane.',
+            composer_hint: 'Reply here to keep assistant guidance threaded.',
+            sort_order: 10,
+            preview: 'Action draft is ready.',
+            unread_count: 1,
+            latest_activity_at: '2026-05-16T20:14:00Z',
+            highlights: ['Action draft AR-204 is staged for review.'],
+            metrics: [{ label: 'Governed drafts', value: '1 new' }],
+            members: [
+              {
+                name: 'ECTRM Desk',
+                title: 'System notification',
+                presence: 'Watching the desk',
+                initials: 'EC',
+                tone: 'desk',
+              },
+            ],
+            timeline: [
+              {
+                id: 'assistant-day',
+                kind: 'system',
+                created_at: '2026-05-16T20:05:00Z',
+                label: 'Today',
+                detail: 'Action draft AR-204 moved into governed review.',
+                author: null,
+                body: [],
+                reactions: [],
+                attachment: null,
+              },
+            ],
+          },
+        ],
       }),
       {
         status: 200,
@@ -27,7 +66,9 @@ test('loadMessagingWorkspaceState targets the public messaging workspace endpoin
 
   try {
     const result = await loadMessagingWorkspaceState('http://localhost:8000')
-    assert.deepEqual(result, { conversations: [], messages: [] })
+    assert.equal(result.conversations.length, 1)
+    assert.equal(result.conversations[0]?.conversation_id, 'ectrm-assistant')
+    assert.equal(result.conversations[0]?.timeline[0]?.kind, 'system')
     assert.equal(requests[0]?.url, 'http://localhost:8000/messages/workspace')
   } finally {
     global.fetch = originalFetch

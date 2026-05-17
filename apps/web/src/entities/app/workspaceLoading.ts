@@ -152,15 +152,7 @@ export function shouldPresentSignedOutAuthGate(args: {
   currentView: ViewKey
   hasAuthSession: boolean
 }): boolean {
-  if (args.hasAuthSession) {
-    return false
-  }
-
-  return (
-    args.currentView !== 'guide' &&
-    args.currentView !== 'prompt' &&
-    args.currentView !== 'messages'
-  )
+  return !args.hasAuthSession
 }
 
 type StartHereOverlayArgs = {
@@ -183,8 +175,9 @@ export function shouldPresentStartHereOverlay({
   usesTerminalMode,
 }: StartHereOverlayArgs): boolean {
   return (
+    hasAuthSession &&
     hasStartHereOnboarding &&
-    !(hasAuthSession && (hasStartHereReturnIntent || usesTerminalMode)) &&
+    !(hasStartHereReturnIntent || usesTerminalMode) &&
     currentView !== 'prompt' &&
     currentView !== 'settings' &&
     currentView !== 'messages' &&

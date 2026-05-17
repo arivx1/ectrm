@@ -1,11 +1,21 @@
 import { useState } from 'react'
 
 import type {
+  CancelDeliveryTruckMovementInput,
+  CancelDeliveryTruckStopInput,
   CreateDeliveryEventInput,
+  DeliveryTruckMovementCreateInput,
+  DeliveryTruckStopCreateInput,
+  RecordDeliveryTruckStopCheckpointInput,
+  ReverseDeliveryTruckStopCheckpointInput,
+  SkipDeliveryTruckStopInput,
   UpdateDeliveryInput,
   UpdateDeliveryLogisticsDetailInput,
   UpdateDeliveryPipelineDetailInput,
   UpdateDeliveryPowerDetailInput,
+  UpdateDeliveryTruckDetailInput,
+  UpdateDeliveryTruckMovementInput,
+  UpdateDeliveryTruckStopInput,
 } from '../../entities/shipments/api'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
 import {
@@ -23,6 +33,10 @@ import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar
 import { OperationalBoardController } from '../operations/OperationalBoardController'
 import { renderOperationalActionPanel } from '../operations/operationalActionPanelRegistry'
 import { resolveOperationalWorkboardDefinition } from '../operations/operationalWorkboardRegistry'
+import {
+  formatTruckCheckpointLabel,
+  latestActiveTruckCheckpointEvent,
+} from './deliveryTruckWorkflowHelpers'
 
 type DeliveryWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -55,6 +69,55 @@ type DeliveryWorkspaceProps = {
   onSaveDeliveryPowerDetails: (
     deliveryId: string,
     payload: UpdateDeliveryPowerDetailInput,
+  ) => Promise<void>
+  onSaveDeliveryTruckDetails: (
+    deliveryId: string,
+    payload: UpdateDeliveryTruckDetailInput,
+  ) => Promise<void>
+  onCreateDeliveryTruckMovement: (
+    deliveryId: string,
+    payload: DeliveryTruckMovementCreateInput,
+  ) => Promise<void>
+  onSaveDeliveryTruckMovement: (
+    deliveryId: string,
+    movementId: string,
+    payload: UpdateDeliveryTruckMovementInput,
+  ) => Promise<void>
+  onCancelDeliveryTruckMovement: (
+    deliveryId: string,
+    movementId: string,
+    payload: CancelDeliveryTruckMovementInput,
+  ) => Promise<void>
+  onCreateDeliveryTruckStop: (
+    deliveryId: string,
+    movementId: string,
+    payload: DeliveryTruckStopCreateInput,
+  ) => Promise<void>
+  onSaveDeliveryTruckStop: (
+    deliveryId: string,
+    stopId: string,
+    payload: UpdateDeliveryTruckStopInput,
+  ) => Promise<void>
+  onSkipDeliveryTruckStop: (
+    deliveryId: string,
+    stopId: string,
+    payload: SkipDeliveryTruckStopInput,
+  ) => Promise<void>
+  onCancelDeliveryTruckStop: (
+    deliveryId: string,
+    stopId: string,
+    payload: CancelDeliveryTruckStopInput,
+  ) => Promise<void>
+  onRecordDeliveryTruckStopCheckpoint: (
+    deliveryId: string,
+    stopId: string,
+    payload: RecordDeliveryTruckStopCheckpointInput,
+  ) => Promise<void>
+  onReverseDeliveryTruckStopCheckpoint: (
+    deliveryId: string,
+    stopId: string,
+    eventId: number,
+    payload: ReverseDeliveryTruckStopCheckpointInput,
   ) => Promise<void>
   onCreateDeliveryEvent: (deliveryId: string, payload: CreateDeliveryEventInput) => Promise<void>
 }
@@ -96,6 +159,20 @@ function volumeLabel(delivery: DeliveryRecord, formatNumber: DeliveryWorkspacePr
   }
 
   return `${formatNumber(delivery.volume, 0)} ${delivery.unit_of_measure ?? ''}`.trim()
+}
+
+function latestTruckCheckpointLabel(
+  delivery: DeliveryRecord,
+  formatDate: DeliveryWorkspaceProps['formatDate'],
+): string | null {
+  if (delivery.transport_mode !== 'TRUCK') {
+    return null
+  }
+  const checkpoint = latestActiveTruckCheckpointEvent(delivery)
+  if (!checkpoint) {
+    return null
+  }
+  return `${formatTruckCheckpointLabel(checkpoint.checkpoint_code)} at ${formatDate(checkpoint.occurred_at)}`
 }
 
 function windowLabel(
@@ -223,6 +300,16 @@ export function DeliveryWorkspace({
   onSaveDeliveryLogisticsDetails,
   onSaveDeliveryPipelineDetails,
   onSaveDeliveryPowerDetails,
+  onSaveDeliveryTruckDetails,
+  onCreateDeliveryTruckMovement,
+  onSaveDeliveryTruckMovement,
+  onCancelDeliveryTruckMovement,
+  onCreateDeliveryTruckStop,
+  onSaveDeliveryTruckStop,
+  onSkipDeliveryTruckStop,
+  onCancelDeliveryTruckStop,
+  onRecordDeliveryTruckStopCheckpoint,
+  onReverseDeliveryTruckStopCheckpoint,
   onCreateDeliveryEvent,
 }: DeliveryWorkspaceProps) {
   const [screenFilter, setScreenFilter] = useState('')
@@ -568,6 +655,16 @@ export function DeliveryWorkspace({
                       onSaveLogisticsDetails: onSaveDeliveryLogisticsDetails,
                       onSavePipelineDetails: onSaveDeliveryPipelineDetails,
                       onSavePowerDetails: onSaveDeliveryPowerDetails,
+                      onSaveTruckDetails: onSaveDeliveryTruckDetails,
+                      onCreateTruckMovement: onCreateDeliveryTruckMovement,
+                      onSaveTruckMovement: onSaveDeliveryTruckMovement,
+                      onCancelTruckMovement: onCancelDeliveryTruckMovement,
+                      onCreateTruckStop: onCreateDeliveryTruckStop,
+                      onSaveTruckStop: onSaveDeliveryTruckStop,
+                      onSkipTruckStop: onSkipDeliveryTruckStop,
+                      onCancelTruckStop: onCancelDeliveryTruckStop,
+                      onRecordTruckStopCheckpoint: onRecordDeliveryTruckStopCheckpoint,
+                      onReverseTruckStopCheckpoint: onReverseDeliveryTruckStopCheckpoint,
                       onCreateEvent: onCreateDeliveryEvent,
                     })
                   ) : (
@@ -584,6 +681,7 @@ export function DeliveryWorkspace({
               <div className="position-list">
                 {visibleDeliveries.map((delivery) => {
                   const isSelected = selectedDelivery?.delivery_id === delivery.delivery_id
+                  const latestTruckCheckpoint = latestTruckCheckpointLabel(delivery, formatDate)
 
                   return (
                     <article
@@ -616,6 +714,9 @@ export function DeliveryWorkspace({
                         {hasManualSharedOverrides(delivery) ? (
                           <span className="entity-chip entity-chip-soft">Manual Overrides</span>
                         ) : null}
+                        {latestTruckCheckpoint ? (
+                          <span className="entity-chip entity-chip-soft">Truck {latestTruckCheckpoint}</span>
+                        ) : null}
                         <span className="entity-chip entity-chip-soft">Pricing {delivery.pricing_status}</span>
                         <span className="entity-chip entity-chip-soft">Confirmation {delivery.confirmation_status}</span>
                         <span className="entity-chip entity-chip-soft">Nomination {delivery.nomination_status}</span>
@@ -639,6 +740,7 @@ export function DeliveryWorkspace({
                             ? `Actualized ${formatNumber(delivery.actualized_quantity, 2)} ${delivery.unit_of_measure ?? ''} on ${formatDate(delivery.actualized_at)}`
                             : 'Execution actuals have not been recorded yet.'}
                         </p>
+                        {latestTruckCheckpoint ? <p>Latest truck checkpoint: {latestTruckCheckpoint}</p> : null}
                         <p>
                           Booked {formatDate(delivery.booked_at)} • Updated {formatDate(delivery.last_updated_at)} • Open{' '}
                           {delivery.age_days}d

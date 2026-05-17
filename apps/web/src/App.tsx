@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 
 import './App.css'
 import './appearance.css'
@@ -10,6 +10,8 @@ import {
   primaryNavigationSectionForView,
 } from './app/navigation'
 import { AppStartHereOverlay } from './entities/app/AppStartHereOverlay'
+import { TerminalCommandBar } from './entities/app/TerminalCommandBar'
+import { TerminalShortcutReference } from './entities/app/TerminalShortcutReference'
 import { AppWorkspaceContent } from './entities/app/AppWorkspaceContent'
 import {
   APP_VIEWS,
@@ -27,6 +29,11 @@ import { useAppAppearance } from './entities/app/useAppAppearance'
 import { useAppTradeCaptureSettings } from './entities/app/useAppTradeCaptureSettings'
 import { useAppWorkspaceData } from './entities/app/useAppWorkspaceData'
 import { useAppWorkspaceSummary } from './entities/app/useAppWorkspaceSummary'
+import {
+  isEditableShortcutTarget,
+  resolveTerminalWorkspaceShortcut,
+  terminalShortcutMatches,
+} from './entities/app/terminalKeyboardShortcuts'
 import {
   deriveWorkspaceStatus,
   isApiReachabilityMessage,
@@ -122,6 +129,50 @@ function WorkspaceErrorBanner({
       ) : null}
     </div>
   )
+}
+
+function visibleElements<TElement extends HTMLElement>(elements: TElement[]): TElement[] {
+  return elements.filter((element) => element.offsetParent !== null)
+}
+
+function focusLocalWorkspaceFilter(): boolean {
+  const input = document.querySelector<HTMLInputElement>('[data-terminal-shortcut-target="local-filter"]')
+  if (!input || input.offsetParent === null) {
+    return false
+  }
+
+  input.focus()
+  input.select()
+  return true
+}
+
+function focusWorkspaceTile(direction: 'next' | 'previous'): boolean {
+  const tiles = visibleElements(
+    Array.from(document.querySelectorAll<HTMLElement>('[data-terminal-shortcut-target="workspace-tile"]')),
+  )
+  if (tiles.length === 0) {
+    return false
+  }
+
+  const activeTile = document.activeElement?.closest<HTMLElement>('[data-terminal-shortcut-target="workspace-tile"]')
+  const activeIndex = activeTile ? tiles.indexOf(activeTile) : -1
+  const nextIndex =
+    activeIndex === -1
+      ? direction === 'next'
+        ? 0
+        : tiles.length - 1
+      : direction === 'next'
+        ? (activeIndex + 1) % tiles.length
+        : (activeIndex - 1 + tiles.length) % tiles.length
+  const nextTile = tiles[nextIndex]
+  nextTile.focus({ preventScroll: true })
+  nextTile.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  return true
+}
+
+function focusMainStage(): void {
+  const mainStage = document.querySelector<HTMLElement>('[data-terminal-shortcut-target="main-stage"]')
+  mainStage?.focus({ preventScroll: true })
 }
 
 type AppRouteController = ReturnType<typeof useAppRouteState>
@@ -327,6 +378,8 @@ function AuthenticatedWorkspaceShell({
   const selectedTrade = summary.selectedTrade
   const currentWorkspaceLabel = APP_VIEWS.find((view) => view.key === route.currentView)?.label ?? workspaceLabel(route.currentView)
   const shellModeClassName = appearance.isTerminalMode ? 'app-shell-terminal-mode' : ''
+  const [terminalCommandBarOpen, setTerminalCommandBarOpen] = useState(false)
+  const [shortcutReferenceOpen, setShortcutReferenceOpen] = useState(false)
   const workspaceReconnectPending =
     workspaceData.groupLoading.core ||
     VIEW_DATA_GROUPS[currentView].some((group) => workspaceData.groupLoading[group])
@@ -334,6 +387,105 @@ function AuthenticatedWorkspaceShell({
   const workspaceWarningReconnectAvailable = workspaceWarning
     ? isApiReachabilityMessage(workspaceData.groupErrors[workspaceWarning])
     : false
+  const terminalSearchLoading = workspaceData.appLoading || workspaceData.groupLoading.core
+
+  function openTerminalCommandBar() {
+    shell.setMobileNavOpen(false)
+    setTerminalCommandBarOpen(true)
+  }
+
+  function closeTerminalCommandBar() {
+    setTerminalCommandBarOpen(false)
+  }
+
+  const openShortcutReference = useCallback(() => {
+    shell.setMobileNavOpen(false)
+    setShortcutReferenceOpen(true)
+  }, [shell])
+
+  function closeShortcutReference() {
+    setShortcutReferenceOpen(false)
+  }
+
+  const resetWorkspaceFocus = useCallback(() => {
+    route.replaceView(route.currentView, null)
+    shell.setMobileNavOpen(false)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    window.setTimeout(focusMainStage, 0)
+  }, [route, shell])
+
+  useEffect(() => {
+    function handleTerminalShortcut(event: KeyboardEvent) {
+      if (event.defaultPrevented) {
+        return
+      }
+
+      if (shortcutReferenceOpen && event.key === 'Escape') {
+        event.preventDefault()
+        closeShortcutReference()
+        return
+      }
+
+      if (terminalCommandBarOpen) {
+        return
+      }
+
+      const editableTarget = isEditableShortcutTarget(event.target)
+      if (!editableTarget && terminalShortcutMatches('shortcut-reference', event)) {
+        event.preventDefault()
+        openShortcutReference()
+        return
+      }
+
+      if (editableTarget || shortcutReferenceOpen) {
+        return
+      }
+
+      const workspaceShortcut = resolveTerminalWorkspaceShortcut(event)
+      if (workspaceShortcut) {
+        event.preventDefault()
+        route.navigateToView(workspaceShortcut.view)
+        shell.setMobileNavOpen(false)
+        return
+      }
+
+      if (terminalShortcutMatches('focus-filter', event)) {
+        if (focusLocalWorkspaceFilter()) {
+          event.preventDefault()
+        }
+        return
+      }
+
+      if (terminalShortcutMatches('next-tile', event)) {
+        if (focusWorkspaceTile('next')) {
+          event.preventDefault()
+        }
+        return
+      }
+
+      if (terminalShortcutMatches('previous-tile', event)) {
+        if (focusWorkspaceTile('previous')) {
+          event.preventDefault()
+        }
+        return
+      }
+
+      if (terminalShortcutMatches('reset-focus', event)) {
+        event.preventDefault()
+        resetWorkspaceFocus()
+      }
+    }
+
+    window.addEventListener('keydown', handleTerminalShortcut)
+    return () => window.removeEventListener('keydown', handleTerminalShortcut)
+  }, [
+    openShortcutReference,
+    resetWorkspaceFocus,
+    route,
+    shell,
+    shortcutReferenceOpen,
+    terminalCommandBarOpen,
+  ])
 
   function handleReconnectWorkspace() {
     void workspaceData
@@ -346,6 +498,36 @@ function AuthenticatedWorkspaceShell({
       })
   }
 
+  function renderTerminalCommandTrigger(className?: string) {
+    return (
+      <button
+        type="button"
+        className={['button button-ghost terminal-command-trigger', className].filter(Boolean).join(' ')}
+        onClick={openTerminalCommandBar}
+      >
+        <span className="terminal-command-trigger-copy">
+          <strong>Search</strong>
+          <small>Open a workspace or record</small>
+        </span>
+        <span className="terminal-command-trigger-shortcut">Ctrl/Cmd+K</span>
+      </button>
+    )
+  }
+
+  function renderShortcutReferenceTrigger(className?: string) {
+    return (
+      <button
+        type="button"
+        className={['button button-ghost terminal-shortcut-trigger', className].filter(Boolean).join(' ')}
+        onClick={openShortcutReference}
+        aria-label="Show terminal keyboard shortcuts"
+      >
+        <span>Shortcuts</span>
+        <kbd>?</kbd>
+      </button>
+    )
+  }
+
   return (
     <div className={`app-shell ${shellModeClassName}`.trim()}>
       <div className="app-aura app-aura-left" />
@@ -353,9 +535,11 @@ function AuthenticatedWorkspaceShell({
 
       <div className="mobile-topbar">
         <div>
-          <span className="brand-mark">E/CTRM</span>
+          <span className="brand-mark">Strata</span>
         </div>
         <div className="mobile-topbar-actions">
+          {renderTerminalCommandTrigger('terminal-command-trigger-mobile')}
+          {renderShortcutReferenceTrigger('terminal-shortcut-trigger-mobile')}
           <button
             type="button"
             className="appearance-toggle appearance-toggle-mobile"
@@ -395,7 +579,7 @@ function AuthenticatedWorkspaceShell({
         aria-hidden={shell.mobileNavHidden ? true : undefined}
       >
         <div className="brand-lockup">
-          <span className="brand-mark">E/CTRM</span>
+          <span className="brand-mark">Strata</span>
           <h1>Operator Console</h1>
           <p>A trading operations cockpit for ticket entry, lifecycle management, and live projection views.</p>
         </div>
@@ -489,7 +673,11 @@ function AuthenticatedWorkspaceShell({
         </nav>
       </aside>
 
-      <main className={`main-stage ${isPromptHomeView ? 'main-stage-prompt' : ''}`}>
+      <main
+        className={`main-stage ${isPromptHomeView ? 'main-stage-prompt' : ''}`}
+        tabIndex={-1}
+        data-terminal-shortcut-target="main-stage"
+      >
         {showStartHereOverlay ? (
           <AppStartHereOverlay
             authSession={authSession}
@@ -505,6 +693,8 @@ function AuthenticatedWorkspaceShell({
               <strong>{currentWorkspaceLabel}</strong>
             </div>
             <div className="workspace-topbar-actions">
+              {renderTerminalCommandTrigger()}
+              {renderShortcutReferenceTrigger()}
               <PromptHomeAvailableTokenBadge />
               <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
                 {effectiveSystemStateLabel}
@@ -556,11 +746,15 @@ function AuthenticatedWorkspaceShell({
                   ? `${selectedTrade.commodity} • ${selectedTrade.book}`
                   : `${workspaceData.events.length} loaded events across the current session`}
               </small>
-              {authSession ? (
-                <div className="hero-badge-actions">
+              <div className="hero-badge-actions">
+                {renderTerminalCommandTrigger()}
+                {renderShortcutReferenceTrigger()}
+                {authSession ? (
                   <small className="hero-badge-session">
                     Signed in as {authSession.user.display_name}
                   </small>
+                ) : null}
+                {authSession ? (
                   <button
                     type="button"
                     className="button button-secondary"
@@ -569,9 +763,9 @@ function AuthenticatedWorkspaceShell({
                   >
                     {signOutPending ? 'Signing Out...' : 'Sign Out'}
                   </button>
-                  {signOutError ? <small className="hero-badge-error">{signOutError}</small> : null}
-                </div>
-              ) : null}
+                ) : null}
+                {signOutError ? <small className="hero-badge-error">{signOutError}</small> : null}
+              </div>
             </div>
           </header>
         )}
@@ -632,8 +826,10 @@ function AuthenticatedWorkspaceShell({
               routeHandoff={route.routeHandoff}
               referenceState={referenceState}
               roadmapRefreshVersion={shell.roadmapRefreshVersion}
+              selectedMessagingConversationId={route.selectedMessagingConversationId}
               selectedTradeId={route.selectedTradeId}
               setInspectorTab={shell.setInspectorTab}
+              setSelectedMessagingConversationId={route.setSelectedMessagingConversationId}
               setSelectedTradeId={route.setSelectedTradeId}
               shell={shell}
               summary={summary}
@@ -679,8 +875,10 @@ function AuthenticatedWorkspaceShell({
               routeHandoff={route.routeHandoff}
               referenceState={referenceState}
               roadmapRefreshVersion={shell.roadmapRefreshVersion}
+              selectedMessagingConversationId={route.selectedMessagingConversationId}
               selectedTradeId={route.selectedTradeId}
               setInspectorTab={shell.setInspectorTab}
+              setSelectedMessagingConversationId={route.setSelectedMessagingConversationId}
               setSelectedTradeId={route.setSelectedTradeId}
               shell={shell}
               summary={summary}
@@ -690,6 +888,26 @@ function AuthenticatedWorkspaceShell({
           </Suspense>
         )}
       </main>
+
+      <TerminalCommandBar
+        isOpen={terminalCommandBarOpen}
+        onOpen={openTerminalCommandBar}
+        onClose={closeTerminalCommandBar}
+        isLoading={terminalSearchLoading}
+        trades={workspaceData.trades}
+        counterparties={workspaceData.counterparties}
+        commodities={workspaceData.commodities}
+        priceIndices={workspaceData.priceIndices}
+        navigateToView={route.navigateToView}
+        navigateToTrade={navigateToTrade}
+        referenceNavigator={{
+          setReferenceTab: referenceState.setReferenceTab,
+          startEditCommodity: referenceState.startEditCommodity,
+          startEditPriceIndex: referenceState.startEditPriceIndex,
+          startEditCounterparty: referenceState.startEditCounterparty,
+        }}
+      />
+      <TerminalShortcutReference isOpen={shortcutReferenceOpen} onClose={closeShortcutReference} />
     </div>
   )
 }
@@ -895,13 +1113,6 @@ export default function App() {
           pendingPromptResumeLabel={promptResumeIntentLabel}
           pendingPromptResumeWillSubmit={promptResumeIntent?.submitAfterSignIn ?? false}
         />
-        {showStartHereOverlay ? (
-          <AppStartHereOverlay
-            authSession={authSession}
-            onDismiss={dismissStartHere}
-            onOpenView={startHereRouting.handleStartHereOpenView}
-          />
-        ) : null}
       </div>
     )
   }

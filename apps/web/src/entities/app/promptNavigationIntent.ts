@@ -5,7 +5,15 @@ import type { InspectorTab, ViewKey } from '../../shared/models'
 export type PromptNavigationIntentKind = 'open_workspace'
 
 export type PromptNavigationFocus = {
-  type: 'trade' | 'workflow_item' | 'document' | 'invoice' | 'payment' | 'reference_record' | 'report'
+  type:
+    | 'trade'
+    | 'workflow_item'
+    | 'document'
+    | 'invoice'
+    | 'payment'
+    | 'reference_record'
+    | 'market_instrument'
+    | 'report'
   id: string
   label?: string
 }
@@ -77,6 +85,7 @@ function normalizePromptNavigationFocus(value: unknown): PromptNavigationFocus |
     case 'invoice':
     case 'payment':
     case 'reference_record':
+    case 'market_instrument':
     case 'report':
       return {
         type: focusType,

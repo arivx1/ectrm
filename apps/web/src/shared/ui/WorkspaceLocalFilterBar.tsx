@@ -45,6 +45,7 @@ export function WorkspaceLocalFilterBar({
           <span>Search current screen</span>
           <input
             className="control"
+            data-terminal-shortcut-target="local-filter"
             type="search"
             value={value}
             onChange={(event) => onChange(event.target.value)}

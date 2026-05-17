@@ -1,14 +1,14 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
+import authGateBarrelLogoUrl from '../../assets/auth-gate-logo-barrel.png'
+import authGateLogoUrl from '../../assets/auth-gate-logo.png'
 import {
   bootstrapAdminSession,
   createAuthSession,
-  createGoogleAuthSession,
   createSingleUserAuthSession,
   type SessionResponse,
 } from './api'
 import { formatAuthErrorMessage } from './errorMessage'
-import { loadGoogleIdentityScript } from './googleIdentity'
 import { loadPublicRuntimeSettings, type PublicRuntimeSettings } from '../app/api'
 import {
   saveCollapsibleCardStateValue,
@@ -30,7 +30,32 @@ type FlashMessage = {
   message: string
 }
 
-type AuthAction = 'login' | 'single-user' | 'bootstrap' | 'google' | null
+type AuthAction = 'login' | 'single-user' | 'bootstrap' | null
+type AuthGateTimeOfDay = 'sunrise' | 'daytime' | 'sunset' | 'night'
+
+const AUTH_GATE_BACKGROUND_REFRESH_MS = 60 * 1000
+const AUTH_GATE_BACKGROUND_SEQUENCE: AuthGateTimeOfDay[] = ['sunrise', 'daytime', 'sunset', 'night']
+
+function getAuthGateTimeOfDay(date = new Date()): AuthGateTimeOfDay {
+  const hour = date.getHours()
+
+  if (hour >= 5 && hour < 9) {
+    return 'sunrise'
+  }
+  if (hour >= 9 && hour < 17) {
+    return 'daytime'
+  }
+  if (hour >= 17 && hour < 20) {
+    return 'sunset'
+  }
+  return 'night'
+}
+
+function getNextAuthGateTimeOfDay(timeOfDay: AuthGateTimeOfDay): AuthGateTimeOfDay {
+  const currentIndex = AUTH_GATE_BACKGROUND_SEQUENCE.indexOf(timeOfDay)
+  const nextIndex = (currentIndex + 1) % AUTH_GATE_BACKGROUND_SEQUENCE.length
+  return AUTH_GATE_BACKGROUND_SEQUENCE[nextIndex]
+}
 
 function mapSession(session: SessionResponse): StoredAuthSession {
   return {
@@ -61,7 +86,8 @@ export function AuthGate({
   const [authAction, setAuthAction] = useState<AuthAction>(null)
   const [serverSettings, setServerSettings] = useState<PublicRuntimeSettings | null>(null)
   const [serverSettingsError, setServerSettingsError] = useState('')
-  const [googleSignInReady, setGoogleSignInReady] = useState(false)
+  const [timeOfDay, setTimeOfDay] = useState<AuthGateTimeOfDay>(() => getAuthGateTimeOfDay())
+  const [timeSkipActive, setTimeSkipActive] = useState(false)
   const bootstrapAdminHashTargeted =
     typeof window !== 'undefined' &&
     window.location.hash.replace(/^#/, '').trim() === 'bootstrap-admin'
@@ -69,7 +95,6 @@ export function AuthGate({
     expanded: bootstrapExpanded,
     setExpanded: setBootstrapExpanded,
   } = usePersistentCollapsibleCardState('auth-gate.bootstrap-admin', bootstrapAdminHashTargeted)
-  const googleSignInContainerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -95,6 +120,16 @@ export function AuthGate({
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      if (!timeSkipActive) {
+        setTimeOfDay(getAuthGateTimeOfDay())
+      }
+    }, AUTH_GATE_BACKGROUND_REFRESH_MS)
+
+    return () => window.clearInterval(intervalId)
+  }, [timeSkipActive])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -164,23 +199,6 @@ export function AuthGate({
     }
   }
 
-  const handleGoogleCredential = useEffectEvent(async (idToken: string) => {
-    setAuthAction('google')
-    setAuthFlash(null)
-
-    try {
-      const session = await createGoogleAuthSession(appConfig.apiBase, { id_token: idToken })
-      await onSessionChange(mapSession(session))
-    } catch (error) {
-      setAuthFlash({
-        tone: 'error',
-        message: formatAuthErrorMessage(error, 'Could not sign in with Google.'),
-      })
-    } finally {
-      setAuthAction(null)
-    }
-  })
-
   async function handleBootstrapAdmin(event: React.FormEvent) {
     event.preventDefault()
     setAuthAction('bootstrap')
@@ -204,94 +222,44 @@ export function AuthGate({
     }
   }
 
-  const googleClientId = serverSettings?.google_auth.client_id?.trim() ?? ''
   const authLoading = authAction !== null
   const singleUserAuthEnabled = Boolean(serverSettings?.single_user_auth_enabled)
-  const googleAuthEnabled = Boolean(serverSettings?.google_auth.enabled && googleClientId)
-  const googleAutoCreateUsers = Boolean(serverSettings?.google_auth.auto_create_users)
-
-  useEffect(() => {
-    const container = googleSignInContainerRef.current
-    if (!container || !googleAuthEnabled) {
+  async function handleSingleSignOn() {
+    if (singleUserAuthEnabled) {
+      await handleSingleUserLogin()
       return
     }
-    const signInContainer = container
 
-    let cancelled = false
-    signInContainer.innerHTML = ''
-    setGoogleSignInReady(false)
+    setAuthFlash({
+      tone: 'error',
+      message: 'Single Sign On is not enabled for this server.',
+    })
+  }
 
-    async function initializeGoogleSignIn() {
-      try {
-        await loadGoogleIdentityScript()
-        if (cancelled) {
-          return
-        }
-
-        const googleIdentityApi = window.google?.accounts?.id
-        if (!googleIdentityApi) {
-          throw new Error('Google sign-in is unavailable in this browser.')
-        }
-
-        googleIdentityApi.initialize({
-          client_id: googleClientId,
-          callback: (response) => {
-            if (cancelled) {
-              return
-            }
-            if (!response.credential) {
-              setAuthFlash({
-                tone: 'error',
-                message: 'Google did not return a sign-in token.',
-              })
-              return
-            }
-            void handleGoogleCredential(response.credential)
-          },
-          cancel_on_tap_outside: true,
-        })
-
-        googleIdentityApi.renderButton(signInContainer, {
-          theme: 'outline',
-          size: 'large',
-          shape: 'pill',
-          text: 'continue_with',
-          width: Math.max(240, Math.min(signInContainer.clientWidth || 320, 360)),
-        })
-        setGoogleSignInReady(true)
-      } catch (error) {
-        if (cancelled) {
-          return
-        }
-
-        setAuthFlash((current) =>
-          current ?? {
-            tone: 'error',
-            message: formatAuthErrorMessage(error, 'Could not initialize Google sign-in.'),
-          },
-        )
-      }
-    }
-
-    void initializeGoogleSignIn()
-
-    return () => {
-      cancelled = true
-      signInContainer.innerHTML = ''
-    }
-  }, [googleAuthEnabled, googleClientId])
+  function handleTimeSkip() {
+    setTimeSkipActive(true)
+    setTimeOfDay((current) => getNextAuthGateTimeOfDay(current))
+  }
 
   return (
-    <main className="auth-gate-stage">
+    <main className={`auth-gate-stage auth-gate-stage-${timeOfDay}`}>
       <section className="auth-gate-frame">
+        <header className="auth-gate-wordmark" aria-label="Strata">
+          <span className="brand-mark">Strata</span>
+        </header>
+
         <section className="surface auth-gate-panel">
           <div className="auth-gate-panel-head">
-            <span className="brand-mark">E/CTRM</span>
-            <div>
-              <span className="eyebrow">Sign In</span>
-              <h3>Enter the console</h3>
+            <div className="auth-gate-orb" aria-hidden="true">
+              <div className="auth-gate-logo-flip">
+                <img className="auth-gate-orb-logo auth-gate-logo-face" src={authGateLogoUrl} alt="" />
+                <img
+                  className="auth-gate-orb-logo auth-gate-logo-face auth-gate-logo-face-back"
+                  src={authGateBarrelLogoUrl}
+                  alt=""
+                />
+              </div>
             </div>
-            <p>Use your ECTRM credentials to continue. Other methods appear only when enabled.</p>
           </div>
 
           {serverSettingsError ? <div className="feedback-banner feedback-banner-error">{serverSettingsError}</div> : null}
@@ -346,53 +314,20 @@ export function AuthGate({
               <button type="submit" className="button button-primary" disabled={authLoading}>
                 {authAction === 'login' ? 'Signing In...' : 'Enter Console'}
               </button>
-              <p className="auth-gate-primary-note">
-                Password access works with either user ID or email and issues the same local session
-                token used by the rest of the console.
-              </p>
             </div>
           </form>
 
-          {singleUserAuthEnabled || googleAuthEnabled ? (
-            <div className="auth-gate-panel-section">
-              <span className="auth-gate-section-label">Other available methods</span>
-              <div className="auth-gate-method-grid">
-                {singleUserAuthEnabled ? (
-                  <button
-                    id="single-user-sign-in"
-                    type="button"
-                    className="auth-gate-method-card"
-                    onClick={() => void handleSingleUserLogin()}
-                    disabled={authLoading}
-                  >
-                    <span>Single-user access</span>
-                    <strong>{authAction === 'single-user' ? 'Signing In...' : 'Use local OPS_ADMIN session'}</strong>
-                    <p>Fast local entry when the API exposes a one-click operator account.</p>
-                  </button>
-                ) : null}
-
-                {googleAuthEnabled ? (
-                  <div className="auth-gate-method-card auth-gate-method-card-google">
-                    <span>Google sign-in</span>
-                    <strong>Continue with Google</strong>
-                    <p>
-                      {googleAutoCreateUsers
-                        ? 'New Google identities can create a local account automatically with the server default role.'
-                        : 'Your Google email must already map to a local account on the API.'}
-                    </p>
-                    <div ref={googleSignInContainerRef} className="google-sign-in-button auth-gate-google-slot" />
-                    <small className="auth-gate-method-note">
-                      {authAction === 'google'
-                        ? 'Completing Google sign-in...'
-                        : googleSignInReady
-                          ? 'Google returns an identity token in the browser, then the API exchanges it for the same session token used by password access.'
-                          : 'Loading Google sign-in...'}
-                    </small>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
+          <div className="auth-gate-primary-actions">
+            <button
+              id="single-user-sign-in"
+              type="button"
+              className="button button-primary"
+              onClick={() => void handleSingleSignOn()}
+              disabled={authLoading}
+            >
+              Single Sign On
+            </button>
+          </div>
 
           {serverSettings?.bootstrap_admin_enabled ? (
             <section id="bootstrap-admin" className={`auth-gate-bootstrap ${bootstrapExpanded ? 'is-open' : ''}`}>
@@ -495,12 +430,15 @@ export function AuthGate({
             </section>
           ) : null}
 
-          <p className={`form-note ${authFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
-            {authFlash?.message ??
-              'Sign in to unlock the console. Protected writes will derive actor identity from the active session.'}
-          </p>
+          {authFlash ? (
+            <p className={`form-note ${authFlash.tone === 'error' ? 'form-note-error' : ''}`}>{authFlash.message}</p>
+          ) : null}
         </section>
       </section>
+
+      <button type="button" className="auth-gate-time-skip" onClick={handleTimeSkip}>
+        Time Skip
+      </button>
     </main>
   )
 }

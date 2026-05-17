@@ -51,6 +51,10 @@ function sourceLabel(handoff: AppRouteHandoff): string {
     return 'Reference Data'
   }
 
+  if (handoff.source === 'terminal') {
+    return 'Terminal Search'
+  }
+
   return 'Activity Feed'
 }
 

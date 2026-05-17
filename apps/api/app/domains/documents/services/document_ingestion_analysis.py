@@ -227,42 +227,15 @@ CLASSIFICATION_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 
 def classify_document_page(filename: str, raw_text: str | None) -> PageClassification:
-    normalized_filename = normalize_for_matching(filename)
-    normalized_text = normalize_for_matching(raw_text or "")
-    searchable = "\n".join(part for part in (normalized_filename, normalized_text) if part)
+    from .document_classification_scoring import score_document_page_classification
 
-    for document_kind, keywords in CLASSIFICATION_RULES:
-        for keyword in keywords:
-            if keyword in normalized_text:
-                return PageClassification(
-                    document_kind=document_kind,
-                    document_subtype=None,
-                    confidence=0.96,
-                    matched_by=f"text:{keyword}",
-                )
-        for keyword in keywords:
-            if keyword in normalized_filename:
-                return PageClassification(
-                    document_kind=document_kind,
-                    document_subtype=None,
-                    confidence=0.72,
-                    matched_by=f"filename:{keyword}",
-                )
-
-    if "statement" in searchable:
-        return PageClassification(
-            document_kind="OTHER",
-            document_subtype="STATEMENT",
-            confidence=0.45,
-            matched_by="fallback:statement",
-        )
-
-    return PageClassification(
-        document_kind="UNKNOWN",
-        document_subtype=None,
-        confidence=0.05,
-        matched_by="fallback:unknown",
+    assessment = score_document_page_classification(
+        filename=filename,
+        raw_text=raw_text,
+        text_source="pdf_text",
+        table_blocks=extract_document_table_blocks(raw_text),
     )
+    return assessment.classification
 
 
 def extract_document_header_fields(

@@ -27,110 +27,111 @@ type MessagingInboxPanelProps = {
   footer?: ReactNode;
 };
 
+function buildMessagePanelId(messageId: string): string {
+  return `prompt-home-communication-record-panel-${messageId.replace(/[^a-z0-9_-]/gi, "-")}`;
+}
+
 export function MessagingInboxPanel({
   messages,
   ariaLabel = "Communication inbox",
-  threadAriaLabel = "Selected communication thread",
+  threadAriaLabel = "Communication details",
   footer = null,
 }: MessagingInboxPanelProps) {
-  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(
-    () => messages[0]?.id ?? null,
-  );
-  const selectedMessage =
-    messages.find((message) => message.id === selectedMessageId) ?? messages[0];
+  const [expandedMessageIds, setExpandedMessageIds] = useState<
+    Record<string, boolean>
+  >({});
 
   return (
     <div className="prompt-home-communication-shell">
-      <div className="prompt-home-communication-inbox" aria-label={ariaLabel}>
+      <div
+        className="prompt-home-communication-record-list"
+        aria-label={ariaLabel}
+      >
         {messages.map((message) => {
-          const selected = message.id === selectedMessage?.id;
+          const expanded = Boolean(expandedMessageIds[message.id]);
+          const panelId = buildMessagePanelId(message.id);
 
           return (
-            <button
+            <article
               key={message.id}
-              type="button"
-              className={`prompt-home-communication-inbox-item ${selected ? "is-selected" : ""}`}
-              aria-pressed={selected}
-              onClick={() => setSelectedMessageId(message.id)}
+              className={`prompt-home-communication-record ${expanded ? "is-expanded" : ""}`}
             >
-              <div className="prompt-home-communication-inbox-item-head">
-                <MessagingInboxTypeBadge type={message.type} />
-                <span className="prompt-home-communication-lane">
-                  {message.lane}
-                </span>
-                <small>{message.timestamp}</small>
-              </div>
-              <div className="prompt-home-communication-inbox-item-copy">
-                <strong>{message.subject}</strong>
-                <p>{message.preview}</p>
-              </div>
-              <div className="prompt-home-communication-inbox-item-foot">
-                <span>{message.sender}</span>
-                <span
-                  className={`prompt-home-communication-status ${message.unread ? "is-unread" : ""}`}
-                >
-                  {message.status}
-                </span>
-              </div>
-            </button>
+              <button
+                type="button"
+                className="prompt-home-communication-record-toggle"
+                aria-expanded={expanded}
+                aria-controls={panelId}
+                onClick={() =>
+                  setExpandedMessageIds((current) => ({
+                    ...current,
+                    [message.id]: !current[message.id],
+                  }))
+                }
+              >
+                <div className="prompt-home-communication-record-meta">
+                  <MessagingInboxTypeBadge type={message.type} />
+                  <span className="prompt-home-communication-lane">
+                    {message.lane}
+                  </span>
+                </div>
+
+                <div className="prompt-home-communication-record-copy">
+                  <strong>{message.subject}</strong>
+                </div>
+
+                <div className="prompt-home-communication-record-side">
+                  <span
+                    className={`prompt-home-communication-status ${message.unread ? "is-unread" : ""}`}
+                  >
+                    {message.status}
+                  </span>
+                  <small>{message.timestamp}</small>
+                  <span
+                    className="prompt-home-communication-record-indicator"
+                    aria-hidden="true"
+                  >
+                    {expanded ? "−" : "+"}
+                  </span>
+                </div>
+              </button>
+
+              <section
+                id={panelId}
+                className="prompt-home-communication-record-panel"
+                aria-label={`${threadAriaLabel}: ${message.subject}`}
+                hidden={!expanded}
+              >
+                <div className="prompt-home-communication-record-panel-head">
+                  <div className="prompt-home-communication-record-panel-copy">
+                    <strong>{message.sender}</strong>
+                    <p>{message.meta}</p>
+                  </div>
+                  <small>{message.timestamp}</small>
+                </div>
+
+                <p className="prompt-home-communication-record-panel-preview">
+                  {message.preview}
+                </p>
+
+                <div className="prompt-home-communication-record-panel-message">
+                  {message.body.map((paragraph) => (
+                    <p key={paragraph}>{paragraph}</p>
+                  ))}
+                </div>
+
+                <div className="prompt-home-communication-record-panel-reply">
+                  <strong>Reply lane</strong>
+                  <p>{message.replyHint}</p>
+                  <small>
+                    This keeps inbox review and thread context in one place so
+                    the app reads more like Slack than a reporting table.
+                  </small>
+                </div>
+              </section>
+            </article>
           );
         })}
       </div>
-
-      {selectedMessage ? (
-        <article
-          className="prompt-home-communication-thread"
-          aria-label={threadAriaLabel}
-        >
-          <div className="prompt-home-communication-thread-head">
-            <div className="prompt-home-communication-thread-copy">
-              <div className="prompt-home-communication-thread-meta">
-                <MessagingInboxTypeBadge type={selectedMessage.type} />
-                <span>{selectedMessage.lane}</span>
-              </div>
-              <strong>{selectedMessage.subject}</strong>
-              <p>
-                {selectedMessage.sender} · {selectedMessage.meta}
-              </p>
-            </div>
-            <div className="prompt-home-communication-thread-side">
-              <span
-                className={`prompt-home-communication-status ${selectedMessage.unread ? "is-unread" : ""}`}
-              >
-                {selectedMessage.status}
-              </span>
-              <small>{selectedMessage.timestamp}</small>
-            </div>
-          </div>
-
-          <div className="prompt-home-communication-thread-message">
-            <div
-              className="prompt-home-communication-thread-avatar"
-              aria-hidden="true"
-            >
-              {selectedMessage.sender.slice(0, 2).toUpperCase()}
-            </div>
-            <div className="prompt-home-communication-thread-bubble">
-              <div className="prompt-home-communication-thread-message-head">
-                <strong>{selectedMessage.sender}</strong>
-                <span>{selectedMessage.timestamp}</span>
-              </div>
-              {selectedMessage.body.map((paragraph) => (
-                <p key={paragraph}>{paragraph}</p>
-              ))}
-            </div>
-          </div>
-
-          <div className="prompt-home-communication-thread-reply">
-            <strong>Reply lane</strong>
-            <p>{selectedMessage.replyHint}</p>
-            <small>
-              This keeps inbox review and thread context in one place so the app
-              reads more like Slack than a reporting table.
-            </small>
-          </div>
-        </article>
-      ) : null}
 
       {footer}
     </div>

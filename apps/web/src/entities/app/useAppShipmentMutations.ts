@@ -1,18 +1,38 @@
 import { useEffect, useState } from 'react'
 
 import {
+  cancelDeliveryTruckMovement,
+  cancelDeliveryTruckStop,
+  createDeliveryTruckMovement,
+  createDeliveryTruckStop,
   createDeliveryEvent,
+  recordDeliveryTruckStopCheckpoint,
+  reverseDeliveryTruckStopCheckpoint,
+  skipDeliveryTruckStop,
   syncDeliveriesFromTrades,
   updateDelivery,
   updateDeliveryLogisticsDetails,
   updateDeliveryPipelineDetails,
   updateDeliveryPowerDetails,
+  updateDeliveryTruckDetails,
+  updateDeliveryTruckMovement,
+  updateDeliveryTruckStop,
+  type CancelDeliveryTruckMovementInput,
+  type CancelDeliveryTruckStopInput,
   type CreateDeliveryEventInput,
+  type DeliveryTruckMovementCreateInput,
+  type DeliveryTruckStopCreateInput,
   type DeliverySyncResult,
   type UpdateDeliveryInput,
+  type RecordDeliveryTruckStopCheckpointInput,
+  type ReverseDeliveryTruckStopCheckpointInput,
   type UpdateDeliveryLogisticsDetailInput,
   type UpdateDeliveryPipelineDetailInput,
   type UpdateDeliveryPowerDetailInput,
+  type UpdateDeliveryTruckDetailInput,
+  type UpdateDeliveryTruckMovementInput,
+  type UpdateDeliveryTruckStopInput,
+  type SkipDeliveryTruckStopInput,
 } from '../shipments/api'
 import { appConfig } from '../../shared/config'
 
@@ -110,6 +130,163 @@ export function useAppShipmentMutations(args: {
     })
   }
 
+  async function handleUpdateDeliveryTruckDetails(deliveryId: string, payload: UpdateDeliveryTruckDetailInput) {
+    await runDeliveryMutation({
+      deliveryId,
+      fallbackMessage: 'Failed to update truck delivery details.',
+      run: () =>
+        updateDeliveryTruckDetails(appConfig.apiBase, {
+          deliveryId,
+          payload,
+        }),
+    })
+  }
+
+  async function handleCreateDeliveryTruckMovement(
+    deliveryId: string,
+    payload: DeliveryTruckMovementCreateInput,
+  ) {
+    await runDeliveryMutation({
+      deliveryId,
+      fallbackMessage: 'Failed to create truck movement.',
+      run: () =>
+        createDeliveryTruckMovement(appConfig.apiBase, {
+          deliveryId,
+          payload,
+        }),
+    })
+  }
+
+  async function handleUpdateDeliveryTruckMovement(
+    deliveryId: string,
+    movementId: string,
+    payload: UpdateDeliveryTruckMovementInput,
+  ) {
+    await runDeliveryMutation({
+      deliveryId,
+      fallbackMessage: 'Failed to update truck movement.',
+      run: () =>
+        updateDeliveryTruckMovement(appConfig.apiBase, {
+          movementId,
+          payload,
+        }),
+    })
+  }
+
+  async function handleCancelDeliveryTruckMovement(
+    deliveryId: string,
+    movementId: string,
+    payload: CancelDeliveryTruckMovementInput,
+  ) {
+    await runDeliveryMutation({
+      deliveryId,
+      fallbackMessage: 'Failed to cancel truck movement.',
+      run: () =>
+        cancelDeliveryTruckMovement(appConfig.apiBase, {
+          movementId,
+          payload,
+        }),
+    })
+  }
+
+  async function handleCreateDeliveryTruckStop(
+    deliveryId: string,
+    movementId: string,
+    payload: DeliveryTruckStopCreateInput,
+  ) {
+    await runDeliveryMutation({
+      deliveryId,
+      fallbackMessage: 'Failed to add truck stop.',
+      run: () =>
+        createDeliveryTruckStop(appConfig.apiBase, {
+          movementId,
+          payload,
+        }),
+    })
+  }
+
+  async function handleUpdateDeliveryTruckStop(
+    deliveryId: string,
+    stopId: string,
+    payload: UpdateDeliveryTruckStopInput,
+  ) {
+    await runDeliveryMutation({
+      deliveryId,
+      fallbackMessage: 'Failed to update truck stop.',
+      run: () =>
+        updateDeliveryTruckStop(appConfig.apiBase, {
+          stopId,
+          payload,
+        }),
+    })
+  }
+
+  async function handleSkipDeliveryTruckStop(
+    deliveryId: string,
+    stopId: string,
+    payload: SkipDeliveryTruckStopInput,
+  ) {
+    await runDeliveryMutation({
+      deliveryId,
+      fallbackMessage: 'Failed to skip truck stop.',
+      run: () =>
+        skipDeliveryTruckStop(appConfig.apiBase, {
+          stopId,
+          payload,
+        }),
+    })
+  }
+
+  async function handleCancelDeliveryTruckStop(
+    deliveryId: string,
+    stopId: string,
+    payload: CancelDeliveryTruckStopInput,
+  ) {
+    await runDeliveryMutation({
+      deliveryId,
+      fallbackMessage: 'Failed to cancel truck stop.',
+      run: () =>
+        cancelDeliveryTruckStop(appConfig.apiBase, {
+          stopId,
+          payload,
+        }),
+    })
+  }
+
+  async function handleRecordDeliveryTruckStopCheckpoint(
+    deliveryId: string,
+    stopId: string,
+    payload: RecordDeliveryTruckStopCheckpointInput,
+  ) {
+    await runDeliveryMutation({
+      deliveryId,
+      fallbackMessage: 'Failed to record truck checkpoint.',
+      run: () =>
+        recordDeliveryTruckStopCheckpoint(appConfig.apiBase, {
+          stopId,
+          payload,
+        }),
+    })
+  }
+
+  async function handleReverseDeliveryTruckStopCheckpoint(
+    deliveryId: string,
+    stopId: string,
+    eventId: number,
+    payload: ReverseDeliveryTruckStopCheckpointInput,
+  ) {
+    await runDeliveryMutation({
+      deliveryId,
+      fallbackMessage: 'Failed to reverse truck checkpoint.',
+      run: () =>
+        reverseDeliveryTruckStopCheckpoint(appConfig.apiBase, {
+          stopId,
+          eventId,
+          payload,
+        }),
+    })
+  }
+
   async function handleCreateDeliveryEvent(deliveryId: string, payload: CreateDeliveryEventInput) {
     await runDeliveryMutation({
       deliveryId,
@@ -154,5 +331,15 @@ export function useAppShipmentMutations(args: {
     handleUpdateDeliveryLogisticsDetails,
     handleUpdateDeliveryPipelineDetails,
     handleUpdateDeliveryPowerDetails,
+    handleUpdateDeliveryTruckDetails,
+    handleCreateDeliveryTruckMovement,
+    handleUpdateDeliveryTruckMovement,
+    handleCancelDeliveryTruckMovement,
+    handleCreateDeliveryTruckStop,
+    handleUpdateDeliveryTruckStop,
+    handleSkipDeliveryTruckStop,
+    handleCancelDeliveryTruckStop,
+    handleRecordDeliveryTruckStopCheckpoint,
+    handleReverseDeliveryTruckStopCheckpoint,
   }
 }

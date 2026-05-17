@@ -41,10 +41,11 @@ envelope with these sections:
 7. `Data Landscape`
 8. `Live Data Inventory`
 9. `Application Access Surface`
-10. `World And Time`
-11. `Managed Agent Profile` when an agent is selected
-12. `Current Workspace` when provided
-13. `Application Context` when provided
+10. `Desk Wiki Knowledge`
+11. `World And Time`
+12. `Managed Agent Profile` when an agent is selected
+13. `Current Workspace` when provided
+14. `Application Context` when provided
 
 Organization and operating-model sections now prefer published organization
 context definitions from the backend registry when they exist. Until those
@@ -129,6 +130,11 @@ Governance and knowledge data:
 
 - Users: 3 active / 3 total
 - Trading sources: 48
+- Wiki pages: active pages are included as read-only assistant grounding when
+  present. `/assistant/respond` ranks active wiki pages against the latest user
+  message and request context before injecting excerpts, page IDs, and link
+  metadata. Prompt preview falls back to recent active pages when no request
+  text is available.
 - Roadmap documents: 0
 
 ## Managed Prompt Profiles

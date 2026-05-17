@@ -4,6 +4,7 @@ from collections import Counter
 import re
 
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
+from apps.api.app.schemas.document import DocumentUnderstandingClassificationAssessmentOut
 from apps.api.app.schemas.document import DocumentIngestionPageUnderstandingOut
 from apps.api.app.schemas.document import DocumentIngestionUnderstandingOut
 from apps.api.app.schemas.document import DocumentUnderstandingClassificationEvidenceOut
@@ -43,6 +44,7 @@ def build_document_page_understanding(
     header_candidate_keys = _header_candidate_keys(header_fields)
     table_template_keys, table_column_keys, table_column_count, table_row_count = _table_structure_signals(table_blocks)
     content_features = _content_features_from_payload(payload, raw_text=raw_text)
+    deterministic_assessment = _page_deterministic_assessment(payload, page=page)
 
     return DocumentIngestionPageUnderstandingOut(
         bundle_version=DOCUMENT_UNDERSTANDING_VERSION,
@@ -104,6 +106,7 @@ def build_document_page_understanding(
             automated_document_kind=clean_optional_text(payload.get("automated_document_kind")),
             automated_document_subtype=clean_optional_text(payload.get("automated_document_subtype")),
         ),
+        deterministic_assessment=deterministic_assessment,
     )
 
 
@@ -144,6 +147,7 @@ def build_document_understanding(
         feature
         for feature, _count in sorted(feature_counts.items(), key=lambda item: (-item[1], item[0]))
     ]
+    deterministic_assessment = _document_deterministic_assessment(page_understandings)
 
     return DocumentIngestionUnderstandingOut(
         bundle_version=DOCUMENT_UNDERSTANDING_VERSION,
@@ -194,6 +198,108 @@ def build_document_understanding(
             content_feature_count=len(content_features),
             learning_version=learning_version,
         ),
+        deterministic_assessment=deterministic_assessment,
+    )
+
+
+def _page_deterministic_assessment(
+    payload: dict[str, object],
+    *,
+    page: DocumentIngestionPage,
+) -> DocumentUnderstandingClassificationAssessmentOut:
+    raw_assessment = payload.get("deterministic_assessment")
+    if isinstance(raw_assessment, dict):
+        return DocumentUnderstandingClassificationAssessmentOut(
+            assessment_version=clean_optional_text(raw_assessment.get("assessment_version")),
+            document_kind=clean_optional_text(raw_assessment.get("document_kind")),
+            document_subtype=clean_optional_text(raw_assessment.get("document_subtype")),
+            confidence=_coerce_confidence(raw_assessment.get("confidence")),
+            matched_by=clean_optional_text(raw_assessment.get("matched_by")),
+            supporting_evidence=_normalized_string_list(raw_assessment.get("supporting_evidence") or []),
+            conflicts=_normalized_string_list(raw_assessment.get("conflicts") or []),
+        )
+    return DocumentUnderstandingClassificationAssessmentOut(
+        document_kind=clean_optional_text(payload.get("system_document_kind")) or clean_optional_text(page.document_kind),
+        document_subtype=clean_optional_text(payload.get("system_document_subtype")),
+        confidence=_coerce_confidence(payload.get("system_classification_confidence"), fallback=page.classification_confidence),
+        matched_by=clean_optional_text(payload.get("system_matched_by")) or clean_optional_text(payload.get("matched_by")),
+    )
+
+
+def _document_deterministic_assessment(
+    page_understandings: list[DocumentIngestionPageUnderstandingOut],
+) -> DocumentUnderstandingClassificationAssessmentOut:
+    if not page_understandings:
+        return DocumentUnderstandingClassificationAssessmentOut()
+
+    pages_by_kind: Counter[str] = Counter()
+    confidence_totals: Counter[str] = Counter()
+    evidence_counts: Counter[str] = Counter()
+    conflict_counts: Counter[str] = Counter()
+    subtype_by_kind: dict[str, set[str]] = {}
+    assessment_version = next(
+        (
+            understanding.deterministic_assessment.assessment_version
+            for understanding in page_understandings
+            if understanding.deterministic_assessment.assessment_version
+        ),
+        None,
+    )
+
+    for understanding in page_understandings:
+        assessment = understanding.deterministic_assessment
+        document_kind = clean_optional_text(assessment.document_kind)
+        if document_kind is None:
+            continue
+        pages_by_kind[document_kind] += 1
+        confidence_totals[document_kind] += assessment.confidence or 0
+        for evidence in assessment.supporting_evidence:
+            evidence_counts[evidence] += 1
+        for conflict in assessment.conflicts:
+            conflict_counts[conflict] += 1
+        subtype = clean_optional_text(assessment.document_subtype)
+        if subtype is not None:
+            subtype_by_kind.setdefault(document_kind, set()).add(subtype)
+
+    if not pages_by_kind:
+        return DocumentUnderstandingClassificationAssessmentOut()
+
+    winner_kind, winner_page_count = max(
+        pages_by_kind.items(),
+        key=lambda item: (item[1], confidence_totals[item[0]], item[0]),
+    )
+    winner_average_confidence = confidence_totals[winner_kind] / max(winner_page_count, 1)
+    agreement_ratio = winner_page_count / max(len(page_understandings), 1)
+    confidence = round(min(max(winner_average_confidence * (0.7 + (0.3 * agreement_ratio)), 0.05), 0.98), 2)
+    supporting_evidence = [
+        f"{winner_page_count} of {len(page_understandings)} pages scored as {_humanize_kind(winner_kind)} deterministically."
+    ]
+    supporting_evidence.extend(
+        evidence
+        for evidence, _count in sorted(evidence_counts.items(), key=lambda item: (-item[1], item[0]))[:3]
+    )
+    conflicts = [
+        conflict
+        for conflict, _count in sorted(conflict_counts.items(), key=lambda item: (-item[1], item[0]))[:3]
+    ]
+    if len(pages_by_kind) > 1:
+        competing = ", ".join(
+            f"{_humanize_kind(kind)} ({count})"
+            for kind, count in sorted(pages_by_kind.items(), key=lambda item: (-item[1], item[0]))[:3]
+        )
+        conflicts.append(f"Pages disagree across deterministic classification signals: {competing}.")
+
+    subtypes = subtype_by_kind.get(winner_kind, set())
+    document_subtype = next(iter(subtypes)) if len(subtypes) == 1 else None
+
+    return DocumentUnderstandingClassificationAssessmentOut(
+        assessment_version=assessment_version,
+        document_kind=winner_kind,
+        document_subtype=document_subtype,
+        confidence=confidence,
+        matched_by=f"page_consensus:{winner_kind.lower()}",
+        supporting_evidence=_normalized_string_list(supporting_evidence),
+        conflicts=_normalized_string_list(conflicts),
     )
 
 
@@ -281,7 +387,13 @@ def _normalized_text_source(value: object | None) -> str:
     return "none"
 
 
+def _humanize_kind(value: str) -> str:
+    return value.replace("_", " ").title()
+
+
 def _normalized_string_list(values, *, sort_values: bool = False) -> list[str]:
+    if isinstance(values, str):
+        values = [values]
     normalized_values: list[str] = []
     seen: set[str] = set()
     for value in values:

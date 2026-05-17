@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-CLASSIFIER_VERSION = "heuristic-v3-content-reviewed-learning"
+CLASSIFIER_VERSION = "deterministic-v1-content-reviewed-learning"
 EXTRACTOR_VERSION = "regex-v2-preview-ocr"
 DOCUMENT_PROCESSOR_ACTOR_ID = "document_processor"
 RAW_TEXT_EXCERPT_LENGTH = 280

@@ -1759,7 +1759,7 @@ test(
 )
 
 test(
-  'start-here onboarding appears once while signed out and only on a user first authenticated login',
+  'start-here onboarding appears only on a user first authenticated login',
   { timeout: 120_000 },
   async () => {
     const mockApi = await startMockApiServer()
@@ -1776,17 +1776,10 @@ test(
         waitUntil: 'domcontentloaded',
       })
 
-      const signedOutOverlay = page.locator('.start-here-dialog')
-      await signedOutOverlay.waitFor()
-      await signedOutOverlay.getByRole('button', { name: 'Sign In for Trade Capture' }).waitFor()
-
-      await signedOutOverlay.getByRole('button', { name: 'Open How It Works' }).click()
-
-      await page.waitForFunction(() => window.location.search.includes('view=guide'))
-      await signedOutOverlay.waitFor({ state: 'hidden' })
-
-      await page.reload({ waitUntil: 'domcontentloaded' })
+      await page.locator('.auth-gate-stage').waitFor()
       await page.waitForFunction(() => !document.querySelector('.start-here-dialog'))
+      assert.equal(await page.locator('.side-rail').count(), 0)
+      assert.equal(await page.getByLabel('Operator prompt').count(), 0)
 
       await page.evaluate((session) => {
         window.localStorage.setItem('ectrm.auth-session', JSON.stringify(session))
@@ -1981,7 +1974,7 @@ test(
 )
 
 test(
-  'signed-out start-here sign-in intent returns the user to trade capture',
+  'signed-out dashboard stays locked behind the auth gate',
   { timeout: 120_000 },
   async () => {
     const mockApi = await startMockApiServer()
@@ -1998,39 +1991,16 @@ test(
         waitUntil: 'domcontentloaded',
       })
 
-      const signedOutOverlay = page.locator('.start-here-dialog')
-      await signedOutOverlay.waitFor()
-      await signedOutOverlay.getByRole('button', { name: 'Sign In for Trade Capture' }).click()
-
-      await page.waitForFunction(() => window.location.search.includes('view=settings'))
-      await signedOutOverlay.waitFor({ state: 'hidden' })
-
       const authGate = page.locator('.auth-gate-stage')
       await authGate.waitFor()
-      await authGate
-        .getByText("After sign-in, opening Trade Capture. We'll take you straight there after authentication succeeds.")
-        .waitFor()
-
-      await page.getByLabel('User ID or Email').fill('ops_admin')
-      await page.getByLabel('Password').fill('demo-password')
-      await page.getByRole('button', { name: 'Enter Console' }).click()
-
-      await page.waitForFunction(() => window.location.search.includes('view=trades'))
-      await page.waitForFunction(() => {
-        const button = document.querySelector('form.trade-form.trade-form-feature button[type="submit"]')
-        return button instanceof HTMLButtonElement && !button.disabled
-      })
       await page.waitForFunction(() => !document.querySelector('.start-here-dialog'))
+      await authGate.getByLabel('User ID or Email').waitFor()
+      await authGate.getByRole('button', { name: 'Enter Console' }).waitFor()
 
-      await page.reload({ waitUntil: 'domcontentloaded' })
-      await page.waitForFunction(() => !document.querySelector('.start-here-dialog'))
-      await page.waitForFunction(() => {
-        const button = document.querySelector('form.trade-form.trade-form-feature button[type="submit"]')
-        return button instanceof HTMLButtonElement && !button.disabled
-      })
-
-      assert.match(page.url(), /\?view=trades(?:&|$)/)
-      assert.equal(await page.locator('form.trade-form.trade-form-feature').isVisible(), true)
+      assert.match(page.url(), /\?view=dashboard(?:&|$)/)
+      assert.equal(await page.locator('.side-rail').count(), 0)
+      assert.equal(await page.locator('.mobile-topbar').count(), 0)
+      assert.equal(await page.getByLabel('Operator prompt').count(), 0)
       assert.equal(
         mockApi.unexpectedRequests.length,
         0,
@@ -2158,14 +2128,12 @@ test(
         waitUntil: 'domcontentloaded',
       })
 
-      await page.getByLabel('Operator prompt').waitFor()
-      await page.getByRole('button', { name: 'Sign In', exact: true }).click()
-
       const authGate = page.locator('.auth-gate-stage')
       await authGate.waitFor()
-      await authGate.getByRole('button', { name: 'Use local OPS_ADMIN session' }).waitFor()
+      assert.equal(await page.getByLabel('Operator prompt').count(), 0)
+      await authGate.getByRole('button', { name: 'Single Sign On' }).waitFor()
 
-      await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
+      await page.getByRole('button', { name: 'Single Sign On' }).click()
 
       await page.waitForFunction(() => !document.querySelector('.auth-gate-stage'))
       await page.getByLabel('Operator prompt').waitFor()

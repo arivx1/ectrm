@@ -386,3 +386,135 @@ class TruckTrackingApiTests(unittest.TestCase):
         )
         self.assertEqual(add_stop_response.status_code, 422)
         self.assertIn("cannot be added after execution starts", add_stop_response.json()["detail"])
+
+    def test_records_and_reverses_manual_truck_stop_checkpoints(self) -> None:
+        self._create_user(
+            user_id="ops.checkpoint",
+            email="ops.checkpoint@example.com",
+            display_name="Ops Checkpoint",
+            role="OPERATIONS",
+        )
+        ops_token = self._login(identifier="ops.checkpoint")
+        self._seed_trade()
+        self._sync_deliveries(ops_token)
+        self._promote_delivery_to_truck(ops_token)
+
+        create_response = self.client.post(
+            "/deliveries/DLV-T-TRUCK-1/truck-movements",
+            json={
+                "sequence_no": 1,
+                "stops": [
+                    {
+                        "stop_type": "PICKUP",
+                        "location_code": "MIDLAND",
+                    },
+                    {
+                        "stop_type": "DROPOFF",
+                        "location_code": "CUSHING",
+                    },
+                ],
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(create_response.status_code, 201)
+        movement_body = create_response.json()
+        pickup_stop_id = movement_body["stops"][0]["stop_id"]
+        destination_stop_id = movement_body["stops"][1]["stop_id"]
+
+        arrived_pickup = self.client.post(
+            f"/truck-stops/{pickup_stop_id}/checkpoints",
+            json={
+                "checkpoint_code": "ARRIVED_PICKUP",
+                "occurred_at": "2026-05-18T08:15:00Z",
+                "notes": "Driver checked in at the lease.",
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(arrived_pickup.status_code, 201)
+        arrived_pickup_body = arrived_pickup.json()
+        self.assertEqual(arrived_pickup_body["status"], "AT_STOP")
+        self.assertEqual(arrived_pickup_body["current_stop_sequence"], 1)
+        self.assertEqual(arrived_pickup_body["stops"][0]["status"], "ARRIVED")
+        self.assertEqual(arrived_pickup_body["stops"][0]["actual_arrived_at"], "2026-05-18T08:15:00Z")
+
+        duplicate_arrival = self.client.post(
+            f"/truck-stops/{pickup_stop_id}/checkpoints",
+            json={
+                "checkpoint_code": "ARRIVED_PICKUP",
+                "occurred_at": "2026-05-18T08:20:00Z",
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(duplicate_arrival.status_code, 422)
+        self.assertIn("already active", duplicate_arrival.json()["detail"])
+
+        departed_pickup = self.client.post(
+            f"/truck-stops/{pickup_stop_id}/checkpoints",
+            json={
+                "checkpoint_code": "DEPARTED_PICKUP",
+                "occurred_at": "2026-05-18T09:00:00Z",
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(departed_pickup.status_code, 201)
+        departed_pickup_body = departed_pickup.json()
+        self.assertEqual(departed_pickup_body["status"], "IN_TRANSIT")
+        self.assertEqual(departed_pickup_body["current_stop_sequence"], 2)
+        self.assertEqual(departed_pickup_body["stops"][0]["status"], "DEPARTED")
+        self.assertEqual(departed_pickup_body["stops"][0]["actual_departed_at"], "2026-05-18T09:00:00Z")
+
+        arrived_destination = self.client.post(
+            f"/truck-stops/{destination_stop_id}/checkpoints",
+            json={
+                "checkpoint_code": "ARRIVED_DESTINATION",
+                "occurred_at": "2026-05-19T15:45:00Z",
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(arrived_destination.status_code, 201)
+        arrived_destination_body = arrived_destination.json()
+        self.assertEqual(arrived_destination_body["status"], "AT_STOP")
+        self.assertEqual(arrived_destination_body["current_stop_sequence"], 2)
+        self.assertEqual(arrived_destination_body["stops"][1]["status"], "ARRIVED")
+
+        with self.SessionLocal() as session:
+            checkpoint_events = (
+                session.query(DeliveryEvent)
+                .filter(
+                    DeliveryEvent.delivery_id == "DLV-T-TRUCK-1",
+                    DeliveryEvent.event_type == "CHECKPOINT_RECORDED",
+                )
+                .order_by(DeliveryEvent.occurred_at.asc(), DeliveryEvent.id.asc())
+                .all()
+            )
+            self.assertEqual(len(checkpoint_events), 3)
+            self.assertEqual(checkpoint_events[0].source, "TRUCK_MANUAL_DISPATCH")
+            self.assertIn("ARRIVED_PICKUP", checkpoint_events[0].reference_code)
+            destination_event_id = checkpoint_events[2].id
+
+        reverse_destination = self.client.post(
+            f"/truck-stops/{destination_stop_id}/checkpoints/{destination_event_id}/reverse",
+            json={
+                "reversal_reason": "Destination arrival was recorded against the wrong driver update.",
+            },
+            headers={"Authorization": f"Bearer {ops_token}"},
+        )
+        self.assertEqual(reverse_destination.status_code, 201)
+        reverse_body = reverse_destination.json()
+        self.assertEqual(reverse_body["status"], "IN_TRANSIT")
+        self.assertEqual(reverse_body["current_stop_sequence"], 2)
+        self.assertEqual(reverse_body["stops"][0]["status"], "DEPARTED")
+        self.assertEqual(reverse_body["stops"][1]["status"], "PLANNED")
+        self.assertIsNone(reverse_body["stops"][1]["actual_arrived_at"])
+
+        with self.SessionLocal() as session:
+            reversal_event = (
+                session.query(DeliveryEvent)
+                .filter(
+                    DeliveryEvent.delivery_id == "DLV-T-TRUCK-1",
+                    DeliveryEvent.event_type == "EVENT_REVERSED",
+                )
+                .one()
+            )
+            self.assertEqual(reversal_event.reversal_of_event_id, destination_event_id)
+            self.assertEqual(reversal_event.source, "TRUCK_MANUAL_DISPATCH")

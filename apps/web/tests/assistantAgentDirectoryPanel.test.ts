@@ -261,4 +261,26 @@ describe('AssistantAgentDirectoryPanel', () => {
     expect(markup).toContain('trade_lookup')
     expect(markup).toContain('market_snapshot')
   })
+
+  it('renders a side-by-side comparison view for the selected and comparison agents', () => {
+    const markup = renderToStaticMarkup(
+      createElement(AssistantAgentDirectoryPanel, {
+        agents,
+        runtimeSettings,
+        selectedAgentId: 'risk-ops',
+        initialComparisonAgentId: 'control-tower',
+        onSelectAgent: () => undefined,
+      }),
+    )
+
+    expect(markup).toContain('Compare with Control Tower')
+    expect(markup).toContain('Best for')
+    expect(markup).toContain('Avoid when')
+    expect(markup).toContain('Governed actions')
+    expect(markup).toContain('Update Trade Workflow Item')
+    expect(markup).toContain('No governed actions granted')
+    expect(markup).toContain('Risk Ops can stage governed actions while Control Tower stays read/explain focused.')
+    expect(markup).toContain('Assistant · Trades · Risk')
+    expect(markup).toContain('Assistant · Admin')
+  })
 })

@@ -50,6 +50,8 @@ class HttpRouterRegistryTests(unittest.TestCase):
         self.assertIn("/assistant/prompt-navigation-outcomes", paths)
         self.assertIn("/assistant/prompt-route-recommendations", paths)
         self.assertIn("/wiki/pages", paths)
+        self.assertIn("/wiki/pages/{page_id}/archive", paths)
+        self.assertIn("/wiki/pages/{page_id}/unarchive", paths)
         self.assertIn("/wiki/pages/{page_id}/revisions/{revision_id}/restore", paths)
         self.assertIn("/mcp/login", paths)
         self.assertIn("/mcp-status", paths)

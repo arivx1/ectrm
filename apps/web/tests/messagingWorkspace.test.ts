@@ -25,6 +25,175 @@ const defaultCounts = {
   pendingSettlementTrades: 6,
 };
 
+const initialWorkspaceState = {
+  conversations: [
+    {
+      conversation_id: "ectrm-assistant",
+      section: "Starred" as const,
+      kind: "channel" as const,
+      label: "#ectrm-assistant",
+      connected_workspace: "Assistant Console",
+      assistant_workspace: "assistant",
+      description: "Governed assistant drafts, approvals, and operator replies stay in one lane.",
+      topic:
+        "Keep governed assistant activity in the same feed as desk work, approval follow-through, and counterparty context.",
+      composer_hint:
+        "Reply here to keep assistant guidance threaded beside the operational follow-up it affects.",
+      sort_order: 10,
+      preview: "Approval packet is ready with owner, inputs, outputs, stop conditions, audit hooks, and rollback notes.",
+      unread_count: 1,
+      latest_activity_at: "2026-05-16T17:14:00Z",
+      highlights: [
+        "Action draft AR-204 is staged for review.",
+        "Prompt context and tool evidence are ready in the assistant console.",
+      ],
+      metrics: [
+        { label: "Governed drafts", value: "1 new" },
+        { label: "Desk attention", value: "5" },
+        { label: "Open work", value: "7" },
+      ],
+      members: [
+        {
+          name: "ECTRM Desk",
+          title: "System notification",
+          presence: "Watching the desk",
+          initials: "EC",
+          tone: "desk" as const,
+        },
+        {
+          name: "Mia Chen",
+          title: "Scheduler",
+          presence: "Online",
+          initials: "MC",
+          tone: "human" as const,
+        },
+        {
+          name: "Approvals Bot",
+          title: "Action request lane",
+          presence: "Reviewing",
+          initials: "AB",
+          tone: "system" as const,
+        },
+      ],
+      timeline: [
+        {
+          id: "assistant-day",
+          kind: "system" as const,
+          created_at: "2026-05-16T17:05:00Z",
+          label: "Today",
+          detail: "Action draft AR-204 moved into governed review.",
+          author: null,
+          body: [],
+          reactions: [],
+          attachment: null,
+        },
+        {
+          id: "assistant-msg-1",
+          kind: "message" as const,
+          created_at: "2026-05-16T17:07:00Z",
+          label: null,
+          detail: null,
+          author: {
+            name: "ECTRM Desk",
+            title: "System notification",
+            presence: "Watching the desk",
+            initials: "EC",
+            tone: "desk" as const,
+          },
+          body: [
+            "Assistant staged a governed action draft for the Northshore timing exception.",
+            "The recommendation keeps approval, provenance, and rollback expectations attached to the proposed workflow item.",
+          ],
+          reactions: ["ack 3", "needs review 1"],
+          attachment: {
+            label: "Action draft",
+            title: "AR-204 governed action draft",
+            summary:
+              "Owner: Desk Ops. Stop conditions: missing counterparty confirmation, settlement conflict, or delivery variance without explanation.",
+            footnote:
+              "Open Assistant Console for prompt context, evidence, and the approval record.",
+          },
+        },
+      ],
+    },
+    {
+      conversation_id: "counterparty-email",
+      section: "Channels" as const,
+      kind: "channel" as const,
+      label: "#counterparty-email",
+      connected_workspace: "Operations",
+      assistant_workspace: "operations",
+      description: "Counterparty communication stays readable like chat while still carrying email context.",
+      topic:
+        "Use this lane for external timing notes, commercial clarifications, and the handoff back into operations or settlement.",
+      composer_hint:
+        "Reply with desk confirmation or route the lane into Operations without losing the message context.",
+      sort_order: 20,
+      preview:
+        "Northshore asked for desk confirmation before 3 PM and attached a revised timing note for the next nomination window.",
+      unread_count: 2,
+      latest_activity_at: "2026-05-16T19:04:00Z",
+      highlights: [
+        "Counterparty deadline: confirm by 3 PM.",
+        "Revised delivery window can flow straight into Operations once acknowledged.",
+      ],
+      metrics: [
+        { label: "Ops queue", value: "3" },
+        { label: "Settlement queue", value: "2" },
+        { label: "Payments due", value: "1" },
+      ],
+      members: [
+        {
+          name: "Northshore LNG",
+          title: "Counterparty contact",
+          presence: "Awaiting reply",
+          initials: "NL",
+          tone: "human" as const,
+        },
+        {
+          name: "Mia Chen",
+          title: "Scheduler",
+          presence: "Online",
+          initials: "MC",
+          tone: "human" as const,
+        },
+      ],
+      timeline: [
+        {
+          id: "northshore-day",
+          kind: "system" as const,
+          created_at: "2026-05-16T18:55:00Z",
+          label: "Today",
+          detail: "Northshore revised the delivery note and requested confirmation.",
+          author: null,
+          body: [],
+          reactions: [],
+          attachment: null,
+        },
+        {
+          id: "northshore-msg-1",
+          kind: "message" as const,
+          created_at: "2026-05-16T18:57:00Z",
+          label: null,
+          detail: null,
+          author: {
+            name: "Northshore LNG",
+            title: "Counterparty contact",
+            presence: "Awaiting reply",
+            initials: "NL",
+            tone: "human" as const,
+          },
+          body: [
+            "We revised the delivery window for the next nomination cycle and need desk confirmation before 3 PM.",
+          ],
+          reactions: [],
+          attachment: null,
+        },
+      ],
+    },
+  ],
+};
+
 test("messaging workspace renders the dedicated unified inbox view", () => {
   const markup = renderToStaticMarkup(
     createElement(MessagingWorkspace, {
@@ -35,10 +204,14 @@ test("messaging workspace renders the dedicated unified inbox view", () => {
       onOpenAssistant: () => undefined,
       onOpenOperations: () => undefined,
       onOpenSettlement: () => undefined,
+      onSelectConversation: () => undefined,
+      selectedConversationId: "ectrm-assistant",
+      initialWorkspaceState,
     }),
   );
 
   assert.match(markup, /Message #ectrm-assistant/);
+  assert.match(markup, /Conversation list/);
   assert.match(markup, /Thread details/);
   assert.match(markup, /Send message/);
   assert.match(markup, /Clear draft/);
@@ -51,8 +224,28 @@ test("messaging workspace renders the dedicated unified inbox view", () => {
   assert.doesNotMatch(markup, /Desk Messages/);
   assert.doesNotMatch(markup, /Desk channels/);
   assert.doesNotMatch(markup, /Jump to a channel or thread/);
-  assert.doesNotMatch(markup, /#counterparty-email/);
   assert.doesNotMatch(markup, /Slack-style desk surface/);
+});
+
+test("messaging workspace honors the selected conversation instead of hard-wiring the first lane", () => {
+  const markup = renderToStaticMarkup(
+    createElement(MessagingWorkspace, {
+      authSession: null,
+      counts: defaultCounts,
+      onSessionSync: () => undefined,
+      onOpenPrompt: () => undefined,
+      onOpenAssistant: () => undefined,
+      onOpenOperations: () => undefined,
+      onOpenSettlement: () => undefined,
+      onSelectConversation: () => undefined,
+      selectedConversationId: "counterparty-email",
+      initialWorkspaceState,
+    }),
+  );
+
+  assert.match(markup, /Message #counterparty-email/);
+  assert.match(markup, /Northshore revised the delivery note and requested confirmation/);
+  assert.doesNotMatch(markup, /Message #ectrm-assistant/);
 });
 
 test("appendMessagingWorkspacePost adds a sent message to the selected thread shape", () => {

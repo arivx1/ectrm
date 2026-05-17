@@ -101,6 +101,15 @@ function buildDocumentUnderstanding(
       content_feature_count: 2,
       learning_version: 'content-similarity-v1',
     },
+    deterministic_assessment: {
+      assessment_version: 'deterministic-score-v1',
+      document_kind: 'INVOICE',
+      document_subtype: null,
+      confidence: 0.72,
+      matched_by: 'filename:invoice',
+      supporting_evidence: ['Filename also hints at invoice (invoice).'],
+      conflicts: [],
+    },
     ...overrides,
   }
 }
@@ -164,6 +173,15 @@ function buildPageUnderstanding(
       learning_example_count: 0,
       automated_document_kind: null,
       automated_document_subtype: null,
+    },
+    deterministic_assessment: {
+      assessment_version: 'deterministic-score-v1',
+      document_kind: 'INVOICE',
+      document_subtype: null,
+      confidence: 0.72,
+      matched_by: 'filename:invoice',
+      supporting_evidence: ['Filename also hints at invoice (invoice).'],
+      conflicts: [],
     },
     ...overrides,
   }
@@ -230,6 +248,15 @@ function buildPage(overrides: Partial<DocumentIngestionPageRecord> = {}): Docume
       classification_corrected: false,
       learning_applied: false,
       learning_example_count: 0,
+      deterministic_assessment: {
+        assessment_version: 'deterministic-score-v1',
+        document_kind: 'INVOICE',
+        document_subtype: null,
+        confidence: 0.72,
+        matched_by: 'filename:invoice',
+        supporting_evidence: ['Filename also hints at invoice (invoice).'],
+        conflicts: [],
+      },
     },
     header_fields: [],
     table_blocks: [],

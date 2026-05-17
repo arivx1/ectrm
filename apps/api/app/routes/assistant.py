@@ -128,6 +128,7 @@ from apps.api.app.domains.assistant.services.profile_requests import (
     list_profile_requests,
     mark_profile_request_activated,
     reject_profile_request,
+    submit_profile_request,
     to_profile_request_out,
     validate_agent_activation_requirements,
 )
@@ -190,6 +191,7 @@ from apps.api.app.schemas.assistant import (
     AssistantAgentProfileRequestCreate,
     AssistantAgentProfileRequestDecision,
     AssistantAgentProfileRequestOut,
+    AssistantAgentProfileRequestSubmit,
     AssistantAgentRoleArchetypeOut,
     AssistantAgentSelfUpdateDraftOut,
     AssistantAgentSelfUpdateRequest,
@@ -269,6 +271,53 @@ def list_assistant_agents(db: Session = Depends(get_db)) -> list[AssistantAgentO
         )
         for record in records
     ]
+
+
+@router.get("/profile-requests", response_model=list[AssistantAgentProfileRequestOut])
+def list_current_user_assistant_profile_requests(
+    request: Request,
+    status: str | None = None,
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> list[AssistantAgentProfileRequestOut]:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return [
+        to_profile_request_out(record)
+        for record in list_profile_requests(
+            db,
+            status=status,
+            requested_by=user.user_id,
+            limit=limit,
+            offset=offset,
+        )
+    ]
+
+
+@router.post(
+    "/profile-requests",
+    response_model=AssistantAgentProfileRequestOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_current_user_assistant_profile_request(
+    payload: AssistantAgentProfileRequestSubmit,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantAgentProfileRequestOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+        return to_profile_request_out(
+            submit_profile_request(
+                db,
+                payload=payload,
+                requested_by=user.user_id,
+            )
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @router.get("/conversations", response_model=list[AssistantConversationSummaryOut])
@@ -745,6 +794,21 @@ def reject_admin_assistant_profile_request(
 ) -> AssistantAgentProfileRequestOut:
     try:
         return to_profile_request_out(reject_profile_request(db, request_id=request_id, payload=payload))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@admin_router.post("/profile-requests/{request_id}/activate", response_model=AssistantAgentProfileRequestOut)
+def activate_admin_assistant_profile_request(
+    request_id: int,
+    payload: AssistantAgentProfileRequestActivation,
+    db: Session = Depends(get_db),
+) -> AssistantAgentProfileRequestOut:
+    try:
+        record = mark_profile_request_activated(db, request_id=request_id, payload=payload)
+        db.commit()
+        db.refresh(record)
+        return to_profile_request_out(record)
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -1859,6 +1923,12 @@ def _mark_profile_request_activated_for_agent(
 ) -> None:
     if record.profile_request_id is None:
         return
+    linked_revision_id = record.published_revision_id or record.latest_revision_id
+    if linked_revision_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Assistant agent profile request activation requires a saved agent revision.",
+        )
     try:
         mark_profile_request_activated(
             db,
@@ -1866,6 +1936,7 @@ def _mark_profile_request_activated_for_agent(
             payload=AssistantAgentProfileRequestActivation(
                 activated_by=actor_id,
                 linked_agent_id=record.agent_id,
+                linked_revision_id=linked_revision_id,
             ),
         )
     except AssistantServiceError as exc:

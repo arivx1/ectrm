@@ -10,6 +10,8 @@ from apps.api.app.domains.assistant.services.organization_context_registry impor
     list_published_organization_context_prompt_sections,
 )
 from apps.api.app.domains.assistant.services.prompt_context import (
+    _load_active_wiki_page_matches_for_prompt,
+    _load_active_wiki_pages_for_prompt,
     _safe_count,
     _safe_count_active,
     _safe_count_where,
@@ -17,6 +19,7 @@ from apps.api.app.domains.assistant.services.prompt_context import (
 from apps.api.app.main import _attach_correlation_header
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.wiki_page import WikiPage
 
 
 class _FailingSession:
@@ -92,6 +95,22 @@ class AssistantPromptContextResilienceTests(unittest.TestCase):
         count = _safe_count_where(session, ReferenceBook, ReferenceBook.is_active.is_(True))
 
         self.assertIsNone(count)
+        self.assertEqual(session.rollback_count, 1)
+
+    def test_wiki_prompt_grounding_rolls_back_swallowed_sql_errors(self) -> None:
+        session = _FailingSession()
+
+        pages = _load_active_wiki_pages_for_prompt(session)
+
+        self.assertIsNone(pages)
+        self.assertEqual(session.rollback_count, 1)
+
+    def test_query_aware_wiki_prompt_grounding_rolls_back_swallowed_sql_errors(self) -> None:
+        session = _FailingSession()
+
+        matches = _load_active_wiki_page_matches_for_prompt(session, query="cash handoff")
+
+        self.assertIsNone(matches)
         self.assertEqual(session.rollback_count, 1)
 
     def test_attach_correlation_header_preserves_allowed_cors_origin(self) -> None:

@@ -1,0 +1,188 @@
+{
+  "corpus_version": "document-classification-eval-corpus-v1",
+  "thresholds": {
+    "min_kind_accuracy": 1.0,
+    "max_false_confidence_count": 0,
+    "low_confidence_threshold": 0.46,
+    "max_review_false_negative_count": 0,
+    "max_abstain_false_negative_count": 0,
+    "max_low_confidence_false_negative_count": 0
+  },
+  "cases": [
+    {
+      "case_id": "invoice_structured_pdf_text",
+      "filename": "april-invoice.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Invoice\nInvoice Number: INV-1007\nInvoice Date: 2026-04-06\nDue Date: 2026-04-15\nCounterparty: Shell Trading\nTotal Amount: USD 79250\n\nDescription  Quantity  Line Amount\nWTI April  1000  79250",
+      "expectations": {
+        "expected_document_kind": "INVOICE",
+        "min_confidence": 0.85,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Matched required invoice fields",
+          "Parsed table columns align with the line items layout"
+        ]
+      }
+    },
+    {
+      "case_id": "trade_confirmation_header_match",
+      "filename": "trade-confirmation.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Trade Confirmation\nConfirmation Number: CONF-3301\nTrade ID: T-3301\nTrade Date: 2026-04-08\nCounterparty: Shell Trading\n\nTerm Name  Term Value\nPricing Period  April 2026",
+      "expectations": {
+        "expected_document_kind": "TRADE_CONFIRMATION",
+        "min_confidence": 0.80,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected trade confirmation terminology",
+          "Matched required trade confirmation fields"
+        ]
+      }
+    },
+    {
+      "case_id": "pipeline_statement_nomination",
+      "filename": "ngpl-nomination-statement.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Pipeline Statement\nStatement Number: PIPE-100\nStatement Date: 2026-04-09\nPipeline System: NGPL\nNomination Reference: NOM-7\nReceipt Location: HENRY HUB\nDelivery Location: SABINE\nTrade ID: T-100",
+      "expectations": {
+        "expected_document_kind": "PIPELINE_STATEMENT",
+        "min_confidence": 0.80,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected pipeline statement terminology",
+          "Matched required pipeline statement fields"
+        ]
+      }
+    },
+    {
+      "case_id": "quality_specification_sheet",
+      "filename": "ulsd-specification-sheet.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Quality Specification\nSpecification Name: ULSD 10 PPM\nSpecification Version: 3.0\nEffective Date: 2026-04-01\nProduct: ULSD\nCounterparty: Shell Trading",
+      "expectations": {
+        "expected_document_kind": "QUALITY_SPECIFICATION",
+        "min_confidence": 0.78,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected quality specification terminology",
+          "Matched required quality specification fields"
+        ]
+      }
+    },
+    {
+      "case_id": "hazardous_cargo_safety_data_sheet",
+      "filename": "methanol-sds.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Safety Data Sheet\nDocument Number: SDS-200\nIssue Date: 2026-04-12\nProduct: Methanol\nUN Number: UN1230\nHazard Class: 3",
+      "expectations": {
+        "expected_document_kind": "HAZARDOUS_CARGO_DOCUMENTATION",
+        "min_confidence": 0.78,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected hazardous cargo documentation terminology",
+          "Matched required hazardous cargo documentation fields"
+        ]
+      }
+    },
+    {
+      "case_id": "broker_statement_account",
+      "filename": "broker-monthly-statement.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Broker Statement\nStatement Number: BR-200\nStatement Date: 2026-04-30\nBroker: ICE Clear\nAccount: ACC-77\nPeriod Start: 2026-04-01\nPeriod End: 2026-04-30\nCurrency: USD",
+      "expectations": {
+        "expected_document_kind": "BROKER_STATEMENT",
+        "min_confidence": 0.78,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected broker statement terminology",
+          "Matched required broker statement fields"
+        ]
+      }
+    },
+    {
+      "case_id": "scanned_invoice_ocr",
+      "filename": "scan-ocr-1007.pdf",
+      "text_source": "ocr",
+      "image_has_visible_content": true,
+      "raw_text": "Invoice\nInvoice Number: INV-1007\nInvoice Date: 2026-04-06\nCounterparty: Shell Trading\nTotal Amount: USD 79250\n\nDescription  Quantity  Line Amount\nWTI April  1000  79250",
+      "expectations": {
+        "expected_document_kind": "INVOICE",
+        "min_confidence": 0.60,
+        "max_confidence": 0.86,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "conflict_contains": [
+          "OCR fallback was required"
+        ]
+      }
+    },
+    {
+      "case_id": "generic_statement_fallback",
+      "filename": "monthly-statement.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Monthly Statement\nAccount activity summary for June period.",
+      "expectations": {
+        "expected_document_kind": "OTHER",
+        "expected_document_subtype": "STATEMENT",
+        "max_confidence": 0.45,
+        "expect_review_recommended": true,
+        "expect_abstain": true,
+        "expect_low_confidence": true,
+        "conflict_contains": [
+          "manual review"
+        ]
+      }
+    },
+    {
+      "case_id": "filename_hint_only_blank_invoice",
+      "filename": "invoice-batch.pdf",
+      "text_source": "none",
+      "raw_text": null,
+      "expectations": {
+        "expected_document_kind": "INVOICE",
+        "max_confidence": 0.12,
+        "expect_review_recommended": true,
+        "expect_abstain": false,
+        "expect_low_confidence": true,
+        "supporting_evidence_contains": [
+          "Filename also hints at invoice"
+        ],
+        "conflict_contains": [
+          "manual review"
+        ]
+      }
+    },
+    {
+      "case_id": "no_signal_upload",
+      "filename": "misc-upload.pdf",
+      "text_source": "none",
+      "raw_text": null,
+      "expectations": {
+        "expected_document_kind": "UNKNOWN",
+        "max_confidence": 0.12,
+        "expect_review_recommended": true,
+        "expect_abstain": true,
+        "expect_low_confidence": true,
+        "supporting_evidence_contains": [
+          "No stable document-specific signals"
+        ],
+        "conflict_contains": [
+          "manual review"
+        ]
+      }
+    }
+  ]
+}

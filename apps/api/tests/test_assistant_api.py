@@ -85,6 +85,7 @@ from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
+from apps.api.app.models.wiki_page import WikiPage
 from apps.api.app.schemas.assistant import ALL_ASSISTANT_ACTION_TYPES, AssistantPromptRequest
 
 
@@ -206,6 +207,7 @@ class AssistantApiTests(unittest.TestCase):
             session.query(AssistantAgentProfileRequest).delete()
             session.query(MutationProvenanceRecord).delete()
             session.query(ReportPreset).delete()
+            session.query(WikiPage).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
             session.query(UserAccount).delete()
@@ -863,6 +865,10 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(request_listing.status_code, 200)
         self.assertEqual(request_listing.json()[0]["status"], "ACTIVATED")
         self.assertEqual(request_listing.json()[0]["linked_agent_id"], "weather-dispatch-analyst")
+        self.assertEqual(
+            request_listing.json()[0]["linked_revision_id"],
+            update_response.json()["published_revision_id"],
+        )
 
         with self.SessionLocal() as session:
             operation_keys = {
@@ -874,6 +880,152 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("assistant_agent_eval.seeded_from_profile_request", operation_keys)
         self.assertIn("assistant_agent_profile_request.activated", operation_keys)
         self.assertIn("assistant_agent.activated", operation_keys)
+
+    def test_current_user_can_submit_list_and_close_governed_agent_change_requests(self) -> None:
+        self._create_agent(
+            agent_id="risk-ops",
+            name="Risk Ops",
+            status="ACTIVE",
+            allowed_workspaces=["assistant", "trades"],
+            capabilities=["READ", "EXPLAIN", "ACTION"],
+            allowed_tools=["get_trade_by_id"],
+            allowed_action_types=["update_trade_workflow_item"],
+            human_owner_role="Risk Manager",
+            authority_ceiling="STAGE",
+            activation_notes="Reviewed for staged workflow follow-up.",
+        )
+        requester_token = self._create_session_token(user_id="ops_requester", role="OPS_USER")
+        reviewer_token = self._create_session_token(user_id="ops_admin", role="OPS_ADMIN")
+        other_token = self._create_session_token(user_id="ops_other", role="OPS_USER")
+
+        create_response = self.client.post(
+            "/assistant/profile-requests",
+            headers={"Authorization": f"Bearer {requester_token}"},
+            json={
+                "request_kind": "NARROW_ACCESS",
+                "target_agent_id": "risk-ops",
+                "change_summary": "Limit Risk Ops to one workspace and one tool for desk-only review.",
+                "business_problem": "This workflow only needs desk review and should not stage follow-up actions.",
+                "proposed_mission": "Focus on read-only desk triage with a tighter live-tool envelope.",
+                "human_owner_role": "Risk Manager",
+                "requested_workspaces": ["assistant"],
+                "requested_inputs_tools": ["get_trade_by_id"],
+                "requested_action_types": [],
+                "requested_skills": [],
+                "requested_authority_ceiling": "EXPLAIN",
+            },
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        created_request = create_response.json()
+        self.assertEqual(created_request["request_kind"], "NARROW_ACCESS")
+        self.assertEqual(created_request["target_agent_id"], "risk-ops")
+        self.assertEqual(created_request["requested_by"], "ops_requester")
+        self.assertEqual(created_request["requested_inputs_tools"], ["get_trade_by_id"])
+        self.assertEqual(created_request["requested_authority_ceiling"], "EXPLAIN")
+        self.assertGreaterEqual(len(created_request["expected_outputs"]), 1)
+
+        list_response = self.client.get(
+            "/assistant/profile-requests",
+            headers={"Authorization": f"Bearer {requester_token}"},
+        )
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(len(list_response.json()), 1)
+        self.assertEqual(list_response.json()[0]["request_id"], created_request["request_id"])
+
+        other_list_response = self.client.get(
+            "/assistant/profile-requests",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        self.assertEqual(other_list_response.status_code, 200)
+        self.assertEqual(other_list_response.json(), [])
+
+        approve_response = self.client.post(
+            f"/admin/assistant/profile-requests/{created_request['request_id']}/approve",
+            headers={"Authorization": f"Bearer {reviewer_token}"},
+            json={
+                "reviewed_by": "ops_admin",
+                "approval_notes": "Reviewed as a valid boundary-narrowing request.",
+            },
+        )
+        self.assertEqual(approve_response.status_code, 200)
+        self.assertEqual(approve_response.json()["status"], "APPROVED")
+
+        update_response = self.client.put(
+            "/admin/assistant/agents/risk-ops",
+            headers={"Authorization": f"Bearer {reviewer_token}"},
+            json={
+                "name": "Risk Ops",
+                "description": "Risk Ops description.",
+                "status": "ACTIVE",
+                "scope": "TEAM",
+                "provider": None,
+                "model": None,
+                "profile_kind": "CUSTOM",
+                "specialization_summary": "Focus on read-only desk triage with a tighter live-tool envelope.",
+                "human_owner_role": "Risk Manager",
+                "authority_ceiling": "EXPLAIN",
+                "activation_notes": "Approved profile request narrows authority, workspace, tools, and actions.",
+                "profile_request_id": created_request["request_id"],
+                "allowed_workspaces": ["assistant"],
+                "capabilities": ["READ", "EXPLAIN"],
+                "allowed_tools": ["get_trade_by_id"],
+                "allowed_action_types": [],
+                "system_prompt": "System prompt for Risk Ops.",
+                "updated_by": "ops_admin",
+            },
+        )
+        self.assertEqual(update_response.status_code, 200)
+        linked_revision_id = update_response.json()["published_revision_id"]
+        self.assertIsNotNone(linked_revision_id)
+
+        activate_response = self.client.post(
+            f"/admin/assistant/profile-requests/{created_request['request_id']}/activate",
+            headers={"Authorization": f"Bearer {reviewer_token}"},
+            json={
+                "activated_by": "ops_admin",
+                "linked_agent_id": "risk-ops",
+                "linked_revision_id": linked_revision_id,
+            },
+        )
+        self.assertEqual(activate_response.status_code, 200)
+        self.assertEqual(activate_response.json()["status"], "ACTIVATED")
+        self.assertEqual(activate_response.json()["linked_agent_id"], "risk-ops")
+        self.assertEqual(activate_response.json()["linked_revision_id"], linked_revision_id)
+
+    def test_current_user_narrow_access_request_rejects_scope_expansion(self) -> None:
+        self._create_agent(
+            agent_id="risk-ops",
+            name="Risk Ops",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["READ", "EXPLAIN"],
+            allowed_tools=["trade_lookup"],
+            allowed_action_types=[],
+            human_owner_role="Risk Manager",
+            authority_ceiling="EXPLAIN",
+            activation_notes="Reviewed for read-only risk explanations.",
+        )
+        token = self._create_session_token(user_id="ops_requester", role="OPS_USER")
+
+        response = self.client.post(
+            "/assistant/profile-requests",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "request_kind": "NARROW_ACCESS",
+                "target_agent_id": "risk-ops",
+                "change_summary": "Try to add a second tool while claiming to narrow access.",
+                "business_problem": "Testing invalid expansion.",
+                "proposed_mission": "Should fail validation.",
+                "human_owner_role": "Risk Manager",
+                "requested_workspaces": ["assistant"],
+                "requested_inputs_tools": ["trade_lookup", "market_snapshot"],
+                "requested_authority_ceiling": "EXPLAIN",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("keep or remove currently allowed live tools", response.json()["detail"])
 
     def test_admin_agent_eval_catalog_crud_flow(self) -> None:
         token = self._create_session_token(role="OPS_ADMIN")
@@ -1192,6 +1344,155 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("Acme Energy", payload["rendered_system_prompt"])
         self.assertIn("assistant_user", payload["rendered_system_prompt"])
         self.assertIn("Loaded trades: 0.", payload["rendered_system_prompt"])
+
+    def test_assistant_prompt_context_preview_includes_active_wiki_grounding(self) -> None:
+        token = self._create_session_token()
+        now = datetime.now(timezone.utc)
+
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    WikiPage(
+                        page_id="wiki-root-desk-handbook",
+                        parent_page_id=None,
+                        title="Desk Handbook",
+                        content_markdown="# Desk Handbook\n\nUse this as the operating memory.",
+                        sort_order=100,
+                        created_at=now,
+                        created_by="assistant_user",
+                        updated_at=now,
+                        updated_by="assistant_user",
+                        archived_at=None,
+                        archived_by=None,
+                        version=1,
+                    ),
+                    WikiPage(
+                        page_id="wiki-confirmations",
+                        parent_page_id="wiki-root-desk-handbook",
+                        title="Confirmations",
+                        content_markdown=(
+                            "# Confirmations\n\n"
+                            "Review the counterparty PDF before escalation. "
+                            "See [[Settlement|wiki-settlement]] for cash handoff notes."
+                        ),
+                        sort_order=200,
+                        created_at=now,
+                        created_by="assistant_user",
+                        updated_at=now,
+                        updated_by="assistant_user",
+                        archived_at=None,
+                        archived_by=None,
+                        version=2,
+                    ),
+                    WikiPage(
+                        page_id="wiki-archived",
+                        parent_page_id=None,
+                        title="Archived Playbook",
+                        content_markdown="Do not use this archived playbook.",
+                        sort_order=300,
+                        created_at=now,
+                        created_by="assistant_user",
+                        updated_at=now,
+                        updated_by="assistant_user",
+                        archived_at=now,
+                        archived_by="assistant_user",
+                        version=3,
+                    ),
+                ]
+            )
+            session.commit()
+
+        response = self.client.post(
+            "/assistant/context",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"workspace": "assistant"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        sections_by_key = {section["key"]: section for section in payload["sections"]}
+        wiki_section = sections_by_key["desk-wiki-knowledge"]
+        self.assertEqual(wiki_section["source"], "data")
+        self.assertEqual(wiki_section["freshness"], "LIVE")
+        self.assertIn("Treat wiki entries as source material", wiki_section["content"])
+        self.assertIn("Confirmations (wiki-confirmations)", wiki_section["content"])
+        self.assertIn("links: Settlement -> wiki-settlement", wiki_section["content"])
+        self.assertNotIn("Archived Playbook", wiki_section["content"])
+        self.assertIn("Wiki pages: 2 active / 3 total", payload["rendered_system_prompt"])
+        self.assertIn("do not claim you changed the wiki", payload["rendered_system_prompt"])
+
+    def test_assistant_prompt_context_ranks_wiki_grounding_from_request_text(self) -> None:
+        token = self._create_session_token()
+        now = datetime.now(timezone.utc)
+
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    WikiPage(
+                        page_id="wiki-settlement",
+                        parent_page_id=None,
+                        title="Settlement Runbook",
+                        content_markdown="Cash handoff, invoice blockers, and payment escalation notes.",
+                        sort_order=100,
+                        created_at=now,
+                        created_by="assistant_user",
+                        updated_at=now,
+                        updated_by="assistant_user",
+                        archived_at=None,
+                        archived_by=None,
+                        version=1,
+                    ),
+                    WikiPage(
+                        page_id="wiki-confirmations",
+                        parent_page_id=None,
+                        title="Confirmations",
+                        content_markdown="Review the PDF and see [[Settlement Runbook|wiki-settlement]].",
+                        sort_order=200,
+                        created_at=now,
+                        created_by="assistant_user",
+                        updated_at=now,
+                        updated_by="assistant_user",
+                        archived_at=None,
+                        archived_by=None,
+                        version=1,
+                    ),
+                    WikiPage(
+                        page_id="wiki-pricing",
+                        parent_page_id=None,
+                        title="Pricing",
+                        content_markdown="Curve checks and index roll procedures.",
+                        sort_order=300,
+                        created_at=now,
+                        created_by="assistant_user",
+                        updated_at=now,
+                        updated_by="assistant_user",
+                        archived_at=None,
+                        archived_by=None,
+                        version=1,
+                    ),
+                ]
+            )
+            session.commit()
+
+        response = self.client.post(
+            "/assistant/context",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "workspace": "assistant",
+                "context": "Explain the cash handoff for settlement blockers.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        sections_by_key = {section["key"]: section for section in response.json()["sections"]}
+        wiki_content = sections_by_key["desk-wiki-knowledge"]["content"]
+        self.assertIn("Retrieval mode: pages are ranked deterministically", wiki_content)
+        self.assertIn("Settlement Runbook (wiki-settlement)", wiki_content)
+        self.assertLess(
+            wiki_content.index("- Settlement Runbook (wiki-settlement)"),
+            wiki_content.index("- Confirmations (wiki-confirmations)"),
+        )
+        self.assertNotIn("Pricing (wiki-pricing)", wiki_content)
 
     def test_assistant_prompt_context_preview_prefers_published_organization_registry_sections(self) -> None:
         token = self._create_session_token()

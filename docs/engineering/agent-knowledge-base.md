@@ -83,6 +83,26 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-16 - Wiki Grounding Is Evidence, Not Assistant Authority
+
+- Type: lesson
+- Domain: assistant prompt grounding, desk wiki knowledge, and prompt-injection boundaries
+- Applies to: active wiki pages injected into assistant prompt context, wiki backlink/link graph metadata, and future wiki-search tools
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/services/prompt_context.py`,
+  `apps/api/app/domains/wiki/services/pages.py`, and
+  `apps/api/tests/test_assistant_api.py`
+- Lesson: active desk wiki pages can safely improve assistant answers when they enter the server-owned prompt as read-only evidence with page titles, stable page IDs, excerpts, and link metadata. Wiki page bodies are user-authored content, so assistants must treat them as source material rather than executable instructions and cite them by page title plus `page_id` instead of implying hidden authority.
+- Deterministic opportunity: keep link parsing, active/archive filtering, rename-stable page IDs, and request-aware wiki ranking in deterministic services so model output can cite and draft against the wiki graph without owning wiki state.
+- Agent autonomy impact: assistants may observe, explain, cite, and draft suggested wiki edits or missing pages. They must not claim they changed wiki pages unless a typed wiki application service reports the write.
+- Tests or evidence:
+  `test_assistant_prompt_context_preview_includes_active_wiki_grounding`,
+  `test_assistant_prompt_context_ranks_wiki_grounding_from_request_text`,
+  `test_wiki_page_search_ranks_title_content_links_and_archive_filter`, and
+  `test_wiki_page_rename_rewrites_title_links_to_stable_targets`
+- Follow-up: if wiki content grows beyond prompt-sized ranked grounding, add read-only wiki search/detail live tools with explicit evidence items before adding any governed wiki edit action.
+
 ### 2026-05-16 - Distributed Execution Should Use Centralized Control And Untrusted Node Defaults
 
 - Type: lesson
@@ -185,6 +205,70 @@ proposal form until a human owner approves the domain rule.
   `apps/web/tests/messagingWorkspace.test.ts`
 - Follow-up: add explicit channel selection and per-message thread records on
   top of the same durable conversation and message contract.
+
+### 2026-05-16 - Durable Messaging Reads Should Replace Seeded Runtime Fallbacks, Not Sit Beside Them
+
+- Type: lesson
+- Domain: messaging workspace rendering, seeded collaboration surfaces, and
+  incremental prototype retirement
+- Applies to: `Messages` workspace loads, backend-seeded starter history,
+  frontend test fixtures, and other seeded surfaces that are graduating into
+  typed API state
+- Status: implemented
+- Source:
+  `apps/api/app/domains/messages/services/workspace.py`,
+  `apps/api/app/schemas/messaging.py`,
+  `apps/web/src/entities/messages/api.ts`,
+  `apps/web/src/workspaces/messages/MessagingWorkspace.tsx`, and
+  `apps/web/tests/messagingWorkspace.test.ts`
+- Lesson: once the backend owns seeded starter conversations and starter
+  timeline items, the runtime UI should render from that API contract directly
+  instead of keeping a parallel frontend seed builder as the live fallback.
+  If server-side or static tests still need deterministic content, inject an
+  `initialWorkspaceState` fixture into the component under test rather than
+  preserving duplicate runtime truth in production code.
+- Deterministic opportunity: promote seeded lane definitions, seeded timeline
+  items, previews, members, attachments, reactions, and conversation metrics
+  into the typed messaging service so future unread-state, navigation, and
+  thread-model work builds on one contract.
+- Agent autonomy impact: assistant replies become easier to audit because the
+  same API-owned conversation contract now supplies both starter history and
+  newly persisted governed replies.
+- Tests or evidence:
+  `.venv/bin/python -m unittest apps.api.tests.test_messaging_workspace_api`,
+  `npm test -- messagingWorkspace.test.ts messagesApi.test.ts messagingAgentSession.test.ts messagingAgentRouter.test.ts`,
+  and `npm run build`
+- Follow-up: remove the remaining legacy frontend channel-seed helper once the
+  router and append-helper tests move to API-shaped fixtures too.
+
+### 2026-05-16 - Workspace Sub-Selection Should Live In Shared Route State When The URL Matters
+
+- Type: lesson
+- Domain: app route state, messaging workspace navigation, and durable
+  deep-link behavior
+- Applies to: `Messages` conversation selection, future workspace-specific
+  detail panes, and any sub-selection that should survive refresh or browser
+  navigation
+- Status: implemented
+- Source:
+  `apps/web/src/entities/app/useAppRouteState.ts`,
+  `apps/web/src/entities/app/workspaceRendererRegistry.tsx`, and
+  `apps/web/src/workspaces/messages/MessagingWorkspace.tsx`
+- Lesson: once a workspace sub-selection needs to be linkable through query
+  params, do not manage it as an ad hoc local `window.history` patch inside the
+  workspace. Put the parameter in the shared route-state contract so popstate,
+  view replacement, and other navigation updates preserve it instead of
+  stripping it back out.
+- Deterministic opportunity: centralize future workspace sub-route params in
+  `useAppRouteState` so trade IDs, documentation page IDs, message
+  conversations, and later thread IDs follow one URL lifecycle.
+- Agent autonomy impact: better deep links make it easier for agents to hand
+  humans back into the exact desk lane or thread that needs review, without
+  inventing local navigation state.
+- Tests or evidence:
+  `npm test -- messagingWorkspace.test.ts messagesApi.test.ts messagingAgentSession.test.ts messagingAgentRouter.test.ts`
+- Follow-up: apply the same route-state pattern when per-message thread IDs
+  become first-class in the messaging workspace.
 
 ### 2026-05-15 - Agent Replies In Messaging Surfaces Should Stay In-Thread And Use The Governed Assistant Runtime
 
@@ -3632,3 +3716,168 @@ independently"`.
   `./node_modules/.bin/vitest run tests/libraryWorkspace.test.ts tests/documentLibrary.test.ts tests/documentIngestionSelectors.test.ts tests/promptHomeDocumentUploadCard.test.ts`
 - Follow-up: decide whether grid-card and multi-page subtype editing should get
   the same quick-control treatment or remain in the deeper review editor.
+
+### 2026-05-16 - Agent Change Suggestions Should Reuse The Governed Profile-Request Queue
+
+- Type: lesson
+- Domain: managed agent governance, operator request intake, and admin review
+- Applies to: assistant agent directory UX, non-admin agent change requests,
+  managed-agent review queues, and future agent-configuration workflows
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/services/profile_requests.py`,
+  `apps/api/app/routes/assistant.py`,
+  `apps/api/app/schemas/assistant.py`,
+  `apps/web/src/workspaces/assistant/AssistantAgentChangeRequestPanel.tsx`, and
+  `apps/web/src/workspaces/admin/AgentManagementPanel.tsx`
+- Lesson: when operators want agent changes, the product should not grant
+  direct mutation rights or hide the request in freeform prompt text. ECTRM now
+  routes user-submitted agent requests through the typed
+  `assistant_agent_profile_requests` seam with explicit request kinds for `new
+  specialization`, `edit existing`, and `narrow access`. The assistant surface
+  captures the desired scope, tools, actions, skills, authority, and review
+  rationale, while the admin surface remains the only place that approves,
+  links, and applies the request to a managed agent record. A request can only
+  be marked applied after the linked agent has a published revision whose
+  payload carries the approved profile request ID, so the final status is tied
+  to a concrete before/after agent configuration delta rather than a manual
+  closure click.
+- Deterministic opportunity: if request patterns stabilize, promote frequent
+  reductions or safe edit classes into narrower typed workflows rather than
+  widening this queue into a generic freeform mutation surface.
+- Agent autonomy impact: agents can help users explain and stage agent changes,
+  but they still cannot directly rewrite managed-agent configuration outside
+  the reviewed admin workflow.
+- Tests or evidence:
+  `npm --prefix apps/web test -- assistantApi.test.ts
+  assistantAgentChangeRequestPanel.test.ts assistantWorkspace.test.ts
+  assistantAgentDirectoryPanel.test.ts`,
+  `./.venv/bin/python -m unittest
+  apps.api.tests.test_assistant_api.AssistantApiTests.test_current_user_can_submit_list_and_close_governed_agent_change_requests
+  apps.api.tests.test_assistant_api.AssistantApiTests.test_admin_profile_request_approval_gates_custom_agent_activation`,
+  and `npx playwright test
+  tests/browser/smokeHarness.spec.ts --grep "assistant smoke submits a
+  governed agent change request"`
+- Follow-up: add a compact admin diff summary directly on each profile-request
+  card if reviewers need to compare multiple saved revisions before applying
+  the request.
+
+### 2026-05-16 - Document Classification Should Persist Explainable Deterministic Assessment
+
+- Type: algorithm-added
+- Domain: document ingestion, deterministic classification, and operator review
+- Applies to: uploaded-document typing, manual correction follow-up, typed
+  understanding bundles, and future classifier promotion work
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_classification_scoring.py`,
+  `apps/api/app/domains/documents/services/ingestion.py`,
+  `apps/api/app/domains/documents/services/document_understanding.py`,
+  `apps/api/app/schemas/document.py`, and
+  `apps/web/src/features/documents/DocumentIngestionPageEditor.tsx`
+- Lesson: document classification should not stop at a hidden heuristic kind.
+  ECTRM now runs a deterministic evidence scorer over extracted text, schema
+  header-field hits, matching keys, table-shape overlap, OCR state, and
+  filename hints, then persists that scored assessment alongside the page
+  classification payload. The typed understanding bundle exposes the scored
+  `document_kind`, `confidence`, `matched_by`, `supporting_evidence`, and
+  `conflicts` separately from the later system classification so reviewers can
+  see the baseline deterministic judgment even when AI or learned reuse
+  changes the final review starting point.
+- Deterministic opportunity: future DCL-02 follow-on work should extend this
+  scorer by tuning weights and ambiguity rules behind typed services and evals,
+  not by moving explanation logic back into prompts or client-only inference.
+- Agent autonomy impact: agents can now rely on a server-owned explanation
+  bundle when discussing why a document was typed a certain way, while the
+  actual classification state remains governed by typed review and learning
+  services.
+- Tests or evidence:
+  `./node_modules/.bin/vitest run tests/documentIngestionPageEditor.test.ts
+  tests/libraryWorkspace.test.ts tests/documentLibrary.test.ts
+  tests/documentIngestionSelectors.test.ts
+  tests/promptHomeDocumentUploadCard.test.ts`,
+  `./.venv/bin/python -m compileall
+  apps/api/app/domains/documents/services/document_classification_scoring.py
+  apps/api/app/domains/documents/services/document_understanding.py
+  apps/api/app/domains/documents/services/ingestion.py
+  apps/api/app/schemas/document.py`, and a standalone scorer/understanding
+  runtime check in the local virtualenv. The full
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api`
+  suite is currently blocked in this worktree by an unrelated missing module at
+  `apps.api.app.domains.messages.services.workspace`.
+- Follow-up: add seeded eval coverage that measures confusion and ambiguity
+  margins by document kind before tuning the scorer weights, and repair the
+  unrelated messages-service import so the full ingestion API regression suite
+  can run again.
+
+### 2026-05-16 - Document Classification Tuning Needs A Replayable Gold Corpus
+
+- Type: lesson
+- Domain: document ingestion, deterministic classification evaluation, and
+  regression safety
+- Applies to: document kind scoring changes, ambiguity threshold tuning,
+  filename-signal adjustments, OCR-confidence handling, and learned
+  classification promotion work
+- Status: implemented
+- Source:
+  `apps/api/tests/fixtures/document_classification_eval_corpus.json`,
+  `apps/api/tests/document_classification_eval_harness.py`,
+  `apps/api/tests/test_document_classification_evals.py`,
+  `apps/api/scripts/run_document_classification_evals.py`, and `Makefile`
+- Lesson: once document typing moves beyond a single heuristic, correctness has
+  to be guarded by a replayable gold corpus instead of one-off upload checks.
+  ECTRM now has a checked-in deterministic classification corpus that spans
+  strong schema matches, OCR-backed cases, generic statement fallback, weak
+  filename-only hints, and no-signal uploads. The harness computes kind
+  accuracy and false-confidence counts, the unittest enforces the seeded
+  expectations, and `make api-document-classification-evals` gives engineers a
+  canonical local replay command before they retune scoring weights or stop
+  conditions.
+- Deterministic opportunity: expand this corpus with real reviewed examples and
+  per-kind confusion tracking before changing score weights, rather than
+  encoding more exceptions directly into classifier rules.
+- Agent autonomy impact: agents should treat document-classification weight
+  changes as behavior that needs a replay lane, not as safe prompt-only tuning.
+- Tests or evidence:
+  `./.venv/bin/python apps/api/scripts/run_document_classification_evals.py`,
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_classification_evals`,
+  and `make api-document-classification-evals`
+- Follow-up: grow the corpus from 10 seed cases into a reviewed historical
+  replay set with confusion-matrix reporting and promotion thresholds for new
+  document kinds.
+
+### 2026-05-16 - Reviewed Document Replay Fixtures Should Be Sanitized And Track Caution Behavior
+
+- Type: lesson
+- Domain: document ingestion evals, reviewed-document replay, and classifier
+  safety gating
+- Applies to: exporting reviewed document examples, tuning deterministic
+  document scorers, and deciding whether confidence/abstain behavior regressed
+- Status: implemented
+- Source:
+  `apps/api/tests/document_classification_eval_harness.py`,
+  `apps/api/scripts/export_document_classification_replay_fixture.py`,
+  `apps/api/scripts/run_document_classification_evals.py`, and
+  `apps/api/tests/test_document_classification_evals.py`
+- Lesson: historical replay fixtures should not copy reviewed document text
+  verbatim into the repo. ECTRM now builds sanitized replay text from reviewed
+  page header fields and table structure first, then falls back to redacted raw
+  text only when structured signals are missing. The replay export marks cases
+  that historically required correction or landed in `OTHER`/`UNKNOWN` as
+  review-recommended or low-confidence expectations, and the eval lane now
+  reports per-kind metrics, confusion summaries, abstain accuracy, and
+  low-confidence false negatives in addition to exact kind accuracy.
+- Deterministic opportunity: once enough reviewed examples accumulate, raise
+  the replay corpus quality by splitting thresholds per document kind and
+  graduating historically corrected cases into explicit abstain-vs-commit
+  expectations owned by operations.
+- Agent autonomy impact: agents should not claim a scorer retune is safe after
+  matching only top-line accuracy; they should check the replay lane for
+  confusion drift and missed caution signals too.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_classification_evals`,
+  `./.venv/bin/python apps/api/scripts/run_document_classification_evals.py`,
+  and `make api-document-classification-evals`
+- Follow-up: export a first real reviewed replay corpus from the configured
+  database, replay it through the scorer lane, and tighten thresholds by
+  document kind once the historical sample is large enough to be representative.

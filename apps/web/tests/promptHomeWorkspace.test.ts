@@ -202,7 +202,7 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.match(markup, /Communication center/);
   assert.match(
     markup,
-    /Incoming messages, integrated email, to-do items, and issues now read like one inbox\. This first pass uses typed sample rows for Email, To-Do, Issue, and App Message\./,
+    /One inbox for email, work follow-through, issues, and app messages\. Expand a row only when you need the detail\./,
   );
   assert.match(
     markup,
@@ -228,7 +228,23 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.match(markup, /5 attention items surfaced for review/);
   assert.match(markup, /7 open work items/);
   assert.match(markup, /5 attention items/);
-  assert.match(markup, /aria-label="Selected communication thread"/);
+  assert.match(markup, /class="prompt-home-communication-record-list"/);
+  assert.doesNotMatch(
+    markup,
+    /class="prompt-home-communication-record is-expanded"/,
+  );
+  assert.match(
+    markup,
+    /aria-expanded="false" aria-controls="prompt-home-communication-record-panel-email"/,
+  );
+  assert.match(
+    markup,
+    /aria-expanded="false" aria-controls="prompt-home-communication-record-panel-todo"/,
+  );
+  assert.match(
+    markup,
+    /id="prompt-home-communication-record-panel-email" class="prompt-home-communication-record-panel" aria-label="Communication details: Northshore sent a revised delivery window" hidden=""/,
+  );
   assert.match(markup, /Counterparty email · Example inbox row/);
   assert.match(
     markup,

@@ -22,11 +22,120 @@
   min-width: 0;
 }
 
+.messaging-desk-empty {
+  display: grid;
+  gap: 0.55rem;
+  align-content: center;
+  justify-items: start;
+  min-height: clamp(28rem, 68vh, 42rem);
+  padding: 2rem 2.2rem;
+}
+
+.messaging-desk-empty strong,
+.messaging-desk-empty p {
+  margin: 0;
+}
+
+.messaging-desk-empty strong {
+  color: #13293d;
+  font-size: 1.15rem;
+}
+
+.messaging-desk-empty p {
+  max-width: 34rem;
+  color: #5f6d79;
+  line-height: 1.6;
+}
+
 .messaging-desk-channel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-height: 0;
   background: rgba(252, 254, 255, 0.98);
+}
+
+.messaging-desk-conversation-strip {
+  display: flex;
+  gap: 0.85rem;
+  padding: 1rem 1.45rem 1rem;
+  overflow-x: auto;
+  border-bottom: 1px solid rgba(18, 42, 56, 0.08);
+  background:
+    linear-gradient(180deg, rgba(247, 250, 252, 0.96), rgba(242, 247, 250, 0.96)),
+    rgba(255, 255, 255, 0.9);
+}
+
+.messaging-desk-conversation-tab {
+  display: grid;
+  gap: 0.35rem;
+  min-width: min(18rem, 72vw);
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.88);
+  color: inherit;
+  text-align: left;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.messaging-desk-conversation-tab:hover {
+  border-color: rgba(45, 116, 196, 0.32);
+  box-shadow: 0 14px 28px rgba(18, 42, 56, 0.1);
+  transform: translateY(-1px);
+}
+
+.messaging-desk-conversation-tab.is-selected {
+  border-color: rgba(45, 116, 196, 0.4);
+  background:
+    linear-gradient(180deg, rgba(88, 165, 255, 0.1), rgba(255, 255, 255, 0.95)),
+    rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 34px rgba(45, 116, 196, 0.16);
+}
+
+.messaging-desk-conversation-tab-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.messaging-desk-conversation-tab-head strong,
+.messaging-desk-conversation-tab p,
+.messaging-desk-conversation-tab small {
+  margin: 0;
+}
+
+.messaging-desk-conversation-tab-head strong {
+  color: #13293d;
+  font-size: 0.96rem;
+}
+
+.messaging-desk-conversation-tab-head span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.75rem;
+  min-height: 1.75rem;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  background: #dcecff;
+  color: #1f5eaa;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.messaging-desk-conversation-tab small {
+  color: #6a7480;
+  line-height: 1.45;
+}
+
+.messaging-desk-conversation-tab p {
+  color: #304658;
+  line-height: 1.5;
 }
 
 .messaging-desk-channel-header {

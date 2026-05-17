@@ -106,3 +106,37 @@ test('workspace handoff focus banner labels reference-sourced route focus clearl
   assert.match(markup, /Filter: BNSF_WAHA_TO_HSC/)
   assert.match(markup, /Show Full Board/)
 })
+
+test('workspace handoff focus banner labels terminal search context clearly', () => {
+  const markup = renderToStaticMarkup(
+    createElement(WorkspaceHandoffFocusBanner, {
+      currentView: 'reports',
+      handoff: {
+        source: 'terminal',
+        tradeId: 'reports-credit',
+        focus: {
+          type: 'report',
+          id: 'reports-credit',
+          label: 'Counterparty Credit Report',
+        },
+        tradeInspectorTab: null,
+        eventType: null,
+        label: 'Open Counterparty Credit Report',
+        rationale:
+          'Terminal search opened the Reports workspace on this module so you can review the matching analysis without hunting through the full report grid.',
+        filter: 'reports-credit',
+        sourceRunId: null,
+        sourceConversationId: null,
+        sourceActionRequestId: null,
+      },
+      onClear: () => {},
+      clearLabel: 'Show Full Workspace',
+    }),
+  )
+
+  assert.match(markup, /Open Counterparty Credit Report/)
+  assert.match(markup, /Terminal Search/)
+  assert.match(markup, /Report: Counterparty Credit Report/)
+  assert.match(markup, /Filter: reports-credit/)
+  assert.match(markup, /Show Full Workspace/)
+})

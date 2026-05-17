@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.http import (
@@ -12,10 +12,13 @@ from apps.api.app.core.http import (
 )
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.wiki.services.pages import (
+    archive_wiki_page,
     create_wiki_page,
     get_wiki_page_detail,
     list_wiki_pages,
+    restore_archived_wiki_page,
     restore_wiki_page_revision,
+    search_wiki_pages,
     update_wiki_page,
 )
 from apps.api.app.schemas.wiki import (
@@ -23,6 +26,7 @@ from apps.api.app.schemas.wiki import (
     WikiPageDetailOut,
     WikiPageIndexOut,
     WikiPageRestore,
+    WikiPageSearchOut,
     WikiPageUpdate,
 )
 
@@ -32,10 +36,28 @@ router = APIRouter(prefix="/wiki", tags=["wiki"])
 @router.get("/pages", response_model=WikiPageIndexOut)
 def get_wiki_pages(
     request: Request,
+    include_archived: bool = False,
     db: Session = Depends(get_db),
 ) -> WikiPageIndexOut:
     require_authenticated_actor(request)
-    return list_wiki_pages(db)
+    return list_wiki_pages(db, include_archived=include_archived)
+
+
+@router.get("/pages/search", response_model=WikiPageSearchOut)
+def search_wiki_page_index(
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=300),
+    include_archived: bool = False,
+    limit: int = Query(default=10, ge=1, le=25),
+    db: Session = Depends(get_db),
+) -> WikiPageSearchOut:
+    require_authenticated_actor(request)
+    return search_wiki_pages(
+        db,
+        query=q,
+        include_archived=include_archived,
+        limit=limit,
+    )
 
 
 @router.get("/pages/{page_id}", response_model=WikiPageDetailOut)
@@ -109,6 +131,36 @@ def post_wiki_page_restore(
             revision_id=revision_id,
             actor_id=payload.restored_by,
         ),
+        commit=True,
+        handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
+
+
+@router.post("/pages/{page_id}/archive", response_model=WikiPageDetailOut)
+def post_wiki_page_archive(
+    page_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> WikiPageDetailOut:
+    actor_id = require_authenticated_actor(request)
+    return execute_http_action(
+        db,
+        lambda: archive_wiki_page(db, page_id=page_id, actor_id=actor_id),
+        commit=True,
+        handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
+
+
+@router.post("/pages/{page_id}/unarchive", response_model=WikiPageDetailOut)
+def post_wiki_page_unarchive(
+    page_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> WikiPageDetailOut:
+    actor_id = require_authenticated_actor(request)
+    return execute_http_action(
+        db,
+        lambda: restore_archived_wiki_page(db, page_id=page_id, actor_id=actor_id),
         commit=True,
         handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
     )

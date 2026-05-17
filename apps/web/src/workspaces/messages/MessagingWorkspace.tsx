@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -17,7 +16,7 @@ import {
 import {
   createMessagingWorkspacePost,
   loadMessagingWorkspaceState,
-  type MessagingWorkspaceMessageRecord,
+  type MessagingWorkspaceState,
 } from '../../entities/messages/api'
 import { appConfig } from '../../shared/config'
 import type { AssistantPromptRequest, AssistantProvider } from '../../shared/models'
@@ -25,8 +24,9 @@ import { shouldSendMessageOnKeyDown } from './messagingComposerKeybindings'
 import { resolveMessagingAgentSession } from './messagingAgentSession'
 import {
   appendMessagingWorkspacePost,
+  buildMessagingWorkspaceChannelsFromRecords,
   buildMessagingWorkspacePostFromRecord,
-  buildMessagingWorkspaceChannels,
+  formatMessagingWorkspacePostBody,
   type MessagingWorkspaceChannel,
   type MessagingWorkspaceMember,
   type MessagingWorkspacePost,
@@ -43,6 +43,9 @@ type MessagingWorkspaceProps = {
   onOpenAssistant: () => void
   onOpenOperations: () => void
   onOpenSettlement: () => void
+  onSelectConversation: (conversationId: string | null) => void
+  selectedConversationId: string | null
+  initialWorkspaceState?: MessagingWorkspaceState | null
 }
 
 function buildMemberInitials(label: string): string {
@@ -70,21 +73,6 @@ function formatMessageTimestamp(date: Date): string {
 
 function createLocalPostId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
-
-function buildPostsByChannelId(
-  records: MessagingWorkspaceMessageRecord[],
-): Record<string, MessagingWorkspacePost[]> {
-  return records.reduce<Record<string, MessagingWorkspacePost[]>>((current, record) => {
-    const timestamp = formatMessageTimestamp(new Date(record.created_at))
-    return {
-      ...current,
-      [record.conversation_id]: [
-        ...(current[record.conversation_id] ?? []),
-        buildMessagingWorkspacePostFromRecord(record, timestamp),
-      ],
-    }
-  }, {})
 }
 
 function buildAssistantAuthor(
@@ -129,38 +117,35 @@ function buildThreadContext(selectedChannel: MessagingWorkspaceChannel): string 
   ].join('\n')
 }
 
-export function MessagingWorkspace({
-  authSession,
-  counts,
-  onOpenPrompt,
-  onOpenAssistant,
-  onOpenOperations,
-  onOpenSettlement,
-}: MessagingWorkspaceProps) {
-  const baseChannels = useMemo(() => buildMessagingWorkspaceChannels(counts), [counts])
-  const [postedMessagesByChannelId, setPostedMessagesByChannelId] = useState<
-    Record<string, MessagingWorkspacePost[]>
-  >({})
+export function MessagingWorkspace(props: MessagingWorkspaceProps) {
+  const {
+    authSession,
+    onOpenPrompt,
+    onOpenAssistant,
+    onOpenOperations,
+    onOpenSettlement,
+    onSelectConversation,
+    selectedConversationId,
+    initialWorkspaceState = null,
+  } = props
+
+  const [channels, setChannels] = useState<MessagingWorkspaceChannel[]>(() =>
+    initialWorkspaceState
+      ? buildMessagingWorkspaceChannelsFromRecords(initialWorkspaceState.conversations)
+      : [],
+  )
   const [draftsByChannelId, setDraftsByChannelId] = useState<Record<string, string>>({})
   const [composerStatusByChannelId, setComposerStatusByChannelId] = useState<
     Record<string, string>
   >({})
   const [assistantReplyChannelId, setAssistantReplyChannelId] = useState<string | null>(null)
   const [workspaceLoadError, setWorkspaceLoadError] = useState<string>('')
+  const [workspaceLoading, setWorkspaceLoading] = useState<boolean>(!initialWorkspaceState)
   const feedRef = useRef<HTMLDivElement | null>(null)
   const composerFormRef = useRef<HTMLFormElement | null>(null)
 
-  const channels = useMemo(
-    () =>
-      baseChannels.map((channel) =>
-        (postedMessagesByChannelId[channel.id] ?? []).reduce(
-          (nextChannel, post) => appendMessagingWorkspacePost(nextChannel, post),
-          channel,
-        ),
-      ),
-    [baseChannels, postedMessagesByChannelId],
-  )
-  const selectedChannel = channels[0] ?? null
+  const selectedChannel =
+    channels.find((channel) => channel.id === selectedConversationId) ?? channels[0] ?? null
   const selectedChannelDraft = selectedChannel ? draftsByChannelId[selectedChannel.id] ?? '' : ''
   const selectedChannelStatus = selectedChannel
     ? composerStatusByChannelId[selectedChannel.id] ?? ''
@@ -180,7 +165,21 @@ export function MessagingWorkspace({
   }, [selectedChannel, selectedChannel?.id, selectedChannel?.timeline.length])
 
   useEffect(() => {
+    if (!selectedChannel) {
+      if (selectedConversationId !== null && channels.length === 0) {
+        onSelectConversation(null)
+      }
+      return
+    }
+
+    if (selectedConversationId !== selectedChannel.id) {
+      onSelectConversation(selectedChannel.id)
+    }
+  }, [channels.length, onSelectConversation, selectedChannel, selectedConversationId])
+
+  useEffect(() => {
     let active = true
+    setWorkspaceLoading(true)
 
     void loadMessagingWorkspaceState(appConfig.apiBase, {
       accessToken: authSession?.accessToken,
@@ -190,8 +189,9 @@ export function MessagingWorkspace({
           return
         }
 
-        setPostedMessagesByChannelId(buildPostsByChannelId(state.messages))
+        setChannels(buildMessagingWorkspaceChannelsFromRecords(state.conversations))
         setWorkspaceLoadError('')
+        setWorkspaceLoading(false)
       })
       .catch((error) => {
         if (!active) {
@@ -202,6 +202,7 @@ export function MessagingWorkspace({
             ? error.message
             : 'Could not load persisted message history for this workspace.',
         )
+        setWorkspaceLoading(false)
       })
 
     return () => {
@@ -269,11 +270,19 @@ export function MessagingWorkspace({
     }))
   }
 
+  function handleConversationSelect(conversationId: string) {
+    if (conversationId === selectedConversationId) {
+      return
+    }
+    onSelectConversation(conversationId)
+  }
+
   function appendPostToChannel(channelId: string, post: MessagingWorkspacePost) {
-    setPostedMessagesByChannelId((current) => ({
-      ...current,
-      [channelId]: [...(current[channelId] ?? []), post],
-    }))
+    setChannels((current) =>
+      current.map((channel) =>
+        channel.id === channelId ? appendMessagingWorkspacePost(channel, post) : channel,
+      ),
+    )
   }
 
   function updatePostInChannel(
@@ -281,12 +290,47 @@ export function MessagingWorkspace({
     postId: string,
     updater: (post: MessagingWorkspacePost) => MessagingWorkspacePost,
   ) {
-    setPostedMessagesByChannelId((current) => ({
-      ...current,
-      [channelId]: (current[channelId] ?? []).map((post) =>
-        post.id === postId ? updater(post) : post,
-      ),
-    }))
+    setChannels((current) =>
+      current.map((channel) => {
+        if (channel.id !== channelId) {
+          return channel
+        }
+
+        const nextTimeline = channel.timeline.map((item) =>
+          item.kind === 'message' && item.id === postId
+            ? (() => {
+                const updatedPost = updater({
+                  id: item.id,
+                  author: item.author,
+                  timestamp: item.timestamp,
+                  body: item.body.join('\n\n'),
+                })
+
+                return {
+                  ...item,
+                  author: updatedPost.author,
+                  timestamp: updatedPost.timestamp,
+                  body: formatMessagingWorkspacePostBody(updatedPost.body),
+                }
+              })()
+            : item,
+        )
+        const latestTimelineItem = nextTimeline[nextTimeline.length - 1]
+
+        return {
+          ...channel,
+          preview:
+            latestTimelineItem?.kind === 'message'
+              ? latestTimelineItem.body[0] ?? channel.preview
+              : channel.preview,
+          timestamp:
+            latestTimelineItem?.kind === 'message'
+              ? latestTimelineItem.timestamp
+              : channel.timestamp,
+          timeline: nextTimeline,
+        }
+      }),
+    )
   }
 
   async function postDraftToThread(channel: MessagingWorkspaceChannel, body: string): Promise<string> {
@@ -542,17 +586,15 @@ export function MessagingWorkspace({
                   const persistedTimestamp = formatMessageTimestamp(
                     new Date(persistedAssistantPost.created_at),
                   )
-                  setPostedMessagesByChannelId((current) => ({
-                    ...current,
-                    [selectedChannel.id]: (current[selectedChannel.id] ?? []).map((post) =>
-                      post.id === assistantPostId
-                        ? buildMessagingWorkspacePostFromRecord(
-                            persistedAssistantPost,
-                            persistedTimestamp,
-                          )
-                        : post,
-                    ),
-                  }))
+                  updatePostInChannel(
+                    selectedChannel.id,
+                    assistantPostId,
+                    () =>
+                      buildMessagingWorkspacePostFromRecord(
+                        persistedAssistantPost,
+                        persistedTimestamp,
+                      ),
+                  )
                 })
                 .catch(() => {
                   // Keep the visible in-thread assistant draft even if the
@@ -593,6 +635,36 @@ export function MessagingWorkspace({
               className="messaging-desk-channel"
               aria-label={`Message ${selectedChannel.label}`}
             >
+              <nav
+                className="messaging-desk-conversation-strip"
+                aria-label="Conversation list"
+              >
+                {channels.map((channel) => {
+                  const isSelected = channel.id === selectedChannel.id
+                  return (
+                    <button
+                      key={channel.id}
+                      type="button"
+                      className={`messaging-desk-conversation-tab${isSelected ? ' is-selected' : ''}`}
+                      aria-pressed={isSelected}
+                      onClick={() => handleConversationSelect(channel.id)}
+                    >
+                      <div className="messaging-desk-conversation-tab-head">
+                        <strong>{channel.label}</strong>
+                        {channel.unreadCount > 0 ? (
+                          <span>{channel.unreadCount.toLocaleString()}</span>
+                        ) : null}
+                      </div>
+                      <small>
+                        {channel.kind === 'dm' ? 'Direct message' : 'Channel'} ·{' '}
+                        {channel.connectedWorkspace}
+                      </small>
+                      <p>{channel.preview}</p>
+                    </button>
+                  )
+                })}
+              </nav>
+
               <header className="messaging-desk-channel-header">
                 <div className="messaging-desk-channel-copy">
                   <div className="messaging-desk-channel-title-row">
@@ -803,7 +875,18 @@ export function MessagingWorkspace({
               </section>
             </aside>
           </>
-        ) : null}
+        ) : (
+          <div className="messaging-desk-empty">
+            <span className="eyebrow">{workspaceLoading ? 'Loading' : 'Messages'}</span>
+            <strong>
+              {workspaceLoading ? 'Loading desk messages' : 'No messaging channels available'}
+            </strong>
+            <p>
+              {workspaceLoadError ||
+                'The shared desk thread will appear here when workspace messages are available.'}
+            </p>
+          </div>
+        )}
       </section>
     </div>
   )

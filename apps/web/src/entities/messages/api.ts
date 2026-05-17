@@ -9,6 +9,7 @@ export type MessagingWorkspaceConversationSection =
 export type MessagingWorkspaceConversationKind = 'channel' | 'dm'
 export type MessagingWorkspaceMemberTone = 'desk' | 'human' | 'ops' | 'system'
 export type MessagingWorkspacePostSource = 'human' | 'assistant'
+export type MessagingWorkspaceTimelineItemKind = 'system' | 'message'
 
 export type MessagingWorkspaceConversationRecord = {
   conversation_id: string
@@ -21,9 +22,13 @@ export type MessagingWorkspaceConversationRecord = {
   topic: string
   composer_hint: string
   sort_order: number
-  message_count: number
-  latest_message_preview: string | null
-  latest_message_at: string | null
+  preview: string
+  unread_count: number
+  latest_activity_at: string | null
+  highlights: string[]
+  metrics: MessagingWorkspaceMetricRecord[]
+  members: MessagingWorkspaceMemberRecord[]
+  timeline: MessagingWorkspaceTimelineItemRecord[]
 }
 
 export type MessagingWorkspaceMemberRecord = {
@@ -32,6 +37,30 @@ export type MessagingWorkspaceMemberRecord = {
   presence: string
   initials: string
   tone: MessagingWorkspaceMemberTone
+}
+
+export type MessagingWorkspaceAttachmentRecord = {
+  label: string
+  title: string
+  summary: string
+  footnote: string
+}
+
+export type MessagingWorkspaceMetricRecord = {
+  label: string
+  value: string
+}
+
+export type MessagingWorkspaceTimelineItemRecord = {
+  id: string
+  kind: MessagingWorkspaceTimelineItemKind
+  created_at: string
+  label: string | null
+  detail: string | null
+  author: MessagingWorkspaceMemberRecord | null
+  body: string[]
+  reactions: string[]
+  attachment: MessagingWorkspaceAttachmentRecord | null
 }
 
 export type MessagingWorkspaceMessageRecord = {
@@ -51,7 +80,6 @@ export type MessagingWorkspaceMessageRecord = {
 
 export type MessagingWorkspaceState = {
   conversations: MessagingWorkspaceConversationRecord[]
-  messages: MessagingWorkspaceMessageRecord[]
 }
 
 export type CreateMessagingWorkspacePostInput = {

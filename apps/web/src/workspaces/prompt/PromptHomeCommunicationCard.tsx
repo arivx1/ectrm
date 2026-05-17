@@ -52,7 +52,7 @@ export function PromptHomeCommunicationCard({
           <strong>Communication center</strong>
           <p>
             {communicationExpandedState.expanded
-              ? "Incoming messages, integrated email, to-do items, and issues now read like one inbox. This first pass uses typed sample rows for Email, To-Do, Issue, and App Message."
+              ? "One inbox for email, work follow-through, issues, and app messages. Expand a row only when you need the detail."
               : collapsedSummary}
           </p>
         </div>

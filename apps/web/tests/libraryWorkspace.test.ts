@@ -64,6 +64,15 @@ function buildDocumentUnderstanding(
       content_feature_count: 2,
       learning_version: 'content-similarity-v1',
     },
+    deterministic_assessment: {
+      assessment_version: 'deterministic-score-v1',
+      document_kind: 'UNKNOWN',
+      document_subtype: null,
+      confidence: 0.12,
+      matched_by: 'fallback:unknown',
+      supporting_evidence: ['No stable document-specific signals were found in the extracted content.'],
+      conflicts: ['Deterministic evidence stayed low-confidence, so manual review is recommended.'],
+    },
     ...overrides,
   }
 }
@@ -184,6 +193,15 @@ function buildDocument(overrides: Partial<DocumentIngestionRecord> = {}): Docume
             learning_example_count: 0,
             automated_document_kind: null,
             automated_document_subtype: null,
+          },
+          deterministic_assessment: {
+            assessment_version: 'deterministic-score-v1',
+            document_kind: 'UNKNOWN',
+            document_subtype: null,
+            confidence: 0.12,
+            matched_by: 'fallback:unknown',
+            supporting_evidence: ['No stable document-specific signals were found in the extracted content.'],
+            conflicts: ['Deterministic evidence stayed low-confidence, so manual review is recommended.'],
           },
         },
       },

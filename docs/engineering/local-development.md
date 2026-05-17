@@ -99,6 +99,7 @@ Run these from the repo root:
 make api-contract-check
 make api-mcp-test
 make api-assistant-evals
+make api-document-classification-evals
 make api-test
 make web-build
 make web-lint
@@ -142,6 +143,26 @@ verification targets instead of redefining parallel command sets.
 Use `make api-assistant-evals` explicitly whenever changes affect assistant or
 automation behavior. That lane is also part of the repo-level `make verify`
 contract now.
+
+Use `make api-document-classification-evals` explicitly whenever changes affect
+deterministic document typing, classification evidence weights, ambiguity
+handling, or reviewed-example reuse for uploaded documents.
+
+To export a sanitized replay fixture from reviewed document pages in the
+configured database, run:
+
+```bash
+./.venv/bin/python apps/api/scripts/export_document_classification_replay_fixture.py \
+  --output tmp/document-classification-reviewed-replay.json \
+  --limit 100
+```
+
+Then replay it through the same scorer lane with:
+
+```bash
+./.venv/bin/python apps/api/scripts/run_document_classification_evals.py \
+  --corpus tmp/document-classification-reviewed-replay.json --check
+```
 
 Use `make api-mcp-test` explicitly whenever changes affect the ChatGPT MCP
 surface, including `/mcp` transport behavior, MCP OAuth, or the published

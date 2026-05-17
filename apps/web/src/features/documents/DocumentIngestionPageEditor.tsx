@@ -51,6 +51,9 @@ export function DocumentIngestionPageEditor({
   const classificationCorrected = pageClassificationCorrected(page)
   const learningApplied = pageLearningApplied(page)
   const learningExampleCount = pageLearningExampleCount(page)
+  const deterministicAssessment = page.understanding.deterministic_assessment
+  const deterministicSupportingEvidence = deterministicAssessment.supporting_evidence.filter((value) => value.trim())
+  const deterministicConflicts = deterministicAssessment.conflicts.filter((value) => value.trim())
   const nonProcessorWarnings = page.processing_warnings.filter((warning) => !processorTrace?.warnings.includes(warning))
 
   return (
@@ -152,6 +155,36 @@ export function DocumentIngestionPageEditor({
           </p>
         ) : null}
         {systemClassification.matchedBy ? <p>System evidence: {systemClassification.matchedBy.replaceAll('_', ' ')}.</p> : null}
+        {deterministicAssessment.document_kind ? (
+          <div className="document-schema-note">
+            <div className="document-ingestion-chip-row">
+              <span className={`status-pill status-pill-${deterministicConflicts.length > 0 ? 'in-progress' : 'active'}`}>
+                DETERMINISTIC
+              </span>
+              <span className="entity-chip entity-chip-soft">
+                {formatDocumentKindLabel(deterministicAssessment.document_kind)}
+                {deterministicAssessment.document_subtype ? ` • ${deterministicAssessment.document_subtype}` : ''}
+              </span>
+              {deterministicAssessment.confidence !== null ? (
+                <span className="entity-chip entity-chip-soft">
+                  {Math.round(deterministicAssessment.confidence * 100)}% confidence
+                </span>
+              ) : null}
+            </div>
+            {deterministicAssessment.document_kind !== systemClassification.documentKind ? (
+              <p>
+                The final system classification differs because a later AI or learned override changed the review
+                starting point.
+              </p>
+            ) : null}
+            {deterministicSupportingEvidence.map((evidence) => (
+              <p key={evidence}>{evidence}</p>
+            ))}
+            {deterministicConflicts.map((conflict) => (
+              <p key={conflict}>Watch for: {conflict}</p>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <div className="document-page-evidence">

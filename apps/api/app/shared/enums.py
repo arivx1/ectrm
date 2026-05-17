@@ -225,6 +225,12 @@ class TruckStopType(StrEnum):
     WAYPOINT = "WAYPOINT"
 
 
+class TruckCheckpointCode(StrEnum):
+    ARRIVED_PICKUP = "ARRIVED_PICKUP"
+    DEPARTED_PICKUP = "DEPARTED_PICKUP"
+    ARRIVED_DESTINATION = "ARRIVED_DESTINATION"
+
+
 class TrackingSignalProcessingStatus(StrEnum):
     RECEIVED = "RECEIVED"
     MATCHED = "MATCHED"

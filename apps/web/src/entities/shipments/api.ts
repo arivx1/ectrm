@@ -1,6 +1,16 @@
-import { patchJson, postJson, putJson } from '../../shared/api'
+import { fetchJson, patchJson, postJson, putJson } from '../../shared/api'
 import { buildMutationHeaders } from '../../shared/mutation'
-import type { DeliveryEventType, DeliveryExecutionStatus, DeliveryRecord } from '../../shared/models'
+import type {
+  DeliveryEventType,
+  DeliveryExecutionStatus,
+  DeliveryRecord,
+  DeliveryTruckMovementRecord,
+  DeliveryTruckMovementSummaryRecord,
+  TruckCheckpointCode,
+  TruckMovementStatus,
+  TruckStopStatus,
+  TruckStopType,
+} from '../../shared/models'
 
 export type SaveDeliveryActualizationInput = {
   actual_quantity: number
@@ -115,12 +125,116 @@ export type UpdateDeliveryPowerDetailInput = {
   >
 }
 
+export type UpdateDeliveryTruckDetailInput = {
+  target_run_count?: number | null
+  dispatcher_owner?: string | null
+  tracking_provider?: string | null
+  tracking_policy?: string | null
+  default_carrier_name?: string | null
+  default_external_carrier_reference?: string | null
+  equipment_type?: string | null
+  origin_geofence_code?: string | null
+  destination_geofence_code?: string | null
+}
+
 export type CreateDeliveryEventInput = {
   event_type: DeliveryEventType
   occurred_at: string
   location_code?: string | null
   reference_code?: string | null
   source?: string | null
+  notes?: string | null
+}
+
+export type DeliveryTruckStopCreateInput = {
+  stop_sequence?: number | null
+  stop_type: TruckStopType
+  location_code?: string | null
+  planned_arrival_start?: string | null
+  planned_arrival_end?: string | null
+  planned_departure_start?: string | null
+  planned_departure_end?: string | null
+  appointment_reference?: string | null
+  planned_quantity?: number | null
+  status?: TruckStopStatus | null
+}
+
+export type DeliveryTruckMovementCreateInput = {
+  sequence_no: number
+  planned_quantity?: number | null
+  planned_unit_of_measure?: string | null
+  carrier_name?: string | null
+  external_carrier_reference?: string | null
+  dispatcher_owner?: string | null
+  driver_name?: string | null
+  driver_phone?: string | null
+  tractor_reference?: string | null
+  trailer_reference?: string | null
+  external_load_reference?: string | null
+  bill_of_lading_number?: string | null
+  truck_ticket_number?: string | null
+  hold_reason_code?: string | null
+  status?: Extract<TruckMovementStatus, 'PLANNED' | 'ASSIGNED' | 'ON_HOLD'> | null
+  stops: DeliveryTruckStopCreateInput[]
+}
+
+export type UpdateDeliveryTruckMovementInput = {
+  sequence_no?: number | null
+  planned_quantity?: number | null
+  planned_unit_of_measure?: string | null
+  carrier_name?: string | null
+  external_carrier_reference?: string | null
+  dispatcher_owner?: string | null
+  driver_name?: string | null
+  driver_phone?: string | null
+  tractor_reference?: string | null
+  trailer_reference?: string | null
+  external_load_reference?: string | null
+  bill_of_lading_number?: string | null
+  truck_ticket_number?: string | null
+  hold_reason_code?: string | null
+  status?: Extract<TruckMovementStatus, 'PLANNED' | 'ASSIGNED' | 'ON_HOLD'> | null
+  status_reason?: string | null
+}
+
+export type CancelDeliveryTruckMovementInput = {
+  cancel_reason: string
+}
+
+export type UpdateDeliveryTruckStopInput = {
+  stop_sequence?: number | null
+  stop_type?: TruckStopType | null
+  location_code?: string | null
+  planned_arrival_start?: string | null
+  planned_arrival_end?: string | null
+  planned_departure_start?: string | null
+  planned_departure_end?: string | null
+  appointment_reference?: string | null
+  planned_quantity?: number | null
+  actual_quantity?: number | null
+  actual_arrived_at?: string | null
+  actual_departed_at?: string | null
+  status?: TruckStopStatus | null
+  status_reason?: string | null
+}
+
+export type SkipDeliveryTruckStopInput = {
+  skip_reason: string
+}
+
+export type CancelDeliveryTruckStopInput = {
+  cancel_reason: string
+}
+
+export type RecordDeliveryTruckStopCheckpointInput = {
+  checkpoint_code: TruckCheckpointCode
+  occurred_at: string
+  notes?: string | null
+}
+
+export type ReverseDeliveryTruckStopCheckpointInput = {
+  reversal_reason: string
+  reversed_at?: string | null
   notes?: string | null
 }
 
@@ -224,6 +338,20 @@ export async function updateDeliveryPowerDetails(
   })
 }
 
+export async function updateDeliveryTruckDetails(
+  apiBase: string,
+  args: {
+    deliveryId: string
+    payload: UpdateDeliveryTruckDetailInput
+  },
+): Promise<DeliveryRecord> {
+  const { deliveryId, payload } = args
+
+  return patchJson(`${apiBase}/deliveries/${deliveryId}/truck-details`, payload, {
+    headers: shipmentHeaders(),
+  })
+}
+
 export async function updateDeliveryRailDetails(
   apiBase: string,
   args: {
@@ -248,6 +376,151 @@ export async function createDeliveryEvent(
   const { deliveryId, payload } = args
 
   return postJson(`${apiBase}/deliveries/${deliveryId}/events`, payload, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function listDeliveryTruckMovements(
+  apiBase: string,
+  deliveryId: string,
+): Promise<DeliveryTruckMovementSummaryRecord[]> {
+  return fetchJson(`${apiBase}/deliveries/${deliveryId}/truck-movements`, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function getDeliveryTruckMovement(
+  apiBase: string,
+  movementId: string,
+): Promise<DeliveryTruckMovementRecord> {
+  return fetchJson(`${apiBase}/truck-movements/${movementId}`, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function createDeliveryTruckMovement(
+  apiBase: string,
+  args: {
+    deliveryId: string
+    payload: DeliveryTruckMovementCreateInput
+  },
+): Promise<DeliveryTruckMovementRecord> {
+  const { deliveryId, payload } = args
+
+  return postJson(`${apiBase}/deliveries/${deliveryId}/truck-movements`, payload, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function updateDeliveryTruckMovement(
+  apiBase: string,
+  args: {
+    movementId: string
+    payload: UpdateDeliveryTruckMovementInput
+  },
+): Promise<DeliveryTruckMovementRecord> {
+  const { movementId, payload } = args
+
+  return patchJson(`${apiBase}/truck-movements/${movementId}`, payload, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function cancelDeliveryTruckMovement(
+  apiBase: string,
+  args: {
+    movementId: string
+    payload: CancelDeliveryTruckMovementInput
+  },
+): Promise<DeliveryTruckMovementRecord> {
+  const { movementId, payload } = args
+
+  return postJson(`${apiBase}/truck-movements/${movementId}/cancel`, payload, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function createDeliveryTruckStop(
+  apiBase: string,
+  args: {
+    movementId: string
+    payload: DeliveryTruckStopCreateInput
+  },
+): Promise<DeliveryTruckMovementRecord> {
+  const { movementId, payload } = args
+
+  return postJson(`${apiBase}/truck-movements/${movementId}/stops`, payload, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function updateDeliveryTruckStop(
+  apiBase: string,
+  args: {
+    stopId: string
+    payload: UpdateDeliveryTruckStopInput
+  },
+): Promise<DeliveryTruckMovementRecord> {
+  const { stopId, payload } = args
+
+  return patchJson(`${apiBase}/truck-stops/${stopId}`, payload, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function skipDeliveryTruckStop(
+  apiBase: string,
+  args: {
+    stopId: string
+    payload: SkipDeliveryTruckStopInput
+  },
+): Promise<DeliveryTruckMovementRecord> {
+  const { stopId, payload } = args
+
+  return postJson(`${apiBase}/truck-stops/${stopId}/skip`, payload, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function cancelDeliveryTruckStop(
+  apiBase: string,
+  args: {
+    stopId: string
+    payload: CancelDeliveryTruckStopInput
+  },
+): Promise<DeliveryTruckMovementRecord> {
+  const { stopId, payload } = args
+
+  return postJson(`${apiBase}/truck-stops/${stopId}/cancel`, payload, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function recordDeliveryTruckStopCheckpoint(
+  apiBase: string,
+  args: {
+    stopId: string
+    payload: RecordDeliveryTruckStopCheckpointInput
+  },
+): Promise<DeliveryTruckMovementRecord> {
+  const { stopId, payload } = args
+
+  return postJson(`${apiBase}/truck-stops/${stopId}/checkpoints`, payload, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function reverseDeliveryTruckStopCheckpoint(
+  apiBase: string,
+  args: {
+    stopId: string
+    eventId: number
+    payload: ReverseDeliveryTruckStopCheckpointInput
+  },
+): Promise<DeliveryTruckMovementRecord> {
+  const { stopId, eventId, payload } = args
+
+  return postJson(`${apiBase}/truck-stops/${stopId}/checkpoints/${eventId}/reverse`, payload, {
     headers: shipmentHeaders(),
   })
 }

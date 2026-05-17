@@ -34,6 +34,9 @@ import {
   publicRuntimeSettings,
   spatialFeatures,
   spatialFeatureStandards,
+  smokeDeliveries,
+  smokeTruckMovements,
+  smokeTruckMovementSummaries,
   type RecordedRequest,
   selectedTradeEvents,
   smokeAccessToken,
@@ -52,6 +55,40 @@ import {
 type SmokeTradeRow = (typeof trades)[number]
 type SmokeEventRow = (typeof selectedTradeEvents)[number]
 type SmokeAssistantActionRequestRow = (typeof assistantActionRequests)[number]
+type SmokeAssistantProfileRequestKind = 'NEW_SPECIALIZATION' | 'EDIT_EXISTING' | 'NARROW_ACCESS'
+type SmokeAssistantProfileRequestStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'ACTIVATED'
+type SmokeAssistantProfileRequestRow = {
+  request_id: number
+  status: SmokeAssistantProfileRequestStatus
+  request_kind: SmokeAssistantProfileRequestKind
+  target_agent_id: string | null
+  requested_agent_id: string | null
+  change_summary: string | null
+  business_problem: string
+  proposed_mission: string
+  human_owner_role: string
+  requested_workspaces: string[]
+  work_objects: string[]
+  requested_inputs_tools: string[]
+  requested_action_types: string[]
+  requested_skills: string[]
+  expected_outputs: string[]
+  requested_authority_ceiling: string
+  stop_conditions: string[]
+  success_metrics: string[]
+  proposed_eval_cases: string[]
+  approval_notes: string | null
+  rejection_reason: string | null
+  linked_agent_id: string | null
+  linked_revision_id: number | null
+  requested_at: string
+  requested_by: string
+  reviewed_at: string | null
+  reviewed_by: string | null
+  activated_at: string | null
+  activated_by: string | null
+  updated_at: string
+}
 type SmokeAssistantFeedbackRating = 'HELPFUL' | 'NEEDS_WORK'
 type SmokeAssistantFeedbackRow = {
   feedback_id: number
@@ -235,6 +272,8 @@ function plainTextFromWikiMarkdown(markdown: string): string {
   return markdown
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
+    .replace(/\[\[([^[\]|]+)\|([^[\]]+)\]\]/g, '$1')
+    .replace(/\[\[([^[\]]+)\]\]/g, '$1')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
@@ -246,6 +285,31 @@ function plainTextFromWikiMarkdown(markdown: string): string {
     .replace(/[*_]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function parseWikiMarkdownLinks(markdown: string): Array<{ label: string; target: string }> {
+  const links: Array<{ label: string; target: string }> = []
+  const linkPattern = /\[\[([^[\]|]+)\|([^[\]]+)\]\]|\[\[([^[\]]+)\]\]/g
+
+  for (const match of markdown.matchAll(linkPattern)) {
+    if (typeof match[1] === 'string' && typeof match[2] === 'string') {
+      links.push({
+        label: match[1].trim(),
+        target: match[2].trim(),
+      })
+      continue
+    }
+
+    if (typeof match[3] === 'string') {
+      const label = match[3].trim()
+      links.push({
+        label,
+        target: label,
+      })
+    }
+  }
+
+  return links
 }
 
 function summarizeWikiMarkdown(markdown: string): string {
@@ -265,6 +329,17 @@ function summarizeWikiMarkdown(markdown: string): string {
 function countWikiWords(markdown: string): number {
   const plainText = plainTextFromWikiMarkdown(markdown)
   return plainText ? plainText.split(' ').filter(Boolean).length : 0
+}
+
+function isWikiPageArchived(page: SmokeWikiPageRow): boolean {
+  return page.archived_at !== null
+}
+
+function filterWikiPagesByArchiveState(
+  rows: SmokeWikiPageRow[],
+  isArchived: boolean,
+): SmokeWikiPageRow[] {
+  return rows.filter((page) => isWikiPageArchived(page) === isArchived)
 }
 
 function buildWikiChildCount(rows: SmokeWikiPageRow[], pageId: string): number {
@@ -300,6 +375,7 @@ function serializeWikiPageSummary(rows: SmokeWikiPageRow[], page: SmokeWikiPageR
     parent_page_id: page.parent_page_id,
     title: page.title,
     summary: summarizeWikiMarkdown(page.content_markdown),
+    links: parseWikiMarkdownLinks(page.content_markdown),
     child_count: buildWikiChildCount(rows, page.page_id),
     word_count: countWikiWords(page.content_markdown),
     sort_order: page.sort_order,
@@ -307,6 +383,9 @@ function serializeWikiPageSummary(rows: SmokeWikiPageRow[], page: SmokeWikiPageR
     created_by: page.created_by,
     updated_at: page.updated_at,
     updated_by: page.updated_by,
+    is_archived: isWikiPageArchived(page),
+    archived_at: page.archived_at,
+    archived_by: page.archived_by,
     version: page.version,
   }
 }
@@ -471,6 +550,10 @@ function validateWikiParentPage(
     return 'A wiki page cannot be its own parent'
   }
 
+  if (isWikiPageArchived(pagesById.get(parentPageId)!)) {
+    return 'Archived wiki pages cannot accept child pages'
+  }
+
   const descendants = pageId === null ? new Set<string>() : buildWikiDescendantIds(rows, pageId)
   if (pageId !== null && descendants.has(parentPageId)) {
     return 'A wiki page cannot move underneath one of its descendants'
@@ -493,18 +576,6 @@ function validateWikiParentPage(
 
   return null
 }
-
-const wikiSmokeHelperCatalog = {
-  sortWikiPages,
-  nextWikiTimestamp,
-  nextWikiSortOrder,
-  buildWikiChangeSummary,
-  recordWikiRevision,
-  serializeWikiPageDetail,
-  validateWikiParentPage,
-}
-void wikiSmokeHelperCatalog
-
 function writeJson(response: ServerResponse, payload: unknown, status = 200): void {
   response.writeHead(status, {
     'Content-Type': 'application/json',
@@ -708,20 +779,80 @@ async function startMockApiServer(
     }
   }
 
+  function cloneAssistantAgent(agent: (typeof assistantAdminAgents)[number]) {
+    return {
+      ...agent,
+      managed_agent_ids: [...agent.managed_agent_ids],
+      allowed_workspaces: [...agent.allowed_workspaces],
+      capabilities: [...agent.capabilities],
+      skills: [...agent.skills],
+      allowed_tools: [...agent.allowed_tools],
+      allowed_action_types: [...agent.allowed_action_types],
+      effective_policy: {
+        ...agent.effective_policy,
+        allowed_tools: agent.effective_policy.allowed_tools.map((decision) => ({ ...decision })),
+        blocked_tools: agent.effective_policy.blocked_tools.map((decision) => ({ ...decision })),
+        allowed_actions: agent.effective_policy.allowed_actions.map((decision) => ({ ...decision })),
+        blocked_actions: agent.effective_policy.blocked_actions.map((decision) => ({ ...decision })),
+        policy_notes: [...agent.effective_policy.policy_notes],
+      },
+      eval_gate: agent.eval_gate
+        ? {
+            ...agent.eval_gate,
+            required_cases: [...agent.eval_gate.required_cases],
+            covered_cases: [...agent.eval_gate.covered_cases],
+            missing_cases: [...agent.eval_gate.missing_cases],
+            notes: [...agent.eval_gate.notes],
+          }
+        : null,
+    }
+  }
+
+  function cloneAssistantProfileRequest(
+    request: SmokeAssistantProfileRequestRow,
+  ): SmokeAssistantProfileRequestRow {
+    return {
+      ...request,
+      requested_workspaces: [...request.requested_workspaces],
+      work_objects: [...request.work_objects],
+      requested_inputs_tools: [...request.requested_inputs_tools],
+      requested_action_types: [...request.requested_action_types],
+      requested_skills: [...request.requested_skills],
+      expected_outputs: [...request.expected_outputs],
+      stop_conditions: [...request.stop_conditions],
+      success_metrics: [...request.success_metrics],
+      proposed_eval_cases: [...request.proposed_eval_cases],
+    }
+  }
+
+  const assistantAgentOverrides = new Map<string, Record<string, unknown>>()
+  let nextAssistantAgentRevisionId = 7001
+
+  function currentAssistantAgent(agentId: string) {
+    const fixtureAgent = assistantAdminAgents.find((agent) => agent.agent_id === agentId)
+    if (!fixtureAgent) {
+      return null
+    }
+    return cloneAssistantAgent({
+      ...fixtureAgent,
+      ...(assistantAgentOverrides.get(agentId) ?? {}),
+    })
+  }
+
   const assistantActionRequestRows: SmokeAssistantActionRequestRow[] = assistantActionRequests.map(
     cloneAssistantActionRequest,
   )
+  const assistantProfileRequestRows: SmokeAssistantProfileRequestRow[] = []
+  let nextAssistantProfileRequestId = 9001
   const assistantRunFeedbackByRunId = new Map<number, SmokeAssistantFeedbackRow>()
   const assistantPromptNavigationOutcomeRows = new Map<string, SmokeAssistantPromptNavigationOutcomeRow>()
   const assistantConversationId = 902
   const assistantRunId = 8801
   const assistantRunRecordedAt = '2026-04-11T09:08:00Z'
   const assistantUserPrompt = 'Where should I handle the confirmation blocker?'
-  void wikiPageRevisionsByPageId
   let nextWikiPageSequence = wikiPageRows.length + 1
   let nextWikiRevisionId = wikiPageRows.length + 1
   let wikiMutationSequence = 0
-  void [nextWikiPageSequence, nextWikiRevisionId, wikiMutationSequence]
   let sessionExpired = false
   const runtimeSettings = {
     ...publicRuntimeSettings,
@@ -1243,6 +1374,7 @@ async function startMockApiServer(
       !(method === 'POST' && url.pathname === '/auth/logout') &&
       !(method === 'POST' && url.pathname === '/auth/session') &&
       !(method === 'POST' && url.pathname === '/auth/single-user-session') &&
+      !(method === 'POST' && url.pathname === '/assistant/context') &&
       !(method === 'POST' && url.pathname === '/assistant/respond') &&
       !(method === 'POST' && url.pathname === '/assistant/prompt-navigation-outcomes') &&
       !(method === 'POST' && /\/assistant\/runs\/\d+\/prompt-navigation-outcomes$/.test(url.pathname)) &&
@@ -1331,7 +1463,105 @@ async function startMockApiServer(
     }
 
     if (url.pathname === '/assistant/agents' && method === 'GET') {
-      writeJson(response, [])
+      writeJson(
+        response,
+        assistantAdminAgents
+          .map((agent) => currentAssistantAgent(agent.agent_id))
+          .filter((agent): agent is NonNullable<typeof agent> => Boolean(agent))
+          .filter((agent) => agent.status === 'ACTIVE'),
+      )
+      return
+    }
+
+    if (url.pathname === '/assistant/profile-requests' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const requestedStatus = url.searchParams.get('status')
+      const limit = Number(url.searchParams.get('limit') ?? '100')
+      const offset = Number(url.searchParams.get('offset') ?? '0')
+      const filteredRequests = assistantProfileRequestRows.filter(
+        (requestRow) =>
+          requestRow.requested_by === smokeSession.user.user_id &&
+          (!requestedStatus || requestRow.status === requestedStatus),
+      )
+      writeJson(
+        response,
+        filteredRequests
+          .slice(Math.max(offset, 0), Math.max(offset, 0) + Math.max(1, limit))
+          .map(cloneAssistantProfileRequest),
+      )
+      return
+    }
+
+    if (url.pathname === '/assistant/profile-requests' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const requestPayload = await readJsonBody(request)
+      const requestRecord =
+        requestPayload && typeof requestPayload === 'object' && !Array.isArray(requestPayload)
+          ? (requestPayload as Record<string, unknown>)
+          : {}
+      const now = '2026-04-11T09:10:00Z'
+      const createdRequest: SmokeAssistantProfileRequestRow = {
+        request_id: nextAssistantProfileRequestId,
+        status: 'REQUESTED',
+        request_kind:
+          requestRecord.request_kind === 'EDIT_EXISTING' || requestRecord.request_kind === 'NARROW_ACCESS'
+            ? requestRecord.request_kind
+            : 'NEW_SPECIALIZATION',
+        target_agent_id: normalizedReviewText(requestRecord.target_agent_id),
+        requested_agent_id: normalizedReviewText(requestRecord.requested_agent_id),
+        change_summary: normalizedReviewText(requestRecord.change_summary),
+        business_problem: normalizedReviewText(requestRecord.business_problem) ?? 'Smoke change request.',
+        proposed_mission: normalizedReviewText(requestRecord.proposed_mission) ?? 'Smoke governed profile update.',
+        human_owner_role: normalizedReviewText(requestRecord.human_owner_role) ?? 'Operations Lead',
+        requested_workspaces: Array.isArray(requestRecord.requested_workspaces)
+          ? requestRecord.requested_workspaces.filter((workspace): workspace is string => typeof workspace === 'string')
+          : [],
+        work_objects: Array.isArray(requestRecord.work_objects)
+          ? requestRecord.work_objects.filter((workObject): workObject is string => typeof workObject === 'string')
+          : [],
+        requested_inputs_tools: Array.isArray(requestRecord.requested_inputs_tools)
+          ? requestRecord.requested_inputs_tools.filter((tool): tool is string => typeof tool === 'string')
+          : [],
+        requested_action_types: Array.isArray(requestRecord.requested_action_types)
+          ? requestRecord.requested_action_types.filter((action): action is string => typeof action === 'string')
+          : [],
+        requested_skills: Array.isArray(requestRecord.requested_skills)
+          ? requestRecord.requested_skills.filter((skill): skill is string => typeof skill === 'string')
+          : [],
+        expected_outputs: Array.isArray(requestRecord.expected_outputs)
+          ? requestRecord.expected_outputs.filter((output): output is string => typeof output === 'string')
+          : [],
+        requested_authority_ceiling: normalizedReviewText(requestRecord.requested_authority_ceiling) ?? 'DRAFT',
+        stop_conditions: Array.isArray(requestRecord.stop_conditions)
+          ? requestRecord.stop_conditions.filter((condition): condition is string => typeof condition === 'string')
+          : [],
+        success_metrics: Array.isArray(requestRecord.success_metrics)
+          ? requestRecord.success_metrics.filter((metric): metric is string => typeof metric === 'string')
+          : [],
+        proposed_eval_cases: Array.isArray(requestRecord.proposed_eval_cases)
+          ? requestRecord.proposed_eval_cases.filter((evalCase): evalCase is string => typeof evalCase === 'string')
+          : [],
+        approval_notes: null,
+        rejection_reason: null,
+        linked_agent_id: null,
+        linked_revision_id: null,
+        requested_at: now,
+        requested_by: smokeSession.user.user_id,
+        reviewed_at: null,
+        reviewed_by: null,
+        activated_at: null,
+        activated_by: null,
+        updated_at: now,
+      }
+      nextAssistantProfileRequestId += 1
+      assistantProfileRequestRows.unshift(createdRequest)
+      writeJson(response, cloneAssistantProfileRequest(createdRequest), 201)
       return
     }
 
@@ -1683,14 +1913,86 @@ async function startMockApiServer(
 
       writeJson(
         response,
-        assistantAdminAgents.map((agent) => ({
-          ...agent,
-          allowed_workspaces: [...agent.allowed_workspaces],
-          capabilities: [...agent.capabilities],
-          allowed_tools: [...agent.allowed_tools],
-          allowed_action_types: [...agent.allowed_action_types],
-        })),
+        assistantAdminAgents
+          .map((agent) => currentAssistantAgent(agent.agent_id))
+          .filter((agent): agent is NonNullable<typeof agent> => Boolean(agent)),
       )
+      return
+    }
+
+    const updateAgentMatch = url.pathname.match(/^\/admin\/assistant\/agents\/([^/]+)$/)
+    if (updateAgentMatch && method === 'PUT') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const agentId = decodeURIComponent(updateAgentMatch[1] ?? '')
+      const currentAgent = currentAssistantAgent(agentId)
+      if (!currentAgent) {
+        writeJson(response, { detail: 'Assistant agent not found' }, 404)
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      const record =
+        payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>)
+          : {}
+      const nextRevisionId = nextAssistantAgentRevisionId
+      nextAssistantAgentRevisionId += 1
+      const now = '2026-04-11T09:12:45Z'
+      const nextStatus = normalizedReviewText(record.status) ?? currentAgent.status
+      const updatedBy = normalizedReviewText(record.updated_by) ?? smokeSession.user.user_id
+      const arrayOrCurrent = <T extends string>(value: unknown, current: T[]): T[] =>
+        Array.isArray(value) ? value.map((entry) => String(entry)) as T[] : [...current]
+
+      const updatedAgent = {
+        ...currentAgent,
+        name: normalizedReviewText(record.name) ?? currentAgent.name,
+        description: normalizedReviewText(record.description) ?? currentAgent.description,
+        status: nextStatus,
+        scope: normalizedReviewText(record.scope) ?? currentAgent.scope,
+        provider: normalizeOptionalText(record.provider),
+        model: normalizeOptionalText(record.model),
+        role_key: normalizeOptionalText(record.role_key),
+        profile_kind: normalizedReviewText(record.profile_kind) ?? currentAgent.profile_kind,
+        specialization_summary: normalizeOptionalText(record.specialization_summary),
+        human_owner_role: normalizeOptionalText(record.human_owner_role),
+        authority_ceiling: normalizeOptionalText(record.authority_ceiling),
+        activation_notes: normalizeOptionalText(record.activation_notes),
+        orchestration_pattern: normalizedReviewText(record.orchestration_pattern) ?? currentAgent.orchestration_pattern,
+        parent_agent_id: normalizeOptionalText(record.parent_agent_id),
+        managed_agent_ids: arrayOrCurrent(record.managed_agent_ids, currentAgent.managed_agent_ids),
+        delegation_guidance: normalizeOptionalText(record.delegation_guidance),
+        profile_request_id: normalizeOptionalNumber(record.profile_request_id),
+        allowed_workspaces: arrayOrCurrent(record.allowed_workspaces, currentAgent.allowed_workspaces),
+        capabilities: arrayOrCurrent(record.capabilities, currentAgent.capabilities),
+        skills: arrayOrCurrent(record.skills, currentAgent.skills),
+        allowed_tools: arrayOrCurrent(record.allowed_tools, currentAgent.allowed_tools),
+        allowed_action_types: arrayOrCurrent(record.allowed_action_types, currentAgent.allowed_action_types),
+        daily_token_allocation: normalizeOptionalNumber(record.daily_token_allocation),
+        system_prompt: normalizedReviewText(record.system_prompt) ?? currentAgent.system_prompt,
+        updated_at: now,
+        updated_by: updatedBy,
+        version: Number(currentAgent.version ?? 0) + 1,
+        latest_revision_id: nextRevisionId,
+        published_revision_id: nextStatus === 'DRAFT' ? currentAgent.published_revision_id ?? null : nextRevisionId,
+        published_at: nextStatus === 'DRAFT' ? currentAgent.published_at ?? null : now,
+        published_by: nextStatus === 'DRAFT' ? currentAgent.published_by ?? null : updatedBy,
+        has_unpublished_revision: nextStatus === 'DRAFT',
+      }
+      assistantAgentOverrides.set(agentId, updatedAgent)
+      writeJson(response, cloneAssistantAgent(updatedAgent))
+      return
+    }
+
+    const agentRevisionsMatch = url.pathname.match(/^\/admin\/assistant\/agents\/([^/]+)\/revisions$/)
+    if (agentRevisionsMatch && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
       return
     }
 
@@ -1707,13 +2009,26 @@ async function startMockApiServer(
           allowed_workspaces: [...role.allowed_workspaces],
           work_objects: [...role.work_objects],
           capability_ceiling: [...role.capability_ceiling],
+          skills: [...role.skills],
           default_tools: [...role.default_tools],
           maximum_action_types: [...role.maximum_action_types],
           approval_rules: [...role.approval_rules],
           stop_conditions: [...role.stop_conditions],
           success_metrics: [...role.success_metrics],
           required_eval_coverage: [...role.required_eval_coverage],
+          eval_gate: role.eval_gate
+            ? {
+                ...role.eval_gate,
+                required_cases: [...role.eval_gate.required_cases],
+                covered_cases: [...role.eval_gate.covered_cases],
+                missing_cases: [...role.eval_gate.missing_cases],
+                notes: [...role.eval_gate.notes],
+              }
+            : null,
           base_prompt_guidance: [...role.base_prompt_guidance],
+          recommended_parent_role_keys: [...role.recommended_parent_role_keys],
+          recommended_managed_role_keys: [...role.recommended_managed_role_keys],
+          delegation_guidance: [...role.delegation_guidance],
           current_profile_ids: [...role.current_profile_ids],
         })),
       )
@@ -1725,7 +2040,162 @@ async function startMockApiServer(
         return
       }
 
-      writeJson(response, [])
+      const requestedStatus = url.searchParams.get('status')
+      const limit = Number(url.searchParams.get('limit') ?? '100')
+      const offset = Number(url.searchParams.get('offset') ?? '0')
+      const filteredRequests = requestedStatus
+        ? assistantProfileRequestRows.filter((requestRow) => requestRow.status === requestedStatus)
+        : assistantProfileRequestRows
+      writeJson(
+        response,
+        filteredRequests
+          .slice(Math.max(offset, 0), Math.max(offset, 0) + Math.max(1, limit))
+          .map(cloneAssistantProfileRequest),
+      )
+      return
+    }
+
+    const approveProfileRequestMatch = url.pathname.match(/^\/admin\/assistant\/profile-requests\/(\d+)\/approve$/)
+    if (approveProfileRequestMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const requestId = Number(approveProfileRequestMatch[1])
+      const profileRequestIndex = assistantProfileRequestRows.findIndex(
+        (requestRow) => requestRow.request_id === requestId,
+      )
+      if (profileRequestIndex < 0) {
+        writeJson(response, { detail: 'Assistant agent profile request not found.' }, 404)
+        return
+      }
+
+      const currentRequest = assistantProfileRequestRows[profileRequestIndex]
+      if (currentRequest.status !== 'REQUESTED' && currentRequest.status !== 'APPROVED') {
+        writeJson(response, { detail: `Profile request ${requestId} cannot be approved from ${currentRequest.status}.` }, 409)
+        return
+      }
+
+      const decisionPayload = await readJsonBody(request)
+      const decisionRecord =
+        decisionPayload && typeof decisionPayload === 'object' && !Array.isArray(decisionPayload)
+          ? (decisionPayload as Record<string, unknown>)
+          : {}
+      const now = '2026-04-11T09:12:00Z'
+      const updatedRequest: SmokeAssistantProfileRequestRow = {
+        ...currentRequest,
+        status: 'APPROVED',
+        approval_notes: normalizedReviewText(decisionRecord.approval_notes) ?? 'Approved through smoke review.',
+        rejection_reason: null,
+        reviewed_at: now,
+        reviewed_by: normalizedReviewText(decisionRecord.reviewed_by) ?? smokeSession.user.user_id,
+        updated_at: now,
+      }
+      assistantProfileRequestRows[profileRequestIndex] = updatedRequest
+      writeJson(response, cloneAssistantProfileRequest(updatedRequest))
+      return
+    }
+
+    const activateProfileRequestMatch = url.pathname.match(/^\/admin\/assistant\/profile-requests\/(\d+)\/activate$/)
+    if (activateProfileRequestMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const requestId = Number(activateProfileRequestMatch[1])
+      const profileRequestIndex = assistantProfileRequestRows.findIndex(
+        (requestRow) => requestRow.request_id === requestId,
+      )
+      if (profileRequestIndex < 0) {
+        writeJson(response, { detail: 'Assistant agent profile request not found.' }, 404)
+        return
+      }
+
+      const currentRequest = assistantProfileRequestRows[profileRequestIndex]
+      if (currentRequest.status !== 'APPROVED' && currentRequest.status !== 'ACTIVATED') {
+        writeJson(response, { detail: `Profile request ${requestId} must be approved before activation.` }, 409)
+        return
+      }
+
+      const activationPayload = await readJsonBody(request)
+      const activationRecord =
+        activationPayload && typeof activationPayload === 'object' && !Array.isArray(activationPayload)
+          ? (activationPayload as Record<string, unknown>)
+          : {}
+      const linkedAgentId =
+        normalizedReviewText(activationRecord.linked_agent_id) ??
+        currentRequest.linked_agent_id ??
+        currentRequest.target_agent_id
+      const linkedRevisionId = normalizeOptionalNumber(activationRecord.linked_revision_id)
+      const linkedAgent = linkedAgentId ? currentAssistantAgent(linkedAgentId) : null
+      if (!linkedAgentId || !linkedAgent || !linkedRevisionId) {
+        writeJson(response, { detail: 'Profile request activation requires a linked agent and published revision.' }, 422)
+        return
+      }
+      if (
+        linkedAgent.profile_request_id !== currentRequest.request_id ||
+        linkedAgent.published_revision_id !== linkedRevisionId
+      ) {
+        writeJson(
+          response,
+          { detail: 'Linked agent revision must carry the approved profile request before activation.' },
+          422,
+        )
+        return
+      }
+      const now = '2026-04-11T09:13:00Z'
+      const updatedRequest: SmokeAssistantProfileRequestRow = {
+        ...currentRequest,
+        status: 'ACTIVATED',
+        linked_agent_id: linkedAgentId,
+        linked_revision_id: linkedRevisionId,
+        activated_at: now,
+        activated_by: normalizedReviewText(activationRecord.activated_by) ?? smokeSession.user.user_id,
+        updated_at: now,
+      }
+      assistantProfileRequestRows[profileRequestIndex] = updatedRequest
+      writeJson(response, cloneAssistantProfileRequest(updatedRequest))
+      return
+    }
+
+    const rejectProfileRequestMatch = url.pathname.match(/^\/admin\/assistant\/profile-requests\/(\d+)\/reject$/)
+    if (rejectProfileRequestMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const requestId = Number(rejectProfileRequestMatch[1])
+      const profileRequestIndex = assistantProfileRequestRows.findIndex(
+        (requestRow) => requestRow.request_id === requestId,
+      )
+      if (profileRequestIndex < 0) {
+        writeJson(response, { detail: 'Assistant agent profile request not found.' }, 404)
+        return
+      }
+
+      const currentRequest = assistantProfileRequestRows[profileRequestIndex]
+      if (currentRequest.status === 'ACTIVATED' || currentRequest.status === 'REJECTED') {
+        writeJson(response, { detail: `Profile request ${requestId} cannot be rejected from ${currentRequest.status}.` }, 409)
+        return
+      }
+
+      const decisionPayload = await readJsonBody(request)
+      const decisionRecord =
+        decisionPayload && typeof decisionPayload === 'object' && !Array.isArray(decisionPayload)
+          ? (decisionPayload as Record<string, unknown>)
+          : {}
+      const now = '2026-04-11T09:12:30Z'
+      const updatedRequest: SmokeAssistantProfileRequestRow = {
+        ...currentRequest,
+        status: 'REJECTED',
+        approval_notes: null,
+        rejection_reason: normalizedReviewText(decisionRecord.rejection_reason) ?? 'Rejected through smoke review.',
+        reviewed_at: now,
+        reviewed_by: normalizedReviewText(decisionRecord.reviewed_by) ?? smokeSession.user.user_id,
+        updated_at: now,
+      }
+      assistantProfileRequestRows[profileRequestIndex] = updatedRequest
+      writeJson(response, cloneAssistantProfileRequest(updatedRequest))
       return
     }
 
@@ -2404,8 +2874,20 @@ async function startMockApiServer(
         return
       }
 
+      const includeArchived = url.searchParams.get('include_archived') === 'true'
+      const visiblePages = includeArchived
+        ? sortWikiPages(wikiPageRows)
+        : sortWikiPages(filterWikiPagesByArchiveState(wikiPageRows, false))
+      const activePages = filterWikiPagesByArchiveState(visiblePages, false)
+      const archivedPages = filterWikiPagesByArchiveState(visiblePages, true)
+
       writeJson(response, {
-        pages: sortWikiPages(wikiPageRows).map((page) => serializeWikiPageSummary(wikiPageRows, page)),
+        pages: visiblePages.map((page) =>
+          serializeWikiPageSummary(
+            isWikiPageArchived(page) ? archivedPages : activePages,
+            page,
+          ),
+        ),
       })
       return
     }
@@ -2463,6 +2945,8 @@ async function startMockApiServer(
         created_by: smokeSession.user.user_id,
         updated_at: timestamp,
         updated_by: smokeSession.user.user_id,
+        archived_at: null,
+        archived_by: null,
         version: 1,
       } satisfies SmokeWikiPageRow
       nextWikiPageSequence += 1
@@ -2477,7 +2961,15 @@ async function startMockApiServer(
       })
       nextWikiRevisionId += 1
 
-      writeJson(response, serializeWikiPageDetail(wikiPageRows, wikiPageRevisionsByPageId, createdPage), 201)
+      writeJson(
+        response,
+        serializeWikiPageDetail(
+          filterWikiPagesByArchiveState(wikiPageRows, false),
+          wikiPageRevisionsByPageId,
+          createdPage,
+        ),
+        201,
+      )
       return
     }
 
@@ -2492,6 +2984,10 @@ async function startMockApiServer(
       const page = wikiPageRows.find((entry) => entry.page_id === pageId)
       if (!page) {
         writeJson(response, { detail: `Wiki page '${pageId}' was not found` }, 404)
+        return
+      }
+      if (isWikiPageArchived(page)) {
+        writeJson(response, { detail: 'Archived wiki pages must be restored before applying a revision' }, 422)
         return
       }
 
@@ -2546,7 +3042,14 @@ async function startMockApiServer(
       })
       nextWikiRevisionId += 1
 
-      writeJson(response, serializeWikiPageDetail(wikiPageRows, wikiPageRevisionsByPageId, page))
+      writeJson(
+        response,
+        serializeWikiPageDetail(
+          filterWikiPagesByArchiveState(wikiPageRows, false),
+          wikiPageRevisionsByPageId,
+          page,
+        ),
+      )
       return
     }
 
@@ -2563,7 +3066,14 @@ async function startMockApiServer(
         return
       }
 
-      writeJson(response, serializeWikiPageDetail(wikiPageRows, wikiPageRevisionsByPageId, page))
+      writeJson(
+        response,
+        serializeWikiPageDetail(
+          filterWikiPagesByArchiveState(wikiPageRows, isWikiPageArchived(page)),
+          wikiPageRevisionsByPageId,
+          page,
+        ),
+      )
       return
     }
 
@@ -2576,6 +3086,10 @@ async function startMockApiServer(
       const page = wikiPageRows.find((entry) => entry.page_id === pageId)
       if (!page) {
         writeJson(response, { detail: `Wiki page '${pageId}' was not found` }, 404)
+        return
+      }
+      if (isWikiPageArchived(page)) {
+        writeJson(response, { detail: 'Archived wiki pages must be restored before editing' }, 422)
         return
       }
 
@@ -2640,7 +3154,14 @@ async function startMockApiServer(
         nextSortOrder !== page.sort_order
 
       if (!effectiveChange) {
-        writeJson(response, serializeWikiPageDetail(wikiPageRows, wikiPageRevisionsByPageId, page))
+        writeJson(
+          response,
+          serializeWikiPageDetail(
+            filterWikiPagesByArchiveState(wikiPageRows, false),
+            wikiPageRevisionsByPageId,
+            page,
+          ),
+        )
         return
       }
 
@@ -2673,7 +3194,150 @@ async function startMockApiServer(
       })
       nextWikiRevisionId += 1
 
-      writeJson(response, serializeWikiPageDetail(wikiPageRows, wikiPageRevisionsByPageId, page))
+      writeJson(
+        response,
+        serializeWikiPageDetail(
+          filterWikiPagesByArchiveState(wikiPageRows, false),
+          wikiPageRevisionsByPageId,
+          page,
+        ),
+      )
+      return
+    }
+
+    const wikiPageArchiveMatch = url.pathname.match(/^\/wiki\/pages\/([^/]+)\/archive$/)
+    if (wikiPageArchiveMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const pageId = decodeURIComponent(wikiPageArchiveMatch[1] ?? '')
+      const page = wikiPageRows.find((entry) => entry.page_id === pageId)
+      if (!page) {
+        writeJson(response, { detail: `Wiki page '${pageId}' was not found` }, 404)
+        return
+      }
+      if (isWikiPageArchived(page)) {
+        writeJson(
+          response,
+          serializeWikiPageDetail(
+            filterWikiPagesByArchiveState(wikiPageRows, true),
+            wikiPageRevisionsByPageId,
+            page,
+          ),
+        )
+        return
+      }
+
+      const descendantIds = buildWikiDescendantIds(wikiPageRows, pageId)
+      const timestamp = nextWikiTimestamp(++wikiMutationSequence)
+      const targetPageIds = new Set<string>([pageId, ...descendantIds])
+
+      wikiPageRows.forEach((currentPage) => {
+        if (!targetPageIds.has(currentPage.page_id)) {
+          return
+        }
+
+        currentPage.archived_at = timestamp
+        currentPage.archived_by = smokeSession.user.user_id
+        currentPage.updated_at = timestamp
+        currentPage.updated_by = smokeSession.user.user_id
+        currentPage.version += 1
+        recordWikiRevision({
+          revisionsByPageId: wikiPageRevisionsByPageId,
+          nextRevisionId: nextWikiRevisionId,
+          page: currentPage,
+          createdAt: timestamp,
+          createdBy: smokeSession.user.user_id,
+          changeSummary: [
+            currentPage.page_id === pageId
+              ? 'Archived page.'
+              : `Archived with parent page '${page.title}'.`,
+          ],
+        })
+        nextWikiRevisionId += 1
+      })
+
+      writeJson(
+        response,
+        serializeWikiPageDetail(
+          filterWikiPagesByArchiveState(wikiPageRows, true),
+          wikiPageRevisionsByPageId,
+          page,
+        ),
+      )
+      return
+    }
+
+    const wikiPageUnarchiveMatch = url.pathname.match(/^\/wiki\/pages\/([^/]+)\/unarchive$/)
+    if (wikiPageUnarchiveMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const pageId = decodeURIComponent(wikiPageUnarchiveMatch[1] ?? '')
+      const page = wikiPageRows.find((entry) => entry.page_id === pageId)
+      if (!page) {
+        writeJson(response, { detail: `Wiki page '${pageId}' was not found` }, 404)
+        return
+      }
+      if (!isWikiPageArchived(page)) {
+        writeJson(
+          response,
+          serializeWikiPageDetail(
+            filterWikiPagesByArchiveState(wikiPageRows, false),
+            wikiPageRevisionsByPageId,
+            page,
+          ),
+        )
+        return
+      }
+
+      if (page.parent_page_id) {
+        const parentPage = wikiPageRows.find((entry) => entry.page_id === page.parent_page_id)
+        if (parentPage && isWikiPageArchived(parentPage)) {
+          writeJson(response, { detail: 'Restore the archived parent page before restoring this page' }, 422)
+          return
+        }
+      }
+
+      const descendantIds = buildWikiDescendantIds(wikiPageRows, pageId)
+      const timestamp = nextWikiTimestamp(++wikiMutationSequence)
+      const targetPageIds = new Set<string>([pageId, ...descendantIds])
+
+      wikiPageRows.forEach((currentPage) => {
+        if (!targetPageIds.has(currentPage.page_id)) {
+          return
+        }
+
+        currentPage.archived_at = null
+        currentPage.archived_by = null
+        currentPage.updated_at = timestamp
+        currentPage.updated_by = smokeSession.user.user_id
+        currentPage.version += 1
+        recordWikiRevision({
+          revisionsByPageId: wikiPageRevisionsByPageId,
+          nextRevisionId: nextWikiRevisionId,
+          page: currentPage,
+          createdAt: timestamp,
+          createdBy: smokeSession.user.user_id,
+          changeSummary: [
+            currentPage.page_id === pageId
+              ? 'Restored page from archive.'
+              : `Restored with parent page '${page.title}'.`,
+          ],
+        })
+        nextWikiRevisionId += 1
+      })
+
+      writeJson(
+        response,
+        serializeWikiPageDetail(
+          filterWikiPagesByArchiveState(wikiPageRows, false),
+          wikiPageRevisionsByPageId,
+          page,
+        ),
+      )
       return
     }
 
@@ -2780,7 +3444,29 @@ async function startMockApiServer(
     }
 
     if (url.pathname === '/deliveries' && method === 'GET') {
-      writeJson(response, [])
+      writeJson(response, smokeDeliveries)
+      return
+    }
+
+    const truckMovementListMatch = /^\/deliveries\/([^/]+)\/truck-movements$/.exec(url.pathname)
+    if (truckMovementListMatch && method === 'GET') {
+      const deliveryId = decodeURIComponent(truckMovementListMatch[1])
+      writeJson(
+        response,
+        smokeTruckMovementSummaries.filter((movement) => movement.delivery_id === deliveryId),
+      )
+      return
+    }
+
+    const truckMovementDetailMatch = /^\/truck-movements\/([^/]+)$/.exec(url.pathname)
+    if (truckMovementDetailMatch && method === 'GET') {
+      const movementId = decodeURIComponent(truckMovementDetailMatch[1])
+      const movement = smokeTruckMovements.find((row) => row.movement_id === movementId)
+      if (!movement) {
+        writeJson(response, { detail: 'Truck movement not found' }, 404)
+        return
+      }
+      writeJson(response, movement)
       return
     }
 

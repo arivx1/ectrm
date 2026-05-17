@@ -586,12 +586,11 @@
   gap: 0.85rem;
 }
 
-.prompt-home-communication-inbox,
-.prompt-home-communication-thread {
+.prompt-home-communication-record-list {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.6rem;
   min-width: 0;
-  padding: 0.9rem;
+  padding: 0.45rem;
   border: 1px solid rgba(18, 42, 56, 0.08);
   border-radius: 1rem;
   background:
@@ -599,21 +598,11 @@
     rgba(255, 255, 255, 0.05);
 }
 
-.prompt-home-communication-inbox {
-  align-content: start;
-}
-
-.prompt-home-communication-inbox-item {
-  display: grid;
-  gap: 0.45rem;
-  width: 100%;
-  padding: 0.8rem 0.85rem;
+.prompt-home-communication-record {
+  overflow: hidden;
   border: 1px solid rgba(18, 42, 56, 0.08);
-  border-radius: 0.95rem;
-  background: rgba(255, 255, 255, 0.05);
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.04);
   transition:
     border-color 160ms ease,
     background-color 160ms ease,
@@ -621,38 +610,56 @@
     box-shadow 160ms ease;
 }
 
-.prompt-home-communication-inbox-item:hover,
-.prompt-home-communication-inbox-item:focus-visible,
-.prompt-home-communication-inbox-item.is-selected {
+.prompt-home-communication-record:hover,
+.prompt-home-communication-record:focus-within,
+.prompt-home-communication-record.is-expanded {
   transform: translateY(-1px);
   border-color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.28);
   background:
     linear-gradient(180deg, rgb(var(--theme-highlight-rgb, 78 167 255) / 0.09), transparent),
     rgba(255, 255, 255, 0.08);
   box-shadow: 0 14px 30px rgba(8, 20, 31, 0.08);
-  outline: none;
 }
 
-.prompt-home-communication-inbox-item-head,
-.prompt-home-communication-inbox-item-foot {
+.prompt-home-communication-record-toggle {
+  display: grid;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.75rem 0.9rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.prompt-home-communication-record-toggle:focus-visible {
+  outline: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.38);
+  outline-offset: -2px;
+}
+
+.prompt-home-communication-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.prompt-home-communication-record-side {
   display: flex;
   flex-wrap: wrap;
   gap: 0.55rem;
   align-items: center;
-  justify-content: space-between;
 }
 
-.prompt-home-communication-inbox-item-head {
-  align-items: baseline;
-}
-
-.prompt-home-communication-inbox-item-head small,
-.prompt-home-communication-inbox-item-foot span,
-.prompt-home-communication-thread-copy p,
-.prompt-home-communication-thread-side small,
-.prompt-home-communication-thread-message-head span,
-.prompt-home-communication-thread-reply p,
-.prompt-home-communication-thread-reply small {
+.prompt-home-communication-record-side small,
+.prompt-home-communication-record-panel-copy p,
+.prompt-home-communication-record-panel-head small,
+.prompt-home-communication-record-panel-preview,
+.prompt-home-communication-record-panel-message p,
+.prompt-home-communication-record-panel-reply p,
+.prompt-home-communication-record-panel-reply small {
   margin: 0;
   color: var(--color-copy-muted, #66717c);
   line-height: 1.5;
@@ -664,28 +671,21 @@
   font-weight: 700;
 }
 
-.prompt-home-communication-inbox-item-copy {
-  display: grid;
-  gap: 0.16rem;
+.prompt-home-communication-record-copy {
+  min-width: 0;
 }
 
-.prompt-home-communication-inbox-item-copy strong,
-.prompt-home-communication-thread-copy strong {
+.prompt-home-communication-record-copy strong,
+.prompt-home-communication-record-panel-copy strong,
+.prompt-home-communication-record-panel-reply strong {
   font-size: 1rem;
   line-height: 1.18;
 }
 
-.prompt-home-communication-inbox-item-copy p,
-.prompt-home-communication-thread-message p {
-  margin: 0;
-  line-height: 1.58;
-}
-
-.prompt-home-communication-inbox-item-copy p {
-  color: var(--color-copy-muted, #66717c);
+.prompt-home-communication-record-copy strong {
   display: -webkit-box;
   overflow: hidden;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
 }
 
@@ -745,93 +745,74 @@
   color: rgb(12 138 105 / 0.96);
 }
 
-.prompt-home-communication-thread {
-  align-content: start;
+.prompt-home-communication-record-side {
+  justify-content: flex-start;
 }
 
-.prompt-home-communication-thread-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.75rem 1rem;
-  align-items: start;
-}
-
-.prompt-home-communication-thread-copy,
-.prompt-home-communication-thread-reply {
-  display: grid;
-  gap: 0.3rem;
-}
-
-.prompt-home-communication-thread-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-  align-items: center;
-}
-
-.prompt-home-communication-thread-meta span {
-  color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.96);
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-
-.prompt-home-communication-thread-side {
-  display: grid;
-  gap: 0.35rem;
-  justify-items: end;
-  text-align: right;
-}
-
-.prompt-home-communication-thread-message {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.8rem;
-  align-items: start;
-}
-
-.prompt-home-communication-thread-avatar {
+.prompt-home-communication-record-indicator {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 0.8rem;
-  background:
-    linear-gradient(180deg, rgb(var(--theme-highlight-rgb, 78 167 255) / 0.88), rgb(var(--theme-highlight-rgb, 78 167 255) / 0.58)),
-    rgba(18, 42, 56, 0.16);
-  color: #ffffff;
-  font-size: 0.76rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  width: 1.8rem;
+  height: 1.8rem;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.18);
+  border-radius: 999px;
+  color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.96);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
-.prompt-home-communication-thread-bubble {
+.prompt-home-communication-record.is-expanded
+  .prompt-home-communication-record-indicator {
+  background: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.12);
+}
+
+.prompt-home-communication-record-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0 0.95rem 0.95rem;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.prompt-home-communication-record-panel[hidden] {
+  display: none;
+}
+
+.prompt-home-communication-record-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-top: 0.8rem;
+}
+
+.prompt-home-communication-record-panel-copy {
+  display: grid;
+  gap: 0.16rem;
+  min-width: 0;
+}
+
+.prompt-home-communication-record-panel-preview {
+  padding: 0 0.1rem;
+}
+
+.prompt-home-communication-record-panel-message,
+.prompt-home-communication-record-panel-reply {
   display: grid;
   gap: 0.45rem;
-  padding: 0.9rem 0.95rem;
-  border: 1px solid rgba(18, 42, 56, 0.08);
+  padding: 0.85rem 0.9rem;
   border-radius: 1rem;
+}
+
+.prompt-home-communication-record-panel-message {
+  border: 1px solid rgba(18, 42, 56, 0.08);
   background: rgba(255, 255, 255, 0.06);
 }
 
-.prompt-home-communication-thread-message-head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
-  align-items: baseline;
-  justify-content: space-between;
-}
-
-.prompt-home-communication-thread-message-head strong,
-.prompt-home-communication-thread-reply strong {
-  color: inherit;
-}
-
-.prompt-home-communication-thread-reply {
-  padding: 0.85rem 0.9rem;
+.prompt-home-communication-record-panel-reply {
   border: 1px dashed rgb(var(--theme-highlight-rgb, 78 167 255) / 0.24);
-  border-radius: 1rem;
   background: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.05);
 }
 
@@ -840,10 +821,15 @@
   gap: 0.35rem;
 }
 
-@media (min-width: 920px) {
-  .prompt-home-communication-shell {
-    grid-template-columns: minmax(18rem, 0.9fr) minmax(0, 1.3fr);
-    align-items: start;
+@media (min-width: 780px) {
+  .prompt-home-communication-record-toggle {
+    grid-template-columns: minmax(10rem, auto) minmax(0, 1fr) auto;
+    gap: 0.75rem 1rem;
+    align-items: center;
+  }
+
+  .prompt-home-communication-record-side {
+    justify-content: flex-end;
   }
 }
 

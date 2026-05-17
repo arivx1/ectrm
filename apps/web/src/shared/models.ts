@@ -171,6 +171,128 @@ export type DeliveryEventRecord = {
   version: number
 }
 
+export type TruckMovementStatus =
+  | 'PLANNED'
+  | 'ASSIGNED'
+  | 'EN_ROUTE_TO_STOP'
+  | 'AT_STOP'
+  | 'IN_TRANSIT'
+  | 'ON_HOLD'
+  | 'COMPLETED'
+  | 'CANCELLED'
+
+export type TruckStopStatus =
+  | 'PLANNED'
+  | 'EN_ROUTE'
+  | 'ARRIVED'
+  | 'WORKING'
+  | 'DEPARTED'
+  | 'SKIPPED'
+  | 'CANCELLED'
+
+export type TruckStopType = 'PICKUP' | 'DROPOFF' | 'WAYPOINT'
+
+export type TruckCheckpointCode =
+  | 'ARRIVED_PICKUP'
+  | 'DEPARTED_PICKUP'
+  | 'ARRIVED_DESTINATION'
+
+export type DeliveryTruckDetailRecord = {
+  delivery_id: string
+  target_run_count: number | null
+  dispatcher_owner: string | null
+  tracking_provider: string | null
+  tracking_policy: string | null
+  default_carrier_name: string | null
+  default_carrier_name_source: DeliveryFieldSource
+  default_external_carrier_reference: string | null
+  default_external_carrier_reference_source: DeliveryFieldSource
+  equipment_type: string | null
+  equipment_type_source: DeliveryFieldSource
+  origin_geofence_code: string | null
+  origin_geofence_code_source: DeliveryFieldSource
+  destination_geofence_code: string | null
+  destination_geofence_code_source: DeliveryFieldSource
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type DeliveryTruckStopRecord = {
+  stop_id: string
+  movement_id: string
+  stop_sequence: number
+  stop_type: TruckStopType
+  status: TruckStopStatus
+  status_reason: string | null
+  location_code: string | null
+  location_code_source: DeliveryFieldSource
+  planned_arrival_start: string | null
+  planned_arrival_end: string | null
+  planned_departure_start: string | null
+  planned_departure_end: string | null
+  appointment_reference: string | null
+  appointment_reference_source: DeliveryFieldSource
+  planned_quantity: number | null
+  actual_quantity: number | null
+  actual_arrived_at: string | null
+  actual_departed_at: string | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type DeliveryTruckMovementSummaryRecord = {
+  movement_id: string
+  delivery_id: string
+  sequence_no: number
+  status: TruckMovementStatus
+  status_reason: string | null
+  planned_quantity: number | null
+  planned_unit_of_measure: string | null
+  carrier_name: string | null
+  carrier_name_source: DeliveryFieldSource
+  external_carrier_reference: string | null
+  external_carrier_reference_source: DeliveryFieldSource
+  dispatcher_owner: string | null
+  dispatcher_owner_source: DeliveryFieldSource
+  current_stop_sequence: number | null
+  current_location_code: string | null
+  last_signal_at: string | null
+  current_eta_at_destination: string | null
+  hold_reason_code: string | null
+  hold_reason_code_source: DeliveryFieldSource
+  stop_count: number
+  active_stop_count: number
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type DeliveryTruckMovementRecord = DeliveryTruckMovementSummaryRecord & {
+  driver_name: string | null
+  driver_name_source: DeliveryFieldSource
+  driver_phone: string | null
+  driver_phone_source: DeliveryFieldSource
+  tractor_reference: string | null
+  tractor_reference_source: DeliveryFieldSource
+  trailer_reference: string | null
+  trailer_reference_source: DeliveryFieldSource
+  external_load_reference: string | null
+  external_load_reference_source: DeliveryFieldSource
+  bill_of_lading_number: string | null
+  bill_of_lading_number_source: DeliveryFieldSource
+  truck_ticket_number: string | null
+  truck_ticket_number_source: DeliveryFieldSource
+  stops: DeliveryTruckStopRecord[]
+}
+
 export type DeliveryRecord = {
   delivery_id: string
   trade_id: string
@@ -226,6 +348,9 @@ export type DeliveryRecord = {
   load_reference_source: DeliveryFieldSource | null
   discharge_reference: string | null
   discharge_reference_source: DeliveryFieldSource | null
+  truck_detail?: DeliveryTruckDetailRecord | null
+  truck_movement_count?: number
+  active_truck_movement_count?: number
   rail_route_code: string | null
   rail_route_code_source: DeliveryFieldSource | null
   rail_line_code: string | null
@@ -678,6 +803,16 @@ export type DocumentUnderstandingClassificationEvidenceRecord = {
   automated_document_subtype: string | null
 }
 
+export type DocumentUnderstandingClassificationAssessmentRecord = {
+  assessment_version: string | null
+  document_kind: string | null
+  document_subtype: string | null
+  confidence: number | null
+  matched_by: string | null
+  supporting_evidence: string[]
+  conflicts: string[]
+}
+
 export type DocumentIngestionPageUnderstandingRecord = {
   bundle_version: string
   text_stats: DocumentUnderstandingTextStatsRecord
@@ -686,6 +821,7 @@ export type DocumentIngestionPageUnderstandingRecord = {
   visual_signals: DocumentUnderstandingVisualSignalsRecord
   content_fingerprint: DocumentUnderstandingContentFingerprintRecord
   classification_evidence: DocumentUnderstandingClassificationEvidenceRecord
+  deterministic_assessment: DocumentUnderstandingClassificationAssessmentRecord
 }
 
 export type DocumentIngestionUnderstandingRecord = {
@@ -695,6 +831,7 @@ export type DocumentIngestionUnderstandingRecord = {
   structure_signals: DocumentUnderstandingStructureSignalsRecord
   visual_signals: DocumentUnderstandingDocumentVisualSummaryRecord
   content_fingerprint: DocumentUnderstandingContentFingerprintRecord
+  deterministic_assessment: DocumentUnderstandingClassificationAssessmentRecord
 }
 
 export type DocumentRoutingCandidateRecord = {
@@ -2502,6 +2639,7 @@ export type AssistantAgentSkillKey =
   | 'inter_agent_consultation'
 export type AssistantAgentRoleCatalogStatus = 'SEEDED' | 'TEMPLATE' | 'PHASE_1' | 'PHASE_2_PLUS'
 export type AssistantAgentProfileKind = 'CURATED' | 'ROLE_DERIVED' | 'CUSTOM'
+export type AssistantAgentProfileRequestKind = 'NEW_SPECIALIZATION' | 'EDIT_EXISTING' | 'NARROW_ACCESS'
 export type AssistantAgentProfileRequestStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'ACTIVATED'
 export type AssistantAgentEvalGateStatus = 'PASS' | 'BLOCKED' | 'NOT_REQUIRED'
 export type AssistantAgentAuthorityLevel =
@@ -2874,13 +3012,18 @@ export type AssistantAgentRoleArchetype = {
 export type AssistantAgentProfileRequest = {
   request_id: number
   status: AssistantAgentProfileRequestStatus
+  request_kind: AssistantAgentProfileRequestKind
+  target_agent_id: string | null
   requested_agent_id: string | null
+  change_summary: string | null
   business_problem: string
   proposed_mission: string
   human_owner_role: string
   requested_workspaces: ViewKey[]
   work_objects: string[]
   requested_inputs_tools: string[]
+  requested_action_types: AssistantActionType[]
+  requested_skills: AssistantAgentSkillKey[]
   expected_outputs: string[]
   requested_authority_ceiling: AssistantAgentAuthorityLevel
   stop_conditions: string[]
@@ -2889,6 +3032,7 @@ export type AssistantAgentProfileRequest = {
   approval_notes: string | null
   rejection_reason: string | null
   linked_agent_id: string | null
+  linked_revision_id: number | null
   requested_at: string
   requested_by: string
   reviewed_at: string | null
@@ -3088,6 +3232,7 @@ export type AssistantPromptNavigationFocusType =
   | 'invoice'
   | 'payment'
   | 'reference_record'
+  | 'market_instrument'
   | 'report'
 export type AssistantPromptNavigationSignal = 'OBSERVE' | 'CANDIDATE_FOR_RULE' | 'NARROW' | 'RETIRE'
 

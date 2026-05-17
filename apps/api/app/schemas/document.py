@@ -360,6 +360,16 @@ class DocumentUnderstandingClassificationEvidenceOut(BaseModel):
     automated_document_subtype: Optional[str] = None
 
 
+class DocumentUnderstandingClassificationAssessmentOut(BaseModel):
+    assessment_version: Optional[str] = None
+    document_kind: Optional[str] = None
+    document_subtype: Optional[str] = None
+    confidence: Optional[float] = Field(default=None, ge=0, le=1)
+    matched_by: Optional[str] = None
+    supporting_evidence: list[str] = Field(default_factory=list)
+    conflicts: list[str] = Field(default_factory=list)
+
+
 class DocumentIngestionPageUnderstandingOut(BaseModel):
     bundle_version: str = "document-understanding-v1"
     text_stats: DocumentUnderstandingTextStatsOut = Field(default_factory=DocumentUnderstandingTextStatsOut)
@@ -373,6 +383,9 @@ class DocumentIngestionPageUnderstandingOut(BaseModel):
     )
     classification_evidence: DocumentUnderstandingClassificationEvidenceOut = Field(
         default_factory=DocumentUnderstandingClassificationEvidenceOut
+    )
+    deterministic_assessment: DocumentUnderstandingClassificationAssessmentOut = Field(
+        default_factory=DocumentUnderstandingClassificationAssessmentOut
     )
 
 
@@ -388,6 +401,9 @@ class DocumentIngestionUnderstandingOut(BaseModel):
     )
     content_fingerprint: DocumentUnderstandingContentFingerprintOut = Field(
         default_factory=DocumentUnderstandingContentFingerprintOut
+    )
+    deterministic_assessment: DocumentUnderstandingClassificationAssessmentOut = Field(
+        default_factory=DocumentUnderstandingClassificationAssessmentOut
     )
 
 

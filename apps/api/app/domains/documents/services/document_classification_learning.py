@@ -135,6 +135,7 @@ def initialize_page_classification_payload(
     source: str,
     provider: str | None = None,
     model: str | None = None,
+    deterministic_assessment: dict[str, object] | None = None,
 ) -> dict[str, object]:
     content_features = build_document_content_features(raw_text)
     payload: dict[str, object] = {
@@ -158,6 +159,8 @@ def initialize_page_classification_payload(
         "learning_example_count": 0,
         "learning_version": LEARNING_VERSION,
     }
+    if deterministic_assessment is not None:
+        payload["deterministic_assessment"] = deterministic_assessment
     if provider is not None:
         payload["system_classification_provider"] = provider
     if model is not None:

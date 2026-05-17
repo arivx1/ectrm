@@ -15,12 +15,44 @@ import type { PnlHistoryPoint, PnlHistoryReport, Trade as TradeRecord, ViewKey }
 import { buildUnitLabelByCommodity, summarizeUnitLabels } from '../../shared/unitDisplay'
 import { MetricValue } from '../../shared/ui/MetricValue'
 import { TileLayout } from '../../shared/ui/TileLayout'
+import { WorkspaceHandoffFocusBanner } from '../../shared/ui/WorkspaceHandoffFocusBanner'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import type { StoredAuthSession } from '../../shared/mutation'
+import {
+  buildDashboardInstrumentBrief,
+  buildDashboardInstrumentHandoff,
+  resolveDashboardInstrumentBriefSelection,
+  type DashboardInstrumentBriefSelection,
+} from './dashboardInstrumentBrief'
+import {
+  DASHBOARD_DESK_HEADLINE_CONCERNS,
+  DASHBOARD_DESK_HEADLINE_SEVERITIES,
+  buildDashboardDeskHeadlines,
+  filterDashboardDeskHeadlines,
+  formatDashboardDeskHeadlineConcern,
+  formatDashboardDeskHeadlineSeverity,
+  type DashboardDeskHeadlineConcern,
+  type DashboardDeskHeadlineItem,
+  type DashboardDeskHeadlineSeverity,
+} from './dashboardDeskHeadlines'
+import { buildDashboardMarketMonitorSummary } from './dashboardMarketMonitor'
+import {
+  DASHBOARD_WATCHLIST_STORAGE_KEY,
+  buildDefaultDashboardWatchlist,
+  evaluateDashboardWatchlistAlerts,
+  formatDashboardWatchlistAlertCondition,
+  formatDashboardWatchlistAlertSeverity,
+  formatDashboardWatchlistObjectType,
+  parseDashboardWatchlist,
+  serializeDashboardWatchlist,
+  type DashboardWatchlist,
+  type DashboardWatchlistAlert,
+  type DashboardWatchlistAlertSeverity,
+} from './dashboardWatchlists'
 import { loadDashboardPnlHistory } from './pnlHistoryLoader'
 import { ExternalSeriesTileContent } from './ExternalSeriesPanel'
 import { MarketContextTileContent } from './MarketContextPanel'
-import { MarketPricesTileContent } from './MarketPricesPanel'
+import { MarketMonitorStripTileContent, MarketPricesTileContent } from './MarketPricesPanel'
 import { WeatherIntelligenceTileContent } from './WeatherIntelligencePanel'
 import {
   CHART_HEIGHT,
@@ -54,13 +86,19 @@ type PriceIndexRecord = {
   unit_code: string
   currency_code: string
   is_active: boolean
+  commodity_class?: string | null
+  commodity_code?: string | null
+  market?: string | null
+  location_code?: string | null
 }
 
 type DashboardWorkspaceProps = {
   authSession: StoredAuthSession | null
+  routeHandoff?: AppRouteHandoff | null
   globalFilter: string
   onOpenView: (view: ViewKey, handoff?: AppRouteHandoff | null) => void
   onOpenTrade: (tradeId: string) => void
+  onClearHandoff?: () => void
   appLoading: boolean
   activeTrades: TradeRecord[]
   dashboardSummary: WorkspaceDashboardSummary | null
@@ -83,6 +121,12 @@ type DashboardIssueRow = {
 }
 
 const DASHBOARD_CANDIDATE_LIMIT = 8
+
+type DashboardViewAction = {
+  label: string
+  view: ViewKey
+  variant?: 'secondary' | 'ghost'
+}
 
 function ageInDays(value: string | null | undefined): number | null {
   if (!value) {
@@ -169,6 +213,10 @@ function matchesDashboardPriceIndexFilter(priceIndex: PriceIndexRecord, query: s
     priceIndex.provider,
     priceIndex.unit_code,
     priceIndex.currency_code,
+    priceIndex.commodity_class,
+    priceIndex.commodity_code,
+    priceIndex.market,
+    priceIndex.location_code,
     priceIndex.is_active,
   ])
 }
@@ -256,6 +304,64 @@ function summarizeCandidateStatuses(candidate: {
     `Payment ${candidate.payment_status}`,
     `Settlement ${candidate.settlement_status}`,
   ].join(' • ')
+}
+
+function headlineSeverityTone(severity: DashboardDeskHeadlineSeverity): 'active' | 'blocked' | 'in-progress' {
+  switch (severity) {
+    case 'critical':
+      return 'blocked'
+    case 'warning':
+      return 'in-progress'
+    case 'info':
+      return 'active'
+  }
+}
+
+function watchlistAlertSeverityTone(severity: DashboardWatchlistAlertSeverity): 'active' | 'blocked' | 'in-progress' {
+  switch (severity) {
+    case 'critical':
+      return 'blocked'
+    case 'warning':
+      return 'in-progress'
+    case 'info':
+      return 'active'
+  }
+}
+
+function readDashboardWatchlistFromStorage(): DashboardWatchlist | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    return parseDashboardWatchlist(window.localStorage.getItem(DASHBOARD_WATCHLIST_STORAGE_KEY))
+  } catch {
+    return null
+  }
+}
+
+function writeDashboardWatchlistToStorage(watchlist: DashboardWatchlist): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(DASHBOARD_WATCHLIST_STORAGE_KEY, serializeDashboardWatchlist(watchlist))
+  } catch {
+    // Local storage can be blocked in hardened browser contexts; the in-memory watchlist still works.
+  }
+}
+
+function removeDashboardWatchlistFromStorage(): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.removeItem(DASHBOARD_WATCHLIST_STORAGE_KEY)
+  } catch {
+    // Storage cleanup is best-effort only.
+  }
 }
 
 function formatDateInputValue(value: Date): string {
@@ -591,9 +697,11 @@ function PnlTrendChart({
 export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const {
     authSession,
+    routeHandoff = null,
     globalFilter,
     onOpenView,
     onOpenTrade,
+    onClearHandoff,
     appLoading,
     activeTrades,
     dashboardSummary,
@@ -614,6 +722,10 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const [dateToFilter, setDateToFilter] = useState('')
   const [screenFilter, setScreenFilter] = useState('')
   const [activeAttentionIssue, setActiveAttentionIssue] = useState<DashboardIssueRow | null>(null)
+  const [headlineCommodityFilter, setHeadlineCommodityFilter] = useState('ALL')
+  const [headlineConcernFilter, setHeadlineConcernFilter] = useState<DashboardDeskHeadlineConcern | 'ALL'>('ALL')
+  const [headlineSeverityFilter, setHeadlineSeverityFilter] = useState<DashboardDeskHeadlineSeverity | 'ALL'>('ALL')
+  const [savedWatchlist, setSavedWatchlist] = useState<DashboardWatchlist | null>(() => readDashboardWatchlistFromStorage())
   const [attentionCandidates, setAttentionCandidates] = useState<TradeAttentionCandidateList | null>(null)
   const [attentionCandidatesLoading, setAttentionCandidatesLoading] = useState(false)
   const [attentionCandidatesError, setAttentionCandidatesError] = useState('')
@@ -865,6 +977,12 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
       cancelled = true
     }
   }, [activeAttentionIssue, authSession, hasScreenFilter])
+
+  useEffect(() => {
+    if (savedWatchlist) {
+      writeDashboardWatchlistToStorage(savedWatchlist)
+    }
+  }, [savedWatchlist])
 
   const unitLabelByCommodity = useMemo(() => buildUnitLabelByCommodity(activeTrades), [activeTrades])
   const canUseDashboardSummary = !hasScreenFilter && dashboardSummary !== null
@@ -1204,6 +1322,80 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
       ] as DashboardIssueRow[],
     }
   }, [canUseDashboardSummary, dashboardSummary, visibleActiveTrades])
+  const defaultWatchlist = useMemo(
+    () =>
+      buildDefaultDashboardWatchlist({
+        activeTrades: visibleActiveTrades,
+        priceIndices: visiblePriceIndices,
+        exposureByClass,
+      }),
+    [exposureByClass, visibleActiveTrades, visiblePriceIndices],
+  )
+  const effectiveWatchlist = savedWatchlist ?? defaultWatchlist
+  const watchlistAlerts = useMemo(
+    () =>
+      evaluateDashboardWatchlistAlerts({
+        watchlist: effectiveWatchlist,
+        priceIndices: visiblePriceIndices,
+        exposureByClass,
+        issues: dashboardIssues.rows,
+        activeTrades: visibleActiveTrades,
+      }),
+    [dashboardIssues.rows, effectiveWatchlist, exposureByClass, visibleActiveTrades, visiblePriceIndices],
+  )
+  const marketMonitorSummary = useMemo(
+    () =>
+      buildDashboardMarketMonitorSummary({
+        activeTrades: visibleActiveTrades,
+        exposureByClass,
+        issues: dashboardIssues.rows,
+        events: visibleEvents,
+      }),
+    [dashboardIssues.rows, exposureByClass, visibleActiveTrades, visibleEvents],
+  )
+  const deskHeadlines = useMemo(
+    () =>
+      buildDashboardDeskHeadlines({
+        activeTrades: visibleActiveTrades,
+        priceIndices: visiblePriceIndices,
+        exposureByClass,
+        issues: dashboardIssues.rows,
+        events: visibleEvents,
+      }),
+    [dashboardIssues.rows, exposureByClass, visibleActiveTrades, visibleEvents, visiblePriceIndices],
+  )
+  const filteredDeskHeadlines = useMemo(
+    () =>
+      filterDashboardDeskHeadlines(deskHeadlines, {
+        commodityClass: headlineCommodityFilter,
+        concern: headlineConcernFilter,
+        severity: headlineSeverityFilter,
+      }),
+    [deskHeadlines, headlineCommodityFilter, headlineConcernFilter, headlineSeverityFilter],
+  )
+  const deskHeadlineCommodityOptions = useMemo(
+    () =>
+      [...new Set(deskHeadlines.map((item) => item.commodityClass).filter((value): value is string => Boolean(value)))]
+        .sort(),
+    [deskHeadlines],
+  )
+  const instrumentBriefSelection = useMemo(
+    () => resolveDashboardInstrumentBriefSelection(routeHandoff),
+    [routeHandoff],
+  )
+  const instrumentBrief = useMemo(
+    () =>
+      instrumentBriefSelection
+        ? buildDashboardInstrumentBrief({
+            selection: instrumentBriefSelection,
+            activeTrades,
+            priceIndices,
+            positionsWithClass,
+            events,
+          })
+        : null,
+    [activeTrades, events, instrumentBriefSelection, positionsWithClass, priceIndices],
+  )
   const activeAttentionSummary = activeAttentionIssue && attentionCandidates
     ? `${formatNumber(attentionCandidates.count, 0)} of ${formatNumber(attentionCandidates.total_count, 0)} candidate trades loaded.`
     : null
@@ -1244,6 +1436,517 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     view: ViewKey
     actionLabel: string
   }>
+  const marketMonitorActions: DashboardViewAction[] = [
+    { label: 'Open Reports', view: 'reports', variant: 'secondary' },
+    { label: 'Open Risk', view: 'risk' },
+    { label: 'Open Operations', view: 'operations' },
+    { label: 'Open Activity', view: 'events' },
+    { label: 'Open Trades', view: 'trades' },
+  ]
+  const marketPriceActions: DashboardViewAction[] = [
+    { label: 'Open Reports', view: 'reports', variant: 'secondary' },
+    { label: 'Open Trades', view: 'trades' },
+  ]
+  const marketContextActions: DashboardViewAction[] = [
+    { label: 'Open Reports', view: 'reports', variant: 'secondary' },
+    { label: 'Open Activity', view: 'events' },
+  ]
+  const positionActions: DashboardViewAction[] = [
+    { label: 'Open Positions', view: 'positions', variant: 'secondary' },
+    { label: 'Open Risk', view: 'risk' },
+  ]
+  const weatherActions: DashboardViewAction[] = [
+    { label: 'Open Map', view: 'map', variant: 'secondary' },
+    { label: 'Open Reports', view: 'reports' },
+  ]
+  const timelineActions: DashboardViewAction[] = [
+    { label: 'Open Activity Feed', view: 'events', variant: 'secondary' },
+    { label: 'Open Operations', view: 'operations' },
+  ]
+
+  function renderTileActions(actions: DashboardViewAction[]) {
+    return (
+      <div className="workflow-item-button-row dashboard-tile-action-row">
+        {actions.map((action) => (
+          <button
+            key={`${action.view}-${action.label}`}
+            type="button"
+            className={`button ${action.variant === 'secondary' ? 'button-secondary' : 'button-ghost'}`}
+            onClick={() => onOpenView(action.view)}
+          >
+            {action.label}
+          </button>
+        ))}
+      </div>
+    )
+  }
+
+  function openInstrumentBrief(selection: DashboardInstrumentBriefSelection): void {
+    onOpenView('dashboard', buildDashboardInstrumentHandoff(selection))
+  }
+
+  function openPriceIndexBrief(priceIndex: PriceIndexRecord): void {
+    openInstrumentBrief({
+      kind: 'price_index',
+      id: priceIndex.code,
+      label: priceIndex.name,
+    })
+  }
+
+  function openCommodityClassBrief(commodityClass: string): void {
+    openInstrumentBrief({
+      kind: 'commodity_class',
+      id: commodityClass,
+      label: formatCommodityClass(commodityClass),
+    })
+  }
+
+  function clearInstrumentBrief(): void {
+    if (onClearHandoff) {
+      onClearHandoff()
+      return
+    }
+
+    onOpenView('dashboard', null)
+  }
+
+  function openDeskHeadline(item: DashboardDeskHeadlineItem): void {
+    if (item.source.type === 'trade') {
+      onOpenTrade(item.source.id)
+      return
+    }
+
+    onOpenView(item.ownerView)
+  }
+
+  function deskHeadlineActionLabel(item: DashboardDeskHeadlineItem): string {
+    return item.source.type === 'trade' ? 'Open Trade' : `Open ${item.ownerView}`
+  }
+
+  function saveLiveDeskWatchlist(): void {
+    setSavedWatchlist(
+      buildDefaultDashboardWatchlist({
+        activeTrades: visibleActiveTrades,
+        priceIndices: visiblePriceIndices,
+        exposureByClass,
+      }),
+    )
+  }
+
+  function resetTerminalWatchlist(): void {
+    setSavedWatchlist(null)
+    removeDashboardWatchlistFromStorage()
+  }
+
+  function openWatchlistAlert(alert: DashboardWatchlistAlert): void {
+    if (alert.objectType === 'price_index') {
+      const priceIndex = visiblePriceIndices.find((candidate) => candidate.code === alert.objectId)
+      if (priceIndex) {
+        openPriceIndexBrief(priceIndex)
+        return
+      }
+    }
+
+    if (alert.objectType === 'commodity_class') {
+      openCommodityClassBrief(alert.objectId)
+      return
+    }
+
+    onOpenView(alert.ownerView)
+  }
+
+  function watchlistAlertActionLabel(alert: DashboardWatchlistAlert): string {
+    return alert.objectType === 'price_index' || alert.objectType === 'commodity_class'
+      ? 'Open Brief'
+      : `Open ${alert.ownerView}`
+  }
+
+  function renderWatchlistAlertsContent() {
+    const isSavedWatchlist = savedWatchlist !== null
+    const visibleAlerts = watchlistAlerts.slice(0, 6)
+    const visibleItems = effectiveWatchlist.items.slice(0, 6)
+
+    return (
+      <div className="watchlist-alert-panel">
+        <div className="watchlist-alert-head">
+          <div className="watchlist-alert-copy">
+            <span>{isSavedWatchlist ? 'Saved terminal watchlist' : 'Preview terminal watchlist'}</span>
+            <strong>{effectiveWatchlist.name}</strong>
+            <p>
+              {isSavedWatchlist
+                ? `Saved terminal watchlist updated ${formatDate(effectiveWatchlist.updatedAt)}.`
+                : 'Previewing a live desk watchlist built from the current market tape, largest exposure, and desk signals.'}
+            </p>
+          </div>
+          <div className="workflow-item-button-row dashboard-tile-action-row watchlist-alert-actions">
+            <button
+              type="button"
+              className="button button-secondary"
+              aria-label="Save Watchlist"
+              onClick={saveLiveDeskWatchlist}
+            >
+              Save Watchlist
+            </button>
+            {isSavedWatchlist ? (
+              <button type="button" className="button button-ghost" onClick={resetTerminalWatchlist}>
+                Reset Watchlist
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="dashboard-report-grid watchlist-alert-stat-grid">
+          <article className="dashboard-report-card">
+            <span>Watched Items</span>
+            <strong>{formatNumber(effectiveWatchlist.items.length, 0)}</strong>
+            <p>Price indices, commodity classes, and desk signals powering this terminal tile.</p>
+          </article>
+          <article className="dashboard-report-card">
+            <span>Alert Rules</span>
+            <strong>{formatNumber(effectiveWatchlist.alertRules.length, 0)}</strong>
+            <p>Typed thresholds covering price moves, stale data, exposure, pricing, and settlement.</p>
+          </article>
+          <article className="dashboard-report-card">
+            <span>Triggered</span>
+            <strong>{formatNumber(watchlistAlerts.length, 0)}</strong>
+            <p>Governed in-product statuses evaluated from deterministic dashboard data.</p>
+          </article>
+        </div>
+
+        {visibleItems.length > 0 ? (
+          <div className="watchlist-item-strip" aria-label="Saved watchlist items">
+            {visibleItems.map((item) => (
+              <span key={`${item.objectType}-${item.objectId}`} className="entity-chip entity-chip-soft">
+                {formatDashboardWatchlistObjectType(item.objectType)} ·{' '}
+                {item.objectType === 'commodity_class' ? formatCommodityClass(item.objectId) : item.label}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">
+            <strong>No watchlist items yet</strong>
+            <p>Save the live desk watchlist to capture the current terminal-mode market focus.</p>
+          </div>
+        )}
+
+        {visibleAlerts.length > 0 ? (
+          <div className="watchlist-alert-list">
+            {visibleAlerts.map((alert) => (
+              <article key={alert.id} className="watchlist-alert-row">
+                <div className="watchlist-alert-row-copy">
+                  <div className="watchlist-alert-title-row">
+                    <span className={`status-pill status-pill-${watchlistAlertSeverityTone(alert.severity)}`}>
+                      {formatDashboardWatchlistAlertSeverity(alert.severity)}
+                    </span>
+                    <span>{formatDashboardWatchlistAlertCondition(alert.conditionType)}</span>
+                  </div>
+                  <strong>{alert.title}</strong>
+                  <p>{alert.detail}</p>
+                  <small>Source: {alert.sourceLabel}</small>
+                </div>
+                <div className="watchlist-alert-row-meta">
+                  <span>Triggered</span>
+                  <button type="button" className="button button-ghost" onClick={() => openWatchlistAlert(alert)}>
+                    {watchlistAlertActionLabel(alert)}
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">
+            <strong>Watchlist rules are clear</strong>
+            <p>No saved alert condition is currently crossing its typed threshold in this dashboard view.</p>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function renderDeskHeadlinesContent() {
+    const hasHeadlineFilters =
+      headlineCommodityFilter !== 'ALL' || headlineConcernFilter !== 'ALL' || headlineSeverityFilter !== 'ALL'
+
+    return (
+      <div className="desk-headline-panel">
+        <div className="desk-headline-toolbar" aria-label="Filter desk headlines">
+          <label>
+            <span>Commodity</span>
+            <select
+              value={headlineCommodityFilter}
+              onChange={(event) => setHeadlineCommodityFilter(event.target.value)}
+              aria-label="Filter headlines by commodity"
+            >
+              <option value="ALL">All commodities</option>
+              {deskHeadlineCommodityOptions.map((commodityClass) => (
+                <option key={commodityClass} value={commodityClass}>
+                  {formatCommodityClass(commodityClass)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Concern</span>
+            <select
+              value={headlineConcernFilter}
+              onChange={(event) =>
+                setHeadlineConcernFilter(event.target.value as DashboardDeskHeadlineConcern | 'ALL')
+              }
+              aria-label="Filter headlines by concern"
+            >
+              <option value="ALL">All concerns</option>
+              {DASHBOARD_DESK_HEADLINE_CONCERNS.map((concern) => (
+                <option key={concern} value={concern}>
+                  {formatDashboardDeskHeadlineConcern(concern)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Severity</span>
+            <select
+              value={headlineSeverityFilter}
+              onChange={(event) =>
+                setHeadlineSeverityFilter(event.target.value as DashboardDeskHeadlineSeverity | 'ALL')
+              }
+              aria-label="Filter headlines by severity"
+            >
+              <option value="ALL">All severities</option>
+              {DASHBOARD_DESK_HEADLINE_SEVERITIES.map((severity) => (
+                <option key={severity} value={severity}>
+                  {formatDashboardDeskHeadlineSeverity(severity)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {filteredDeskHeadlines.length > 0 ? (
+          <div className="desk-headline-list">
+            {filteredDeskHeadlines.slice(0, 8).map((item) => (
+              <article key={item.id} className="desk-headline-row">
+                <div className="desk-headline-copy">
+                  <div className="desk-headline-title-row">
+                    <span className={`status-pill status-pill-${headlineSeverityTone(item.severity)}`}>
+                      {formatDashboardDeskHeadlineSeverity(item.severity)}
+                    </span>
+                    <span>{formatDashboardDeskHeadlineConcern(item.concern)}</span>
+                    {item.commodityClass ? <span>{formatCommodityClass(item.commodityClass)}</span> : null}
+                  </div>
+                  <strong>{item.title}</strong>
+                  <p>{item.detail}</p>
+                  <small>Source: {item.source.label}</small>
+                </div>
+                <div className="desk-headline-meta">
+                  <span>{item.timestamp ? formatDate(item.timestamp) : 'Live'}</span>
+                  <button type="button" className="button button-ghost" onClick={() => openDeskHeadline(item)}>
+                    {deskHeadlineActionLabel(item)}
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">
+            <strong>
+              {deskHeadlines.length > 0
+                ? 'No headlines match these filters'
+                : visibleActiveTrades.length + visiblePositionsWithClass.length + visiblePriceIndices.length === 0
+                  ? 'No headline source data'
+                  : visibleEvents.length === 0
+                    ? 'No active attention or workflow events'
+                    : 'No desk headlines'}
+            </strong>
+            <p>
+              {deskHeadlines.length > 0 && hasHeadlineFilters
+                ? 'Broaden the commodity, concern, or severity filter to bring more terminal headlines back into view.'
+                : 'The feed only promotes deterministic market, workflow, exposure, and activity evidence.'}
+            </p>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function renderInstrumentBriefContent() {
+    if (!instrumentBriefSelection) {
+      return (
+        <div className="empty-state">
+          <strong>No instrument selected</strong>
+          <p>Open a price index or commodity-class brief from the market strip, monitor board, or exposure cards.</p>
+        </div>
+      )
+    }
+
+    if (!instrumentBrief) {
+      return (
+        <div className="empty-state">
+          <strong>Unsupported instrument brief</strong>
+          <p>
+            The requested market instrument is not available in the current dashboard data. Clear the focus to return
+            to the live board.
+          </p>
+          <button type="button" className="button button-secondary" onClick={clearInstrumentBrief}>
+            Clear Brief
+          </button>
+        </div>
+      )
+    }
+
+    const pricedBriefTrades = instrumentBrief.relatedTrades.filter(
+      (trade) => trade.price !== null && trade.volume !== null,
+    ).length
+    const pricingCoverage =
+      instrumentBrief.relatedTrades.length > 0
+        ? Math.round((pricedBriefTrades / instrumentBrief.relatedTrades.length) * 100)
+        : null
+    const netBriefExposure = instrumentBrief.relatedPositions.reduce(
+      (sum, position) => sum + position.net_volume,
+      0,
+    )
+    const briefExposureUnitLabel = summarizeUnitLabels(
+      instrumentBrief.relatedTrades.map((trade) => trade.unit_of_measure),
+    )
+    const ownerAction: DashboardViewAction =
+      instrumentBrief.ownerView === 'reference'
+        ? { label: 'Open Reference Data', view: 'reference', variant: 'secondary' }
+        : { label: 'Open Positions', view: 'positions', variant: 'secondary' }
+
+    return (
+      <div className="instrument-brief-panel">
+        <div className="instrument-brief-head">
+          <div className="instrument-brief-copy">
+            <span>
+              {instrumentBrief.selection.kind === 'price_index' ? 'Price Index' : 'Commodity Class'} Brief
+            </span>
+            <strong>{instrumentBrief.title}</strong>
+            <p>{instrumentBrief.subtitle}</p>
+          </div>
+          <div className="workflow-item-button-row dashboard-tile-action-row">
+            <button type="button" className="button button-ghost" onClick={clearInstrumentBrief}>
+              Clear Brief
+            </button>
+          </div>
+        </div>
+
+        <div className="dashboard-report-grid instrument-brief-summary-grid">
+          <article className="dashboard-report-card">
+            <span>Related Trades</span>
+            <strong>{formatNumber(instrumentBrief.relatedTrades.length, 0)}</strong>
+            <p>Active trades connected by curve, commodity, or commodity class.</p>
+          </article>
+          <article className="dashboard-report-card">
+            <span>Pricing Coverage</span>
+            <strong>{pricingCoverage === null ? '—' : `${formatNumber(pricingCoverage, 0)}%`}</strong>
+            <p>{countLabel(pricedBriefTrades, 'priced trade')} in this brief.</p>
+          </article>
+          <article className="dashboard-report-card">
+            <span>Net Exposure</span>
+            {instrumentBrief.relatedPositions.length > 0 ? (
+              <MetricValue value={formatNumber(netBriefExposure, 0)} unit={briefExposureUnitLabel} />
+            ) : (
+              <strong>—</strong>
+            )}
+            <p>{countLabel(instrumentBrief.relatedPositions.length, 'position row')} linked to the brief.</p>
+          </article>
+          <article className="dashboard-report-card">
+            <span>Recent Events</span>
+            <strong>{formatNumber(instrumentBrief.relatedEvents.length, 0)}</strong>
+            <p>Workflow events attached to the related trade set.</p>
+          </article>
+        </div>
+
+        {instrumentBrief.linkedPriceIndices.length > 0 ? (
+          <section className="instrument-brief-section">
+            <div className="instrument-brief-section-head">
+              <strong>Linked Curves</strong>
+              <p>Current market history for the curves tied to this brief.</p>
+            </div>
+            <MarketPricesTileContent
+              appLoading={appLoading}
+              activeTrades={instrumentBrief.relatedTrades}
+              priceIndices={instrumentBrief.linkedPriceIndices}
+              formatNumber={formatNumber}
+            />
+          </section>
+        ) : null}
+
+        <div className="instrument-brief-section-grid">
+          <section className="instrument-brief-section">
+            <div className="instrument-brief-section-head">
+              <strong>Related Trades</strong>
+              <p>Open the ticket for commercial, lifecycle, and event detail.</p>
+            </div>
+            {instrumentBrief.relatedTrades.length > 0 ? (
+              <div className="instrument-brief-row-list">
+                {instrumentBrief.relatedTrades.slice(0, 5).map((trade) => (
+                  <article key={trade.trade_id} className="instrument-brief-row">
+                    <div className="instrument-brief-row-copy">
+                      <strong>{trade.trade_id}</strong>
+                      <p>
+                        {trade.book} - {trade.commodity} - {trade.counterparty ?? 'Counterparty TBD'}
+                      </p>
+                    </div>
+                    <div className="instrument-brief-row-meta">
+                      <span className={`status-pill status-pill-${trade.pricing_status === 'PRICED' ? 'active' : 'blocked'}`}>
+                        {trade.pricing_status}
+                      </span>
+                      <button
+                        type="button"
+                        className="button button-ghost"
+                        onClick={() => onOpenTrade(trade.trade_id)}
+                      >
+                        Open Trade
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">
+                <strong>No related trades</strong>
+                <p>This brief is supported by reference and market-data context, but no active trade is linked yet.</p>
+              </div>
+            )}
+          </section>
+
+          <section className="instrument-brief-section">
+            <div className="instrument-brief-section-head">
+              <strong>Recent Activity</strong>
+              <p>Latest workflow events for the related trade set.</p>
+            </div>
+            {instrumentBrief.relatedEvents.length > 0 ? (
+              <div className="instrument-brief-row-list">
+                {instrumentBrief.relatedEvents.slice(0, 5).map((event) => (
+                  <article key={event.event_id} className="instrument-brief-row">
+                    <div className="instrument-brief-row-copy">
+                      <strong>{event.event_type}</strong>
+                      <p>
+                        {event.aggregate_id} - {event.aggregate_type}
+                      </p>
+                    </div>
+                    <span>{formatDate(event.recorded_at)}</span>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">
+                <strong>No recent activity</strong>
+                <p>No workflow events are attached to the related trade set yet.</p>
+              </div>
+            )}
+          </section>
+        </div>
+
+        {renderTileActions([
+          ownerAction,
+          { label: 'Open Trades', view: 'trades' },
+          { label: 'Open Reports', view: 'reports' },
+          { label: 'Open Risk', view: 'risk' },
+        ])}
+      </div>
+    )
+  }
 
   return (
     <TileLayout
@@ -1251,24 +1954,237 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
       workspaceLabel="Live Desk"
       authSession={authSession}
       headerContent={
-        <WorkspaceLocalFilterBar
-          value={screenFilter}
-          onChange={setScreenFilter}
-          placeholder="Trade, commodity, event, book, counterparty, price index, or workflow status"
-          description="Keep dashboard filtering local to this screen so you can narrow live desk context without changing any other workspace."
-          totalCount={activeTrades.length + positionsWithClass.length + events.length + priceIndices.length}
-          matchedCount={
-            visibleActiveTrades.length +
-            visiblePositionsWithClass.length +
-            visibleEvents.length +
-            visiblePriceIndices.length
-          }
-          resultLabel="dashboard records"
-          globalValue={globalFilter}
-          note="The local search narrows the live snapshot, exposure, market-price, and timeline cards. The P&L history module keeps using its own book, class, and date controls."
-        />
+        <>
+          <WorkspaceHandoffFocusBanner
+            handoff={routeHandoff}
+            currentView="dashboard"
+            clearLabel="Show Full Dashboard"
+            onClear={clearInstrumentBrief}
+          />
+          <WorkspaceLocalFilterBar
+            value={screenFilter}
+            onChange={setScreenFilter}
+            placeholder="Trade, commodity, event, book, counterparty, price index, or workflow status"
+            description="Keep dashboard filtering local to this screen so you can narrow live desk context without changing any other workspace."
+            totalCount={activeTrades.length + positionsWithClass.length + events.length + priceIndices.length}
+            matchedCount={
+              visibleActiveTrades.length +
+              visiblePositionsWithClass.length +
+              visibleEvents.length +
+              visiblePriceIndices.length
+            }
+            resultLabel="dashboard records"
+            globalValue={globalFilter}
+            note="The local search narrows the live snapshot, exposure, market-price, and timeline cards. The P&L history module keeps using its own book, class, and date controls."
+          />
+        </>
       }
       tiles={[
+        {
+          id: 'market-monitor-strip',
+          eyebrow: 'Market Tape',
+          title: 'Market Monitor Strip',
+          description: 'Compact price tape for the desk curves already tied to active trades, with partial coverage called out inline.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: (
+            <div className="dashboard-tile-action-shell">
+              <MarketMonitorStripTileContent
+                appLoading={appLoading}
+                activeTrades={visibleActiveTrades}
+                priceIndices={visiblePriceIndices}
+                formatNumber={formatNumber}
+                onOpenPriceIndexBrief={openPriceIndexBrief}
+              />
+              {renderTileActions(marketPriceActions)}
+            </div>
+          ),
+        },
+        {
+          id: 'market-monitor-board',
+          eyebrow: 'Desk Monitor',
+          title: 'Market Monitor Board',
+          description: 'Cross-panel market focus, pricing coverage, attention queues, and fast drill-throughs for a terminal-style first screen.',
+          span: 'wide',
+          availableSpans: ['full', 'wide', 'half'],
+          content: appLoading ? (
+            <div className="skeleton-stack">
+              <div className="skeleton-block" />
+              <div className="skeleton-block" />
+            </div>
+          ) : (
+            <div className="market-monitor-board">
+              <div className="dashboard-report-grid market-monitor-summary-grid">
+                <article className="dashboard-report-card">
+                  <span>Active Trades</span>
+                  <strong>{formatNumber(marketMonitorSummary.activeTradeCount, 0)}</strong>
+                  <p>
+                    {countLabel(marketMonitorSummary.focusRows.length, 'commodity class')} currently represented in
+                    the live monitor.
+                  </p>
+                </article>
+                <article className="dashboard-report-card">
+                  <span>Pricing Coverage</span>
+                  <strong>
+                    {marketMonitorSummary.pricedTradeCoveragePercent === null
+                      ? '—'
+                      : `${formatNumber(marketMonitorSummary.pricedTradeCoveragePercent, 0)}%`}
+                  </strong>
+                  <p>
+                    {countLabel(marketMonitorSummary.pricedTradeCount, 'priced trade')} out of{' '}
+                    {countLabel(marketMonitorSummary.activeTradeCount, 'active trade')} in the current board.
+                  </p>
+                </article>
+                <article className="dashboard-report-card">
+                  <span>Attention Queue</span>
+                  <strong>{formatNumber(marketMonitorSummary.issueCount, 0)}</strong>
+                  <p>
+                    {marketMonitorSummary.priorityRows[0]
+                      ? `${marketMonitorSummary.priorityRows[0].label} is leading the watchlist right now.`
+                      : 'No active operational backlog is currently leading the watchlist.'}
+                  </p>
+                </article>
+                <article className="dashboard-report-card">
+                  <span>Latest Event</span>
+                  <strong>
+                    {marketMonitorSummary.latestEventAt
+                      ? formatDate(marketMonitorSummary.latestEventAt)
+                      : 'No events'}
+                  </strong>
+                  <p>
+                    {countLabel(marketMonitorSummary.eventCount, 'workflow event')} in the local timeline and{' '}
+                    {countLabel(marketMonitorSummary.positionBucketCount, 'exposure bucket')} in view.
+                  </p>
+                </article>
+              </div>
+
+              <div className="market-monitor-section-grid">
+                <section className="market-monitor-section">
+                  <div className="market-monitor-section-head">
+                    <strong>Market Focus</strong>
+                    <p>The heaviest live commodity classes with pricing-link and exposure context.</p>
+                  </div>
+                  {marketMonitorSummary.focusRows.length > 0 ? (
+                    <div className="market-monitor-focus-list">
+                      {marketMonitorSummary.focusRows.slice(0, 4).map((row) => (
+                        <article key={row.commodityClass} className="market-monitor-focus-row">
+                          <div className="market-monitor-focus-copy">
+                            <strong>{formatCommodityClass(row.commodityClass)}</strong>
+                            <p>
+                              {countLabel(row.tradeCount, 'active trade')} •{' '}
+                              {countLabel(row.pricedTradeCount, 'priced trade')} •{' '}
+                              {countLabel(row.linkedPriceIndexCount, 'linked curve')}
+                            </p>
+                          </div>
+                          <div className="market-monitor-focus-meta">
+                            {row.leadExposureNetVolume !== null && row.leadExposureUnitLabel ? (
+                              <MetricValue
+                                value={formatNumber(row.leadExposureNetVolume, 0)}
+                                unit={row.leadExposureUnitLabel}
+                              />
+                            ) : (
+                              <strong>—</strong>
+                            )}
+                            <span>{countLabel(row.commodityCount, 'commodity')} in the position bucket view</span>
+                            <button
+                              type="button"
+                              className="button button-ghost"
+                              onClick={() => openCommodityClassBrief(row.commodityClass)}
+                            >
+                              Open Brief
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-state">
+                      <strong>No live commodity focus yet</strong>
+                      <p>Create or widen the local screen filter to bring more market-facing exposure back into view.</p>
+                    </div>
+                  )}
+                </section>
+
+                <section className="market-monitor-section">
+                  <div className="market-monitor-section-head">
+                    <strong>Desk Priorities</strong>
+                    <p>Open backlog categories sorted by live trade pressure.</p>
+                  </div>
+                  {marketMonitorSummary.priorityRows.length > 0 ? (
+                    <div className="market-monitor-priority-list">
+                      {marketMonitorSummary.priorityRows.slice(0, 4).map((row) => (
+                        <article key={row.label} className="market-monitor-priority-row">
+                          <div className="market-monitor-priority-copy">
+                            <strong>{row.label}</strong>
+                            <p>{row.detail}</p>
+                          </div>
+                          <div className="market-monitor-priority-meta">
+                            <span className={`status-pill status-pill-${row.tone}`}>{row.count} open</span>
+                            <button
+                              type="button"
+                              className="button button-ghost"
+                              onClick={() => onOpenView(row.destinationView)}
+                            >
+                              Open {row.destinationView}
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-state">
+                      <strong>No active desk priorities</strong>
+                      <p>The current trade set is clear enough that nothing is bubbling to the top queue right now.</p>
+                    </div>
+                  )}
+                </section>
+              </div>
+
+              {renderTileActions(marketMonitorActions)}
+            </div>
+          ),
+        },
+        {
+          id: 'desk-headlines',
+          eyebrow: 'Headlines',
+          title: 'Desk Headlines',
+          description: 'A Bloomberg-style attention stream blended from market signals, workflow blockers, pricing gaps, exposure, and activity.',
+          span: 'wide',
+          availableSpans: ['full', 'wide', 'half'],
+          content: appLoading ? (
+            <div className="skeleton-stack">
+              <div className="skeleton-block" />
+              <div className="skeleton-block" />
+            </div>
+          ) : (
+            renderDeskHeadlinesContent()
+          ),
+        },
+        {
+          id: 'watchlist-alerts',
+          eyebrow: 'Watchlist',
+          title: 'Watchlist Alerts',
+          description: 'Saved terminal-mode markets and desk signals with typed in-product alert thresholds.',
+          span: 'wide',
+          availableSpans: ['full', 'wide', 'half', 'side'],
+          content: appLoading ? (
+            <div className="skeleton-stack">
+              <div className="skeleton-block" />
+              <div className="skeleton-block" />
+            </div>
+          ) : (
+            renderWatchlistAlertsContent()
+          ),
+        },
+        {
+          id: 'instrument-brief',
+          eyebrow: 'Drill-Down',
+          title: instrumentBrief?.title ?? 'Instrument Brief',
+          description: 'Read-only price-index and commodity-class context with related trades, exposure, events, and owner workspaces.',
+          span: 'wide',
+          availableSpans: ['full', 'wide', 'half'],
+          content: renderInstrumentBriefContent(),
+        },
         {
           id: 'desk-snapshot',
           eyebrow: 'Reporting',
@@ -1551,11 +2467,14 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           span: 'full',
           availableSpans: ['full', 'wide'],
           content: (
-            <WeatherIntelligenceTileContent
-              appLoading={appLoading}
-              formatDate={formatDate}
-              formatNumber={formatNumber}
-            />
+            <div className="dashboard-tile-action-shell">
+              <WeatherIntelligenceTileContent
+                appLoading={appLoading}
+                formatDate={formatDate}
+                formatNumber={formatNumber}
+              />
+              {renderTileActions(weatherActions)}
+            </div>
           ),
         },
         {
@@ -1566,11 +2485,14 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           span: 'full',
           availableSpans: ['full', 'wide'],
           content: (
-            <MarketContextTileContent
-              appLoading={appLoading}
-              formatDate={formatDate}
-              formatNumber={formatNumber}
-            />
+            <div className="dashboard-tile-action-shell">
+              <MarketContextTileContent
+                appLoading={appLoading}
+                formatDate={formatDate}
+                formatNumber={formatNumber}
+              />
+              {renderTileActions(marketContextActions)}
+            </div>
           ),
         },
         {
@@ -1594,14 +2516,18 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           title: 'Market Prices',
           description: 'Current marks with a rolling view so you can see where tracked curves are moving.',
           span: 'full',
-          availableSpans: ['full', 'wide'],
+          availableSpans: ['full', 'wide', 'half'],
           content: (
-            <MarketPricesTileContent
-              appLoading={appLoading}
-              activeTrades={visibleActiveTrades}
-              priceIndices={visiblePriceIndices}
-              formatNumber={formatNumber}
-            />
+            <div className="dashboard-tile-action-shell">
+              <MarketPricesTileContent
+                appLoading={appLoading}
+                activeTrades={visibleActiveTrades}
+                priceIndices={visiblePriceIndices}
+                formatNumber={formatNumber}
+                onOpenPriceIndexBrief={openPriceIndexBrief}
+              />
+              {renderTileActions(marketPriceActions)}
+            </div>
           ),
         },
         {
@@ -1617,26 +2543,41 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
               <div className="skeleton-block" />
             </div>
           ) : exposureByClass.length > 0 ? (
-            <div className="position-class-grid">
-              {exposureByClass.map((row) => (
-                <article key={`${row.commodityClass}-${row.unitLabel}`} className="position-class-card">
-                  <span>{formatCommodityClass(row.commodityClass)}</span>
-                  <MetricValue value={formatNumber(row.netVolume, 0)} unit={row.unitLabel} />
-                  <p>
-                    {row.commodityCount} commodit{row.commodityCount === 1 ? 'y' : 'ies'} contributing to this
-                    reporting bucket.
-                  </p>
-                </article>
-              ))}
+            <div className="dashboard-tile-action-shell">
+              <div className="position-class-grid">
+                {exposureByClass.map((row) => (
+                  <article key={`${row.commodityClass}-${row.unitLabel}`} className="position-class-card">
+                    <span>{formatCommodityClass(row.commodityClass)}</span>
+                    <MetricValue value={formatNumber(row.netVolume, 0)} unit={row.unitLabel} />
+                    <p>
+                      {row.commodityCount} commodit{row.commodityCount === 1 ? 'y' : 'ies'} contributing to this
+                      reporting bucket.
+                    </p>
+                    <div className="workflow-item-button-row dashboard-tile-action-row">
+                      <button
+                        type="button"
+                        className="button button-ghost"
+                        onClick={() => openCommodityClassBrief(row.commodityClass)}
+                      >
+                        Open Brief
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              {renderTileActions(positionActions)}
             </div>
           ) : (
-            <div className="empty-state">
-              <strong>{hasScreenFilter ? 'No exposure matches the filter' : 'No open exposure'}</strong>
-              <p>
-                {hasScreenFilter
-                  ? 'Try a broader local search to bring more commodity exposure back into the dashboard.'
-                  : 'The system is healthy, but there are no active trades contributing exposure yet.'}
-              </p>
+            <div className="dashboard-tile-action-shell">
+              <div className="empty-state">
+                <strong>{hasScreenFilter ? 'No exposure matches the filter' : 'No open exposure'}</strong>
+                <p>
+                  {hasScreenFilter
+                    ? 'Try a broader local search to bring more commodity exposure back into the dashboard.'
+                    : 'The system is healthy, but there are no active trades contributing exposure yet.'}
+                </p>
+              </div>
+              {renderTileActions(positionActions)}
             </div>
           ),
         },
@@ -1808,36 +2749,39 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           span: 'full',
           availableSpans: ['full', 'wide', 'half', 'side'],
           content: (
-            <div className="timeline">
-              {appLoading ? (
-                <div className="skeleton-stack">
-                  <div className="skeleton-block" />
-                </div>
-              ) : visibleEvents.slice(0, 5).length > 0 ? (
-                visibleEvents.slice(0, 5).map((event) => (
-                  <article key={event.event_id} className="timeline-item">
-                    <div className="timeline-dot" />
-                    <div className="timeline-body">
-                      <div className="timeline-head">
-                        <strong>{event.event_type}</strong>
-                        <span>{formatDate(event.recorded_at)}</span>
+            <div className="dashboard-tile-action-shell">
+              <div className="timeline">
+                {appLoading ? (
+                  <div className="skeleton-stack">
+                    <div className="skeleton-block" />
+                  </div>
+                ) : visibleEvents.slice(0, 5).length > 0 ? (
+                  visibleEvents.slice(0, 5).map((event) => (
+                    <article key={event.event_id} className="timeline-item">
+                      <div className="timeline-dot" />
+                      <div className="timeline-body">
+                        <div className="timeline-head">
+                          <strong>{event.event_type}</strong>
+                          <span>{formatDate(event.recorded_at)}</span>
+                        </div>
+                        <p>
+                          {event.aggregate_id} • {event.aggregate_type}
+                        </p>
                       </div>
-                      <p>
-                        {event.aggregate_id} • {event.aggregate_type}
-                      </p>
-                    </div>
-                  </article>
-                ))
-              ) : (
-                <div className="empty-state">
-                  <strong>{hasScreenFilter ? 'No recent events match the filter' : 'No recent events'}</strong>
-                  <p>
-                    {hasScreenFilter
-                      ? 'Try a broader local search to bring more workflow activity back into the dashboard timeline.'
-                      : 'Create or amend a trade to start building the operational timeline.'}
-                  </p>
-                </div>
-              )}
+                    </article>
+                  ))
+                ) : (
+                  <div className="empty-state">
+                    <strong>{hasScreenFilter ? 'No recent events match the filter' : 'No recent events'}</strong>
+                    <p>
+                      {hasScreenFilter
+                        ? 'Try a broader local search to bring more workflow activity back into the dashboard timeline.'
+                        : 'Create or amend a trade to start building the operational timeline.'}
+                    </p>
+                  </div>
+                )}
+              </div>
+              {renderTileActions(timelineActions)}
             </div>
           ),
         },

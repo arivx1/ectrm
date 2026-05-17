@@ -1,6 +1,6 @@
 import type { InspectorTab, ViewKey } from './models'
 
-export type AppRouteHandoffSource = 'events' | 'assistant' | 'map' | 'reference'
+export type AppRouteHandoffSource = 'events' | 'assistant' | 'map' | 'reference' | 'terminal'
 export type AppRouteHandoffFocusType =
   | 'trade'
   | 'workflow_item'
@@ -8,6 +8,7 @@ export type AppRouteHandoffFocusType =
   | 'invoice'
   | 'payment'
   | 'reference_record'
+  | 'market_instrument'
   | 'report'
 
 export type AppRouteHandoffFocus = {
@@ -88,6 +89,7 @@ function normalizeHandoffSource(value: unknown): AppRouteHandoffSource | null {
     case 'assistant':
     case 'map':
     case 'reference':
+    case 'terminal':
       return value
     default:
       return null
@@ -102,6 +104,7 @@ function normalizeHandoffFocusType(value: unknown): AppRouteHandoffFocusType | n
     case 'invoice':
     case 'payment':
     case 'reference_record':
+    case 'market_instrument':
     case 'report':
       return value
     default:
@@ -333,6 +336,8 @@ function formatFocusType(focusType: AppRouteHandoffFocusType): string {
       return 'workflow item'
     case 'reference_record':
       return 'reference record'
+    case 'market_instrument':
+      return 'market instrument'
     default:
       return focusType
   }
@@ -367,6 +372,15 @@ export function describeAppRouteHandoff(
       detail:
         normalizedHandoff.rationale ??
         `This workspace opened with ${formatFocusType(normalizedHandoff.focus.type)} ${focusLabel} in focus. Clear the focus when you are ready to return to the full workspace.`,
+    }
+  }
+
+  if (normalizedHandoff.source === 'terminal') {
+    return {
+      title: normalizedHandoff.label ?? `Opened from Terminal Search for ${focusLabel}`,
+      detail:
+        normalizedHandoff.rationale ??
+        `Terminal search opened with ${formatFocusType(normalizedHandoff.focus.type)} ${focusLabel} in focus. Clear the focus when you are ready to widen back to the full workspace.`,
     }
   }
 

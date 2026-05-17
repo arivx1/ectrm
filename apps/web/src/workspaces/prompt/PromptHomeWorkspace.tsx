@@ -62,6 +62,7 @@ import { usePersistentPromptHomeCalendarCardState } from "../../shared/promptHom
 import type { AppRouteHandoff } from "../../shared/appRouteHandoff";
 import type {
   AssistantActionRequest,
+  AssistantPromptNavigationFocusType,
   AssistantProvider,
   AssistantPromptRouteRecommendation,
   AssistantRuntimeSettings,
@@ -2948,14 +2949,7 @@ export function PromptHomeWorkspace({
         targetView?: ViewKey;
         targetLabel?: string;
         targetRationale?: string;
-        focusType?:
-          | "trade"
-          | "workflow_item"
-          | "document"
-          | "invoice"
-          | "payment"
-          | "reference_record"
-          | "report";
+        focusType?: AssistantPromptNavigationFocusType;
         focusId?: string;
         focusLabel?: string;
         detail?: string;
