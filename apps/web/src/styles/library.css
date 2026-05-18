@@ -853,6 +853,150 @@
   overflow-wrap: anywhere;
 }
 
+.library-document-pages-section {
+  align-content: start;
+}
+
+.library-document-pages-layout {
+  display: grid;
+  grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.library-document-page-list {
+  display: grid;
+  gap: 0.55rem;
+  max-height: 38rem;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
+.library-document-page-button {
+  display: grid;
+  gap: 0.25rem;
+  min-height: 5.5rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(126, 154, 184, 0.12);
+  border-radius: 0.65rem;
+  background: rgba(8, 15, 24, 0.58);
+  color: var(--color-copy-muted);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.library-document-page-button:hover,
+.library-document-page-button:focus-visible,
+.library-document-page-button.is-active {
+  border-color: rgba(89, 145, 215, 0.38);
+  background: rgba(15, 31, 48, 0.86);
+  box-shadow: 0 0 0 3px rgb(var(--theme-highlight-rgb) / 0.08);
+  outline: none;
+}
+
+.library-document-page-button strong,
+.library-document-page-detail-head strong,
+.library-document-page-detail-grid strong,
+.library-document-page-excerpt p {
+  color: var(--terminal-text);
+}
+
+.library-document-page-button span,
+.library-document-page-detail-grid span,
+.library-document-page-excerpt p,
+.library-document-page-notes p,
+.library-muted-copy {
+  margin: 0;
+  color: var(--color-copy-muted);
+}
+
+.library-document-page-button-index {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.library-document-page-detail {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.library-document-page-detail-head,
+.library-document-page-detail-badges {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.library-document-page-detail-head > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.library-document-page-preview-frame {
+  display: grid;
+  min-height: 24rem;
+  max-height: 38rem;
+  place-items: center;
+  overflow: auto;
+  padding: 0.85rem;
+  border: 1px solid rgba(126, 154, 184, 0.12);
+  border-radius: 0.65rem;
+  background:
+    linear-gradient(180deg, rgba(5, 10, 18, 0.84), rgba(8, 15, 24, 0.96));
+}
+
+.library-document-page-preview-frame img {
+  display: block;
+  width: min(100%, 58rem);
+  height: auto;
+  max-height: 36rem;
+  object-fit: contain;
+  border-radius: 0.35rem;
+}
+
+.library-document-page-preview-frame p {
+  max-width: 28rem;
+  margin: 0;
+  color: var(--color-copy-muted);
+  text-align: center;
+}
+
+.library-document-page-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.library-document-page-detail-grid div,
+.library-document-page-excerpt,
+.library-document-page-notes {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid rgba(126, 154, 184, 0.1);
+  border-radius: 0.65rem;
+  background: rgba(8, 15, 24, 0.5);
+}
+
+.library-document-page-detail-grid div {
+  min-height: 4.6rem;
+  align-content: center;
+}
+
+.library-document-page-excerpt p,
+.library-document-page-notes p {
+  overflow-wrap: anywhere;
+}
+
 .library-document-activity-list {
   display: grid;
   gap: 0.8rem;
@@ -1202,8 +1346,19 @@
   }
 
   .library-document-page-grid,
-  .library-document-fact-list {
+  .library-document-fact-list,
+  .library-document-pages-layout {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .library-document-page-list {
+    max-height: none;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    padding-right: 0;
+  }
+
+  .library-document-page-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .library-upload-inline-grid {
@@ -1262,5 +1417,13 @@
 
   .library-document-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .library-document-page-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .library-document-page-preview-frame {
+    min-height: 16rem;
   }
 }

@@ -548,6 +548,24 @@ def build_document_routing_assessment(
             reasons=["No pages are available for routing."],
         )
 
+    page_level_kinds = sorted({page.document_kind for page in pages if page.document_kind != "UNKNOWN"})
+    has_unknown_pages = any(page.document_kind == "UNKNOWN" for page in pages)
+    if len(page_level_kinds) > 1 or (has_unknown_pages and page_level_kinds):
+        reason = (
+            f"Document contains multiple page-level document kinds: {', '.join(page_level_kinds)}."
+            if len(page_level_kinds) > 1
+            else f"Document has unclassified pages alongside {page_level_kinds[0]} pages."
+        )
+        return DocumentRoutingAssessmentOut(
+            routing_strategy="MANUAL_REVIEW",
+            status="MANUAL_REVIEW",
+            confidence=0.0,
+            reasons=[
+                reason,
+                "Route each logical document or page group separately instead of assigning one document-level target.",
+            ],
+        )
+
     dominant_kind = _dominant_document_kind(pages)
     relevant_pages = [page for page in pages if page.document_kind == dominant_kind] or pages
     combined_header_fields = _merge_header_fields(relevant_pages)

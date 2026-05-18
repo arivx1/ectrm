@@ -13,7 +13,10 @@ import {
   documentStatusTone,
   dominantDocumentKind,
   dominantDocumentKindCode,
+  formatDocumentKindLabel,
   formatBytes,
+  pageTextSourceLabel,
+  pageTextSourceTone,
   processorLabel,
   reviewReady,
   reviewedPageCount,
@@ -252,6 +255,10 @@ export function LibraryWorkspace({
     selectedProcessorModel,
     selectedFile,
     isDragActive,
+    expandedDocumentIds,
+    pagePreviewUrls,
+    pagePreviewLoading,
+    pagePreviewErrors,
     fileInputRef,
     setDisplayName,
     setSelectedProcessorProvider,
@@ -266,6 +273,7 @@ export function LibraryWorkspace({
     handleSubmit,
     handleImportGmailInbox: importGmailInbox,
     handleSetDocumentKind,
+    toggleDocumentExpanded,
     saveErrors,
     savingTarget,
   } = useDocumentIngestionController({ authSession })
@@ -279,6 +287,7 @@ export function LibraryWorkspace({
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null)
   const [localActiveDocumentId, setLocalActiveDocumentId] = useState<string | null>(null)
+  const [selectedDetailPageId, setSelectedDetailPageId] = useState<number | null>(null)
   const [openingDocumentId, setOpeningDocumentId] = useState<string | null>(null)
   const [openDocumentError, setOpenDocumentError] = useState('')
   const [kindDraftByDocumentId, setKindDraftByDocumentId] = useState<Record<string, string>>({})
@@ -358,6 +367,13 @@ export function LibraryWorkspace({
   const documentPageActivity = documentPage
     ? buildDocumentActivityLog(documentPage)
     : []
+  const selectedDetailPage =
+    documentPage?.pages.find((page) => page.page_id === selectedDetailPageId) ?? documentPage?.pages[0] ?? null
+  const selectedDetailPagePreviewUrl = selectedDetailPage ? pagePreviewUrls[selectedDetailPage.page_id] ?? '' : ''
+  const selectedDetailPagePreviewLoading = selectedDetailPage
+    ? pagePreviewLoading[selectedDetailPage.page_id] === true
+    : false
+  const selectedDetailPagePreviewError = selectedDetailPage ? pagePreviewErrors[selectedDetailPage.page_id] ?? '' : ''
 
   useEffect(() => {
     if (
@@ -384,9 +400,32 @@ export function LibraryWorkspace({
     }
   }, [documentPageId])
 
+  useEffect(() => {
+    if (!documentPageId || expandedDocumentIds[documentPageId]) {
+      return
+    }
+    toggleDocumentExpanded(documentPageId)
+  }, [documentPageId, expandedDocumentIds, toggleDocumentExpanded])
+
+  useEffect(() => {
+    if (!documentPage) {
+      setSelectedDetailPageId(null)
+      return
+    }
+
+    setSelectedDetailPageId((current) => {
+      if (current && documentPage.pages.some((page) => page.page_id === current)) {
+        return current
+      }
+      return documentPage.pages[0]?.page_id ?? null
+    })
+  }, [documentPage])
+
   function handleOpenDocumentPage(documentId: string) {
     setSelectedDocumentId(documentId)
     setLocalActiveDocumentId(documentId)
+    const targetDocument = documents.find((document) => document.document_id === documentId)
+    setSelectedDetailPageId(targetDocument?.pages[0]?.page_id ?? null)
     setOpenDocumentError('')
     onActiveDocumentChange?.(documentId)
   }
@@ -730,6 +769,126 @@ export function LibraryWorkspace({
                     </dl>
                   </section>
                 </div>
+
+                <section className="library-document-page-section library-document-pages-section">
+                  <div className="library-section-head">
+                    <span className="eyebrow">Pages</span>
+                    <small>{documentPage.pages.length} page{documentPage.pages.length === 1 ? '' : 's'}</small>
+                  </div>
+
+                  {documentPage.pages.length > 0 ? (
+                    <div className="library-document-pages-layout">
+                      <div className="library-document-page-list" role="list" aria-label="Document pages">
+                        {documentPage.pages.map((page) => {
+                          const isSelected = selectedDetailPage?.page_id === page.page_id
+                          const confidence =
+                            typeof page.classification_confidence === 'number'
+                              ? `${Math.round(page.classification_confidence * 100)}%`
+                              : 'No confidence'
+                          return (
+                            <button
+                              key={page.page_id}
+                              type="button"
+                              className={`library-document-page-button${isSelected ? ' is-active' : ''}`}
+                              aria-pressed={isSelected}
+                              onClick={() => setSelectedDetailPageId(page.page_id)}
+                            >
+                              <span className="library-document-page-button-index">
+                                Page {page.page_number}
+                              </span>
+                              <strong>{formatDocumentKindLabel(page.document_kind)}</strong>
+                              <span>
+                                {formatDocumentLibraryLabel(page.review_status)} / {confidence}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+
+                      <div className="library-document-page-detail">
+                        {selectedDetailPage ? (
+                          <>
+                            <div className="library-document-page-detail-head">
+                              <div>
+                                <span className="eyebrow">Selected Page</span>
+                                <strong>Page {selectedDetailPage.page_number}</strong>
+                              </div>
+                              <div className="library-document-page-detail-badges">
+                                <span className={`status-pill status-pill-${pageTextSourceTone(selectedDetailPage)}`}>
+                                  {pageTextSourceLabel(selectedDetailPage)}
+                                </span>
+                                <span className="entity-chip entity-chip-soft">
+                                  {formatDocumentKindLabel(selectedDetailPage.document_kind)}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="library-document-page-preview-frame">
+                              {selectedDetailPage.preview_available ? (
+                                selectedDetailPagePreviewUrl ? (
+                                  <img
+                                    src={selectedDetailPagePreviewUrl}
+                                    alt={`Preview for page ${selectedDetailPage.page_number}`}
+                                  />
+                                ) : selectedDetailPagePreviewLoading ? (
+                                  <p>Loading page preview...</p>
+                                ) : selectedDetailPagePreviewError ? (
+                                  <p className="field-error">{selectedDetailPagePreviewError}</p>
+                                ) : (
+                                  <p>Preview is ready and will load shortly.</p>
+                                )
+                              ) : (
+                                <p>Preview is not available for this page yet.</p>
+                              )}
+                            </div>
+
+                            <div className="library-document-page-detail-grid">
+                              <div>
+                                <span>Review</span>
+                                <strong>{formatDocumentLibraryLabel(selectedDetailPage.review_status)}</strong>
+                              </div>
+                              <div>
+                                <span>Classification</span>
+                                <strong>{formatDocumentLibraryLabel(selectedDetailPage.classification_status)}</strong>
+                              </div>
+                              <div>
+                                <span>Fields</span>
+                                <strong>{selectedDetailPage.header_fields.length}</strong>
+                              </div>
+                              <div>
+                                <span>Tables</span>
+                                <strong>{selectedDetailPage.table_blocks.length}</strong>
+                              </div>
+                            </div>
+
+                            <div className="library-document-page-excerpt">
+                              <span className="eyebrow">Extracted Text</span>
+                              <p>
+                                {selectedDetailPage.raw_text_excerpt ||
+                                  'No extractable text has been captured for this page yet.'}
+                              </p>
+                            </div>
+
+                            {selectedDetailPage.processing_warnings.length > 0 ||
+                            selectedDetailPage.processing_errors.length > 0 ? (
+                              <div className="library-document-page-notes">
+                                {[...selectedDetailPage.processing_errors, ...selectedDetailPage.processing_warnings].map(
+                                  (message) => (
+                                    <p key={message}>{message}</p>
+                                  ),
+                                )}
+                              </div>
+                            ) : null}
+                          </>
+                        ) : (
+                          <p>No page is selected.</p>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="library-muted-copy">No page records are available for this file.</p>
+                  )}
+                </section>
 
                 <section className="library-document-page-section library-document-activity-section">
                   <div className="library-section-head">

@@ -29,6 +29,7 @@ from sqlalchemy.pool import StaticPool
 from apps.api.app.config import settings
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.documents.services.document_classification_scoring import score_document_page_classification
+from apps.api.app.domains.documents.services.document_ingestion_review import build_document_summary
 from apps.api.app.domains.documents.services.document_processor import _build_openai_text_format
 from apps.api.app.domains.documents.services.document_processor import _generate_openai_document_analysis
 from apps.api.app.domains.documents.services.document_processor import DocumentProcessorOutcome
@@ -286,6 +287,37 @@ class DocumentIngestionApiTests(unittest.TestCase):
         writer.write(buffer)
         return buffer.getvalue()
 
+    def _summary_page(
+        self,
+        *,
+        page_number: int,
+        document_kind: str,
+        classification_status: str = "ANALYZED",
+    ) -> DocumentIngestionPage:
+        now = datetime(2026, 4, 14, 12, 0, tzinfo=timezone.utc)
+        return DocumentIngestionPage(
+            document_id="summary-doc",
+            page_number=page_number,
+            classification_status=classification_status,
+            extraction_status="ANALYZED",
+            document_kind=document_kind,
+            document_subtype=None,
+            classification_confidence=0.92,
+            classification_payload={},
+            header_fields=[],
+            table_blocks=[],
+            raw_text="",
+            processing_warnings=[],
+            processing_errors=[],
+            review_status="UNREVIEWED",
+            review_notes=None,
+            reviewed_at=None,
+            reviewed_by=None,
+            processed_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+
     def _configure_gmail_inbox(self) -> None:
         settings.GMAIL_INBOX_ENABLED = True
         settings.GMAIL_INBOX_CLIENT_ID = "gmail-client-id"
@@ -389,7 +421,10 @@ class DocumentIngestionApiTests(unittest.TestCase):
 
         analyzed = self._wait_for_document(admin_token, body["document_id"])
         self.assertEqual(analyzed["status"], "ANALYZED")
+        self.assertEqual(analyzed["analysis_summary"]["document_classification_scope"], "DOCUMENT")
+        self.assertEqual(analyzed["analysis_summary"]["document_classification_kind"], "INVOICE")
         self.assertEqual(analyzed["analysis_summary"]["dominant_document_kind"], "INVOICE")
+        self.assertFalse(analyzed["analysis_summary"]["page_level_classification_required"])
         self.assertEqual(analyzed["analysis_summary"]["routing_strategy"], "SETTLEMENT_FIRST")
         self.assertEqual(analyzed["analysis_summary"]["artifact_profile"]["detected_file_type"], "pdf")
         self.assertEqual(analyzed["analysis_summary"]["artifact_profile"]["recommended_parse_mode"], "pdf_ocr_required")
@@ -432,6 +467,41 @@ class DocumentIngestionApiTests(unittest.TestCase):
             self.assertEqual(pages[0].document_kind, "INVOICE")
             self.assertEqual(document.review_status, "UNREVIEWED")
             self.assertEqual(pages[0].review_status, "UNREVIEWED")
+
+    def test_summary_classifies_homogeneous_upload_at_document_level(self) -> None:
+        pages = [
+            self._summary_page(page_number=1, document_kind="INVOICE"),
+            self._summary_page(page_number=2, document_kind="INVOICE"),
+        ]
+
+        summary = build_document_summary(pages, review_status="UNREVIEWED")
+
+        self.assertEqual(summary["document_classification_scope"], "DOCUMENT")
+        self.assertEqual(summary["document_classification_kind"], "INVOICE")
+        self.assertEqual(summary["dominant_document_kind"], "INVOICE")
+        self.assertFalse(summary["page_level_classification_required"])
+        self.assertTrue(summary["document_type_homogeneous"])
+        self.assertEqual(summary["page_document_kinds"], ["INVOICE"])
+        self.assertEqual(summary["structure_profile"]["logical_document_count_estimate"], 1)
+
+    def test_summary_requires_page_level_classification_for_mixed_upload(self) -> None:
+        pages = [
+            self._summary_page(page_number=1, document_kind="INVOICE"),
+            self._summary_page(page_number=2, document_kind="BILL_OF_LADING"),
+        ]
+
+        summary = build_document_summary(pages, review_status="UNREVIEWED")
+
+        self.assertEqual(summary["document_classification_scope"], "PAGE")
+        self.assertIsNone(summary["document_classification_kind"])
+        self.assertEqual(summary["dominant_document_kind"], "MIXED")
+        self.assertEqual(summary["representative_page_document_kind"], "INVOICE")
+        self.assertTrue(summary["page_level_classification_required"])
+        self.assertFalse(summary["document_type_homogeneous"])
+        self.assertEqual(summary["page_document_kinds"], ["BILL_OF_LADING", "INVOICE"])
+        self.assertEqual(summary["structure_profile"]["logical_document_count_estimate"], 2)
+        self.assertEqual(summary["routing_strategy"], "MANUAL_REVIEW")
+        self.assertIn("multiple page-level document kinds", " ".join(summary["routing_assessment"]["reasons"]))
 
     def test_upload_requires_pdf(self) -> None:
         admin_token = self._bootstrap_admin()

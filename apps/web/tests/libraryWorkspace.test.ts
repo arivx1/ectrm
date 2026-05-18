@@ -428,18 +428,70 @@ describe('LibraryWorkspace', () => {
   })
 
   it('renders a selected file page with upload provenance and activity', () => {
+    const baseDocument = buildDocument({
+      created_by: 'ops_admin',
+      updated_by: 'ops_reviewer',
+      updated_at: '2026-05-16T18:00:00Z',
+      review_status: 'VERIFIED',
+      reviewed_at: '2026-05-16T18:00:00Z',
+      reviewed_by: 'ops_reviewer',
+    })
+    const firstPage = baseDocument.pages[0]
     useDocumentIngestionControllerMock.mockReturnValue(
       buildController({
         documents: [
-          buildDocument({
-            created_by: 'ops_admin',
-            updated_by: 'ops_reviewer',
-            updated_at: '2026-05-16T18:00:00Z',
-            review_status: 'VERIFIED',
-            reviewed_at: '2026-05-16T18:00:00Z',
-            reviewed_by: 'ops_reviewer',
-          }),
+          {
+            ...baseDocument,
+            page_count: 2,
+            analysis_summary: {
+              ...baseDocument.analysis_summary,
+              dominant_document_kind: 'MIXED',
+              document_classification_scope: 'PAGE',
+              page_level_classification_required: true,
+            },
+            pages: [
+              {
+                ...firstPage,
+                raw_text_excerpt: 'Vessel nomination details for review.',
+                text_source: 'pdf_text',
+                preview_available: true,
+              },
+              {
+                ...firstPage,
+                page_id: 2,
+                page_number: 2,
+                document_kind: 'DELIVERY_CONFIRMATION',
+                classification_confidence: 0.93,
+                raw_text_excerpt: 'Delivery confirmation received at terminal.',
+                text_source: 'pdf_text',
+                preview_available: true,
+                header_fields: [
+                  {
+                    field_key: 'delivery_number',
+                    label: 'Delivery Number',
+                    value: 'DEL-100',
+                    confidence: 0.91,
+                    source: 'system',
+                  },
+                ],
+                table_blocks: [
+                  {
+                    table_index: 0,
+                    template_key: null,
+                    title: 'Delivery Lines',
+                    columns: ['product', 'quantity'],
+                    rows: [{ product: 'ULSD', quantity: '100 bbl' }],
+                    header_row_detected: true,
+                    source: 'system',
+                  },
+                ],
+              },
+            ],
+          },
         ],
+        pagePreviewUrls: {
+          1: 'blob:page-1',
+        },
       }),
     )
 
@@ -468,5 +520,13 @@ describe('LibraryWorkspace', () => {
     expect(markup).toContain('Uploaded By')
     expect(markup).toContain('ops_admin')
     expect(markup).toContain('Open Source PDF')
+    expect(markup).toContain('Pages')
+    expect(markup).toContain('Page 1')
+    expect(markup).toContain('Page 2')
+    expect(markup).toContain('DELIVERY CONFIRMATION')
+    expect(markup).toContain('Selected Page')
+    expect(markup).toContain('Extracted Text')
+    expect(markup).toContain('Vessel nomination details for review.')
+    expect(markup).toContain('Preview for page 1')
   })
 })

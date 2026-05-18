@@ -83,6 +83,34 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-17 - Mixed Document Packets Require Page-Level Classification
+
+- Type: algorithm-added
+- Domain: document ingestion, logical document segmentation, routing, and review
+- Applies to: `analysis_summary.document_classification_scope`,
+  `analysis_summary.document_classification_kind`,
+  `analysis_summary.page_level_classification_required`, and mixed-packet
+  routing decisions
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_ingestion_review.py` and
+  `apps/api/app/domains/documents/services/document_routing.py`
+- Lesson: an uploaded file may be assigned a document-level kind only when every
+  page resolves to the same non-unknown document kind. If pages differ, the file
+  is a packet and its canonical classification scope is page-level; the summary
+  should surface `dominant_document_kind=MIXED` rather than promoting a majority
+  page kind to document truth.
+- Deterministic opportunity: persist logical-document boundaries so mixed
+  packets can route each page group independently instead of relying on a single
+  document-level routing assessment.
+- Agent autonomy impact: agents can explain mixed packet classification, but
+  they should not choose one dominant document kind for the whole file unless
+  the deterministic page-kind check is homogeneous.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_summary_classifies_homogeneous_upload_at_document_level apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_summary_requires_page_level_classification_for_mixed_upload`
+- Follow-up: add a persisted logical-document table when page groups need
+  independent extraction, routing, or approval workflows.
+
 ### 2026-05-17 - Document Extraction Starts With Artifact And Structure Profiling
 
 - Type: algorithm-added

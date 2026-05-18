@@ -22,11 +22,8 @@ def build_document_summary(
 ) -> dict[str, object]:
     routing_assessment = build_document_routing_assessment(pages, review_status=str(review_status))
     kind_counts = Counter(page.document_kind for page in pages)
-    dominant_document_kind = "UNKNOWN"
-    for kind, _count in kind_counts.most_common():
-        if kind != "UNKNOWN":
-            dominant_document_kind = kind
-            break
+    classification_profile = build_document_classification_profile(pages, kind_counts=kind_counts)
+    dominant_document_kind = str(classification_profile["dominant_document_kind"])
 
     reviewed_page_count = sum(1 for page in pages if page.review_status == "REVIEWED")
     corrected_page_count = sum(
@@ -57,6 +54,7 @@ def build_document_summary(
     )
 
     return {
+        **classification_profile,
         "dominant_document_kind": dominant_document_kind,
         "page_kind_counts": dict(kind_counts),
         "header_field_count": sum(len(page.header_fields or []) for page in pages),
@@ -80,6 +78,47 @@ def build_document_summary(
             artifact_profile=artifact_profile,
             logical_documents=list(structure_profile.get("logical_documents") or []),
         ),
+    }
+
+
+def build_document_classification_profile(
+    pages: list[DocumentIngestionPage],
+    *,
+    kind_counts: Counter[str] | None = None,
+) -> dict[str, object]:
+    counts = kind_counts or Counter(page.document_kind for page in pages)
+    page_kinds = [page.document_kind or "UNKNOWN" for page in sorted(pages, key=lambda page: page.page_number)]
+    distinct_page_kinds = set(page_kinds)
+    concrete_page_kinds = [kind for kind in page_kinds if kind != "UNKNOWN"]
+    distinct_concrete_page_kinds = set(concrete_page_kinds)
+    representative_page_kind = "UNKNOWN"
+    for kind, _count in counts.most_common():
+        if kind != "UNKNOWN":
+            representative_page_kind = kind
+            break
+
+    document_type_homogeneous = bool(page_kinds) and len(distinct_page_kinds) == 1 and page_kinds[0] != "UNKNOWN"
+    if document_type_homogeneous:
+        document_kind = page_kinds[0]
+        return {
+            "document_classification_scope": "DOCUMENT",
+            "document_classification_kind": document_kind,
+            "dominant_document_kind": document_kind,
+            "representative_page_document_kind": document_kind,
+            "page_level_classification_required": False,
+            "document_type_homogeneous": True,
+            "page_document_kinds": [document_kind],
+        }
+
+    mixed_page_kinds = len(distinct_page_kinds) > 1
+    return {
+        "document_classification_scope": "PAGE" if pages else "UNCLASSIFIED",
+        "document_classification_kind": None,
+        "dominant_document_kind": "MIXED" if mixed_page_kinds else "UNKNOWN",
+        "representative_page_document_kind": representative_page_kind,
+        "page_level_classification_required": bool(pages),
+        "document_type_homogeneous": False,
+        "page_document_kinds": sorted(distinct_concrete_page_kinds),
     }
 
 

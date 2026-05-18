@@ -106,7 +106,14 @@ export function pageRoutingAssessment(page: DocumentIngestionPageRecord): Docume
 }
 
 export function formatDocumentKindLabel(value: string | null | undefined): string {
-  return value?.trim() ? value.replaceAll('_', ' ') : 'UNKNOWN'
+  const normalized = value?.trim()
+  if (!normalized) {
+    return 'UNKNOWN'
+  }
+  if (normalized.toUpperCase() === 'MIXED') {
+    return 'Mixed / Page-level'
+  }
+  return normalized.replaceAll('_', ' ')
 }
 
 export function pageSystemClassification(page: DocumentIngestionPageRecord): {
