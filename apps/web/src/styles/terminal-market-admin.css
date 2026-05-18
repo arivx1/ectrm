@@ -218,7 +218,11 @@
 
 .terminal-quote-selector,
 .terminal-quote-chart-card,
-.terminal-curve-card {
+.terminal-curve-card,
+.terminal-analytics-hero,
+.terminal-analytics-card,
+.terminal-analytics-note-list,
+.watchlist-alert-delivery-list {
   border-color: rgba(126, 154, 184, 0.16);
   background:
     radial-gradient(circle at top right, rgba(78, 167, 255, 0.08), transparent 34%),
@@ -227,8 +231,11 @@
 
 .terminal-quote-selector-row,
 .terminal-quote-stat-grid article,
+.terminal-analytics-stat-grid article,
+.terminal-analytics-row,
 .terminal-curve-row,
-.terminal-curve-bucket {
+.terminal-curve-bucket,
+.watchlist-alert-delivery-row {
   border-color: rgba(126, 154, 184, 0.12);
   background: linear-gradient(180deg, rgba(7, 14, 23, 0.96), rgba(13, 23, 35, 0.76));
 }
@@ -239,24 +246,40 @@
 }
 
 .terminal-quote-card-head strong,
+.terminal-analytics-copy strong,
+.terminal-analytics-latest strong,
+.terminal-analytics-section-head strong,
+.terminal-analytics-row-copy strong,
+.terminal-analytics-row-meta strong,
+.terminal-analytics-stat-grid strong,
 .terminal-quote-selector-head strong,
 .terminal-quote-latest strong,
 .terminal-quote-selector-row strong,
 .terminal-quote-stat-grid strong,
 .terminal-curve-row-copy strong,
 .terminal-curve-row-meta strong,
-.terminal-curve-bucket strong {
+.terminal-curve-bucket strong,
+.watchlist-alert-delivery-head strong {
   color: var(--terminal-text);
 }
 
 .terminal-quote-card-head p,
+.terminal-analytics-copy p,
+.terminal-analytics-latest span,
+.terminal-analytics-latest small,
+.terminal-analytics-section-head small,
+.terminal-analytics-row-copy span,
+.terminal-analytics-row-meta span,
+.terminal-analytics-note-list p,
 .terminal-quote-latest span,
 .terminal-quote-latest small,
 .terminal-quote-selector-row span,
 .terminal-quote-stat-grid span,
 .terminal-curve-row-copy span,
 .terminal-curve-bucket span,
-.terminal-curve-bucket p {
+.terminal-curve-bucket p,
+.watchlist-alert-delivery-head span,
+.watchlist-alert-delivery-head small {
   color: var(--terminal-muted);
 }
 

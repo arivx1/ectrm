@@ -4,7 +4,12 @@ import type { Trade } from '../src/shared/models'
 import {
   buildDefaultDashboardWatchlist,
   evaluateDashboardWatchlistAlerts,
+  formatDashboardWatchlistAlertDeliveryChannel,
+  markDashboardWatchlistAlertDeliveryOpened,
+  parseDashboardWatchlistAlertDeliveries,
   parseDashboardWatchlist,
+  reconcileDashboardWatchlistAlertDeliveries,
+  serializeDashboardWatchlistAlertDeliveries,
   serializeDashboardWatchlist,
 } from '../src/workspaces/dashboard/dashboardWatchlists'
 
@@ -176,5 +181,98 @@ describe('dashboard watchlists', () => {
       metricValue: 1,
     })
     expect(alerts.find((alert) => alert.conditionType === 'price_move')?.threshold).toBe(5)
+  })
+
+  test('persists terminal alert delivery records with deterministic routing and cooldowns', () => {
+    const watchlist = buildDefaultDashboardWatchlist({
+      activeTrades: [baseTrade],
+      priceIndices: [
+        {
+          code: 'ERCOT_DA',
+          name: 'ERCOT Day Ahead',
+          provider: 'ICE',
+          is_active: true,
+          commodity_class: 'POWER',
+        },
+      ],
+      exposureByClass: [
+        {
+          commodityClass: 'POWER',
+          unitLabel: 'MWh',
+          netVolume: 1200,
+          commodityCount: 1,
+        },
+      ],
+      now: new Date('2026-05-16T00:00:00Z'),
+    })
+    const alerts = evaluateDashboardWatchlistAlerts({
+      watchlist,
+      priceIndices: [
+        {
+          code: 'ERCOT_DA',
+          name: 'ERCOT Day Ahead',
+          provider: 'ICE',
+          is_active: true,
+          commodity_class: 'POWER',
+          dayChangePercent: 6.2,
+        },
+      ],
+      exposureByClass: [
+        {
+          commodityClass: 'POWER',
+          unitLabel: 'MWh',
+          netVolume: 1200,
+          commodityCount: 1,
+        },
+      ],
+      issues: [],
+      activeTrades: [baseTrade],
+      now: new Date('2026-05-16T00:00:00Z'),
+    })
+
+    const firstSnapshot = reconcileDashboardWatchlistAlertDeliveries({
+      watchlistId: watchlist.id,
+      alerts,
+      existingRecords: [],
+      now: new Date('2026-05-16T10:00:00Z'),
+      minimumIntervalMinutes: 30,
+    })
+    const priceMoveDelivery = firstSnapshot.records.find((record) => record.conditionType === 'price_move')
+
+    expect(firstSnapshot.emittedCount).toBe(alerts.length)
+    expect(priceMoveDelivery).toMatchObject({
+      channel: 'instrument_brief',
+      routeView: 'dashboard',
+      ownerView: 'reference',
+      actionLabel: 'Open Brief',
+      deliveryCount: 1,
+    })
+
+    const suppressedSnapshot = reconcileDashboardWatchlistAlertDeliveries({
+      watchlistId: watchlist.id,
+      alerts,
+      existingRecords: firstSnapshot.records,
+      now: new Date('2026-05-16T10:15:00Z'),
+      minimumIntervalMinutes: 30,
+    })
+
+    expect(suppressedSnapshot.emittedCount).toBe(0)
+    expect(suppressedSnapshot.suppressedCount).toBe(alerts.length)
+    expect(suppressedSnapshot.records.find((record) => record.conditionType === 'price_move')?.deliveryCount).toBe(1)
+
+    const openedRecords = markDashboardWatchlistAlertDeliveryOpened({
+      records: suppressedSnapshot.records,
+      deliveryId: priceMoveDelivery?.id ?? '',
+      now: new Date('2026-05-16T10:20:00Z'),
+    })
+
+    expect(parseDashboardWatchlistAlertDeliveries(serializeDashboardWatchlistAlertDeliveries(openedRecords))).toEqual(
+      openedRecords,
+    )
+    expect(openedRecords.find((record) => record.id === priceMoveDelivery?.id)?.lastOpenedAt).toBe(
+      '2026-05-16T10:20:00.000Z',
+    )
+    expect(formatDashboardWatchlistAlertDeliveryChannel('instrument_brief')).toBe('Instrument Brief')
+    expect(parseDashboardWatchlistAlertDeliveries('{bad json')).toEqual([])
   })
 })

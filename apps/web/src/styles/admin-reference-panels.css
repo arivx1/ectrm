@@ -175,6 +175,7 @@
 .desk-headline-list,
 .watchlist-alert-panel,
 .watchlist-alert-list,
+.watchlist-alert-delivery-list,
 .instrument-brief-panel,
 .instrument-brief-row-list {
   display: grid;
@@ -210,6 +211,7 @@
 .market-monitor-priority-row,
 .desk-headline-row,
 .watchlist-alert-row,
+.watchlist-alert-delivery-row,
 .instrument-brief-section,
 .instrument-brief-row {
   border: 1px solid rgba(18, 42, 56, 0.08);
@@ -237,6 +239,7 @@
 .desk-headline-row,
 .watchlist-alert-head,
 .watchlist-alert-row,
+.watchlist-alert-delivery-row,
 .instrument-brief-head,
 .instrument-brief-row {
   display: flex;
@@ -247,6 +250,7 @@
 .market-monitor-strip-head,
 .market-monitor-section-head,
 .watchlist-alert-head,
+.watchlist-alert-delivery-head,
 .instrument-brief-head {
   align-items: baseline;
 }
@@ -258,6 +262,7 @@
 .desk-headline-copy strong,
 .watchlist-alert-copy strong,
 .watchlist-alert-row-copy strong,
+.watchlist-alert-delivery-head strong,
 .instrument-brief-copy strong,
 .instrument-brief-section-head strong,
 .instrument-brief-row-copy strong {
@@ -278,6 +283,8 @@
 .watchlist-alert-row-copy p,
 .watchlist-alert-row-copy small,
 .watchlist-alert-row-meta span,
+.watchlist-alert-delivery-head span,
+.watchlist-alert-delivery-head small,
 .market-monitor-strip-footer span,
 .market-monitor-strip-meta span,
 .instrument-brief-copy span,
@@ -294,6 +301,8 @@
 .desk-headline-meta span,
 .watchlist-alert-row-copy small,
 .watchlist-alert-row-meta span,
+.watchlist-alert-delivery-head span,
+.watchlist-alert-delivery-head small,
 .market-monitor-strip-footer span {
   font-size: 0.9rem;
 }
@@ -347,6 +356,7 @@
 .market-monitor-priority-row,
 .desk-headline-row,
 .watchlist-alert-row,
+.watchlist-alert-delivery-row,
 .instrument-brief-row {
   align-items: flex-start;
   padding: 0.85rem 1rem;
@@ -423,7 +433,7 @@
 }
 
 .watchlist-alert-stat-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .watchlist-alert-actions {
@@ -441,6 +451,37 @@
 .watchlist-alert-row {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(246, 245, 240, 0.72));
+}
+
+.watchlist-alert-delivery-list {
+  padding: 1rem 1.05rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.05rem;
+  background:
+    radial-gradient(circle at top left, rgba(27, 92, 151, 0.1), transparent 34%),
+    rgba(255, 255, 255, 0.68);
+}
+
+.watchlist-alert-delivery-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.watchlist-alert-delivery-head div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.watchlist-alert-delivery-head span {
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.watchlist-alert-delivery-row {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(238, 241, 238, 0.7));
 }
 
 .watchlist-alert-row-copy strong {

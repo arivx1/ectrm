@@ -238,10 +238,14 @@ test("dashboard smoke boots against the seeded browser harness", async ({
     await expect(page.getByText("Desk Headlines")).toBeVisible();
     await expect(page.getByText("Pricing gap on T-AMEND-100")).toBeVisible();
     await expect(page.getByText("Watchlist Alerts")).toBeVisible();
-    await expect(page.getByText(/Pricing exceptions:/)).toBeVisible();
+    await expect(
+      page
+        .locator(".watchlist-alert-list")
+        .getByText(/Pricing exceptions:/),
+    ).toBeVisible();
     await page.getByRole("button", { name: "Save Watchlist" }).click();
     await expect(page.getByText("Saved terminal watchlist", { exact: true })).toBeVisible();
-    await expect(page.getByText("Instrument Brief")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Instrument Brief" })).toBeVisible();
     await expect(page.getByText("Common Starting Points")).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Open Exposure" }).first(),

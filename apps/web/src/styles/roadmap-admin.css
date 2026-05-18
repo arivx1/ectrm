@@ -57,6 +57,9 @@
 .external-series-layout,
 .external-series-list,
 .terminal-quote-panel,
+.terminal-analytics-panel,
+.terminal-analytics-row-list,
+.terminal-analytics-note-list,
 .terminal-quote-selector-list,
 .terminal-curve-row-list {
   display: grid;
@@ -75,9 +78,18 @@
   align-items: start;
 }
 
+.terminal-analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
 .terminal-quote-selector,
 .terminal-quote-chart-card,
-.terminal-curve-card {
+.terminal-curve-card,
+.terminal-analytics-hero,
+.terminal-analytics-card {
   display: grid;
   gap: 0.9rem;
   padding: 1rem;
@@ -88,6 +100,9 @@
 
 .terminal-quote-selector-head,
 .terminal-quote-card-head,
+.terminal-analytics-hero,
+.terminal-analytics-section-head,
+.terminal-analytics-row,
 .terminal-curve-row,
 .terminal-curve-row-meta {
   display: flex;
@@ -97,6 +112,13 @@
 }
 
 .terminal-quote-card-head p,
+.terminal-analytics-copy p,
+.terminal-analytics-latest span,
+.terminal-analytics-latest small,
+.terminal-analytics-section-head small,
+.terminal-analytics-row-copy span,
+.terminal-analytics-row-meta span,
+.terminal-analytics-note-list p,
 .terminal-quote-latest span,
 .terminal-quote-latest small,
 .terminal-quote-selector-row span,
@@ -123,6 +145,12 @@
 }
 
 .terminal-quote-card-head strong,
+.terminal-analytics-copy strong,
+.terminal-analytics-latest strong,
+.terminal-analytics-section-head strong,
+.terminal-analytics-row-copy strong,
+.terminal-analytics-row-meta strong,
+.terminal-analytics-stat-grid strong,
 .terminal-quote-selector-head strong,
 .terminal-quote-latest strong,
 .terminal-quote-selector-row strong,
@@ -132,6 +160,7 @@
   color: #13293d;
 }
 
+.terminal-analytics-latest,
 .terminal-quote-latest {
   display: grid;
   gap: 0.35rem;
@@ -139,9 +168,14 @@
   text-align: right;
 }
 
+.terminal-analytics-latest strong,
 .terminal-quote-latest strong {
   font-size: clamp(1.4rem, 3vw, 2rem);
   letter-spacing: -0.04em;
+}
+
+.terminal-analytics-basis-chart {
+  height: 9rem;
 }
 
 .terminal-quote-chart {
@@ -158,6 +192,7 @@
 }
 
 .terminal-quote-stat-grid,
+.terminal-analytics-stat-grid,
 .terminal-curve-bucket-grid {
   display: grid;
   gap: 0.75rem;
@@ -165,6 +200,7 @@
 }
 
 .terminal-quote-stat-grid article,
+.terminal-analytics-stat-grid article,
 .terminal-curve-bucket {
   display: grid;
   gap: 0.25rem;
@@ -175,6 +211,7 @@
 }
 
 .terminal-quote-stat-grid span,
+.terminal-analytics-stat-grid span,
 .terminal-curve-bucket span {
   font-size: 0.72rem;
   font-weight: 700;
@@ -182,6 +219,18 @@
   text-transform: uppercase;
 }
 
+.terminal-analytics-stat-grid article p,
+.terminal-analytics-note-list p {
+  margin: 0;
+  color: #66717c;
+  line-height: 1.45;
+}
+
+.terminal-analytics-stat-grid-compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.terminal-analytics-row,
 .terminal-curve-row {
   align-items: center;
   padding: 0.8rem;
@@ -190,10 +239,25 @@
   background: rgba(255, 255, 255, 0.48);
 }
 
+.terminal-analytics-row-copy,
 .terminal-curve-row-copy {
   display: grid;
   gap: 0.2rem;
   min-width: min(100%, 12rem);
+}
+
+.terminal-analytics-row-meta {
+  display: grid;
+  gap: 0.25rem;
+  justify-items: end;
+  text-align: right;
+}
+
+.terminal-analytics-note-list {
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.48);
 }
 
 .terminal-curve-row-bar {

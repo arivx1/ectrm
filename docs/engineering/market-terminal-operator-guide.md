@@ -47,6 +47,7 @@ dashboard workspace and adds monitor-first tiles such as:
 - saved terminal watchlist
 - instrument brief
 - quote chart and curve panel
+- instrument analytics
 - market prices
 - position snapshot
 - operational attention
@@ -109,6 +110,23 @@ stored price-index observations. It shows:
 This panel uses stored ECTRM price-index observations. It is not a real-time
 tick feed, execution blotter, market-data entitlement system, curve valuation
 model, or order-entry path.
+
+## Instrument Analytics
+
+Live Desk includes an `Instrument Analytics` tile for read-only curve, basis,
+volatility, and P&L context. It shows:
+
+- curve diagnostics ranked by active trade usage
+- latest marks and history moves from stored price-index observations
+- realized annualized volatility from deterministic percentage returns
+- compatible-basis analytics when two curves share currency and unit
+- P&L attribution context from the existing P&L history report
+- links back to read-only instrument briefs and the Reports workspace
+
+This tile is analytical context, not a production valuation engine. It does
+not create marks, recommend hedges, calculate VaR or Greeks, submit orders,
+change P&L records, or replace the Reports workspace as the owner of official
+P&L reporting.
 
 ## Command Bar
 
@@ -213,6 +231,17 @@ Alerts are deterministic UI state, not freeform assistant text. Alert rows
 show severity, source context, detail, and an action that opens the owning
 workspace or supported market brief.
 
+The same tile also keeps an `Alert Delivery Trail`. Triggered alerts are
+persisted locally as in-product notification routes with delivery count, last
+delivered time, last opened time, severity, and destination. Price-index and
+commodity-class alerts route to read-only instrument briefs. Desk-signal alerts
+route to the workspace that owns the issue, such as Trades or Settlement.
+
+Delivery persistence is local to the browser. It is not email, Slack, browser
+push, mobile push, an incident queue, or a cross-device notification system.
+Use `Clear Delivery Trail` to remove the local route history without changing
+business records.
+
 ## Instrument Briefs
 
 Instrument briefs are read-only drill-downs for supported market objects. They
@@ -265,6 +294,8 @@ Every terminal-mode path should leave an obvious manual fallback:
 | A search result opens the wrong context | Clear the handoff banner, retry with a scoped prefix, or open the workspace directly. |
 | A preset seems to hide expected tiles | Reset the workspace layout, then reapply the preset. |
 | Watchlist alerts look stale | Confirm market data recency and reference-data activity in `Reference Data` or the linked workspace. |
+| Alert delivery trail is empty | Triggered watchlist alerts are archived after the Live Desk evaluates the current dashboard data in the browser. |
+| Instrument analytics is sparse | Stored price-index histories and the existing P&L report must load before curve, basis, volatility, and P&L context can populate. |
 | Assistant handoff does not open | The destination or focus metadata may be unsupported; use manual navigation and report the prompt as a routing candidate. |
 
 ## Verification Evidence
@@ -277,6 +308,8 @@ The closeout pass verified the terminal-mode slice with:
 - workspace-set launch target and persistence tests
 - terminal quote and curve helper tests
 - Live Desk rendering tests for the quote chart and curve panel
+- terminal alert delivery persistence and routing tests
+- terminal instrument analytics calculation tests
 - terminal shortcut tests
 - dashboard watchlist and alert tests
 - dashboard browser smoke coverage

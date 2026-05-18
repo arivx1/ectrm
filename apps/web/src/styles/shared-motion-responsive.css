@@ -157,6 +157,8 @@
   }
 
   .terminal-quote-layout,
+  .terminal-analytics-grid,
+  .terminal-analytics-stat-grid,
   .terminal-quote-stat-grid,
   .terminal-curve-bucket-grid {
     grid-template-columns: 1fr;
@@ -167,7 +169,12 @@
   .desk-headline-row,
   .watchlist-alert-head,
   .watchlist-alert-row,
+  .watchlist-alert-delivery-head,
+  .watchlist-alert-delivery-row,
   .market-monitor-strip-head,
+  .terminal-analytics-hero,
+  .terminal-analytics-section-head,
+  .terminal-analytics-row,
   .terminal-quote-card-head,
   .terminal-curve-row,
   .instrument-brief-head,
@@ -180,6 +187,8 @@
   .desk-headline-meta,
   .watchlist-alert-row-meta,
   .terminal-quote-latest,
+  .terminal-analytics-latest,
+  .terminal-analytics-row-meta,
   .instrument-brief-row-meta {
     justify-items: start;
     text-align: left;

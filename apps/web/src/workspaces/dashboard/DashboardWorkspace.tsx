@@ -37,22 +37,30 @@ import {
 } from './dashboardDeskHeadlines'
 import { buildDashboardMarketMonitorSummary } from './dashboardMarketMonitor'
 import {
+  DASHBOARD_WATCHLIST_ALERT_DELIVERY_STORAGE_KEY,
   DASHBOARD_WATCHLIST_STORAGE_KEY,
   buildDefaultDashboardWatchlist,
   evaluateDashboardWatchlistAlerts,
+  formatDashboardWatchlistAlertDeliveryChannel,
   formatDashboardWatchlistAlertCondition,
   formatDashboardWatchlistAlertSeverity,
   formatDashboardWatchlistObjectType,
+  markDashboardWatchlistAlertDeliveryOpened,
+  parseDashboardWatchlistAlertDeliveries,
   parseDashboardWatchlist,
+  reconcileDashboardWatchlistAlertDeliveries,
+  serializeDashboardWatchlistAlertDeliveries,
   serializeDashboardWatchlist,
   type DashboardWatchlist,
   type DashboardWatchlistAlert,
+  type DashboardWatchlistAlertDeliveryRecord,
   type DashboardWatchlistAlertSeverity,
 } from './dashboardWatchlists'
 import { loadDashboardPnlHistory } from './pnlHistoryLoader'
 import { ExternalSeriesTileContent } from './ExternalSeriesPanel'
 import { MarketContextTileContent } from './MarketContextPanel'
 import { MarketMonitorStripTileContent, MarketPricesTileContent } from './MarketPricesPanel'
+import { TerminalInstrumentAnalyticsPanel } from './TerminalInstrumentAnalyticsPanel'
 import { TerminalQuoteCurvePanel } from './TerminalQuoteCurvePanel'
 import { WeatherIntelligenceTileContent } from './WeatherIntelligencePanel'
 import {
@@ -360,6 +368,47 @@ function removeDashboardWatchlistFromStorage(): void {
 
   try {
     window.localStorage.removeItem(DASHBOARD_WATCHLIST_STORAGE_KEY)
+  } catch {
+    // Storage cleanup is best-effort only.
+  }
+}
+
+function readDashboardWatchlistAlertDeliveriesFromStorage(): DashboardWatchlistAlertDeliveryRecord[] {
+  if (typeof window === 'undefined') {
+    return []
+  }
+
+  try {
+    return parseDashboardWatchlistAlertDeliveries(
+      window.localStorage.getItem(DASHBOARD_WATCHLIST_ALERT_DELIVERY_STORAGE_KEY),
+    )
+  } catch {
+    return []
+  }
+}
+
+function writeDashboardWatchlistAlertDeliveriesToStorage(records: DashboardWatchlistAlertDeliveryRecord[]): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(
+      DASHBOARD_WATCHLIST_ALERT_DELIVERY_STORAGE_KEY,
+      serializeDashboardWatchlistAlertDeliveries(records),
+    )
+  } catch {
+    // Alert delivery persistence is best-effort; routing still works from active in-memory alerts.
+  }
+}
+
+function removeDashboardWatchlistAlertDeliveriesFromStorage(): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.removeItem(DASHBOARD_WATCHLIST_ALERT_DELIVERY_STORAGE_KEY)
   } catch {
     // Storage cleanup is best-effort only.
   }
@@ -727,6 +776,9 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
   const [headlineConcernFilter, setHeadlineConcernFilter] = useState<DashboardDeskHeadlineConcern | 'ALL'>('ALL')
   const [headlineSeverityFilter, setHeadlineSeverityFilter] = useState<DashboardDeskHeadlineSeverity | 'ALL'>('ALL')
   const [savedWatchlist, setSavedWatchlist] = useState<DashboardWatchlist | null>(() => readDashboardWatchlistFromStorage())
+  const [watchlistAlertDeliveries, setWatchlistAlertDeliveries] = useState<DashboardWatchlistAlertDeliveryRecord[]>(
+    () => readDashboardWatchlistAlertDeliveriesFromStorage(),
+  )
   const [attentionCandidates, setAttentionCandidates] = useState<TradeAttentionCandidateList | null>(null)
   const [attentionCandidatesLoading, setAttentionCandidatesLoading] = useState(false)
   const [attentionCandidatesError, setAttentionCandidatesError] = useState('')
@@ -984,6 +1036,10 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
       writeDashboardWatchlistToStorage(savedWatchlist)
     }
   }, [savedWatchlist])
+
+  useEffect(() => {
+    writeDashboardWatchlistAlertDeliveriesToStorage(watchlistAlertDeliveries)
+  }, [watchlistAlertDeliveries])
 
   const unitLabelByCommodity = useMemo(() => buildUnitLabelByCommodity(activeTrades), [activeTrades])
   const canUseDashboardSummary = !hasScreenFilter && dashboardSummary !== null
@@ -1344,6 +1400,39 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
       }),
     [dashboardIssues.rows, effectiveWatchlist, exposureByClass, visibleActiveTrades, visiblePriceIndices],
   )
+  useEffect(() => {
+    if (appLoading) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      setWatchlistAlertDeliveries((currentRecords) => {
+        const nextSnapshot = reconcileDashboardWatchlistAlertDeliveries({
+          watchlistId: effectiveWatchlist.id,
+          alerts: watchlistAlerts,
+          existingRecords: currentRecords,
+        })
+        const currentValue = serializeDashboardWatchlistAlertDeliveries(currentRecords)
+        const nextValue = serializeDashboardWatchlistAlertDeliveries(nextSnapshot.records)
+
+        return currentValue === nextValue ? currentRecords : nextSnapshot.records
+      })
+    }, 0)
+
+    return () => window.clearTimeout(timeout)
+  }, [appLoading, effectiveWatchlist.id, watchlistAlerts])
+  const activeWatchlistAlertDeliveryIds = useMemo(
+    () => new Set(watchlistAlerts.map((alert) => alert.id)),
+    [watchlistAlerts],
+  )
+  const activeWatchlistAlertDeliveries = useMemo(
+    () => watchlistAlertDeliveries.filter((record) => activeWatchlistAlertDeliveryIds.has(record.alertId)).slice(0, 6),
+    [activeWatchlistAlertDeliveryIds, watchlistAlertDeliveries],
+  )
+  const recentWatchlistAlertDeliveries = useMemo(
+    () => watchlistAlertDeliveries.slice(0, 6),
+    [watchlistAlertDeliveries],
+  )
   const marketMonitorSummary = useMemo(
     () =>
       buildDashboardMarketMonitorSummary({
@@ -1539,6 +1628,11 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     removeDashboardWatchlistFromStorage()
   }
 
+  function clearAlertDeliveryTrail(): void {
+    setWatchlistAlertDeliveries([])
+    removeDashboardWatchlistAlertDeliveriesFromStorage()
+  }
+
   function openWatchlistAlert(alert: DashboardWatchlistAlert): void {
     if (alert.objectType === 'price_index') {
       const priceIndex = visiblePriceIndices.find((candidate) => candidate.code === alert.objectId)
@@ -1546,6 +1640,9 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
         openPriceIndexBrief(priceIndex)
         return
       }
+
+      onOpenView(alert.ownerView)
+      return
     }
 
     if (alert.objectType === 'commodity_class') {
@@ -1554,6 +1651,33 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
     }
 
     onOpenView(alert.ownerView)
+  }
+
+  function openWatchlistAlertDelivery(record: DashboardWatchlistAlertDeliveryRecord): void {
+    setWatchlistAlertDeliveries((currentRecords) =>
+      markDashboardWatchlistAlertDeliveryOpened({
+        records: currentRecords,
+        deliveryId: record.id,
+      }),
+    )
+
+    if (record.objectType === 'price_index') {
+      const priceIndex = visiblePriceIndices.find((candidate) => candidate.code === record.objectId)
+      if (priceIndex) {
+        openPriceIndexBrief(priceIndex)
+        return
+      }
+
+      onOpenView(record.ownerView)
+      return
+    }
+
+    if (record.objectType === 'commodity_class') {
+      openCommodityClassBrief(record.objectId)
+      return
+    }
+
+    onOpenView(record.routeView)
   }
 
   function watchlistAlertActionLabel(alert: DashboardWatchlistAlert): string {
@@ -1593,6 +1717,11 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
                 Reset Watchlist
               </button>
             ) : null}
+            {watchlistAlertDeliveries.length > 0 ? (
+              <button type="button" className="button button-ghost" onClick={clearAlertDeliveryTrail}>
+                Clear Delivery Trail
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -1611,6 +1740,11 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
             <span>Triggered</span>
             <strong>{formatNumber(watchlistAlerts.length, 0)}</strong>
             <p>Governed in-product statuses evaluated from deterministic dashboard data.</p>
+          </article>
+          <article className="dashboard-report-card">
+            <span>Delivered</span>
+            <strong>{formatNumber(activeWatchlistAlertDeliveries.length, 0)}</strong>
+            <p>Active notifications persisted to the terminal alert delivery trail.</p>
           </article>
         </div>
 
@@ -1660,6 +1794,54 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
             <p>No saved alert condition is currently crossing its typed threshold in this dashboard view.</p>
           </div>
         )}
+
+        <section className="watchlist-alert-delivery-list" aria-label="Alert delivery trail">
+          <div className="watchlist-alert-delivery-head">
+            <div>
+              <span>Alert Delivery Trail</span>
+              <strong>{formatNumber(watchlistAlertDeliveries.length, 0)} persisted notification routes</strong>
+            </div>
+            <small>
+              {activeWatchlistAlertDeliveries.length > 0
+                ? `${formatNumber(activeWatchlistAlertDeliveries.length, 0)} active route(s)`
+                : 'No active notification routes'}
+            </small>
+          </div>
+
+          {recentWatchlistAlertDeliveries.length > 0 ? (
+            recentWatchlistAlertDeliveries.map((record) => (
+              <article key={record.id} className="watchlist-alert-delivery-row">
+                <div className="watchlist-alert-row-copy">
+                  <div className="watchlist-alert-title-row">
+                    <span className={`status-pill status-pill-${watchlistAlertSeverityTone(record.severity)}`}>
+                      {formatDashboardWatchlistAlertSeverity(record.severity)}
+                    </span>
+                    <span>{formatDashboardWatchlistAlertDeliveryChannel(record.channel)}</span>
+                  </div>
+                  <strong>{record.title}</strong>
+                  <p>
+                    Route: {record.routeLabel} · delivered {formatDate(record.lastDeliveredAt)} · count{' '}
+                    {formatNumber(record.deliveryCount, 0)}
+                  </p>
+                  <small>
+                    {record.lastOpenedAt ? `Opened ${formatDate(record.lastOpenedAt)}` : 'Awaiting operator open'}
+                  </small>
+                </div>
+                <div className="watchlist-alert-row-meta">
+                  <span>{activeWatchlistAlertDeliveryIds.has(record.alertId) ? 'Active' : 'History'}</span>
+                  <button type="button" className="button button-ghost" onClick={() => openWatchlistAlertDelivery(record)}>
+                    {record.actionLabel}
+                  </button>
+                </div>
+              </article>
+            ))
+          ) : (
+            <div className="empty-state">
+              <strong>No delivered alerts recorded</strong>
+              <p>Triggered watchlist alerts will be archived here as local in-product notification routes.</p>
+            </div>
+          )}
+        </section>
       </div>
     )
   }
@@ -2200,6 +2382,28 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
               priceIndices={visiblePriceIndices}
               formatNumber={formatNumber}
               onOpenPriceIndexBrief={openPriceIndexBrief}
+            />
+          ),
+        },
+        {
+          id: 'instrument-analytics',
+          eyebrow: 'Analytics',
+          title: 'Instrument Analytics',
+          description: 'Read-only curve, basis, volatility, and P&L context for desk-linked market instruments.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: (
+            <TerminalInstrumentAnalyticsPanel
+              appLoading={appLoading}
+              activeTrades={visibleActiveTrades}
+              priceIndices={visiblePriceIndices}
+              pnlHistoryReport={effectivePnlHistoryReport}
+              pnlHistoryLoading={pnlHistoryLoading}
+              pnlHistoryError={pnlHistoryError || pnlFilterError}
+              formatNumber={formatNumber}
+              formatMoney={formatMoney}
+              onOpenPriceIndexBrief={openPriceIndexBrief}
+              onOpenReports={() => onOpenView('reports')}
             />
           ),
         },

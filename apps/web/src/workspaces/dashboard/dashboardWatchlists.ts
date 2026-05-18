@@ -1,6 +1,7 @@
 import type { Trade, ViewKey } from '../../shared/models'
 
 export const DASHBOARD_WATCHLIST_STORAGE_KEY = 'ectrm.dashboard.terminalWatchlist.v1'
+export const DASHBOARD_WATCHLIST_ALERT_DELIVERY_STORAGE_KEY = 'ectrm.dashboard.terminalAlertDeliveries.v1'
 export const DEFAULT_DASHBOARD_WATCHLIST_ID = 'terminal-live-desk-watchlist'
 
 export const DASHBOARD_WATCHLIST_OBJECT_TYPES = [
@@ -23,9 +24,16 @@ export const DASHBOARD_WATCHLIST_ALERT_SEVERITIES = [
   'info',
 ] as const
 
+export const DASHBOARD_WATCHLIST_ALERT_DELIVERY_CHANNELS = [
+  'live_desk',
+  'instrument_brief',
+  'owning_workspace',
+] as const
+
 export type DashboardWatchlistObjectType = (typeof DASHBOARD_WATCHLIST_OBJECT_TYPES)[number]
 export type DashboardWatchlistAlertConditionType = (typeof DASHBOARD_WATCHLIST_ALERT_CONDITIONS)[number]
 export type DashboardWatchlistAlertSeverity = (typeof DASHBOARD_WATCHLIST_ALERT_SEVERITIES)[number]
+export type DashboardWatchlistAlertDeliveryChannel = (typeof DASHBOARD_WATCHLIST_ALERT_DELIVERY_CHANNELS)[number]
 
 export type DashboardWatchlistItem = {
   objectType: DashboardWatchlistObjectType
@@ -67,6 +75,38 @@ export type DashboardWatchlistAlert = {
   threshold?: number | null
 }
 
+export type DashboardWatchlistAlertDeliveryRecord = {
+  id: string
+  alertId: string
+  watchlistId: string
+  ruleId: string
+  conditionType: DashboardWatchlistAlertConditionType
+  severity: DashboardWatchlistAlertSeverity
+  title: string
+  detail: string
+  sourceLabel: string
+  channel: DashboardWatchlistAlertDeliveryChannel
+  ownerView: ViewKey
+  routeView: ViewKey
+  routeLabel: string
+  actionLabel: string
+  objectType: DashboardWatchlistObjectType
+  objectId: string
+  firstDeliveredAt: string
+  lastDeliveredAt: string
+  lastOpenedAt: string | null
+  deliveryCount: number
+  metricValue: number | null
+  threshold: number | null
+}
+
+export type DashboardWatchlistAlertDeliverySnapshot = {
+  records: DashboardWatchlistAlertDeliveryRecord[]
+  activeRecords: DashboardWatchlistAlertDeliveryRecord[]
+  emittedCount: number
+  suppressedCount: number
+}
+
 type DashboardWatchlistPriceIndex = {
   code: string
   name: string
@@ -95,7 +135,11 @@ type DashboardWatchlistIssue = {
 }
 
 const WATCHLIST_VERSION = 1
+const WATCHLIST_ALERT_DELIVERY_VERSION = 1
+const DEFAULT_ALERT_DELIVERY_COOLDOWN_MINUTES = 30
+const DEFAULT_ALERT_DELIVERY_MAX_RECORDS = 24
 const MS_PER_DAY = 86_400_000
+const MS_PER_MINUTE = 60_000
 
 const ALERT_SEVERITY_RANK: Record<DashboardWatchlistAlertSeverity, number> = {
   critical: 0,
@@ -106,6 +150,29 @@ const ALERT_SEVERITY_RANK: Record<DashboardWatchlistAlertSeverity, number> = {
 const WATCHLIST_OBJECT_TYPE_SET = new Set<string>(DASHBOARD_WATCHLIST_OBJECT_TYPES)
 const WATCHLIST_ALERT_CONDITION_SET = new Set<string>(DASHBOARD_WATCHLIST_ALERT_CONDITIONS)
 const WATCHLIST_ALERT_SEVERITY_SET = new Set<string>(DASHBOARD_WATCHLIST_ALERT_SEVERITIES)
+const WATCHLIST_ALERT_DELIVERY_CHANNEL_SET = new Set<string>(DASHBOARD_WATCHLIST_ALERT_DELIVERY_CHANNELS)
+const WATCHLIST_ALERT_ROUTE_VIEW_SET = new Set<string>([
+  'prompt',
+  'dashboard',
+  'guide',
+  'pretrade',
+  'trades',
+  'events',
+  'risk',
+  'positions',
+  'shipments',
+  'scheduling',
+  'operations',
+  'settlement',
+  'messages',
+  'reports',
+  'library',
+  'map',
+  'reference',
+  'admin',
+  'settings',
+  'assistant',
+])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -207,6 +274,117 @@ function parseWatchlistAlertRule(value: unknown): DashboardWatchlistAlertRule | 
   }
 }
 
+function parseNullableDateString(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) {
+    return null
+  }
+
+  return parseDateString(value) ?? undefined
+}
+
+function parseNullableNumberValue(value: unknown): number | null | undefined {
+  if (value === undefined || value === null) {
+    return null
+  }
+
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function parsePositiveInteger(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) {
+    return null
+  }
+
+  return Math.floor(value)
+}
+
+function parseWatchlistAlertDeliveryRecord(value: unknown): DashboardWatchlistAlertDeliveryRecord | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const id = parseNonEmptyString(value.id)
+  const alertId = parseNonEmptyString(value.alertId)
+  const watchlistId = parseNonEmptyString(value.watchlistId)
+  const ruleId = parseNonEmptyString(value.ruleId)
+  const conditionType = parseNonEmptyString(value.conditionType)
+  const severity = parseNonEmptyString(value.severity)
+  const title = parseNonEmptyString(value.title)
+  const detail = parseNonEmptyString(value.detail)
+  const sourceLabel = parseNonEmptyString(value.sourceLabel)
+  const channel = parseNonEmptyString(value.channel)
+  const ownerView = parseNonEmptyString(value.ownerView)
+  const routeView = parseNonEmptyString(value.routeView)
+  const routeLabel = parseNonEmptyString(value.routeLabel)
+  const actionLabel = parseNonEmptyString(value.actionLabel)
+  const objectType = parseNonEmptyString(value.objectType)
+  const objectId = parseNonEmptyString(value.objectId)
+  const firstDeliveredAt = parseDateString(value.firstDeliveredAt)
+  const lastDeliveredAt = parseDateString(value.lastDeliveredAt)
+  const lastOpenedAt = parseNullableDateString(value.lastOpenedAt)
+  const deliveryCount = parsePositiveInteger(value.deliveryCount)
+  const metricValue = parseNullableNumberValue(value.metricValue)
+  const threshold = parseNullableNumberValue(value.threshold)
+
+  if (
+    !id ||
+    !alertId ||
+    !watchlistId ||
+    !ruleId ||
+    !conditionType ||
+    !WATCHLIST_ALERT_CONDITION_SET.has(conditionType) ||
+    !severity ||
+    !WATCHLIST_ALERT_SEVERITY_SET.has(severity) ||
+    !title ||
+    !detail ||
+    !sourceLabel ||
+    !channel ||
+    !WATCHLIST_ALERT_DELIVERY_CHANNEL_SET.has(channel) ||
+    !ownerView ||
+    !WATCHLIST_ALERT_ROUTE_VIEW_SET.has(ownerView) ||
+    !routeView ||
+    !WATCHLIST_ALERT_ROUTE_VIEW_SET.has(routeView) ||
+    !routeLabel ||
+    !actionLabel ||
+    !objectType ||
+    !WATCHLIST_OBJECT_TYPE_SET.has(objectType) ||
+    !objectId ||
+    !firstDeliveredAt ||
+    !lastDeliveredAt ||
+    lastOpenedAt === undefined ||
+    !deliveryCount ||
+    metricValue === undefined ||
+    threshold === undefined
+  ) {
+    return null
+  }
+
+  return {
+    id,
+    alertId,
+    watchlistId,
+    ruleId,
+    conditionType: conditionType as DashboardWatchlistAlertConditionType,
+    severity: severity as DashboardWatchlistAlertSeverity,
+    title,
+    detail,
+    sourceLabel,
+    channel: channel as DashboardWatchlistAlertDeliveryChannel,
+    ownerView: ownerView as ViewKey,
+    routeView: routeView as ViewKey,
+    routeLabel,
+    actionLabel,
+    objectType: objectType as DashboardWatchlistObjectType,
+    objectId,
+    firstDeliveredAt,
+    lastDeliveredAt,
+    lastOpenedAt,
+    deliveryCount,
+    metricValue,
+    threshold,
+  }
+}
+
 function parseWatchlistValue(value: unknown): DashboardWatchlist | null {
   if (!isRecord(value)) {
     return null
@@ -239,6 +417,19 @@ function parseWatchlistValue(value: unknown): DashboardWatchlist | null {
     createdAt,
     updatedAt,
   }
+}
+
+function parseWatchlistAlertDeliveryValue(value: unknown): DashboardWatchlistAlertDeliveryRecord[] | null {
+  if (!isRecord(value) || value.version !== WATCHLIST_ALERT_DELIVERY_VERSION || !Array.isArray(value.records)) {
+    return null
+  }
+
+  const records = value.records.map(parseWatchlistAlertDeliveryRecord)
+  if (records.some((record) => record === null)) {
+    return null
+  }
+
+  return sortDashboardWatchlistAlertDeliveryRecords(records as DashboardWatchlistAlertDeliveryRecord[])
 }
 
 function buildLargePositionThreshold(netVolume: number | null | undefined): number {
@@ -355,6 +546,29 @@ export function parseDashboardWatchlist(rawValue: string | null | undefined): Da
     return parseWatchlistValue(JSON.parse(rawValue))
   } catch {
     return null
+  }
+}
+
+export function serializeDashboardWatchlistAlertDeliveries(
+  records: DashboardWatchlistAlertDeliveryRecord[],
+): string {
+  return JSON.stringify({
+    version: WATCHLIST_ALERT_DELIVERY_VERSION,
+    records,
+  })
+}
+
+export function parseDashboardWatchlistAlertDeliveries(
+  rawValue: string | null | undefined,
+): DashboardWatchlistAlertDeliveryRecord[] {
+  if (!rawValue) {
+    return []
+  }
+
+  try {
+    return parseWatchlistAlertDeliveryValue(JSON.parse(rawValue)) ?? []
+  } catch {
+    return []
   }
 }
 
@@ -669,6 +883,158 @@ export function evaluateDashboardWatchlistAlerts({
   })
 }
 
+function alertDeliveryId(alertId: string): string {
+  return `delivery:${alertId}`
+}
+
+function alertDeliveryRoute(alert: DashboardWatchlistAlert): {
+  channel: DashboardWatchlistAlertDeliveryChannel
+  routeView: ViewKey
+  routeLabel: string
+  actionLabel: string
+} {
+  if (alert.objectType === 'price_index' || alert.objectType === 'commodity_class') {
+    return {
+      channel: 'instrument_brief',
+      routeView: 'dashboard',
+      routeLabel: 'Instrument Brief',
+      actionLabel: 'Open Brief',
+    }
+  }
+
+  return {
+    channel: 'owning_workspace',
+    routeView: alert.ownerView,
+    routeLabel: `${alert.ownerView} workspace`,
+    actionLabel: `Open ${alert.ownerView}`,
+  }
+}
+
+function sortDashboardWatchlistAlertDeliveryRecords(
+  records: DashboardWatchlistAlertDeliveryRecord[],
+): DashboardWatchlistAlertDeliveryRecord[] {
+  return [...records].sort((left, right) => {
+    const deliveredCompare = Date.parse(right.lastDeliveredAt) - Date.parse(left.lastDeliveredAt)
+    if (deliveredCompare !== 0) {
+      return deliveredCompare
+    }
+
+    const severityCompare = ALERT_SEVERITY_RANK[left.severity] - ALERT_SEVERITY_RANK[right.severity]
+    if (severityCompare !== 0) {
+      return severityCompare
+    }
+
+    return left.title.localeCompare(right.title)
+  })
+}
+
+export function reconcileDashboardWatchlistAlertDeliveries({
+  watchlistId,
+  alerts,
+  existingRecords,
+  now = new Date(),
+  minimumIntervalMinutes = DEFAULT_ALERT_DELIVERY_COOLDOWN_MINUTES,
+  maxRecords = DEFAULT_ALERT_DELIVERY_MAX_RECORDS,
+}: {
+  watchlistId: string
+  alerts: readonly DashboardWatchlistAlert[]
+  existingRecords: readonly DashboardWatchlistAlertDeliveryRecord[]
+  now?: Date
+  minimumIntervalMinutes?: number
+  maxRecords?: number
+}): DashboardWatchlistAlertDeliverySnapshot {
+  const nowIso = now.toISOString()
+  const deliveryCooldownMs = Math.max(0, minimumIntervalMinutes) * MS_PER_MINUTE
+  const activeAlertIds = new Set(alerts.map((alert) => alert.id))
+  const existingByAlertId = new Map(existingRecords.map((record) => [record.alertId, record]))
+  const nextByRecordId = new Map(existingRecords.map((record) => [record.id, record]))
+  let emittedCount = 0
+  let suppressedCount = 0
+
+  for (const alert of alerts) {
+    const existingRecord = existingByAlertId.get(alert.id)
+    const route = alertDeliveryRoute(alert)
+    const lastDeliveredAt = existingRecord ? Date.parse(existingRecord.lastDeliveredAt) : Number.NaN
+    const withinCooldown =
+      existingRecord !== undefined &&
+      !Number.isNaN(lastDeliveredAt) &&
+      now.getTime() - lastDeliveredAt < deliveryCooldownMs
+
+    if (withinCooldown) {
+      suppressedCount += 1
+    } else {
+      emittedCount += 1
+    }
+
+    const nextRecord: DashboardWatchlistAlertDeliveryRecord = {
+      id: existingRecord?.id ?? alertDeliveryId(alert.id),
+      alertId: alert.id,
+      watchlistId,
+      ruleId: alert.ruleId,
+      conditionType: alert.conditionType,
+      severity: alert.severity,
+      title: alert.title,
+      detail: alert.detail,
+      sourceLabel: alert.sourceLabel,
+      channel: route.channel,
+      ownerView: alert.ownerView,
+      routeView: route.routeView,
+      routeLabel: route.routeLabel,
+      actionLabel: route.actionLabel,
+      objectType: alert.objectType,
+      objectId: alert.objectId,
+      firstDeliveredAt: existingRecord?.firstDeliveredAt ?? nowIso,
+      lastDeliveredAt: withinCooldown && existingRecord ? existingRecord.lastDeliveredAt : nowIso,
+      lastOpenedAt: existingRecord?.lastOpenedAt ?? null,
+      deliveryCount: withinCooldown && existingRecord
+        ? existingRecord.deliveryCount
+        : (existingRecord?.deliveryCount ?? 0) + 1,
+      metricValue: alert.metricValue ?? null,
+      threshold: alert.threshold ?? null,
+    }
+
+    nextByRecordId.set(nextRecord.id, nextRecord)
+  }
+
+  const records = sortDashboardWatchlistAlertDeliveryRecords([...nextByRecordId.values()]).slice(
+    0,
+    Math.max(1, Math.floor(maxRecords)),
+  )
+  const activeRecords = records.filter((record) => activeAlertIds.has(record.alertId))
+
+  return {
+    records,
+    activeRecords,
+    emittedCount,
+    suppressedCount,
+  }
+}
+
+export function markDashboardWatchlistAlertDeliveryOpened({
+  records,
+  deliveryId,
+  now = new Date(),
+}: {
+  records: readonly DashboardWatchlistAlertDeliveryRecord[]
+  deliveryId: string
+  now?: Date
+}): DashboardWatchlistAlertDeliveryRecord[] {
+  let changed = false
+  const nextRecords = records.map((record) => {
+    if (record.id !== deliveryId) {
+      return record
+    }
+
+    changed = true
+    return {
+      ...record,
+      lastOpenedAt: now.toISOString(),
+    }
+  })
+
+  return changed ? nextRecords : [...records]
+}
+
 export function formatDashboardWatchlistAlertCondition(value: DashboardWatchlistAlertConditionType): string {
   switch (value) {
     case 'price_move':
@@ -681,6 +1047,19 @@ export function formatDashboardWatchlistAlertCondition(value: DashboardWatchlist
       return 'Pricing Exception'
     case 'settlement_exception':
       return 'Settlement Exception'
+  }
+}
+
+export function formatDashboardWatchlistAlertDeliveryChannel(
+  value: DashboardWatchlistAlertDeliveryChannel,
+): string {
+  switch (value) {
+    case 'live_desk':
+      return 'Live Desk'
+    case 'instrument_brief':
+      return 'Instrument Brief'
+    case 'owning_workspace':
+      return 'Owning Workspace'
   }
 }
 

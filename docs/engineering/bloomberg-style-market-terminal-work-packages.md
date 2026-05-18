@@ -50,6 +50,8 @@ surface over existing ECTRM workspaces.
 | MTERM-10 multi-monitor workspace sets | Implemented | Terminal mode exposes Trader Morning, Risk Review, and Ops Close workspace sets with safe route launch targets and manual pop-out guidance. |
 | MTERM-11 expanded terminal command aliases and functions | Implemented | Terminal command search supports deterministic aliases such as `TRD`, `CP`, `PX`, `MON`, `DES`, `EOD`, `SETL`, and workspace-set functions while mutation verbs remain blocked. |
 | MTERM-12 time-series, quote chart, and curve panels | Implemented | Live Desk includes a read-only quote chart and curve panel over stored price-index observations, with deterministic latest marks, deltas, curve rows, and commodity buckets. |
+| MTERM-13 persistent alert delivery and notification routing | Implemented | Terminal watchlist alerts persist to a local in-product delivery trail with deterministic instrument-brief and owning-workspace routes. |
+| MTERM-14 deeper instrument analytics for curve, basis, volatility, and P&L | Implemented | Live Desk includes read-only deterministic instrument analytics over stored curves, compatible basis pairs, realized volatility, and existing P&L report valuations. |
 | MTERM-CLOSEOUT release readiness | Implemented | Roadmap status, operator guide, and Wave 3 candidate backlog documented. |
 
 ## Current Repo Anchors
@@ -126,8 +128,10 @@ It may not:
 | Workspace set | Implemented | Named terminal-mode launch bundles for opening related safe workspaces across browser windows. |
 | Terminal function | Implemented | Deterministic command aliases that resolve to existing read, explain, and navigate actions. |
 | Quote chart and curve panel | Implemented | Read-only price-index history and curve strip built from stored observations and active trade links. |
+| Instrument analytics panel | Implemented | Read-only curve diagnostics, compatible basis, volatility, and P&L attribution context. |
 | Instrument brief | Implemented | Read-only drill-down object for a price index, commodity class, or market theme. |
 | Alert definition | Implemented | Typed thresholds or status triggers for watchlists and attention cards. |
+| Alert delivery record | Implemented | Local in-product notification trail with cooldowns, delivery counts, and safe route targets. |
 | Desk headline or attention item | Implemented | Unified stream built from market context, events, reports, docs, and messages. |
 
 ## Delivery Order
@@ -162,8 +166,8 @@ selected after the Phase 1 terminal mode has been reviewed by operators.
 1. MTERM-10 multi-monitor workspace sets - implemented
 2. MTERM-11 expanded terminal command aliases and functions - implemented
 3. MTERM-12 time-series, quote chart, and curve panels - implemented
-4. MTERM-13 persistent alert delivery and notification routing
-5. MTERM-14 deeper instrument analytics for curve, basis, volatility, and P&L
+4. MTERM-13 persistent alert delivery and notification routing - implemented
+5. MTERM-14 deeper instrument analytics for curve, basis, volatility, and P&L - implemented
 
 ## Shared Definition Of Done
 
@@ -737,6 +741,111 @@ surface.
 - focused dashboard rendering tests for the Live Desk tile
 - workspace layout preset tests for the market overview placement
 
+## MTERM-13: Persistent Alert Delivery And Notification Routing
+
+### Status
+
+Implemented.
+
+### Priority
+
+P2
+
+### Outcome
+
+Terminal watchlist alerts now leave a persistent local delivery trail and route
+operators to the correct read-only brief or owning workspace without creating
+external commitments.
+
+### Scope
+
+- persist triggered terminal watchlist alerts as typed delivery records in
+  browser storage
+- include severity, condition, source, metric, threshold, delivery count, last
+  delivery time, and last opened time
+- apply a deterministic cooldown so repeated dashboard renders do not spam the
+  delivery trail
+- route price-index and commodity-class notifications to read-only instrument
+  briefs
+- route desk-signal notifications to their owning ECTRM workspaces
+- expose clear local history controls without changing business records
+
+### Out Of Scope
+
+- email, Slack, mobile push, browser push, or incident-management delivery
+- autonomous acknowledgement, escalation, trade capture, settlement,
+  confirmation, or approval
+- server-side notification queues, cross-device delivery state, or entitlement
+  modeling
+- freeform assistant-authored alert dispatch
+
+### Acceptance Criteria
+
+- active watchlist alerts persist to a local in-product delivery trail
+- delivery records parse fail-closed and reject unsupported payloads
+- repeated active alerts respect a deterministic cooldown before incrementing
+  delivery count
+- notification routes reuse existing instrument-brief and workspace navigation
+  paths
+- operators can clear the local delivery trail without mutating business data
+
+### Verification
+
+- focused web tests for alert delivery parsing, serialization, routing,
+  cooldown, and opened-state marking
+- focused dashboard rendering tests for the delivery trail
+
+## MTERM-14: Deeper Instrument Analytics For Curve, Basis, Volatility, And P&L
+
+### Status
+
+Implemented.
+
+### Priority
+
+P2
+
+### Outcome
+
+Live Desk now includes a read-only instrument analytics tile that gives
+operators deeper curve, compatible-basis, volatility, and P&L context without
+turning terminal mode into an autonomous valuation or execution system.
+
+### Scope
+
+- load stored price-index histories for desk-linked candidate curves
+- rank curve diagnostics by active trade usage
+- compute latest mark, history move, and realized annualized volatility from
+  stored observations
+- compute basis analytics only for compatible curve pairs with matching
+  currency and unit
+- summarize existing P&L history report totals, window change, included
+  valuation rows, and valuation rows linked to visible curves
+- route curve rows to existing read-only price-index briefs and reports
+
+### Out Of Scope
+
+- production valuation methodology, VaR, Greeks, stress testing, hedge
+  recommendation, or trade execution
+- model-authored marks, freeform basis formulas, or direct mutation of P&L
+  records
+- licensed real-time market-data entitlement or server-side analytics engines
+- replacing the Reports workspace as the owner of P&L reporting
+
+### Acceptance Criteria
+
+- Live Desk includes an instrument analytics tile in the market overview layout
+- curve diagnostics are deterministic and based on stored price observations
+- basis analytics fail soft unless a compatible comparison curve exists
+- volatility uses deterministic percentage-return calculations
+- P&L context comes from the existing P&L report model and remains read-only
+
+### Verification
+
+- focused web tests for terminal instrument analytics calculations
+- focused dashboard rendering tests for the analytics tile
+- workspace layout preset tests for market overview placement
+
 ## MTERM-CLOSEOUT: Terminal Mode Release Readiness
 
 ### Status
@@ -749,38 +858,40 @@ P0
 
 ### Outcome
 
-The implemented terminal-mode slice is documented, reviewable, and ready for
-operator feedback without relying on chat history or code archaeology.
+The implemented terminal-mode slice, including the Wave 3 enhancements, is
+documented, reviewable, and ready for operator feedback without relying on chat
+history or code archaeology.
 
 ### Scope
 
-- mark MTERM-01 through MTERM-09 implementation status in this roadmap
+- mark MTERM-01 through MTERM-14 implementation status in this roadmap
 - add an operator guide that explains:
   - terminal mode intent and boundaries
   - command bar scopes and supported prefixes
   - monitor presets and saved layouts
+  - workspace sets
   - watchlists and typed alerts
+  - quote charts, curve panels, alert delivery, and instrument analytics
   - keyboard shortcuts
   - assistant handoffs and fail-closed behavior
-- document Wave 3 candidate enhancements without committing them as active work
 - keep the authority boundary explicit: terminal mode is still read, explain,
-  navigate, and personalize first
+  navigate, analyze, and personalize first
 
 ### Out Of Scope
 
 - creating new terminal product behavior
 - staging or committing unrelated dirty worktree changes
-- promoting Wave 3 candidates without operator review
+- promoting a future Wave 4 backlog without operator review
 
 ### Acceptance Criteria
 
-- the roadmap reflects the implemented Phase 1 terminal-mode slice
+- the roadmap reflects the implemented terminal-mode slice through Wave 3
 - operators have a single guide for using the terminal-mode behavior
 - future contributors can see what is shipped, what is bounded, and what is
-  merely candidate scope
+  out of scope
 
 ### Verification
 
-- docs links resolve locally
-- markdown formatting is readable
-- no code tests are required unless implementation behavior changes
+- docs links resolve locally and markdown formatting is readable
+- focused web tests, full web lint/build, and seeded browser smoke pass when
+  implementation behavior changes
