@@ -15,7 +15,7 @@
 }
 
 .library-workspace {
-  grid-template-columns: minmax(17rem, 19rem) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
 }
 
@@ -771,7 +771,7 @@
 .library-browser-main {
   display: grid;
   gap: 1rem;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .library-browser-main-head strong {
@@ -1031,23 +1031,48 @@
   flex-wrap: wrap;
 }
 
+.library-file-table-scroll {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.library-file-table-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 .library-file-table {
   gap: 0.8rem;
+}
+
+.library-file-table-scrollbar {
+  position: sticky;
+  z-index: 2;
+  bottom: -0.75rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 1rem;
+  margin: 0 -0.35rem -0.45rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(8, 15, 24, 0), rgba(8, 15, 24, 0.98) 42%);
+}
+
+.library-file-table-scrollbar-spacer {
+  height: 1px;
 }
 
 .library-file-table-head,
 .library-file-row {
   display: grid;
   gap: 0.75rem;
-  grid-template-columns:
-    minmax(0, 2.3fr)
-    minmax(0, 0.95fr)
-    minmax(0, 0.95fr)
-    minmax(0, 1.05fr)
-    minmax(0, 0.9fr)
-    minmax(0, 0.95fr)
-    minmax(0, 0.65fr);
+  grid-template-columns: var(
+    --library-file-table-columns,
+    320px 180px 160px 160px 140px 104px
+  );
   align-items: center;
+  width: max-content;
+  min-width: 100%;
 }
 
 .library-file-table-head {
@@ -1058,9 +1083,56 @@
   letter-spacing: 0.08em;
 }
 
+.library-file-column-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-inline-end: 0.65rem;
+}
+
+.library-file-column-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+.library-file-column-resizer {
+  position: absolute;
+  inset-block: -0.25rem;
+  inset-inline-end: -0.42rem;
+  width: 0.84rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: col-resize;
+}
+
+.library-file-column-resizer::before {
+  position: absolute;
+  inset-block: 0.18rem;
+  inset-inline-start: 50%;
+  width: 1px;
+  border-radius: 999px;
+  background: rgba(126, 154, 184, 0.28);
+  content: '';
+  transform: translateX(-50%);
+}
+
+.library-file-column-resizer:hover::before,
+.library-file-column-resizer:focus-visible::before {
+  width: 2px;
+  background: rgb(var(--theme-highlight-rgb) / 0.95);
+}
+
+.library-file-column-resizer:focus-visible {
+  outline: 2px solid rgb(var(--theme-highlight-rgb) / 0.56);
+  outline-offset: 2px;
+}
+
 .library-file-row {
   box-sizing: border-box;
-  width: 100%;
   padding: 0.9rem;
   border: 1px solid rgba(126, 154, 184, 0.1);
   border-radius: 0.95rem;
@@ -1076,13 +1148,13 @@
     box-shadow 150ms ease;
 }
 
-.library-file-table-head > span,
+.library-file-column-head,
 .library-file-row > span,
 .library-file-row > div {
   min-width: 0;
 }
 
-.library-file-table-head > span,
+.library-file-column-label,
 .library-file-row > span {
   overflow: hidden;
   text-overflow: ellipsis;

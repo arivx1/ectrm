@@ -361,6 +361,7 @@ function AuthenticatedWorkspaceShell({
   const heroTitle = showingNavigationSectionLanding ? activePrimarySection.heroTitle : HERO_TITLE_BY_VIEW[currentView]
   const heroBody = showingNavigationSectionLanding ? activePrimarySection.heroBody : HERO_BODY_BY_VIEW[currentView]
   const isPromptHomeView = !showingNavigationSectionLanding && currentView === 'prompt'
+  const showHeroBadge = showingNavigationSectionLanding || currentView !== 'library'
   const hasAuthenticationIssue =
     isAuthenticationRequiredMessage(workspaceData.error) ||
     Object.values(workspaceData.groupErrors).some((message) => isAuthenticationRequiredMessage(message))
@@ -751,46 +752,48 @@ function AuthenticatedWorkspaceShell({
                 </span>
               </div>
               <h2>{heroTitle}</h2>
-              <p>{heroBody}</p>
+              {heroBody ? <p>{heroBody}</p> : null}
             </div>
 
-            <div className="hero-badge">
-              <span>Focus</span>
-              <strong>
-                {showingNavigationSectionLanding
-                  ? activePrimarySection.label
-                  : selectedTrade
-                  ? selectedTrade.trade_id
-                  : currentWorkspaceLabel}
-              </strong>
-              <small>
-                {showingNavigationSectionLanding
-                  ? `${activePrimarySection.views.length} workspace${activePrimarySection.views.length === 1 ? '' : 's'} grouped in this section`
-                  : selectedTrade
-                  ? `${selectedTrade.commodity} • ${selectedTrade.book}`
-                  : `${workspaceData.events.length} loaded events across the current session`}
-              </small>
-              <div className="hero-badge-actions">
-                {renderTerminalCommandTrigger()}
-                {renderShortcutReferenceTrigger()}
-                {authSession ? (
-                  <small className="hero-badge-session">
-                    Signed in as {authSession.user.display_name}
-                  </small>
-                ) : null}
-                {authSession ? (
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    onClick={() => void onSignOut()}
-                    disabled={signOutPending}
-                  >
-                    {signOutPending ? 'Signing Out...' : 'Sign Out'}
-                  </button>
-                ) : null}
-                {signOutError ? <small className="hero-badge-error">{signOutError}</small> : null}
+            {showHeroBadge ? (
+              <div className="hero-badge">
+                <span>Focus</span>
+                <strong>
+                  {showingNavigationSectionLanding
+                    ? activePrimarySection.label
+                    : selectedTrade
+                    ? selectedTrade.trade_id
+                    : currentWorkspaceLabel}
+                </strong>
+                <small>
+                  {showingNavigationSectionLanding
+                    ? `${activePrimarySection.views.length} workspace${activePrimarySection.views.length === 1 ? '' : 's'} grouped in this section`
+                    : selectedTrade
+                    ? `${selectedTrade.commodity} • ${selectedTrade.book}`
+                    : `${workspaceData.events.length} loaded events across the current session`}
+                </small>
+                <div className="hero-badge-actions">
+                  {renderTerminalCommandTrigger()}
+                  {renderShortcutReferenceTrigger()}
+                  {authSession ? (
+                    <small className="hero-badge-session">
+                      Signed in as {authSession.user.display_name}
+                    </small>
+                  ) : null}
+                  {authSession ? (
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => void onSignOut()}
+                      disabled={signOutPending}
+                    >
+                      {signOutPending ? 'Signing Out...' : 'Sign Out'}
+                    </button>
+                  ) : null}
+                  {signOutError ? <small className="hero-badge-error">{signOutError}</small> : null}
+                </div>
               </div>
-            </div>
+            ) : null}
           </header>
         )}
 

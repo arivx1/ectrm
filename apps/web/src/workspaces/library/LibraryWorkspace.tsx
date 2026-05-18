@@ -2,9 +2,13 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type UIEvent as ReactUIEvent,
 } from 'react'
 
 import { fetchDocumentSource } from '../../entities/documents/api'
@@ -28,14 +32,12 @@ import type { DocumentIngestionRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import {
   buildDocumentLibraryCollectionCounts,
-  documentHasAiAssist,
   documentHasErrors,
   documentIsLinked,
   DOCUMENT_LIBRARY_COLLECTIONS,
   filterDocumentLibraryDocuments,
   formatDocumentLibraryLabel,
   sortDocumentLibraryKindOptions,
-  type DocumentLibraryCollectionKey,
   type DocumentLibrarySortMode,
   type DocumentLibraryViewMode,
 } from './libraryWorkspaceSupport'
@@ -48,17 +50,6 @@ type LibraryWorkspaceProps = {
   onOpenOperationsWorkspace: () => void
 }
 
-type LibraryKindFolder = {
-  label: string
-  count: number
-}
-
-type LibraryLocation =
-  {
-    scope: 'collection'
-    key: DocumentLibraryCollectionKey
-  }
-
 type LibraryDocumentActivityEntry = {
   key: string
   label: string
@@ -67,6 +58,18 @@ type LibraryDocumentActivityEntry = {
 }
 
 const LIBRARY_UPLOAD_CARD_PANEL_ID = 'library-upload-card-panel'
+const LIBRARY_FILE_COLUMNS = [
+  { key: 'name', label: 'Name', minWidth: 240, defaultWidth: 320 },
+  { key: 'type', label: 'Type', minWidth: 150, defaultWidth: 180 },
+  { key: 'review', label: 'Review', minWidth: 130, defaultWidth: 160 },
+  { key: 'owner', label: 'Owner', minWidth: 130, defaultWidth: 160 },
+  { key: 'modified', label: 'Modified', minWidth: 120, defaultWidth: 140 },
+  { key: 'size', label: 'Size', minWidth: 88, defaultWidth: 104 },
+] as const
+
+type LibraryFileColumn = (typeof LIBRARY_FILE_COLUMNS)[number]
+type LibraryFileColumnKey = (typeof LIBRARY_FILE_COLUMNS)[number]['key']
+type LibraryFileColumnWidths = Partial<Record<LibraryFileColumnKey, number>>
 
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
@@ -219,19 +222,6 @@ function fileStatusSummary(document: DocumentIngestionRecord): string {
   return formatDocumentLibraryLabel(document.review_status)
 }
 
-function buildLibraryKindFolders(documents: DocumentIngestionRecord[]): LibraryKindFolder[] {
-  const counts = new Map<string, number>()
-
-  documents.forEach((document) => {
-    const label = dominantDocumentKind(document)
-    counts.set(label, (counts.get(label) ?? 0) + 1)
-  })
-
-  return [...counts.entries()]
-    .sort(([leftLabel], [rightLabel]) => leftLabel.localeCompare(rightLabel))
-    .map(([label, count]) => ({ label, count }))
-}
-
 export function LibraryWorkspace({
   authSession,
   formatDate,
@@ -277,11 +267,6 @@ export function LibraryWorkspace({
     saveErrors,
     savingTarget,
   } = useDocumentIngestionController({ authSession })
-  const [activeLocation, setActiveLocation] = useState<LibraryLocation>({
-    scope: 'collection',
-    key: 'all',
-  })
-  const [selectedKindFilter, setSelectedKindFilter] = useState('all')
   const [viewMode, setViewMode] = useState<DocumentLibraryViewMode>('list')
   const [sortMode, setSortMode] = useState<DocumentLibrarySortMode>('updated')
   const [searchQuery, setSearchQuery] = useState('')
@@ -291,43 +276,30 @@ export function LibraryWorkspace({
   const [openingDocumentId, setOpeningDocumentId] = useState<string | null>(null)
   const [openDocumentError, setOpenDocumentError] = useState('')
   const [kindDraftByDocumentId, setKindDraftByDocumentId] = useState<Record<string, string>>({})
+  const [fileColumnWidths, setFileColumnWidths] = useState<LibraryFileColumnWidths>({})
+  const [fileTableScrollWidth, setFileTableScrollWidth] = useState(0)
+  const fileTableScrollRef = useRef<HTMLDivElement | null>(null)
+  const fileTableScrollbarRef = useRef<HTMLDivElement | null>(null)
   const uploadCardState = usePersistentCollapsibleCardState('library.upload-card', false)
   const setUploadCardExpanded = uploadCardState.setExpanded
   const showUploadComposer = uploadCardState.expanded
   const deferredSearchQuery = useDeferredValue(searchQuery)
 
-  const collectionCounts = buildDocumentLibraryCollectionCounts(documents)
-  const rootCollection = DOCUMENT_LIBRARY_COLLECTIONS[0]
-  const workflowCollections = DOCUMENT_LIBRARY_COLLECTIONS.slice(1)
-  const activeCollection =
-    DOCUMENT_LIBRARY_COLLECTIONS.find((collection) => collection.key === activeLocation.key) ??
-    rootCollection
   const scopedDocuments = filterDocumentLibraryDocuments({
     documents,
-    collectionKey: activeCollection.key,
+    collectionKey: 'all',
     query: '',
     sortMode: 'updated',
   })
   const scopedCollectionCounts = buildDocumentLibraryCollectionCounts(scopedDocuments)
-  const kindFolders = buildLibraryKindFolders(scopedDocuments)
-  const activeKindFilter =
-    selectedKindFilter === 'all' || kindFolders.some((folder) => folder.label === selectedKindFilter)
-      ? selectedKindFilter
-      : 'all'
   const searchedDocuments = filterDocumentLibraryDocuments({
     documents,
-    collectionKey: activeCollection.key,
+    collectionKey: 'all',
     query: deferredSearchQuery,
     sortMode,
   })
-  const visibleDocuments = searchedDocuments.filter(
-    (document) => activeKindFilter === 'all' || dominantDocumentKind(document) === activeKindFilter,
-  )
-  const totalStoredBytes = documents.reduce((sum, document) => sum + document.size_bytes, 0)
+  const visibleDocuments = searchedDocuments
   const visibleStoredBytes = visibleDocuments.reduce((sum, document) => sum + document.size_bytes, 0)
-  const aiAssistedCount = documents.filter(documentHasAiAssist).length
-  const verifiedCount = documents.filter((document) => document.review_status === 'VERIFIED').length
-  const processingCount = documents.filter(documentNeedsProcessing).length
   const documentPageId = activeDocumentId !== undefined ? activeDocumentId : localActiveDocumentId
   const documentPage = documentPageId
     ? documents.find((document) => document.document_id === documentPageId) ?? null
@@ -363,7 +335,7 @@ export function LibraryWorkspace({
       : selectedDocumentId && visibleDocuments.some((document) => document.document_id === selectedDocumentId)
         ? selectedDocumentId
         : visibleDocuments[0]?.document_id ?? null
-  const activeLocationLabel = activeCollection.label
+  const activeLocationLabel = DOCUMENT_LIBRARY_COLLECTIONS[0].label
   const documentPageActivity = documentPage
     ? buildDocumentActivityLog(documentPage)
     : []
@@ -374,6 +346,12 @@ export function LibraryWorkspace({
     ? pagePreviewLoading[selectedDetailPage.page_id] === true
     : false
   const selectedDetailPagePreviewError = selectedDetailPage ? pagePreviewErrors[selectedDetailPage.page_id] ?? '' : ''
+  const fileColumnTemplate = LIBRARY_FILE_COLUMNS.map(
+    (column) => `${fileColumnWidths[column.key] ?? column.defaultWidth}px`,
+  ).join(' ')
+  const fileTableStyle = {
+    '--library-file-table-columns': fileColumnTemplate,
+  } as CSSProperties
 
   useEffect(() => {
     if (
@@ -420,6 +398,42 @@ export function LibraryWorkspace({
       return documentPage.pages[0]?.page_id ?? null
     })
   }, [documentPage])
+
+  useEffect(() => {
+    if (viewMode !== 'list') {
+      return undefined
+    }
+
+    const scrollContainer = fileTableScrollRef.current
+    if (!scrollContainer) {
+      return undefined
+    }
+
+    const updateScrollWidth = () => {
+      setFileTableScrollWidth(scrollContainer.scrollWidth)
+      if (fileTableScrollbarRef.current) {
+        fileTableScrollbarRef.current.scrollLeft = scrollContainer.scrollLeft
+      }
+    }
+
+    updateScrollWidth()
+
+    const resizeObserver =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(() => updateScrollWidth())
+
+    resizeObserver?.observe(scrollContainer)
+    if (scrollContainer.firstElementChild) {
+      resizeObserver?.observe(scrollContainer.firstElementChild)
+    }
+    window.addEventListener('resize', updateScrollWidth)
+
+    return () => {
+      resizeObserver?.disconnect()
+      window.removeEventListener('resize', updateScrollWidth)
+    }
+  }, [fileColumnTemplate, viewMode, visibleDocuments.length])
 
   function handleOpenDocumentPage(documentId: string) {
     setSelectedDocumentId(documentId)
@@ -517,11 +531,82 @@ export function LibraryWorkspace({
     }
   }
 
-  function handleSelectCollection(collectionKey: DocumentLibraryCollectionKey) {
-    setActiveLocation({
-      scope: 'collection',
-      key: collectionKey,
-    })
+  function handleFileTableScroll(event: ReactUIEvent<HTMLDivElement>) {
+    const scrollbar = fileTableScrollbarRef.current
+    if (!scrollbar || scrollbar.scrollLeft === event.currentTarget.scrollLeft) {
+      return
+    }
+
+    scrollbar.scrollLeft = event.currentTarget.scrollLeft
+  }
+
+  function handleFileTableScrollbarScroll(event: ReactUIEvent<HTMLDivElement>) {
+    const scrollContainer = fileTableScrollRef.current
+    if (!scrollContainer || scrollContainer.scrollLeft === event.currentTarget.scrollLeft) {
+      return
+    }
+
+    scrollContainer.scrollLeft = event.currentTarget.scrollLeft
+  }
+
+  function handleFileColumnResizePointerDown(
+    event: ReactPointerEvent<HTMLButtonElement>,
+    column: LibraryFileColumn,
+  ) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const startX = event.clientX
+    const startWidth =
+      event.currentTarget.parentElement?.getBoundingClientRect().width ??
+      fileColumnWidths[column.key] ??
+      column.defaultWidth
+    const previousCursor = document.body.style.cursor
+    const previousUserSelect = document.body.style.userSelect
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const nextWidth = Math.max(column.minWidth, Math.round(startWidth + moveEvent.clientX - startX))
+      setFileColumnWidths((current) => ({
+        ...current,
+        [column.key]: nextWidth,
+      }))
+    }
+
+    const handlePointerEnd = () => {
+      document.body.style.cursor = previousCursor
+      document.body.style.userSelect = previousUserSelect
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerEnd)
+      window.removeEventListener('pointercancel', handlePointerEnd)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerEnd)
+    window.addEventListener('pointercancel', handlePointerEnd)
+  }
+
+  function handleFileColumnResizeKeyDown(
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    column: LibraryFileColumn,
+  ) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+    const direction = event.key === 'ArrowRight' ? 1 : -1
+    const step = event.shiftKey ? 32 : 16
+    const currentWidth =
+      fileColumnWidths[column.key] ??
+      event.currentTarget.parentElement?.getBoundingClientRect().width ??
+      column.defaultWidth
+    setFileColumnWidths((current) => ({
+      ...current,
+      [column.key]: Math.max(column.minWidth, Math.round(currentWidth + direction * step)),
+    }))
   }
 
   async function handleUploadSubmit(event: FormEvent<HTMLFormElement>) {
@@ -543,110 +628,6 @@ export function LibraryWorkspace({
 
   return (
     <div className="library-workspace">
-      <aside className="library-sidebar surface">
-        <section className="library-sidebar-section">
-          <div className="library-sidebar-section-head">
-            <span className="eyebrow">Library</span>
-            <small>{documents.length} files</small>
-          </div>
-          <div className="library-folder-list">
-            <button
-              type="button"
-              className={`library-folder-button${
-                activeLocation.key === rootCollection.key
-                  ? ' is-active'
-                  : ''
-              }`}
-              onClick={() => handleSelectCollection(rootCollection.key)}
-            >
-              <span className="library-folder-icon" aria-hidden="true" />
-              <div className="library-folder-copy">
-                <strong>{rootCollection.label}</strong>
-                <small>{rootCollection.description}</small>
-              </div>
-              <span className="library-folder-count">{collectionCounts[rootCollection.key]}</span>
-            </button>
-          </div>
-        </section>
-
-        <section className="library-sidebar-section">
-          <div className="library-sidebar-section-head">
-            <span className="eyebrow">Workflow Views</span>
-            <small>{workflowCollections.length}</small>
-          </div>
-          <div className="library-folder-list">
-            {workflowCollections.map((collection) => (
-              <button
-                key={collection.key}
-                type="button"
-                className={`library-folder-button${
-                  activeLocation.key === collection.key
-                    ? ' is-active'
-                    : ''
-                }`}
-                onClick={() => handleSelectCollection(collection.key)}
-              >
-                <span className="library-folder-icon" aria-hidden="true" />
-                <div className="library-folder-copy">
-                  <strong>{collection.label}</strong>
-                  <small>{collection.description}</small>
-                </div>
-                <span className="library-folder-count">{collectionCounts[collection.key]}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="library-sidebar-section">
-          <div className="library-sidebar-section-head">
-            <span className="eyebrow">Document Types</span>
-            <small>{kindFolders.length}</small>
-          </div>
-          <div className="library-folder-list">
-            <button
-              type="button"
-              className={`library-folder-button${activeKindFilter === 'all' ? ' is-active' : ''}`}
-              onClick={() => setSelectedKindFilter('all')}
-            >
-              <span className="library-folder-icon library-folder-icon-outline" aria-hidden="true" />
-              <div className="library-folder-copy">
-                <strong>All Types</strong>
-                <small>Show every document family in the selected view.</small>
-              </div>
-              <span className="library-folder-count">{scopedDocuments.length}</span>
-            </button>
-            {kindFolders.map((folder) => (
-              <button
-                key={folder.label}
-                type="button"
-                className={`library-folder-button${activeKindFilter === folder.label ? ' is-active' : ''}`}
-                onClick={() => setSelectedKindFilter(folder.label)}
-              >
-                <span className="library-folder-icon library-folder-icon-type" aria-hidden="true" />
-                <div className="library-folder-copy">
-                  <strong>{folder.label}</strong>
-                  <small>{folder.count} uploaded file{folder.count === 1 ? '' : 's'}</small>
-                </div>
-                <span className="library-folder-count">{folder.count}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="library-sidebar-section">
-          <div className="library-storage-card">
-            <span className="eyebrow">Storage</span>
-            <strong>{formatBytes(totalStoredBytes)}</strong>
-            <p>{documents.length} files stored in the uploaded documents library.</p>
-            <div className="library-storage-stats">
-              <span>{verifiedCount} verified</span>
-              <span>{processingCount} processing</span>
-              <span>{aiAssistedCount} AI-assisted</span>
-            </div>
-          </div>
-        </section>
-      </aside>
-
       <div className="library-browser">
         {documentPageId ? (
           <section className="library-document-page surface">
@@ -946,21 +927,9 @@ export function LibraryWorkspace({
         <section className="library-toolbar surface">
           <div className="library-toolbar-top">
             <div className="library-breadcrumbs" aria-label="Library location">
-              <button
-                type="button"
-                className="library-breadcrumb-button"
-                onClick={() => handleSelectCollection(rootCollection.key)}
-              >
-                Uploaded documents
-              </button>
+              <span>Uploaded documents</span>
               <span className="library-breadcrumb-separator">/</span>
               <span>{activeLocationLabel}</span>
-              {activeKindFilter !== 'all' ? (
-                <>
-                  <span className="library-breadcrumb-separator">/</span>
-                  <strong>{activeKindFilter}</strong>
-                </>
-              ) : null}
             </div>
 
             <div className="library-toolbar-actions">
@@ -1235,82 +1204,113 @@ export function LibraryWorkspace({
                 </p>
               </div>
             ) : viewMode === 'list' ? (
-              <div className="library-file-table" role="list">
-                <div className="library-file-table-head" aria-hidden="true">
-                  <span>Name</span>
-                  <span>Type</span>
-                  <span>Review</span>
-                  <span>Owner</span>
-                  <span>Modified</span>
-                  <span>Size</span>
-                </div>
-                <div className="library-file-table-body">
-                  {visibleDocuments.map((document) => (
-                    <div
-                      key={document.document_id}
-                      role="listitem"
-                      tabIndex={0}
-                      className={`library-file-row${resolvedSelectedDocumentId === document.document_id ? ' is-selected' : ''}`}
-                      aria-label={`Open ${document.display_name || document.original_filename}`}
-                      onClick={() => handleOpenDocumentPage(document.document_id)}
-                      onKeyDown={(event) => handleDocumentRowKeyDown(event, document.document_id)}
-                    >
-                      <div className="library-file-name">
-                        <span className="library-file-icon" aria-hidden="true">
-                          PDF
-                        </span>
-                        <div className="library-file-name-copy">
-                          <strong>{document.display_name || document.original_filename}</strong>
-                          <span>{document.original_filename}</span>
+              <>
+                <div
+                  ref={fileTableScrollRef}
+                  className="library-file-table-scroll"
+                  onScroll={handleFileTableScroll}
+                >
+                  <div className="library-file-table" role="list" style={fileTableStyle}>
+                    <div className="library-file-table-head">
+                      {LIBRARY_FILE_COLUMNS.map((column) => (
+                        <div
+                          key={column.key}
+                          className="library-file-column-head"
+                          data-library-column={column.key}
+                        >
+                          <span className="library-file-column-label">{column.label}</span>
+                          <button
+                            type="button"
+                            className="library-file-column-resizer"
+                            aria-label={`Resize ${column.label} column`}
+                            title={`Drag or use left and right arrow keys to resize ${column.label}`}
+                            onPointerDown={(event) => handleFileColumnResizePointerDown(event, column)}
+                            onKeyDown={(event) => handleFileColumnResizeKeyDown(event, column)}
+                          />
                         </div>
-                      </div>
-                      <div
-                        className="library-file-kind-cell"
-                        onClick={(event) => event.stopPropagation()}
-                        onKeyDown={(event) => event.stopPropagation()}
-                      >
-                        {schemaRegistry ? (
-                          <select
-                            className="control library-file-kind-select"
-                            aria-label={`Set document type for ${document.display_name || document.original_filename}`}
-                            value={kindDraftByDocumentId[document.document_id] ?? dominantDocumentKindCode(document)}
-                            disabled={documentNeedsProcessing(document) || savingTarget === `document-kind:${document.document_id}`}
-                            title={
-                              document.page_count > 1
-                                ? `Changing the type here applies the selected classification to all ${document.page_count} pages in the file.`
-                                : 'Change the classified document type.'
-                            }
-                            onChange={(event) =>
-                              void handleLibraryDocumentKindChange(document, event.target.value)
-                            }
-                          >
-                            {documentKindOptions.map((entry) => (
-                              <option key={entry.document_kind} value={entry.document_kind}>
-                                {entry.label}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span>{dominantDocumentKind(document)}</span>
-                        )}
-                        {savingTarget === `document-kind:${document.document_id}` ? (
-                          <small className="library-file-kind-note">Saving type…</small>
-                        ) : saveErrors[`document-kind:${document.document_id}`] ? (
-                          <small className="field-error">{saveErrors[`document-kind:${document.document_id}`]}</small>
-                        ) : null}
-                      </div>
-                      <span>
-                        <span className={`status-pill status-pill-${documentStatusTone(document.status)}`}>
-                          {fileStatusSummary(document)}
-                        </span>
-                      </span>
-                      <span>{ownerLabel(document)}</span>
-                      <span>{formatDate(document.updated_at)}</span>
-                      <span>{formatBytes(document.size_bytes)}</span>
+                      ))}
                     </div>
-                  ))}
+                    <div className="library-file-table-body">
+                      {visibleDocuments.map((document) => (
+                        <div
+                          key={document.document_id}
+                          role="listitem"
+                          tabIndex={0}
+                          className={`library-file-row${resolvedSelectedDocumentId === document.document_id ? ' is-selected' : ''}`}
+                          aria-label={`Open ${document.display_name || document.original_filename}`}
+                          onClick={() => handleOpenDocumentPage(document.document_id)}
+                          onKeyDown={(event) => handleDocumentRowKeyDown(event, document.document_id)}
+                        >
+                          <div className="library-file-name">
+                            <span className="library-file-icon" aria-hidden="true">
+                              PDF
+                            </span>
+                            <div className="library-file-name-copy">
+                              <strong>{document.display_name || document.original_filename}</strong>
+                              <span>{document.original_filename}</span>
+                            </div>
+                          </div>
+                          <div
+                            className="library-file-kind-cell"
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => event.stopPropagation()}
+                          >
+                            {schemaRegistry ? (
+                              <select
+                                className="control library-file-kind-select"
+                                aria-label={`Set document type for ${document.display_name || document.original_filename}`}
+                                value={kindDraftByDocumentId[document.document_id] ?? dominantDocumentKindCode(document)}
+                                disabled={documentNeedsProcessing(document) || savingTarget === `document-kind:${document.document_id}`}
+                                title={
+                                  document.page_count > 1
+                                    ? `Changing the type here applies the selected classification to all ${document.page_count} pages in the file.`
+                                    : 'Change the classified document type.'
+                                }
+                                onChange={(event) =>
+                                  void handleLibraryDocumentKindChange(document, event.target.value)
+                                }
+                              >
+                                {documentKindOptions.map((entry) => (
+                                  <option key={entry.document_kind} value={entry.document_kind}>
+                                    {entry.label}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span>{dominantDocumentKind(document)}</span>
+                            )}
+                            {savingTarget === `document-kind:${document.document_id}` ? (
+                              <small className="library-file-kind-note">Saving type…</small>
+                            ) : saveErrors[`document-kind:${document.document_id}`] ? (
+                              <small className="field-error">{saveErrors[`document-kind:${document.document_id}`]}</small>
+                            ) : null}
+                          </div>
+                          <span>
+                            <span className={`status-pill status-pill-${documentStatusTone(document.status)}`}>
+                              {fileStatusSummary(document)}
+                            </span>
+                          </span>
+                          <span>{ownerLabel(document)}</span>
+                          <span>{formatDate(document.updated_at)}</span>
+                          <span>{formatBytes(document.size_bytes)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
+                <div
+                  ref={fileTableScrollbarRef}
+                  className="library-file-table-scrollbar"
+                  aria-label="Scroll library columns horizontally"
+                  role="region"
+                  onScroll={handleFileTableScrollbarScroll}
+                >
+                  <div
+                    className="library-file-table-scrollbar-spacer"
+                    style={{ width: fileTableScrollWidth }}
+                  />
+                </div>
+              </>
             ) : (
               <div className="library-document-grid">
                 {visibleDocuments.map((document) => (

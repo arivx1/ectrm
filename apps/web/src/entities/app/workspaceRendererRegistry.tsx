@@ -911,9 +911,8 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     key: 'library',
     label: 'Library',
     kicker: 'Files',
-    heroTitle: 'Uploaded document library and review surface',
-    heroBody:
-      'Browse uploaded PDFs in a dedicated library that keeps search, preview, review status, and source-file access in one place.',
+    heroTitle: 'Library',
+    heroBody: '',
     dataGroups: [],
     blockingGroups: [],
   },

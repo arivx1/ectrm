@@ -378,6 +378,8 @@ describe('LibraryWorkspace', () => {
     expect(markup).toContain('Set document type for 225186 VESSEL NOMINATION')
     expect(markup).toContain('Delivery Confirmation')
     expect(markup).toContain('<option value="UNKNOWN" selected="">Unknown</option>')
+    expect(markup).toContain('Resize Name column')
+    expect(markup).toContain('Resize Size column')
   })
 
   it('does not render custom library folders while folders are disabled', () => {
@@ -425,6 +427,9 @@ describe('LibraryWorkspace', () => {
     expect(markup).not.toContain('Open folder menu for Credit Docs')
     expect(markup).not.toContain('New Folder')
     expect(markup).not.toContain('Destination Folder')
+    expect(markup).not.toContain('Workflow Views')
+    expect(markup).not.toContain('Document Types')
+    expect(markup).not.toContain('Storage')
   })
 
   it('renders a selected file page with upload provenance and activity', () => {
