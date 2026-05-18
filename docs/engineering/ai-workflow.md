@@ -145,6 +145,8 @@ Assistant agents are the first prompt-management surface.
 - Admin list: `GET /admin/assistant/agents`
 - Admin create: `POST /admin/assistant/agents`
 - Admin update: `PUT /admin/assistant/agents/{agent_id}`
+- Admin unsaved draft preview:
+  `POST /admin/assistant/agents/{agent_id}/context-preview`
 
 Each agent carries:
 
@@ -198,6 +200,12 @@ message to a model. The response includes:
 - the final rendered system prompt
 
 This is the main debugging and prompt-review surface for now.
+
+Admin agent edits can also be previewed before save through
+`POST /admin/assistant/agents/{agent_id}/context-preview`. That endpoint accepts
+the same proposed update payload as the save route, runs the agent hierarchy,
+profile-policy, and activation validation path without persisting, and returns
+the server-built prompt context for the unsaved draft.
 
 Note that prompt preview shows the stable server-built foundation. Tool calls
 only happen during `/assistant/respond`, because they depend on the user's

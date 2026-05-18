@@ -56,7 +56,7 @@ function shortcutDisplayLabel(): string {
 }
 
 function prefixExampleLabel(): string {
-  return 'trade: counterparty: report:'
+  return 'MON DES TRD CP PX EOD'
 }
 
 function referenceRecordKindLabel(action: Extract<TerminalCommandAction, { kind: 'reference_record' }>): string {
@@ -71,6 +71,10 @@ function referenceRecordKindLabel(action: Extract<TerminalCommandAction, { kind:
 }
 
 function actionScopeLabel(result: TerminalCommandResult): string {
+  if (result.scope === 'function') {
+    return 'Function'
+  }
+
   switch (result.action.kind) {
     case 'view':
       return result.action.view === 'reports' && result.action.handoff ? 'Report' : 'Workspace'
@@ -234,7 +238,7 @@ export function TerminalCommandBar({
             <span className="eyebrow">Terminal Search</span>
             <strong id={titleId}>Open a workspace or record</strong>
             <p id={descriptionId}>
-              Search navigation targets only. Business mutations still happen inside the destination workspace.
+              Search navigation targets or type deterministic aliases. Business mutations still happen inside the destination workspace.
             </p>
           </div>
 
@@ -252,7 +256,7 @@ export function TerminalCommandBar({
             className="terminal-command-input"
             type="text"
             value={query}
-            placeholder="Search trades, counterparties, commodities, price indices, reports, or workspaces"
+            placeholder="Try MON, DES HENRY, TRD TRD-1001, CP SHELL, PX HENRY, EOD, or a workspace"
             aria-label="Search terminal navigation targets"
             onChange={(event) => {
               setQuery(event.target.value)

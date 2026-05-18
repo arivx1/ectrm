@@ -3,8 +3,6 @@ import {
   useEffect,
   useMemo,
   useState,
-  type CSSProperties,
-  type DragEvent as ReactDragEvent,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
@@ -27,9 +25,6 @@ import type { DocumentIngestionRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import {
   buildDocumentLibraryCollectionCounts,
-  buildDocumentLibraryFolderDescendantIds,
-  buildDocumentLibraryFolderCounts,
-  buildDocumentLibraryFolderTree,
   documentHasAiAssist,
   documentHasErrors,
   documentIsLinked,
@@ -37,12 +32,10 @@ import {
   filterDocumentLibraryDocuments,
   formatDocumentLibraryLabel,
   sortDocumentLibraryKindOptions,
-  type DocumentLibraryFolderTreeItem,
   type DocumentLibraryCollectionKey,
   type DocumentLibrarySortMode,
   type DocumentLibraryViewMode,
 } from './libraryWorkspaceSupport'
-import { useDocumentLibraryFolderState } from './libraryFolderState'
 
 type LibraryWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -58,14 +51,10 @@ type LibraryKindFolder = {
 }
 
 type LibraryLocation =
-  | {
-      scope: 'collection'
-      key: DocumentLibraryCollectionKey
-    }
-  | {
-      scope: 'folder'
-      key: string
-    }
+  {
+    scope: 'collection'
+    key: DocumentLibraryCollectionKey
+  }
 
 type LibraryDocumentActivityEntry = {
   key: string
@@ -75,9 +64,6 @@ type LibraryDocumentActivityEntry = {
 }
 
 const LIBRARY_UPLOAD_CARD_PANEL_ID = 'library-upload-card-panel'
-const LIBRARY_ROOT_DROP_TARGET_KEY = 'root'
-const LIBRARY_DOCUMENT_DRAG_MIME = 'application/x-ectrm-library-document'
-const LIBRARY_FOLDER_DRAG_MIME = 'application/x-ectrm-library-folder'
 
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
@@ -120,10 +106,7 @@ function latestProcessedAt(document: DocumentIngestionRecord): string | null {
   return timestamps[0] ?? null
 }
 
-function buildDocumentActivityLog(
-  document: DocumentIngestionRecord,
-  folderLabel: string | null,
-): LibraryDocumentActivityEntry[] {
+function buildDocumentActivityLog(document: DocumentIngestionRecord): LibraryDocumentActivityEntry[] {
   const processedAt = latestProcessedAt(document)
   const processedPageCount = document.pages.filter((page) => Boolean(page.processed_at)).length
   const entries: LibraryDocumentActivityEntry[] = [
@@ -157,15 +140,6 @@ function buildDocumentActivityLog(
       label: 'Classified',
       detail: `Classified as ${dominantDocumentKind(document)}.`,
       timestamp: processedAt ?? document.updated_at,
-    })
-  }
-
-  if (folderLabel) {
-    entries.push({
-      key: 'filed',
-      label: 'Filed',
-      detail: `Filed in ${folderLabel}.`,
-      timestamp: document.updated_at,
     })
   }
 
@@ -278,8 +252,6 @@ export function LibraryWorkspace({
     selectedProcessorModel,
     selectedFile,
     isDragActive,
-    lastUploadedDocumentId,
-    lastImportedDocumentIds,
     fileInputRef,
     setDisplayName,
     setSelectedProcessorProvider,
@@ -309,76 +281,21 @@ export function LibraryWorkspace({
   const [localActiveDocumentId, setLocalActiveDocumentId] = useState<string | null>(null)
   const [openingDocumentId, setOpeningDocumentId] = useState<string | null>(null)
   const [openDocumentError, setOpenDocumentError] = useState('')
-  const [showFolderComposer, setShowFolderComposer] = useState(false)
-  const [folderDraftName, setFolderDraftName] = useState('')
-  const [folderDraftError, setFolderDraftError] = useState('')
-  const [folderActionNotice, setFolderActionNotice] = useState('')
-  const [folderActionError, setFolderActionError] = useState('')
-  const [folderMenuId, setFolderMenuId] = useState<string | null>(null)
-  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
-  const [folderRenameDraft, setFolderRenameDraft] = useState('')
-  const [folderRenameError, setFolderRenameError] = useState('')
-  const [deletePendingFolderId, setDeletePendingFolderId] = useState<string | null>(null)
-  const [folderClipboard, setFolderClipboard] = useState<{
-    folderId: string
-    folderName: string
-  } | null>(null)
-  const [uploadFolderId, setUploadFolderId] = useState('')
-  const [pendingUploadFolderId, setPendingUploadFolderId] = useState<string | null | undefined>(undefined)
-  const [pendingImportFolderId, setPendingImportFolderId] = useState<string | null | undefined>(undefined)
-  const [draggingDocumentId, setDraggingDocumentId] = useState<string | null>(null)
-  const [draggingFolderId, setDraggingFolderId] = useState<string | null>(null)
-  const [documentDragOverTargetKey, setDocumentDragOverTargetKey] = useState<string | null>(null)
-  const [folderDragOverTargetKey, setFolderDragOverTargetKey] = useState<string | null>(null)
   const [kindDraftByDocumentId, setKindDraftByDocumentId] = useState<Record<string, string>>({})
   const uploadCardState = usePersistentCollapsibleCardState('library.upload-card', false)
   const setUploadCardExpanded = uploadCardState.setExpanded
   const showUploadComposer = uploadCardState.expanded
   const deferredSearchQuery = useDeferredValue(searchQuery)
-  const {
-    folders: customFolders,
-    assignments: folderAssignments,
-    createFolder,
-    moveFolder,
-    copyFolder,
-    renameFolder,
-    deleteFolder,
-    assignDocumentToFolder,
-    assignDocumentsToFolder,
-  } = useDocumentLibraryFolderState()
 
   const collectionCounts = buildDocumentLibraryCollectionCounts(documents)
-  const folderTree = buildDocumentLibraryFolderTree(customFolders)
-  const folderNodeById = Object.fromEntries(
-    folderTree.map((folder) => [folder.id, folder]),
-  ) as Record<string, DocumentLibraryFolderTreeItem>
-  const folderCounts = buildDocumentLibraryFolderCounts(documents, folderAssignments, customFolders)
   const rootCollection = DOCUMENT_LIBRARY_COLLECTIONS[0]
   const workflowCollections = DOCUMENT_LIBRARY_COLLECTIONS.slice(1)
-  const resolvedActiveLocation =
-    activeLocation.scope === 'folder' && !folderNodeById[activeLocation.key]
-      ? {
-          scope: 'collection',
-          key: rootCollection.key,
-        }
-      : activeLocation
   const activeCollection =
-    resolvedActiveLocation.scope === 'collection'
-      ? DOCUMENT_LIBRARY_COLLECTIONS.find((collection) => collection.key === resolvedActiveLocation.key) ??
-        rootCollection
-      : null
-  const activeCustomFolder =
-    resolvedActiveLocation.scope === 'folder'
-      ? folderNodeById[resolvedActiveLocation.key] ?? null
-      : null
-  const activeFolderMatchIds = activeCustomFolder
-    ? buildDocumentLibraryFolderDescendantIds(activeCustomFolder.id, customFolders)
-    : null
+    DOCUMENT_LIBRARY_COLLECTIONS.find((collection) => collection.key === activeLocation.key) ??
+    rootCollection
   const scopedDocuments = filterDocumentLibraryDocuments({
     documents,
-    collectionKey: activeCollection?.key ?? null,
-    folderAssignments,
-    folderMatchIds: activeFolderMatchIds,
+    collectionKey: activeCollection.key,
     query: '',
     sortMode: 'updated',
   })
@@ -390,9 +307,7 @@ export function LibraryWorkspace({
       : 'all'
   const searchedDocuments = filterDocumentLibraryDocuments({
     documents,
-    collectionKey: activeCollection?.key ?? null,
-    folderAssignments,
-    folderMatchIds: activeFolderMatchIds,
+    collectionKey: activeCollection.key,
     query: deferredSearchQuery,
     sortMode,
   })
@@ -439,45 +354,10 @@ export function LibraryWorkspace({
       : selectedDocumentId && visibleDocuments.some((document) => document.document_id === selectedDocumentId)
         ? selectedDocumentId
         : visibleDocuments[0]?.document_id ?? null
-  const selectedDocument =
-    documentPage ?? visibleDocuments.find((document) => document.document_id === resolvedSelectedDocumentId) ?? null
-  const selectedDocumentFolderId = selectedDocument
-    ? folderAssignments[selectedDocument.document_id] ?? ''
-    : ''
-  const activeLocationLabel = activeCustomFolder?.pathLabel ?? activeCollection?.label ?? rootCollection.label
-  const resolvedUploadFolderId =
-    resolvedActiveLocation.scope === 'folder'
-      ? resolvedActiveLocation.key
-      : uploadFolderId && customFolders.some((folder) => folder.id === uploadFolderId)
-        ? uploadFolderId
-        : ''
-  const uploadFolder = resolvedUploadFolderId ? folderNodeById[resolvedUploadFolderId] ?? null : null
-  const folderNameById = Object.fromEntries(
-    folderTree.map((folder) => [folder.id, folder.pathLabel]),
-  ) as Record<string, string>
-  const documentPageFolderLabel = documentPage
-    ? folderNameById[folderAssignments[documentPage.document_id] ?? ''] ?? null
-    : null
+  const activeLocationLabel = activeCollection.label
   const documentPageActivity = documentPage
-    ? buildDocumentActivityLog(documentPage, documentPageFolderLabel)
+    ? buildDocumentActivityLog(documentPage)
     : []
-  const activeFolderPath = activeCustomFolder
-    ? activeCustomFolder.pathIds
-        .map((folderId) => folderNodeById[folderId])
-        .filter((folder): folder is DocumentLibraryFolderTreeItem => Boolean(folder))
-    : []
-  const draggingFolderDescendantIds = draggingFolderId
-    ? buildDocumentLibraryFolderDescendantIds(draggingFolderId, customFolders)
-    : null
-  const clipboardFolder =
-    folderClipboard && customFolders.some((folder) => folder.id === folderClipboard.folderId)
-      ? folderNodeById[folderClipboard.folderId] ?? null
-      : null
-  const effectiveFolderActionNotice = folderClipboard && !clipboardFolder ? '' : folderActionNotice
-  const folderPasteTargetId = resolvedActiveLocation.scope === 'folder' ? resolvedActiveLocation.key : null
-  const folderPasteActionLabel = activeCustomFolder ? 'Paste Here' : 'Paste to Root'
-  const folderShortcutModifierLabel =
-    typeof navigator !== 'undefined' && navigator.platform.includes('Mac') ? 'Cmd' : 'Ctrl'
 
   useEffect(() => {
     if (
@@ -503,143 +383,6 @@ export function LibraryWorkspace({
       setSelectedDocumentId(documentPageId)
     }
   }, [documentPageId])
-
-  useEffect(() => {
-    if (pendingUploadFolderId === undefined || uploading) {
-      return
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      if (lastUploadedDocumentId) {
-        assignDocumentToFolder(lastUploadedDocumentId, pendingUploadFolderId)
-        setSelectedDocumentId(lastUploadedDocumentId)
-      }
-      setPendingUploadFolderId(undefined)
-    }, 0)
-
-    return () => window.clearTimeout(timeoutId)
-  }, [
-    assignDocumentToFolder,
-    lastUploadedDocumentId,
-    pendingUploadFolderId,
-    uploading,
-  ])
-
-  useEffect(() => {
-    if (pendingImportFolderId === undefined || gmailImporting) {
-      return
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      if (lastImportedDocumentIds.length > 0) {
-        assignDocumentsToFolder(lastImportedDocumentIds, pendingImportFolderId)
-        setSelectedDocumentId(lastImportedDocumentIds[0])
-      }
-      setPendingImportFolderId(undefined)
-    }, 0)
-
-    return () => window.clearTimeout(timeoutId)
-  }, [
-    assignDocumentsToFolder,
-    gmailImporting,
-    lastImportedDocumentIds,
-    pendingImportFolderId,
-  ])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return undefined
-    }
-
-    const handleWindowKeyDown = (event: KeyboardEvent) => {
-      if (isEditableKeyboardTarget(event.target) || event.altKey || event.shiftKey) {
-        return
-      }
-
-      const modifierPressed = event.metaKey || event.ctrlKey
-      if (!modifierPressed) {
-        return
-      }
-
-      const normalizedKey = event.key.toLowerCase()
-      if (normalizedKey === 'c' && activeCustomFolder) {
-        event.preventDefault()
-        setFolderClipboard({
-          folderId: activeCustomFolder.id,
-          folderName: activeCustomFolder.pathLabel,
-        })
-        setFolderActionError('')
-        setFolderActionNotice(
-          `Copied ${activeCustomFolder.pathLabel}. Paste duplicates the folder structure while files stay in their original folder.`,
-        )
-      }
-
-      if (normalizedKey === 'v' && clipboardFolder) {
-        event.preventDefault()
-        const result = copyFolder(clipboardFolder.id, folderPasteTargetId)
-        if (!result.ok) {
-          setFolderActionError(result.error)
-          setFolderActionNotice('')
-          return
-        }
-
-        setFolderActionError('')
-        setFolderActionNotice(
-          `Pasted ${result.folder.name} into ${folderPasteTargetId ? folderNodeById[folderPasteTargetId]?.pathLabel ?? 'that folder' : 'Uploaded documents'}.`,
-        )
-        setUploadFolderId(result.folder.id)
-        setActiveLocation({
-          scope: 'folder',
-          key: result.folder.id,
-        })
-      }
-    }
-
-    window.addEventListener('keydown', handleWindowKeyDown)
-
-    return () => {
-      window.removeEventListener('keydown', handleWindowKeyDown)
-    }
-  }, [activeCustomFolder, clipboardFolder, copyFolder, folderNodeById, folderPasteTargetId])
-
-  useEffect(() => {
-    if (!folderMenuId || typeof document === 'undefined') {
-      return undefined
-    }
-
-    const handleDocumentClick = (event: MouseEvent) => {
-      if (
-        event.target instanceof Element &&
-        event.target.closest('.library-folder-action-shell')
-      ) {
-        return
-      }
-
-      setFolderMenuId(null)
-    }
-
-    const handleDocumentKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setFolderMenuId(null)
-      }
-    }
-
-    document.addEventListener('click', handleDocumentClick)
-    document.addEventListener('keydown', handleDocumentKeyDown)
-
-    return () => {
-      document.removeEventListener('click', handleDocumentClick)
-      document.removeEventListener('keydown', handleDocumentKeyDown)
-    }
-  }, [folderMenuId])
-
-  useEffect(() => {
-    const folderIds = new Set(customFolders.map((folder) => folder.id))
-
-    setFolderMenuId((current) => (current && !folderIds.has(current) ? null : current))
-    setRenamingFolderId((current) => (current && !folderIds.has(current) ? null : current))
-    setDeletePendingFolderId((current) => (current && !folderIds.has(current) ? null : current))
-  }, [customFolders])
 
   function handleOpenDocumentPage(documentId: string) {
     setSelectedDocumentId(documentId)
@@ -742,296 +485,12 @@ export function LibraryWorkspace({
     })
   }
 
-  function handleSelectCustomFolder(folderId: string) {
-    setActiveLocation({
-      scope: 'folder',
-      key: folderId,
-    })
-  }
-
-  function handleCreateFolder(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const result = createFolder(folderDraftName, activeCustomFolder?.id ?? null)
-    if (!result.ok) {
-      setFolderDraftError(result.error)
-      return
-    }
-
-    setFolderDraftName('')
-    setFolderDraftError('')
-    setFolderActionError('')
-    setFolderActionNotice(`Created ${result.folder.name}.`)
-    setShowFolderComposer(false)
-    setDeletePendingFolderId(null)
-    setRenamingFolderId(null)
-    setUploadFolderId(result.folder.id)
-    handleSelectCustomFolder(result.folder.id)
-  }
-
-  function handleBeginCreateSubfolder(folder: DocumentLibraryFolderTreeItem) {
-    handleSelectCustomFolder(folder.id)
-    setShowFolderComposer(true)
-    setFolderDraftName('')
-    setFolderDraftError('')
-    setFolderActionError('')
-    setFolderActionNotice('')
-    setFolderMenuId(null)
-    setRenamingFolderId(null)
-    setDeletePendingFolderId(null)
-  }
-
-  function handleBeginRenameFolder(folder: DocumentLibraryFolderTreeItem) {
-    handleSelectCustomFolder(folder.id)
-    setRenamingFolderId(folder.id)
-    setFolderRenameDraft(folder.name)
-    setFolderRenameError('')
-    setFolderActionError('')
-    setFolderActionNotice('')
-    setFolderMenuId(null)
-    setDeletePendingFolderId(null)
-  }
-
-  function handleRenameFolderSubmit(
-    event: FormEvent<HTMLFormElement>,
-    folder: DocumentLibraryFolderTreeItem,
-  ) {
-    event.preventDefault()
-
-    const result = renameFolder(folder.id, folderRenameDraft)
-    if (!result.ok) {
-      setFolderRenameError(result.error)
-      return
-    }
-
-    setRenamingFolderId(null)
-    setFolderRenameDraft('')
-    setFolderRenameError('')
-    setFolderActionError('')
-    setFolderActionNotice(`Renamed ${folder.pathLabel} to ${result.folder.name}.`)
-    handleSelectCustomFolder(result.folder.id)
-  }
-
-  function handleBeginDeleteFolder(folder: DocumentLibraryFolderTreeItem) {
-    handleSelectCustomFolder(folder.id)
-    setDeletePendingFolderId(folder.id)
-    setFolderMenuId(null)
-    setRenamingFolderId(null)
-    setFolderRenameError('')
-    setFolderActionError('')
-    setFolderActionNotice('')
-  }
-
-  function handleDeleteFolder(folder: DocumentLibraryFolderTreeItem) {
-    const result = deleteFolder(folder.id)
-    if (!result.ok) {
-      setFolderActionError(result.error)
-      setFolderActionNotice('')
-      setDeletePendingFolderId(null)
-      return
-    }
-
-    const deletedFolderIds = new Set(result.deletedFolderIds)
-    if (
-      resolvedActiveLocation.scope === 'folder' &&
-      deletedFolderIds.has(resolvedActiveLocation.key)
-    ) {
-      handleSelectCollection(rootCollection.key)
-    }
-
-    setUploadFolderId((current) => (deletedFolderIds.has(current) ? '' : current))
-    setPendingUploadFolderId((current) =>
-      current && deletedFolderIds.has(current) ? null : current,
-    )
-    setPendingImportFolderId((current) =>
-      current && deletedFolderIds.has(current) ? null : current,
-    )
-    setFolderClipboard((current) =>
-      current && deletedFolderIds.has(current.folderId) ? null : current,
-    )
-    setDeletePendingFolderId(null)
-    setRenamingFolderId(null)
-    setFolderRenameError('')
-    setFolderActionError('')
-    setFolderActionNotice(
-      result.unassignedDocumentCount > 0
-        ? `Deleted ${folder.pathLabel}. ${result.unassignedDocumentCount} file${result.unassignedDocumentCount === 1 ? '' : 's'} returned to the library root.`
-        : `Deleted ${folder.pathLabel}.`,
-    )
-  }
-
   async function handleUploadSubmit(event: FormEvent<HTMLFormElement>) {
-    setPendingUploadFolderId(resolvedUploadFolderId || null)
     await handleSubmit(event)
   }
 
   async function handleImportGmailInboxClick() {
-    setPendingImportFolderId(resolvedUploadFolderId || null)
     await importGmailInbox()
-  }
-
-  function folderDropTargetKey(folderId: string | null): string {
-    return folderId ?? LIBRARY_ROOT_DROP_TARGET_KEY
-  }
-
-  function canMoveFolderToTarget(parentFolderId: string | null): boolean {
-    if (!draggingFolderId) {
-      return false
-    }
-
-    if (parentFolderId === draggingFolderId) {
-      return false
-    }
-
-    if (parentFolderId && draggingFolderDescendantIds?.has(parentFolderId)) {
-      return false
-    }
-
-    return true
-  }
-
-  function handleFileDragStart(
-    event: ReactDragEvent<HTMLElement>,
-    documentId: string,
-  ) {
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData(LIBRARY_DOCUMENT_DRAG_MIME, documentId)
-    event.dataTransfer.setData('text/plain', documentId)
-    setDraggingDocumentId(documentId)
-    setSelectedDocumentId(documentId)
-  }
-
-  function handleFileDragEnd() {
-    setDraggingDocumentId(null)
-    setDocumentDragOverTargetKey(null)
-  }
-
-  function handleFolderDragStart(
-    event: ReactDragEvent<HTMLElement>,
-    folderId: string,
-  ) {
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData(LIBRARY_FOLDER_DRAG_MIME, folderId)
-    event.dataTransfer.setData('text/plain', folderId)
-    setDraggingFolderId(folderId)
-    setFolderActionError('')
-    setFolderActionNotice('')
-    handleSelectCustomFolder(folderId)
-  }
-
-  function handleFolderDragEnd() {
-    setDraggingFolderId(null)
-    setFolderDragOverTargetKey(null)
-  }
-
-  function handleLibraryTargetDragOver(
-    event: ReactDragEvent<HTMLElement>,
-    folderId: string | null,
-  ) {
-    if (draggingDocumentId) {
-      event.preventDefault()
-      event.dataTransfer.dropEffect = 'move'
-      setDocumentDragOverTargetKey(folderDropTargetKey(folderId))
-      return
-    }
-
-    if (!canMoveFolderToTarget(folderId)) {
-      return
-    }
-
-    event.preventDefault()
-    event.dataTransfer.dropEffect = 'move'
-    setFolderDragOverTargetKey(folderDropTargetKey(folderId))
-  }
-
-  function handleLibraryTargetDragLeave(folderId: string | null) {
-    const targetKey = folderDropTargetKey(folderId)
-    setDocumentDragOverTargetKey((current) => (current === targetKey ? null : current))
-    setFolderDragOverTargetKey((current) => (current === targetKey ? null : current))
-  }
-
-  function handleLibraryTargetDrop(
-    event: ReactDragEvent<HTMLElement>,
-    folderId: string | null,
-  ) {
-    event.preventDefault()
-
-    const droppedDocumentId =
-      event.dataTransfer.getData(LIBRARY_DOCUMENT_DRAG_MIME) || draggingDocumentId
-    if (droppedDocumentId) {
-      assignDocumentToFolder(droppedDocumentId, folderId)
-      setSelectedDocumentId(droppedDocumentId)
-      setDraggingDocumentId(null)
-      setDocumentDragOverTargetKey(null)
-      setFolderActionError('')
-      setFolderActionNotice('')
-      if (folderId) {
-        handleSelectCustomFolder(folderId)
-        return
-      }
-      handleSelectCollection(rootCollection.key)
-      return
-    }
-
-    const droppedFolderId =
-      event.dataTransfer.getData(LIBRARY_FOLDER_DRAG_MIME) || draggingFolderId
-    if (!droppedFolderId || !canMoveFolderToTarget(folderId)) {
-      return
-    }
-
-    const result = moveFolder(droppedFolderId, folderId)
-    setDraggingFolderId(null)
-    setFolderDragOverTargetKey(null)
-
-    if (!result.ok) {
-      setFolderActionError(result.error)
-      setFolderActionNotice('')
-      return
-    }
-
-    setFolderActionError('')
-    setFolderActionNotice(
-      `Moved ${result.folder.name} to ${folderId ? folderNodeById[folderId]?.pathLabel ?? 'that folder' : 'Uploaded documents'}.`,
-    )
-    setUploadFolderId(result.folder.id)
-    handleSelectCustomFolder(result.folder.id)
-  }
-
-  function handleCopyFolderSelection(folder: DocumentLibraryFolderTreeItem | null = activeCustomFolder) {
-    if (!folder) {
-      return
-    }
-
-    setFolderClipboard({
-      folderId: folder.id,
-      folderName: folder.pathLabel,
-    })
-    setFolderActionError('')
-    setFolderMenuId(null)
-    setFolderActionNotice(
-      `Copied ${folder.pathLabel}. Paste duplicates the folder structure while files stay in their original folder.`,
-    )
-  }
-
-  function handlePasteFolderSelection(parentFolderId: string | null = folderPasteTargetId) {
-    if (!clipboardFolder) {
-      return
-    }
-
-    const result = copyFolder(clipboardFolder.id, parentFolderId)
-    if (!result.ok) {
-      setFolderActionError(result.error)
-      setFolderActionNotice('')
-      setFolderMenuId(null)
-      return
-    }
-
-    setFolderActionError('')
-    setFolderMenuId(null)
-    setFolderActionNotice(
-      `Pasted ${result.folder.name} into ${parentFolderId ? folderNodeById[parentFolderId]?.pathLabel ?? 'that folder' : 'Uploaded documents'}.`,
-    )
-    setUploadFolderId(result.folder.id)
-    handleSelectCustomFolder(result.folder.id)
   }
 
   if (!authSession) {
@@ -1055,19 +514,10 @@ export function LibraryWorkspace({
             <button
               type="button"
               className={`library-folder-button${
-                resolvedActiveLocation.scope === 'collection' && resolvedActiveLocation.key === rootCollection.key
+                activeLocation.key === rootCollection.key
                   ? ' is-active'
                   : ''
-              }${
-                documentDragOverTargetKey === LIBRARY_ROOT_DROP_TARGET_KEY ||
-                folderDragOverTargetKey === LIBRARY_ROOT_DROP_TARGET_KEY
-                  ? ' is-drop-target'
-                  : ''
               }`}
-              onDragOver={(event) => handleLibraryTargetDragOver(event, null)}
-              onDragLeave={() => handleLibraryTargetDragLeave(null)}
-              onDrop={(event) => handleLibraryTargetDrop(event, null)}
-              aria-dropeffect={draggingDocumentId || draggingFolderId ? 'move' : undefined}
               onClick={() => handleSelectCollection(rootCollection.key)}
             >
               <span className="library-folder-icon" aria-hidden="true" />
@@ -1077,270 +527,6 @@ export function LibraryWorkspace({
               </div>
               <span className="library-folder-count">{collectionCounts[rootCollection.key]}</span>
             </button>
-          </div>
-        </section>
-
-        <section className="library-sidebar-section">
-          <div className="library-sidebar-section-head library-sidebar-section-head-actions">
-            <span className="eyebrow">Folders</span>
-            <div className="library-sidebar-section-head-meta">
-              <small>{customFolders.length}</small>
-            </div>
-          </div>
-
-          <div className="library-folder-management">
-            <div className="library-folder-management-actions">
-              <button
-                type="button"
-                className="button button-ghost library-sidebar-inline-action"
-                onClick={() => handleCopyFolderSelection()}
-                disabled={!activeCustomFolder}
-              >
-                Copy Folder
-              </button>
-              <button
-                type="button"
-                className="button button-ghost library-sidebar-inline-action"
-                onClick={() => handlePasteFolderSelection()}
-                disabled={!clipboardFolder}
-              >
-                {folderPasteActionLabel}
-              </button>
-              <button
-                type="button"
-                className="button button-ghost library-sidebar-inline-action"
-                onClick={() => {
-                  setShowFolderComposer((current) => !current)
-                  setFolderDraftError('')
-                  setFolderActionError('')
-                }}
-              >
-                {showFolderComposer ? 'Cancel' : 'New Folder'}
-              </button>
-            </div>
-
-            {effectiveFolderActionNotice ? (
-              <p className="form-note">{effectiveFolderActionNotice}</p>
-            ) : clipboardFolder ? (
-              <p className="form-note">
-                Clipboard: {clipboardFolder.pathLabel}. Use {folderPasteActionLabel.toLowerCase()} or
-                press {folderShortcutModifierLabel}+V.
-              </p>
-            ) : null}
-
-            {folderActionError ? <p className="field-error">{folderActionError}</p> : null}
-          </div>
-
-          {showFolderComposer ? (
-            <form className="library-folder-composer" onSubmit={handleCreateFolder}>
-              <p className="form-note">
-                {activeCustomFolder
-                  ? `Create inside ${activeCustomFolder.pathLabel}.`
-                  : 'Create a top-level folder in the library rail.'}
-              </p>
-              <label className="library-upload-field">
-                <span>Folder Name</span>
-                <input
-                  className="control"
-                  type="text"
-                  value={folderDraftName}
-                  placeholder="Examples: Letters of Credit"
-                  onChange={(event) => {
-                    setFolderDraftName(event.target.value)
-                    if (folderDraftError) {
-                      setFolderDraftError('')
-                    }
-                  }}
-                />
-              </label>
-
-              <div className="library-folder-composer-actions">
-                <button type="submit" className="button button-primary">
-                  Create Folder
-                </button>
-              </div>
-
-              {folderDraftError ? <p className="field-error">{folderDraftError}</p> : null}
-            </form>
-          ) : null}
-
-          <div className="library-folder-list">
-            {customFolders.length === 0 ? (
-              <div className="library-sidebar-empty-card">
-                <strong>No folders yet</strong>
-                <p>Create a folder to organize uploaded documents beyond the built-in workflow views.</p>
-              </div>
-            ) : (
-              folderTree.map((folder) => (
-                <div
-                  key={folder.id}
-                  className="library-folder-item"
-                  style={
-                    {
-                      '--library-folder-depth': `${folder.depth}`,
-                    } as CSSProperties
-                  }
-                >
-                  <div className="library-folder-row">
-                    <button
-                      type="button"
-                      className={`library-folder-button library-folder-button-with-menu${
-                        activeCustomFolder?.id === folder.id ? ' is-active' : ''
-                      }${
-                        documentDragOverTargetKey === folder.id || folderDragOverTargetKey === folder.id
-                          ? ' is-drop-target'
-                          : ''
-                      }${draggingFolderId === folder.id ? ' is-dragging' : ''}`}
-                      draggable
-                      onDragStart={(event) => handleFolderDragStart(event, folder.id)}
-                      onDragEnd={handleFolderDragEnd}
-                      onDragOver={(event) => handleLibraryTargetDragOver(event, folder.id)}
-                      onDragLeave={() => handleLibraryTargetDragLeave(folder.id)}
-                      onDrop={(event) => handleLibraryTargetDrop(event, folder.id)}
-                      aria-dropeffect={draggingDocumentId || draggingFolderId ? 'move' : undefined}
-                      aria-grabbed={draggingFolderId === folder.id ? true : undefined}
-                      onClick={() => handleSelectCustomFolder(folder.id)}
-                    >
-                      <span className="library-folder-icon" aria-hidden="true" />
-                      <div className="library-folder-copy">
-                        <strong>{folder.name}</strong>
-                        <small>
-                          {folderCounts[folder.id] ?? 0} uploaded file
-                          {(folderCounts[folder.id] ?? 0) === 1 ? '' : 's'}
-                        </small>
-                      </div>
-                      <span className="library-folder-count">{folderCounts[folder.id] ?? 0}</span>
-                    </button>
-
-                    <div className="library-folder-action-shell">
-                      <button
-                        type="button"
-                        className="library-folder-menu-trigger"
-                        aria-label={`Open folder menu for ${folder.pathLabel}`}
-                        aria-haspopup="menu"
-                        aria-expanded={folderMenuId === folder.id}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          setFolderMenuId((current) => (current === folder.id ? null : folder.id))
-                        }}
-                      >
-                        <span className="library-folder-menu-dot" aria-hidden="true" />
-                        <span className="library-folder-menu-dot" aria-hidden="true" />
-                        <span className="library-folder-menu-dot" aria-hidden="true" />
-                      </button>
-
-                      {folderMenuId === folder.id ? (
-                        <div className="library-folder-menu" role="menu">
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => handleBeginRenameFolder(folder)}
-                          >
-                            Rename
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => handleBeginCreateSubfolder(folder)}
-                          >
-                            New Subfolder
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => handleCopyFolderSelection(folder)}
-                          >
-                            Copy Folder
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => handlePasteFolderSelection(folder.id)}
-                            disabled={!clipboardFolder}
-                          >
-                            Paste Here
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            className="is-danger"
-                            onClick={() => handleBeginDeleteFolder(folder)}
-                          >
-                            Delete Folder
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {renamingFolderId === folder.id ? (
-                    <form
-                      className="library-folder-inline-panel"
-                      onSubmit={(event) => handleRenameFolderSubmit(event, folder)}
-                    >
-                      <label className="library-upload-field">
-                        <span>Folder Name</span>
-                        <input
-                          className="control"
-                          type="text"
-                          value={folderRenameDraft}
-                          onChange={(event) => {
-                            setFolderRenameDraft(event.target.value)
-                            if (folderRenameError) {
-                              setFolderRenameError('')
-                            }
-                          }}
-                        />
-                      </label>
-                      <div className="library-folder-inline-actions">
-                        <button type="submit" className="button button-primary">
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          className="button button-ghost"
-                          onClick={() => {
-                            setRenamingFolderId(null)
-                            setFolderRenameDraft('')
-                            setFolderRenameError('')
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                      {folderRenameError ? <p className="field-error">{folderRenameError}</p> : null}
-                    </form>
-                  ) : null}
-
-                  {deletePendingFolderId === folder.id ? (
-                    <div
-                      className="library-folder-inline-panel"
-                      role="group"
-                      aria-label={`Delete ${folder.pathLabel}`}
-                    >
-                      <strong>Delete {folder.name}?</strong>
-                      <small>Files stay uploaded and return to the library root.</small>
-                      <div className="library-folder-inline-actions">
-                        <button
-                          type="button"
-                          className="button button-ghost"
-                          onClick={() => setDeletePendingFolderId(null)}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          className="button button-primary"
-                          onClick={() => handleDeleteFolder(folder)}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ))
-            )}
           </div>
         </section>
 
@@ -1355,8 +541,7 @@ export function LibraryWorkspace({
                 key={collection.key}
                 type="button"
                 className={`library-folder-button${
-                  resolvedActiveLocation.scope === 'collection' &&
-                  resolvedActiveLocation.key === collection.key
+                  activeLocation.key === collection.key
                     ? ' is-active'
                     : ''
                 }`}
@@ -1387,7 +572,7 @@ export function LibraryWorkspace({
               <span className="library-folder-icon library-folder-icon-outline" aria-hidden="true" />
               <div className="library-folder-copy">
                 <strong>All Types</strong>
-                <small>Show every document family in the selected folder.</small>
+                <small>Show every document family in the selected view.</small>
               </div>
               <span className="library-folder-count">{scopedDocuments.length}</span>
             </button>
@@ -1489,10 +674,6 @@ export function LibraryWorkspace({
                       <div>
                         <dt>Type</dt>
                         <dd>{dominantDocumentKind(documentPage)}</dd>
-                      </div>
-                      <div>
-                        <dt>Folder</dt>
-                        <dd>{documentPageFolderLabel ?? 'Unfiled'}</dd>
                       </div>
                       <div>
                         <dt>Review</dt>
@@ -1613,27 +794,8 @@ export function LibraryWorkspace({
               >
                 Uploaded documents
               </button>
-              {resolvedActiveLocation.scope === 'folder'
-                ? activeFolderPath.map((folder) => (
-                    <span key={folder.id} className="library-breadcrumb-cluster">
-                      <span className="library-breadcrumb-separator">/</span>
-                      <button
-                        type="button"
-                        className={`library-breadcrumb-button${
-                          activeCustomFolder?.id === folder.id ? ' is-active' : ''
-                        }`}
-                        onClick={() => handleSelectCustomFolder(folder.id)}
-                      >
-                        {folder.name}
-                      </button>
-                    </span>
-                  ))
-                : (
-                    <>
-                      <span className="library-breadcrumb-separator">/</span>
-                      <span>{activeLocationLabel}</span>
-                    </>
-                  )}
+              <span className="library-breadcrumb-separator">/</span>
+              <span>{activeLocationLabel}</span>
               {activeKindFilter !== 'all' ? (
                 <>
                   <span className="library-breadcrumb-separator">/</span>
@@ -1643,31 +805,6 @@ export function LibraryWorkspace({
             </div>
 
             <div className="library-toolbar-actions">
-              {customFolders.length > 0 ? (
-                <label className="library-selected-folder-field">
-                  <span>Move selected</span>
-                  <select
-                    className="control"
-                    value={selectedDocumentFolderId}
-                    onChange={(event) =>
-                      selectedDocument
-                        ? assignDocumentToFolder(
-                            selectedDocument.document_id,
-                            event.target.value || null,
-                          )
-                        : undefined
-                    }
-                    disabled={!selectedDocument}
-                  >
-                    <option value="">Unfiled</option>
-                    {folderTree.map((folder) => (
-                      <option key={folder.id} value={folder.id}>
-                        {folder.pathLabel}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
               <button
                 type="button"
                 className="button button-secondary"
@@ -1724,7 +861,7 @@ export function LibraryWorkspace({
 
           <div className="library-toolbar-summary">
             <span>{visibleDocuments.length} visible</span>
-            <span>{formatBytes(visibleStoredBytes)} in this folder</span>
+            <span>{formatBytes(visibleStoredBytes)} visible</span>
             <span>{scopedCollectionCounts.ready} ready to verify</span>
             <span>{scopedCollectionCounts.errors} need attention</span>
             {loading ? <span>Syncing library…</span> : null}
@@ -1769,8 +906,7 @@ export function LibraryWorkspace({
               <>
                 <div className="library-upload-card-support">
                   <p>
-                    Files land in `{uploadFolder?.pathLabel ?? 'Uploaded documents'}` and can be kept
-                    organized from the moment they arrive.
+                    Files land in Uploaded documents and are ready for review as soon as processing finishes.
                   </p>
                   <div className="library-upload-card-status">
                     {gmailConfigured ? (
@@ -1877,22 +1013,6 @@ export function LibraryWorkspace({
                       </label>
                     ) : null}
 
-                    <label className="library-upload-field">
-                      <span>Destination Folder</span>
-                      <select
-                        className="control"
-                        value={resolvedUploadFolderId}
-                        onChange={(event) => setUploadFolderId(event.target.value)}
-                        disabled={uploading || gmailImporting}
-                      >
-                        <option value="">Unfiled in Library</option>
-                        {folderTree.map((folder) => (
-                          <option key={folder.id} value={folder.id}>
-                            {folder.pathLabel}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
                   </div>
 
                   <div className="library-upload-inline-actions">
@@ -1948,13 +1068,11 @@ export function LibraryWorkspace({
         <section className="library-browser-main surface">
             {visibleDocuments.length === 0 ? (
               <div className="empty-state library-empty-state">
-                <strong>{documents.length === 0 ? 'No uploaded documents yet' : 'No files match this folder'}</strong>
+                <strong>{documents.length === 0 ? 'No uploaded documents yet' : 'No files match this view'}</strong>
                 <p>
                   {documents.length === 0
                     ? 'Open the uploader card to add the first PDF into the library.'
-                    : resolvedActiveLocation.scope === 'folder'
-                      ? 'Move a file into this folder or open the uploader card to add one here.'
-                      : 'Try another folder, clear the search box, or change the type filter.'}
+                    : 'Try another workflow view, clear the search box, or change the type filter.'}
                 </p>
               </div>
             ) : viewMode === 'list' ? (
@@ -1962,7 +1080,6 @@ export function LibraryWorkspace({
                 <div className="library-file-table-head" aria-hidden="true">
                   <span>Name</span>
                   <span>Type</span>
-                  <span>Folder</span>
                   <span>Review</span>
                   <span>Owner</span>
                   <span>Modified</span>
@@ -1974,13 +1091,8 @@ export function LibraryWorkspace({
                       key={document.document_id}
                       role="listitem"
                       tabIndex={0}
-                      className={`library-file-row${resolvedSelectedDocumentId === document.document_id ? ' is-selected' : ''}${
-                        draggingDocumentId === document.document_id ? ' is-dragging' : ''
-                      }`}
+                      className={`library-file-row${resolvedSelectedDocumentId === document.document_id ? ' is-selected' : ''}`}
                       aria-label={`Open ${document.display_name || document.original_filename}`}
-                      draggable
-                      onDragStart={(event) => handleFileDragStart(event, document.document_id)}
-                      onDragEnd={handleFileDragEnd}
                       onClick={() => handleOpenDocumentPage(document.document_id)}
                       onKeyDown={(event) => handleDocumentRowKeyDown(event, document.document_id)}
                     >
@@ -2028,7 +1140,6 @@ export function LibraryWorkspace({
                           <small className="field-error">{saveErrors[`document-kind:${document.document_id}`]}</small>
                         ) : null}
                       </div>
-                      <span>{folderNameById[folderAssignments[document.document_id] ?? ''] ?? '—'}</span>
                       <span>
                         <span className={`status-pill status-pill-${documentStatusTone(document.status)}`}>
                           {fileStatusSummary(document)}
@@ -2047,12 +1158,7 @@ export function LibraryWorkspace({
                   <button
                     key={document.document_id}
                     type="button"
-                    className={`library-document-card${resolvedSelectedDocumentId === document.document_id ? ' is-selected' : ''}${
-                      draggingDocumentId === document.document_id ? ' is-dragging' : ''
-                    }`}
-                    draggable
-                    onDragStart={(event) => handleFileDragStart(event, document.document_id)}
-                    onDragEnd={handleFileDragEnd}
+                    className={`library-document-card${resolvedSelectedDocumentId === document.document_id ? ' is-selected' : ''}`}
                     onClick={() => handleOpenDocumentPage(document.document_id)}
                   >
                     <div className="library-document-card-visual">
@@ -2070,11 +1176,6 @@ export function LibraryWorkspace({
                       <span className={`status-pill status-pill-${documentStatusTone(document.status)}`}>
                         {fileStatusSummary(document)}
                       </span>
-                      {folderAssignments[document.document_id] ? (
-                        <span className="entity-chip entity-chip-soft">
-                          {folderNameById[folderAssignments[document.document_id] ?? '']}
-                        </span>
-                      ) : null}
                       <span className="entity-chip entity-chip-soft">{formatBytes(document.size_bytes)}</span>
                     </div>
                   </button>

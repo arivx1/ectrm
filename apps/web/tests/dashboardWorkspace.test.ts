@@ -145,6 +145,7 @@ describe('dashboard workspace', () => {
     expect(markup).toContain('Pricing exceptions: 1 open')
     expect(markup).toContain('Instrument Brief')
     expect(markup).toContain('No instrument selected')
+    expect(markup).toContain('Quote Chart &amp; Curve Panel')
     expect(markup).toContain('Desk Priorities')
     expect(markup).toContain('Open Brief')
     expect(markup).toContain('Open Reports')

@@ -1486,6 +1486,7 @@ async function startMockApiServer(
       !(method === 'POST' && url.pathname === '/auth/session') &&
       !(method === 'POST' && url.pathname === '/auth/single-user-session') &&
       !(method === 'POST' && url.pathname === '/assistant/context') &&
+      !(method === 'POST' && /^\/admin\/assistant\/agents\/[^/]+\/context-preview$/.test(url.pathname)) &&
       !(method === 'POST' && url.pathname === '/assistant/respond') &&
       !(method === 'POST' && url.pathname === '/assistant/prompt-navigation-outcomes') &&
       !(method === 'POST' && /\/assistant\/runs\/\d+\/prompt-navigation-outcomes$/.test(url.pathname)) &&
@@ -2080,6 +2081,151 @@ async function startMockApiServer(
           .map((agent) => currentAssistantAgent(agent.agent_id))
           .filter((agent): agent is NonNullable<typeof agent> => Boolean(agent)),
       )
+      return
+    }
+
+    const draftAgentContextPreviewMatch = url.pathname.match(
+      /^\/admin\/assistant\/agents\/([^/]+)\/context-preview$/,
+    )
+    if (draftAgentContextPreviewMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const agentId = decodeURIComponent(draftAgentContextPreviewMatch[1] ?? '')
+      const currentAgent = currentAssistantAgent(agentId)
+      if (!currentAgent) {
+        writeJson(response, { detail: 'Assistant agent not found' }, 404)
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      const record =
+        payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>)
+          : {}
+      const arrayOrCurrent = <T extends string>(value: unknown, current: T[]): T[] =>
+        Array.isArray(value) ? value.map((entry) => String(entry)) as T[] : [...current]
+      const optionalTextOrCurrent = (value: unknown, current: string | null) =>
+        value === undefined ? current : normalizeOptionalText(value)
+      const draftAgent = {
+        ...currentAgent,
+        name: normalizedReviewText(record.name) ?? currentAgent.name,
+        description: normalizedReviewText(record.description) ?? currentAgent.description,
+        status: normalizedReviewText(record.status) ?? currentAgent.status,
+        scope: normalizedReviewText(record.scope) ?? currentAgent.scope,
+        provider: optionalTextOrCurrent(record.provider, currentAgent.provider),
+        model: optionalTextOrCurrent(record.model, currentAgent.model),
+        role_key: optionalTextOrCurrent(record.role_key, currentAgent.role_key),
+        profile_kind: normalizedReviewText(record.profile_kind) ?? currentAgent.profile_kind,
+        specialization_summary: optionalTextOrCurrent(
+          record.specialization_summary,
+          currentAgent.specialization_summary,
+        ),
+        human_owner_role: optionalTextOrCurrent(record.human_owner_role, currentAgent.human_owner_role),
+        authority_ceiling: optionalTextOrCurrent(record.authority_ceiling, currentAgent.authority_ceiling),
+        activation_notes: optionalTextOrCurrent(record.activation_notes, currentAgent.activation_notes),
+        orchestration_pattern:
+          normalizedReviewText(record.orchestration_pattern) ?? currentAgent.orchestration_pattern,
+        parent_agent_id: optionalTextOrCurrent(record.parent_agent_id, currentAgent.parent_agent_id),
+        managed_agent_ids: arrayOrCurrent(record.managed_agent_ids, currentAgent.managed_agent_ids),
+        delegation_guidance: optionalTextOrCurrent(record.delegation_guidance, currentAgent.delegation_guidance),
+        profile_request_id:
+          record.profile_request_id === undefined
+            ? currentAgent.profile_request_id
+            : normalizeOptionalNumber(record.profile_request_id),
+        allowed_workspaces: arrayOrCurrent(record.allowed_workspaces, currentAgent.allowed_workspaces),
+        capabilities: arrayOrCurrent(record.capabilities, currentAgent.capabilities),
+        skills: arrayOrCurrent(record.skills, currentAgent.skills),
+        allowed_tools: arrayOrCurrent(record.allowed_tools, currentAgent.allowed_tools),
+        allowed_action_types: arrayOrCurrent(record.allowed_action_types, currentAgent.allowed_action_types),
+        daily_token_allocation:
+          record.daily_token_allocation === undefined
+            ? currentAgent.daily_token_allocation
+            : normalizeOptionalNumber(record.daily_token_allocation),
+        system_prompt: normalizedReviewText(record.system_prompt) ?? currentAgent.system_prompt,
+        has_unpublished_revision: true,
+      }
+      const previewSections = [
+        {
+          key: 'system-mission',
+          title: 'System Mission',
+          source: 'system',
+          scope: 'SYSTEM',
+          kind: 'IMMUTABLE',
+          freshness: 'STATIC',
+          owner: 'Platform',
+          contract_key: 'assistant-prompt-foundation',
+          contract_version: 1,
+          content: 'Answer with grounded operational context and stage reviewable actions only.',
+        },
+        {
+          key: 'workspace',
+          title: 'Admin Workspace',
+          source: 'workspace',
+          scope: 'REQUEST',
+          kind: 'GENERATED',
+          freshness: 'REQUEST',
+          owner: 'Application Shell',
+          content: 'Admin workspace smoke context.',
+        },
+        {
+          key: 'managed-agent',
+          title: `${draftAgent.name} draft profile`,
+          source: 'agent',
+          scope: 'AGENT',
+          kind: 'CONFIGURABLE',
+          freshness: 'REQUEST',
+          owner: draftAgent.human_owner_role ?? 'Operations Lead',
+          owner_reference: draftAgent.agent_id,
+          contract_key: 'assistant-agent-profile',
+          contract_version: Number(draftAgent.version ?? 0) + 1,
+          content: [
+            `role_key: ${draftAgent.role_key ?? 'none'}`,
+            `profile_kind: ${draftAgent.profile_kind}`,
+            `authority_ceiling: ${draftAgent.authority_ceiling ?? 'none'}`,
+            `skills: ${draftAgent.skills.join(', ') || 'none'}`,
+            `allowed_tools: ${draftAgent.allowed_tools.join(', ') || 'none'}`,
+            `allowed_actions: ${draftAgent.allowed_action_types.join(', ') || 'none'}`,
+            `instructions:\n${draftAgent.system_prompt}`,
+          ].join('\n'),
+        },
+        {
+          key: 'application-context',
+          title: 'Application Context',
+          source: 'application',
+          scope: 'REQUEST',
+          kind: 'GENERATED',
+          freshness: 'REQUEST',
+          owner: 'request-payload',
+          content: 'Admin managed-agent draft construction preview.',
+        },
+        {
+          key: 'data-inventory',
+          title: 'Live Data Inventory',
+          source: 'data',
+          scope: 'RUNTIME',
+          kind: 'GENERATED',
+          freshness: 'LIVE',
+          uses_fallback: true,
+          content: 'Smoke inventory uses deterministic fixture counts.',
+        },
+      ]
+
+      writeJson(response, {
+        agent_id: draftAgent.agent_id,
+        agent_name: draftAgent.name,
+        agent_role_key: draftAgent.role_key,
+        agent_profile_kind: draftAgent.profile_kind,
+        provider: draftAgent.provider ?? 'openai',
+        model: draftAgent.model ?? 'gpt-5.4',
+        generated_at: assistantRunRecordedAt,
+        warnings: [
+          'Draft preview is built from an unsaved admin agent payload; save the agent to make these construction changes runtime-active.',
+        ],
+        sections: previewSections,
+        rendered_system_prompt: previewSections.map((section) => `${section.title}:\n${section.content}`).join('\n\n'),
+      })
       return
     }
 

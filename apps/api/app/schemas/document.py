@@ -18,6 +18,7 @@ DocumentProcessorProvider = Literal["openai", "anthropic", "google"]
 DocumentProcessorSelection = Literal["builtin", "openai", "anthropic", "google"]
 DocumentFieldValueType = Literal["text", "date", "number", "currency", "quantity", "identifier"]
 DocumentFacetValueType = Literal["single_select", "multi_select", "boolean", "text", "date", "identifier"]
+DocumentExtractionCardinality = Literal["one", "many"]
 DocumentKind = Literal[
     "UNKNOWN",
     "TRADE_COMMUNICATION",
@@ -140,6 +141,18 @@ class DocumentFacetSchemaOut(BaseModel):
     allowed_values: list[DocumentFacetValueOut] = Field(default_factory=list)
 
 
+class DocumentExtractionObjectSchemaOut(BaseModel):
+    object_key: str
+    label: str
+    cardinality: DocumentExtractionCardinality | str = "one"
+    source_object_type: Optional[str] = None
+    canonical_table: Optional[str] = None
+    description: Optional[str] = None
+    field_keys: list[str] = Field(default_factory=list)
+    table_template_keys: list[str] = Field(default_factory=list)
+    child_object_keys: list[str] = Field(default_factory=list)
+
+
 class DocumentKindSchemaOut(BaseModel):
     document_kind: DocumentKind | str
     label: str
@@ -150,6 +163,11 @@ class DocumentKindSchemaOut(BaseModel):
     record_targets: list[DocumentRecordTargetOut] = Field(default_factory=list)
     matching_keys: list[str] = Field(default_factory=list)
     facets: list[DocumentFacetSchemaOut] = Field(default_factory=list)
+    extraction_schema_code: Optional[str] = None
+    deep_extraction_required: bool = False
+    extraction_objects: list[DocumentExtractionObjectSchemaOut] = Field(default_factory=list)
+    validation_rules: list[str] = Field(default_factory=list)
+    review_rules: list[str] = Field(default_factory=list)
     header_fields: list[DocumentFieldSchemaOut] = Field(default_factory=list)
     table_templates: list[DocumentTableTemplateSchemaOut] = Field(default_factory=list)
 

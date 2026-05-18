@@ -375,12 +375,11 @@ export function AuthGate({
           ) : null}
 
           <form id="session-login" className="auth-gate-entry-form" onSubmit={handleLogin}>
-            <span className="auth-gate-section-label">Password access</span>
             <div className="auth-gate-entry-grid">
               <label className="field">
-                <span>User ID or Email</span>
                 <input
                   className="control auth-gate-control"
+                  aria-label="User ID or Email"
                   value={loginForm.identifier}
                   onChange={(event) => {
                     setAuthFlash(null)
@@ -390,9 +389,9 @@ export function AuthGate({
                 />
               </label>
               <label className="field">
-                <span>Password</span>
                 <input
                   className="control auth-gate-control"
+                  aria-label="Password"
                   type="password"
                   value={loginForm.password}
                   onChange={(event) => {
@@ -405,7 +404,7 @@ export function AuthGate({
             </div>
             <div className="auth-gate-primary-actions">
               <button type="submit" className="button button-primary" disabled={authLoading}>
-                {authAction === 'login' ? 'Signing In...' : 'Enter Console'}
+                {authAction === 'login' ? 'Signing In...' : 'Log In'}
               </button>
             </div>
           </form>

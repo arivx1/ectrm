@@ -391,6 +391,12 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(analyzed["status"], "ANALYZED")
         self.assertEqual(analyzed["analysis_summary"]["dominant_document_kind"], "INVOICE")
         self.assertEqual(analyzed["analysis_summary"]["routing_strategy"], "SETTLEMENT_FIRST")
+        self.assertEqual(analyzed["analysis_summary"]["artifact_profile"]["detected_file_type"], "pdf")
+        self.assertEqual(analyzed["analysis_summary"]["artifact_profile"]["recommended_parse_mode"], "pdf_ocr_required")
+        self.assertTrue(analyzed["analysis_summary"]["structure_profile"]["deep_extraction_required"])
+        self.assertEqual(analyzed["analysis_summary"]["structure_profile"]["logical_document_count_estimate"], 1)
+        self.assertEqual(analyzed["analysis_summary"]["extraction_plan"][0]["schema_code"], "INVOICE.v1")
+        self.assertIn("invoice_lines", analyzed["analysis_summary"]["extraction_plan"][0]["schema_object_keys"])
         self.assertEqual(analyzed["routing_assessment"]["routing_strategy"], "SETTLEMENT_FIRST")
         self.assertEqual(analyzed["routing_assessment"]["status"], "INSUFFICIENT")
         self.assertEqual(len(analyzed["pages"]), 2)
@@ -617,6 +623,17 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertTrue(any(field["field_key"] == "invoice_number" for field in kinds["INVOICE"]["header_fields"]))
         self.assertTrue(any(field["field_key"] == "letter_of_credit_number" for field in kinds["LETTER_OF_CREDIT"]["header_fields"]))
         self.assertTrue(any(template["template_key"] == "line_items" for template in kinds["INVOICE"]["table_templates"]))
+        self.assertEqual(kinds["INVOICE"]["extraction_schema_code"], "INVOICE.v1")
+        self.assertTrue(kinds["INVOICE"]["deep_extraction_required"])
+        invoice_extraction_objects = {
+            entry["object_key"]: entry for entry in kinds["INVOICE"]["extraction_objects"]
+        }
+        self.assertIn("header", invoice_extraction_objects)
+        self.assertIn("invoice_lines", invoice_extraction_objects)
+        self.assertEqual(invoice_extraction_objects["invoice_lines"]["canonical_table"], "invoice_line")
+        self.assertIn("line_items", invoice_extraction_objects["invoice_lines"]["table_template_keys"])
+        self.assertIn("line_amounts_should_sum_to_total_when_lines_present", kinds["INVOICE"]["validation_rules"])
+        self.assertIn("require_review_if_total_amount_mismatch", kinds["INVOICE"]["review_rules"])
         invoice_facets = {facet["facet_key"]: facet for facet in kinds["INVOICE"]["facets"]}
         self.assertIn("economic_purpose", invoice_facets)
         self.assertIn("invoice_stage", invoice_facets)
@@ -632,7 +649,14 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertTrue(
             any(value["code"] == "vessel" for value in bill_of_lading_facets["transport_mode"]["allowed_values"])
         )
+        self.assertEqual(kinds["BILL_OF_LADING"]["extraction_schema_code"], "BOL.v1")
+        bol_extraction_objects = {
+            entry["object_key"]: entry for entry in kinds["BILL_OF_LADING"]["extraction_objects"]
+        }
+        self.assertIn("cargo_lines", bol_extraction_objects)
+        self.assertEqual(bol_extraction_objects["cargo_lines"]["canonical_table"], "bol_cargo")
         self.assertEqual(kinds["UNKNOWN"]["facets"], [])
+        self.assertIsNone(kinds["UNKNOWN"]["extraction_schema_code"])
         self.assertEqual(kinds["TRADE_CONFIRMATION"]["document_family"], "TRADE_EXECUTION")
         self.assertEqual(kinds["DEAL_RECAP"]["document_family"], "TRADE_EXECUTION")
         self.assertIn("trade_id", kinds["TRADE_CONFIRMATION"]["matching_keys"])

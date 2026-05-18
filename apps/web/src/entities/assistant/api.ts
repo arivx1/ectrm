@@ -1252,6 +1252,25 @@ export async function updateAssistantAgent(
   )
 }
 
+export async function previewAdminAssistantAgentDraftContext(
+  apiBase: string,
+  agentId: string,
+  payload: UpdateAssistantAgentInput,
+): Promise<AssistantPromptContext> {
+  const { actorId } = getMutationContext()
+
+  return postJson<AssistantPromptContext>(
+    `${apiBase}/admin/assistant/agents/${encodeURIComponent(agentId)}/context-preview`,
+    {
+      ...payload,
+      updated_by: actorId,
+    },
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
 export async function simulateAssistantAgentPolicy(
   apiBase: string,
   agentId: string,

@@ -229,6 +229,11 @@ function buildController(overrides: Partial<DocumentIngestionController> = {}): 
           record_targets: [],
           matching_keys: [],
           facets: [],
+          extraction_schema_code: null,
+          deep_extraction_required: false,
+          extraction_objects: [],
+          validation_rules: [],
+          review_rules: [],
           header_fields: [],
           table_templates: [],
         },
@@ -242,6 +247,11 @@ function buildController(overrides: Partial<DocumentIngestionController> = {}): 
           record_targets: [],
           matching_keys: [],
           facets: [],
+          extraction_schema_code: null,
+          deep_extraction_required: false,
+          extraction_objects: [],
+          validation_rules: [],
+          review_rules: [],
           header_fields: [],
           table_templates: [],
         },
@@ -370,7 +380,7 @@ describe('LibraryWorkspace', () => {
     expect(markup).toContain('<option value="UNKNOWN" selected="">Unknown</option>')
   })
 
-  it('renders a per-folder action menu trigger for custom library folders', () => {
+  it('does not render custom library folders while folders are disabled', () => {
     useDocumentIngestionControllerMock.mockReturnValue(buildController())
     useDocumentLibraryFolderStateMock.mockReturnValue({
       folders: [
@@ -411,9 +421,10 @@ describe('LibraryWorkspace', () => {
       }),
     )
 
-    expect(markup).toContain('Credit Docs')
-    expect(markup).toContain('Open folder menu for Credit Docs')
-    expect(markup).toContain('aria-haspopup="menu"')
+    expect(markup).not.toContain('Credit Docs')
+    expect(markup).not.toContain('Open folder menu for Credit Docs')
+    expect(markup).not.toContain('New Folder')
+    expect(markup).not.toContain('Destination Folder')
   })
 
   it('renders a selected file page with upload provenance and activity', () => {

@@ -65,6 +65,7 @@ import {
   listAssistantConversations,
   listAssistantProfileRequests,
   listAssistantPromptRouteRecommendations,
+  previewAdminAssistantAgentDraftContext,
   previewAssistantPromptContext,
   rejectAssistantActionRequest,
   rejectAssistantAgentProfileRequest,
@@ -1068,6 +1069,70 @@ test('createAssistantAgent and updateAssistantAgent preserve hierarchy metadata'
     updated_by: 'assistant_user',
   })
   assert.equal(new Headers((updateInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer mutation-token')
+})
+
+test('previewAdminAssistantAgentDraftContext posts unsaved update payloads with admin auth', async () => {
+  const expected = { agent_id: 'ops-manager', provider: 'openai', model: 'gpt-5.4' }
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await previewAdminAssistantAgentDraftContext('http://api.test', 'ops-manager', {
+    name: 'Ops Manager Draft',
+    description: 'Coordinates specialist agents.',
+    status: 'DRAFT',
+    scope: 'TEAM',
+    provider: 'openai',
+    model: 'gpt-5.4',
+    role_key: 'trade-ops-copilot',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Manager role',
+    human_owner_role: 'Operations Lead',
+    authority_ceiling: 'DRAFT',
+    activation_notes: 'Narrowed before save.',
+    orchestration_pattern: 'MANAGER',
+    parent_agent_id: 'control-tower-agent',
+    managed_agent_ids: ['movement-controller-agent'],
+    delegation_guidance: 'Consult specialists before final synthesis.',
+    profile_request_id: null,
+    allowed_workspaces: ['assistant', 'operations'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
+    skills: ['trade_operations_coordination', 'inter_agent_consultation'],
+    allowed_tools: ['get_workspace_summary', 'consult_managed_agent'],
+    allowed_action_types: [],
+    daily_token_allocation: 25000,
+    system_prompt: 'Coordinate specialists and summarize the blocker.',
+  })
+
+  assert.equal(payload, expected)
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/assistant/agents/ops-manager/context-preview')
+  assert.deepEqual(body, {
+    name: 'Ops Manager Draft',
+    description: 'Coordinates specialist agents.',
+    status: 'DRAFT',
+    scope: 'TEAM',
+    provider: 'openai',
+    model: 'gpt-5.4',
+    role_key: 'trade-ops-copilot',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Manager role',
+    human_owner_role: 'Operations Lead',
+    authority_ceiling: 'DRAFT',
+    activation_notes: 'Narrowed before save.',
+    orchestration_pattern: 'MANAGER',
+    parent_agent_id: 'control-tower-agent',
+    managed_agent_ids: ['movement-controller-agent'],
+    delegation_guidance: 'Consult specialists before final synthesis.',
+    profile_request_id: null,
+    allowed_workspaces: ['assistant', 'operations'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
+    skills: ['trade_operations_coordination', 'inter_agent_consultation'],
+    allowed_tools: ['get_workspace_summary', 'consult_managed_agent'],
+    allowed_action_types: [],
+    daily_token_allocation: 25000,
+    system_prompt: 'Coordinate specialists and summarize the blocker.',
+    updated_by: 'assistant_user',
+  })
+  assert.equal(new Headers((init as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer mutation-token')
 })
 
 test('listAdminAssistantProfileRequests loads the admin request queue with mutation auth', async () => {

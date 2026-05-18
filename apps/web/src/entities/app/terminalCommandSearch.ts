@@ -1,6 +1,10 @@
 import { APP_VIEWS } from './appViews'
 import { matchesTextFilter } from '../../shared/filtering'
 import type { AppRouteHandoff, AppRouteHandoffFocusType } from '../../shared/appRouteHandoff'
+import {
+  getPrimaryTerminalWorkspaceSetRoute,
+  listTerminalWorkspaceSets,
+} from '../../shared/terminalWorkspaceSets'
 import type {
   CounterpartyRecord,
   PriceIndexRecord,
@@ -11,6 +15,7 @@ import type {
 } from '../../shared/models'
 
 export type TerminalCommandScope =
+  | 'function'
   | 'workspace'
   | 'trade'
   | 'counterparty'
@@ -103,6 +108,15 @@ type ReportShortcut = {
   id: string
   title: string
   detail: string
+  aliases: string[]
+}
+
+type TerminalFunctionShortcut = {
+  id: string
+  title: string
+  detail: string
+  aliases: string[]
+  action: TerminalCommandAction
 }
 
 const FEATURED_WORKSPACE_VIEW_KEYS: ViewKey[] = [
@@ -121,40 +135,48 @@ const REPORT_SHORTCUTS: ReportShortcut[] = [
     id: 'reports-overview',
     title: 'Reporting Overview',
     detail: 'Desk reporting posture, coverage, and summary counts.',
+    aliases: ['overview', 'reporting', 'reports'],
   },
   {
     id: 'reports-trading-eod',
     title: 'Trading EOD',
     detail: 'Desk close status, blockers, and readiness checks.',
+    aliases: ['eod', 'end of day', 'close', 'desk close'],
   },
   {
     id: 'reports-exposure',
     title: 'Exposure Summary',
     detail: 'Commodity-level volume and concentration posture.',
+    aliases: ['exposure', 'risk', 'position report'],
   },
   {
     id: 'reports-activity',
     title: 'Activity Summary',
     detail: 'Lifecycle activity grouped by event type and recency.',
+    aliases: ['activity', 'events', 'lifecycle'],
   },
   {
     id: 'reports-valuation-snapshot',
     title: 'Portfolio Snapshot',
     detail: 'Current portfolio valuation and priced trade coverage.',
+    aliases: ['portfolio', 'valuation', 'snapshot', 'pnl'],
   },
   {
     id: 'reports-valuation-compare',
     title: 'P&L Comparison',
     detail: 'Snapshot-to-snapshot P&L deltas and bridge context.',
+    aliases: ['pnl compare', 'p&l', 'compare', 'valuation compare'],
   },
   {
     id: 'reports-credit',
     title: 'Counterparty Credit Report',
     detail: 'Credit, exposure, and review posture for active counterparties.',
+    aliases: ['credit', 'counterparty credit', 'cr'],
   },
 ]
 
 const SCOPE_PREFIXES: Record<TerminalCommandScope, string[]> = {
+  function: ['function:', 'fn:', 'cmd:'],
   workspace: ['workspace:', 'ws:', 'view:'],
   trade: ['trade:', 'trd:'],
   counterparty: ['counterparty:', 'cp:'],
@@ -162,6 +184,44 @@ const SCOPE_PREFIXES: Record<TerminalCommandScope, string[]> = {
   price_index: ['index:', 'px:', 'price:'],
   report: ['report:', 'rpt:'],
 }
+
+const BARE_SCOPE_ALIASES: Partial<Record<TerminalCommandScope, string[]>> = {
+  workspace: ['workspace', 'ws', 'view'],
+  trade: ['trade', 'trd', 't'],
+  counterparty: ['counterparty', 'cpty', 'cp'],
+  commodity: ['commodity', 'cmdty', 'cmd'],
+  price_index: ['price', 'index', 'idx', 'px'],
+  report: ['report', 'rpt', 'rep'],
+}
+
+const FUNCTION_QUERY_ALIASES = [
+  'brief',
+  'cr',
+  'credit',
+  'des',
+  'describe',
+  'eod',
+  'help',
+  'launch',
+  'live',
+  'mkt',
+  'mkts',
+  'mon',
+  'monitor',
+  'ops',
+  'pnl',
+  'pos',
+  'positions',
+  'ref',
+  'reference',
+  'risk',
+  'sched',
+  'sch',
+  'setl',
+  'setup',
+  'stlmt',
+  'wset',
+]
 
 const MUTATION_VERBS = [
   'book',
@@ -175,9 +235,21 @@ const MUTATION_VERBS = [
   'pay',
   'settle',
   'schedule',
+  'actualize',
+  'allocate',
+  'assign',
+  'confirm',
+  'delete',
+  'execute',
+  'nominate',
+  'post',
+  'release',
+  'send',
+  'submit',
 ]
 
 const MAX_RESULTS_PER_GROUP = 6
+const BLANK_FUNCTION_LIMIT = 6
 const BLANK_WORKSPACE_LIMIT = 8
 const BLANK_REPORT_LIMIT = 4
 const BLANK_TRADE_LIMIT = 4
@@ -188,6 +260,8 @@ function normalizeText(value: string): string {
 
 function scopeLabel(scope: TerminalCommandScope): string {
   switch (scope) {
+    case 'function':
+      return 'Functions'
     case 'workspace':
       return 'Workspaces'
     case 'trade':
@@ -204,7 +278,7 @@ function scopeLabel(scope: TerminalCommandScope): string {
 }
 
 function scopeSupportsStaticResults(scope: TerminalCommandScope | null): boolean {
-  return scope === 'workspace' || scope === 'report'
+  return scope === 'function' || scope === 'workspace' || scope === 'report'
 }
 
 function buildTerminalHandoff(args: {
@@ -266,6 +340,27 @@ function parseTerminalCommandQuery(rawQuery: string): ParsedTerminalCommandQuery
     }
   }
 
+  const remainingQuery = normalizedQuery.slice(firstToken.length).trim()
+  for (const [scope, aliases] of Object.entries(BARE_SCOPE_ALIASES) as Array<
+    [TerminalCommandScope, string[]]
+  >) {
+    if (aliases.includes(normalizedFirstToken)) {
+      return {
+        scope,
+        query: remainingQuery,
+        mutationVerb: null,
+      }
+    }
+  }
+
+  if (FUNCTION_QUERY_ALIASES.includes(normalizedFirstToken)) {
+    return {
+      scope: 'function',
+      query: remainingQuery ? `${normalizedFirstToken} ${remainingQuery}` : normalizedFirstToken,
+      mutationVerb: null,
+    }
+  }
+
   return {
     scope: null,
     query: normalizedQuery,
@@ -316,6 +411,181 @@ function filterEntries(entries: TerminalCommandEntry[], query: string): Terminal
       detail: entry.detail,
       action: entry.action,
     }))
+}
+
+function reportAction(report: ReportShortcut): Extract<TerminalCommandAction, { kind: 'view' }> {
+  return {
+    kind: 'view',
+    view: 'reports',
+    handoff: buildTerminalHandoff({
+      focusType: 'report',
+      focusId: report.id,
+      focusLabel: report.title,
+      label: `Open ${report.title}`,
+      rationale:
+        'Terminal search opened the Reports workspace on this module so you can review the matching analysis without hunting through the full report grid.',
+    }),
+    hash: report.id,
+  }
+}
+
+function reportById(reportId: string): ReportShortcut {
+  const report = REPORT_SHORTCUTS.find((candidate) => candidate.id === reportId)
+  if (!report) {
+    throw new Error(`Unknown terminal report shortcut: ${reportId}`)
+  }
+
+  return report
+}
+
+function buildMarketInstrumentHandoff(args: {
+  kind: 'price_index' | 'commodity_class'
+  id: string
+  label: string
+}): AppRouteHandoff {
+  return buildTerminalHandoff({
+    focusType: 'market_instrument',
+    focusId: `${args.kind}:${args.id}`,
+    focusLabel: args.label,
+    label: `Open ${args.label} brief`,
+    rationale:
+      'The terminal command opened a read-only instrument brief so you can review market context beside related trades, exposure, and workflow activity.',
+    filter: args.id,
+  })
+}
+
+function functionEntry(
+  shortcut: TerminalFunctionShortcut,
+  order: number,
+): TerminalCommandEntry {
+  return {
+    id: `function:${shortcut.id}`,
+    scope: 'function',
+    title: shortcut.title,
+    detail: shortcut.detail,
+    action: shortcut.action,
+    searchValues: [shortcut.title, shortcut.detail, ...shortcut.aliases],
+    rankValues: [shortcut.title, ...shortcut.aliases],
+    order,
+  }
+}
+
+function buildStaticFunctionShortcuts(): TerminalFunctionShortcut[] {
+  const eodReport = reportById('reports-trading-eod')
+  const creditReport = reportById('reports-credit')
+  const pnlReport = reportById('reports-valuation-snapshot')
+
+  return [
+    {
+      id: 'mon',
+      title: 'MON - Live Desk Monitor',
+      detail: 'Open Live Desk for market monitor, watchlist, headline, price, and exposure context.',
+      aliases: ['mon', 'monitor', 'mkt', 'mkts', 'live', 'live desk', 'market monitor'],
+      action: {
+        kind: 'view',
+        view: 'dashboard',
+        handoff: null,
+      },
+    },
+    {
+      id: 'risk',
+      title: 'RISK - Exposure Workspace',
+      detail: 'Open Exposure for risk summary, concentration, pricing coverage, and expiry pressure.',
+      aliases: ['risk', 'exposure', 'risk board'],
+      action: {
+        kind: 'view',
+        view: 'risk',
+        handoff: null,
+      },
+    },
+    {
+      id: 'ops',
+      title: 'OPS - Work Queue',
+      detail: 'Open Work Queue for confirmations, blockers, credit exceptions, and operational handoffs.',
+      aliases: ['ops', 'operations', 'queue', 'work queue'],
+      action: {
+        kind: 'view',
+        view: 'operations',
+        handoff: null,
+      },
+    },
+    {
+      id: 'setl',
+      title: 'SETL - Settlement',
+      detail: 'Open Settlement for invoices, payments, exception queues, and closeout readiness.',
+      aliases: ['setl', 'stlmt', 'settlement'],
+      action: {
+        kind: 'view',
+        view: 'settlement',
+        handoff: null,
+      },
+    },
+    {
+      id: 'pos',
+      title: 'POS - Net Positions',
+      detail: 'Open Net Positions for commodity and book balances.',
+      aliases: ['pos', 'positions', 'net positions', 'position'],
+      action: {
+        kind: 'view',
+        view: 'positions',
+        handoff: null,
+      },
+    },
+    {
+      id: 'sch',
+      title: 'SCH - Scheduling',
+      detail: 'Open Scheduling for delivery windows, nomination readiness, and scheduler blockers.',
+      aliases: ['sch', 'sched', 'scheduling', 'scheduler'],
+      action: {
+        kind: 'view',
+        view: 'scheduling',
+        handoff: null,
+      },
+    },
+    {
+      id: 'eod',
+      title: 'EOD - Trading EOD Report',
+      detail: eodReport.detail,
+      aliases: ['eod', 'end of day', 'close', 'trading eod', 'desk close'],
+      action: reportAction(eodReport),
+    },
+    {
+      id: 'cr',
+      title: 'CR - Counterparty Credit Report',
+      detail: creditReport.detail,
+      aliases: ['cr', 'credit', 'counterparty credit', 'credit report'],
+      action: reportAction(creditReport),
+    },
+    {
+      id: 'pnl',
+      title: 'PNL - Portfolio Snapshot',
+      detail: pnlReport.detail,
+      aliases: ['pnl', 'p&l', 'valuation', 'portfolio snapshot'],
+      action: reportAction(pnlReport),
+    },
+    {
+      id: 'ref',
+      title: 'REF - Reference Data',
+      detail: 'Open governed reference data for commodities, indices, counterparties, routes, and assets.',
+      aliases: ['ref', 'reference', 'reference data', 'master data'],
+      action: {
+        kind: 'view',
+        view: 'reference',
+        handoff: null,
+      },
+    },
+    {
+      id: 'help',
+      title: 'HELP - How It Works',
+      detail: 'Open the in-product guide when the right workspace or shortcut is unclear.',
+      aliases: ['help', 'guide', 'how it works'],
+      action: {
+        kind: 'view',
+        view: 'guide',
+        handoff: null,
+      },
+    },
+  ]
 }
 
 function buildWorkspaceEntries(): TerminalCommandEntry[] {
@@ -479,27 +749,117 @@ function buildPriceIndexEntries(priceIndices: readonly PriceIndexRecord[]): Term
   }))
 }
 
+function buildTerminalFunctionEntries(args: Omit<TerminalCommandSearchArgs, 'query' | 'isLoading'>): TerminalCommandEntry[] {
+  const staticFunctionEntries = buildStaticFunctionShortcuts().map(functionEntry)
+  const workspaceSetOffset = staticFunctionEntries.length
+  const workspaceSetEntries = listTerminalWorkspaceSets().map((workspaceSet, index): TerminalCommandEntry => {
+    const primaryRoute = getPrimaryTerminalWorkspaceSetRoute(workspaceSet)
+    return {
+      id: `function:workspace-set:${workspaceSet.id}`,
+      scope: 'function',
+      title: `WSET - ${workspaceSet.label}`,
+      detail: `${workspaceSet.description} Opens ${primaryRoute.label}; use the Workspace Set launcher for companion pop-outs.`,
+      action: {
+        kind: 'view',
+        view: primaryRoute.view,
+        handoff: null,
+      },
+      searchValues: [
+        'workspace set',
+        'wset',
+        'setup',
+        'launch',
+        workspaceSet.id,
+        workspaceSet.label,
+        workspaceSet.shortLabel,
+        workspaceSet.description,
+        workspaceSet.operatorGoal,
+        ...workspaceSet.routes.flatMap((route) => [route.label, route.view, route.purpose]),
+      ],
+      rankValues: [workspaceSet.label, workspaceSet.shortLabel, workspaceSet.id, `setup ${workspaceSet.label}`],
+      order: workspaceSetOffset + index,
+    }
+  })
+  const priceIndexOffset = workspaceSetOffset + workspaceSetEntries.length
+  const priceIndexBriefEntries = args.priceIndices.map((priceIndex, index): TerminalCommandEntry => ({
+    id: `function:des:price-index:${priceIndex.code}`,
+    scope: 'function',
+    title: `DES - ${priceIndex.code}`,
+    detail: `Open ${priceIndex.name} as a Live Desk instrument brief.`,
+    action: {
+      kind: 'view',
+      view: 'dashboard',
+      handoff: buildMarketInstrumentHandoff({
+        kind: 'price_index',
+        id: priceIndex.code,
+        label: priceIndex.name,
+      }),
+    },
+    searchValues: [
+      'des',
+      'describe',
+      'brief',
+      'instrument brief',
+      priceIndex.code,
+      priceIndex.name,
+      priceIndex.description,
+      priceIndex.provider,
+      priceIndex.market,
+      priceIndex.location_code,
+      priceIndex.commodity_code,
+      priceIndex.currency_code,
+      priceIndex.unit_code,
+    ],
+    rankValues: [priceIndex.code, priceIndex.name, `des ${priceIndex.code}`],
+    order: priceIndexOffset + index,
+  }))
+  const commodityClassOffset = priceIndexOffset + priceIndexBriefEntries.length
+  const commodityClasses = Array.from(
+    new Set(
+      [
+        ...args.commodities.map((commodity) => commodity.commodity_class),
+        ...args.trades.map((trade) => trade.commodity_class),
+      ]
+        .map((value) => value?.trim())
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ).sort((left, right) => left.localeCompare(right))
+  const commodityClassBriefEntries = commodityClasses.map((commodityClass, index): TerminalCommandEntry => ({
+    id: `function:des:commodity-class:${commodityClass}`,
+    scope: 'function',
+    title: `DES - ${commodityClass}`,
+    detail: `Open ${commodityClass} as a Live Desk commodity-class instrument brief.`,
+    action: {
+      kind: 'view',
+      view: 'dashboard',
+      handoff: buildMarketInstrumentHandoff({
+        kind: 'commodity_class',
+        id: commodityClass,
+        label: commodityClass,
+      }),
+    },
+    searchValues: ['des', 'describe', 'brief', 'instrument brief', 'commodity class', commodityClass],
+    rankValues: [commodityClass, `des ${commodityClass}`],
+    order: commodityClassOffset + index,
+  }))
+
+  return [
+    ...staticFunctionEntries,
+    ...workspaceSetEntries,
+    ...priceIndexBriefEntries,
+    ...commodityClassBriefEntries,
+  ]
+}
+
 function buildReportEntries(): TerminalCommandEntry[] {
   return REPORT_SHORTCUTS.map((report, index) => ({
     id: `report:${report.id}`,
     scope: 'report',
     title: report.title,
     detail: report.detail,
-    action: {
-      kind: 'view',
-      view: 'reports',
-      handoff: buildTerminalHandoff({
-        focusType: 'report',
-        focusId: report.id,
-        focusLabel: report.title,
-        label: `Open ${report.title}`,
-        rationale:
-          'Terminal search opened the Reports workspace on this module so you can review the matching analysis without hunting through the full report grid.',
-      }),
-      hash: report.id,
-    },
-    searchValues: [report.id, report.title, report.detail, 'reports'],
-    rankValues: [report.title, report.id],
+    action: reportAction(report),
+    searchValues: [report.id, report.title, report.detail, 'reports', ...report.aliases],
+    rankValues: [report.title, report.id, ...report.aliases],
     order: index,
   }))
 }
@@ -509,6 +869,7 @@ function buildEntriesByScope(args: Omit<TerminalCommandSearchArgs, 'query' | 'is
   TerminalCommandEntry[]
 > {
   return {
+    function: buildTerminalFunctionEntries(args),
     workspace: buildWorkspaceEntries(),
     trade: buildTradeEntries(args.trades),
     counterparty: buildCounterpartyEntries(args.counterparties),
@@ -527,9 +888,11 @@ function buildBlankStateGroups(
       0,
       scope === 'workspace'
         ? BLANK_WORKSPACE_LIMIT
-        : scope === 'report'
-          ? BLANK_REPORT_LIMIT
-          : MAX_RESULTS_PER_GROUP,
+        : scope === 'function'
+          ? BLANK_FUNCTION_LIMIT
+          : scope === 'report'
+            ? BLANK_REPORT_LIMIT
+            : MAX_RESULTS_PER_GROUP,
     )
 
     return scopedEntries.length > 0
@@ -552,9 +915,21 @@ function buildBlankStateGroups(
   const featuredWorkspaces = FEATURED_WORKSPACE_VIEW_KEYS.map((viewKey) =>
     entriesByScope.workspace.find((entry) => entry.action.kind === 'view' && entry.action.view === viewKey),
   ).filter((entry): entry is TerminalCommandEntry => entry !== undefined)
+  const featuredFunctions = entriesByScope.function.slice(0, BLANK_FUNCTION_LIMIT)
   const blankTrades = entriesByScope.trade.slice(0, BLANK_TRADE_LIMIT)
 
   const groups: TerminalCommandResultGroup[] = [
+    {
+      scope: 'function',
+      label: scopeLabel('function'),
+      results: featuredFunctions.map(({ id, title, detail, action, scope: entryScope }) => ({
+        id,
+        scope: entryScope,
+        title,
+        detail,
+        action,
+      })),
+    },
     {
       scope: 'workspace',
       label: scopeLabel('workspace'),
@@ -653,7 +1028,7 @@ export function resolveTerminalCommandSearchState(
     title: 'No terminal matches',
     detail: parsedQuery.scope
       ? `No ${scopeLabel(parsedQuery.scope).toLowerCase()} matched this lookup. Try a different code, name, or prefix.`
-      : 'Try a trade ID, counterparty code, commodity name, price index, report title, or a scope prefix like trade: or report:.',
+      : 'Try a function alias, trade ID, counterparty code, commodity name, price index, report title, or a scope prefix like trade: or report:.',
     scope: parsedQuery.scope,
   }
 }

@@ -49,6 +49,12 @@ def build_document_summary(
             table_blocks=list(page.table_blocks or []),
         )
     )
+    artifact_profile = build_artifact_profile(pages)
+    structure_profile = build_structure_profile(
+        pages,
+        artifact_profile=artifact_profile,
+        dominant_document_kind=dominant_document_kind,
+    )
 
     return {
         "dominant_document_kind": dominant_document_kind,
@@ -67,7 +73,300 @@ def build_document_summary(
         "routing_status": routing_assessment.status,
         "routing_primary_record_type": routing_assessment.primary_record_type,
         "routing_assessment": routing_assessment.model_dump(),
+        "artifact_profile": artifact_profile,
+        "structure_profile": structure_profile,
+        "extraction_plan": build_extraction_plan(
+            pages,
+            artifact_profile=artifact_profile,
+            logical_documents=list(structure_profile.get("logical_documents") or []),
+        ),
     }
+
+
+def build_artifact_profile(pages: list[DocumentIngestionPage]) -> dict[str, object]:
+    source_counts = Counter(page_text_source(page) for page in pages)
+    processed_pages = [
+        page
+        for page in pages
+        if page.processed_at is not None
+        or page.classification_status != "PENDING"
+        or page.extraction_status != "PENDING"
+    ]
+    processed_count = len(processed_pages)
+    pdf_text_count = source_counts.get("pdf_text", 0)
+    ocr_count = source_counts.get("ocr", 0)
+    no_text_count = source_counts.get("none", 0)
+
+    if not pages:
+        content_mode = "empty"
+        recommended_parse_mode = "manual_review"
+        requires_ocr = False
+    elif processed_count == 0:
+        content_mode = "pending_analysis"
+        recommended_parse_mode = "pdf_pending_analysis"
+        requires_ocr = False
+    elif ocr_count and pdf_text_count:
+        content_mode = "hybrid_text_plus_ocr"
+        recommended_parse_mode = "pdf_hybrid_text_plus_ocr"
+        requires_ocr = True
+    elif ocr_count:
+        content_mode = "ocr"
+        recommended_parse_mode = "pdf_ocr"
+        requires_ocr = True
+    elif pdf_text_count and no_text_count:
+        content_mode = "native_text_with_unparsed_pages"
+        recommended_parse_mode = "pdf_text_plus_ocr_fallback"
+        requires_ocr = True
+    elif pdf_text_count:
+        content_mode = "native_text"
+        recommended_parse_mode = "pdf_native_text"
+        requires_ocr = False
+    else:
+        content_mode = "image_or_no_text"
+        recommended_parse_mode = "pdf_ocr_required"
+        requires_ocr = True
+
+    return {
+        "detected_file_type": "pdf",
+        "content_mode": content_mode,
+        "parser_verified": bool(pages),
+        "page_count": len(pages),
+        "processed_page_count": processed_count,
+        "native_text_page_count": pdf_text_count,
+        "ocr_page_count": ocr_count,
+        "unknown_text_page_count": no_text_count,
+        "requires_ocr": requires_ocr,
+        "recommended_parse_mode": recommended_parse_mode,
+    }
+
+
+def build_structure_profile(
+    pages: list[DocumentIngestionPage],
+    *,
+    artifact_profile: dict[str, object],
+    dominant_document_kind: str,
+) -> dict[str, object]:
+    table_profiles = _build_table_profiles(pages)
+    logical_documents = _build_logical_document_estimates(pages)
+    extractable_table_count = sum(1 for table in table_profiles if table.get("extract_as_dataset"))
+    has_required_deep_schema = any(
+        _schema_requires_deep_extraction(str(document.get("document_kind") or "UNKNOWN"))
+        for document in logical_documents
+    )
+
+    return {
+        "content_mode": artifact_profile.get("content_mode") or "unknown",
+        "logical_document_count_estimate": len(logical_documents),
+        "logical_documents": logical_documents,
+        "has_key_value_fields": any(page.header_fields for page in pages),
+        "has_tables": bool(table_profiles),
+        "table_count": len(table_profiles),
+        "extractable_table_count": extractable_table_count,
+        "deep_extraction_required": bool(table_profiles or has_required_deep_schema),
+        "dominant_document_kind": dominant_document_kind,
+        "tables": table_profiles,
+    }
+
+
+def build_extraction_plan(
+    pages: list[DocumentIngestionPage],
+    *,
+    artifact_profile: dict[str, object],
+    logical_documents: list[object],
+) -> list[dict[str, object]]:
+    plan: list[dict[str, object]] = []
+    pages_by_number = {page.page_number: page for page in pages}
+    for document in logical_documents:
+        if not isinstance(document, dict):
+            continue
+        document_kind = str(document.get("document_kind") or "UNKNOWN")
+        schema = get_document_kind_schema(document_kind)
+        page_start = _coerce_int(document.get("page_start"))
+        page_end = _coerce_int(document.get("page_end"))
+        document_pages = [
+            pages_by_number[page_number]
+            for page_number in range(page_start or 0, (page_end or 0) + 1)
+            if page_number in pages_by_number
+        ]
+        method = _recommended_extraction_method(document_pages, artifact_profile=artifact_profile)
+        if schema is None or document_kind in {"UNKNOWN", "OTHER"} or not schema.extraction_schema_code:
+            plan.append(
+                {
+                    "logical_document_id": document.get("logical_document_id"),
+                    "document_kind": document_kind,
+                    "page_start": page_start,
+                    "page_end": page_end,
+                    "schema_code": None,
+                    "method": method,
+                    "status": "MANUAL_REVIEW",
+                    "reason": "No behavior-specific extraction schema is available for this document kind.",
+                    "deep_extraction_required": False,
+                    "schema_object_keys": [],
+                }
+            )
+            continue
+
+        schema_object_keys = [entry.object_key for entry in schema.extraction_objects]
+        plan.append(
+            {
+                "logical_document_id": document.get("logical_document_id"),
+                "document_kind": document_kind,
+                "page_start": page_start,
+                "page_end": page_end,
+                "schema_code": schema.extraction_schema_code,
+                "method": method,
+                "status": "READY",
+                "deep_extraction_required": bool(schema.deep_extraction_required or document.get("table_count")),
+                "schema_object_keys": schema_object_keys,
+            }
+        )
+    return plan
+
+
+def _build_logical_document_estimates(pages: list[DocumentIngestionPage]) -> list[dict[str, object]]:
+    ordered_pages = sorted(pages, key=lambda page: page.page_number)
+    if not ordered_pages:
+        return []
+
+    groups: list[list[DocumentIngestionPage]] = []
+    current_group: list[DocumentIngestionPage] = [ordered_pages[0]]
+    current_kind = ordered_pages[0].document_kind or "UNKNOWN"
+    for page in ordered_pages[1:]:
+        page_kind = page.document_kind or "UNKNOWN"
+        if page_kind == current_kind:
+            current_group.append(page)
+            continue
+        groups.append(current_group)
+        current_group = [page]
+        current_kind = page_kind
+    groups.append(current_group)
+
+    logical_documents: list[dict[str, object]] = []
+    for index, group in enumerate(groups, start=1):
+        page_start = group[0].page_number
+        page_end = group[-1].page_number
+        document_kind = group[0].document_kind or "UNKNOWN"
+        confidences = [
+            page.classification_confidence
+            for page in group
+            if isinstance(page.classification_confidence, (int, float))
+        ]
+        table_count = sum(len(page.table_blocks or []) for page in group)
+        logical_documents.append(
+            {
+                "logical_document_id": f"LD-{index:03d}",
+                "document_kind": document_kind,
+                "page_start": page_start,
+                "page_end": page_end,
+                "page_count": len(group),
+                "classification_confidence": round(sum(confidences) / len(confidences), 2) if confidences else None,
+                "table_count": table_count,
+                "deep_extraction_required": bool(table_count or _schema_requires_deep_extraction(document_kind)),
+            }
+        )
+    return logical_documents
+
+
+def _build_table_profiles(pages: list[DocumentIngestionPage]) -> list[dict[str, object]]:
+    table_profiles: list[dict[str, object]] = []
+    for page in sorted(pages, key=lambda candidate: candidate.page_number):
+        for table_position, table in enumerate(page.table_blocks or [], start=1):
+            template_key = clean_optional_text(table.get("template_key"), lowercase=True)
+            columns = [str(column) for column in table.get("columns") or [] if str(column).strip()]
+            rows = list(table.get("rows") or [])
+            table_index = _coerce_int(table.get("table_index")) or table_position
+            row_profiles = _profile_table_rows(rows=rows, columns=columns)
+            table_profiles.append(
+                {
+                    "table_id": f"p{page.page_number}-t{table_index}",
+                    "logical_document_kind": page.document_kind or "UNKNOWN",
+                    "source_location": {
+                        "location_type": "pdf_page",
+                        "page": page.page_number,
+                    },
+                    "detected_table_type": "detected_grid",
+                    "semantic_table_type": template_key or "unknown_table",
+                    "extract_as_dataset": template_key is not None,
+                    "template_key": template_key,
+                    "header_row_count": 1 if table.get("header_row_detected") else 0,
+                    "data_row_count": sum(1 for row in row_profiles if row["row_type"] == "data"),
+                    "column_count": len(columns),
+                    "has_totals_row": any(row["row_type"] == "total" for row in row_profiles),
+                    "has_subtotals": any(row["row_type"] == "subtotal" for row in row_profiles),
+                    "has_repeated_headers": False,
+                    "continues_from_previous_page": False,
+                    "continues_to_next_page": False,
+                    "confidence": 0.72 if template_key is None else 0.86,
+                    "columns": [
+                        {
+                            "column_index": index,
+                            "raw_header": column,
+                            "normalized_column_code": normalize_key(column),
+                            "confidence": 0.78 if template_key is None else 0.9,
+                        }
+                        for index, column in enumerate(columns, start=1)
+                    ],
+                    "rows": row_profiles,
+                    "source": clean_optional_text(table.get("source"), lowercase=True),
+                }
+            )
+    return table_profiles
+
+
+def _profile_table_rows(*, rows: list[object], columns: list[str]) -> list[dict[str, object]]:
+    row_profiles: list[dict[str, object]] = []
+    for index, raw_row in enumerate(rows, start=1):
+        row = raw_row if isinstance(raw_row, dict) else {}
+        row_text = " ".join(str(row.get(column) or "") for column in columns).strip().lower()
+        if not row_text:
+            row_type = "blank"
+        elif "subtotal" in row_text:
+            row_type = "subtotal"
+        elif "total" in row_text:
+            row_type = "total"
+        elif all(not str(row.get(column) or "").strip() for column in columns):
+            row_type = "blank"
+        else:
+            row_type = "data"
+        row_profiles.append(
+            {
+                "row_index": index,
+                "row_type": row_type,
+                "confidence": 0.8,
+            }
+        )
+    return row_profiles
+
+
+def _recommended_extraction_method(
+    pages: list[DocumentIngestionPage],
+    *,
+    artifact_profile: dict[str, object],
+) -> str:
+    if not pages:
+        return str(artifact_profile.get("recommended_parse_mode") or "manual_review")
+    source_counts = Counter(page_text_source(page) for page in pages)
+    if source_counts.get("ocr") and source_counts.get("pdf_text"):
+        return "pdf_hybrid_text_plus_ocr"
+    if source_counts.get("ocr"):
+        return "pdf_ocr"
+    if source_counts.get("pdf_text"):
+        return "pdf_native_text"
+    return "pdf_ocr_required"
+
+
+def _schema_requires_deep_extraction(document_kind: str) -> bool:
+    schema = get_document_kind_schema(document_kind)
+    return bool(schema and schema.deep_extraction_required)
+
+
+def _coerce_int(value: object) -> int | None:
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def validate_document_review_status_transition(

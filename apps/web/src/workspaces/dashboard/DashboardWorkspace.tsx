@@ -53,6 +53,7 @@ import { loadDashboardPnlHistory } from './pnlHistoryLoader'
 import { ExternalSeriesTileContent } from './ExternalSeriesPanel'
 import { MarketContextTileContent } from './MarketContextPanel'
 import { MarketMonitorStripTileContent, MarketPricesTileContent } from './MarketPricesPanel'
+import { TerminalQuoteCurvePanel } from './TerminalQuoteCurvePanel'
 import { WeatherIntelligenceTileContent } from './WeatherIntelligencePanel'
 import {
   CHART_HEIGHT,
@@ -2184,6 +2185,23 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
           span: 'wide',
           availableSpans: ['full', 'wide', 'half'],
           content: renderInstrumentBriefContent(),
+        },
+        {
+          id: 'quote-curve-panel',
+          eyebrow: 'Charts',
+          title: 'Quote Chart & Curve Panel',
+          description: 'Terminal-style quote history, latest mark, and curve strip for desk-linked price indices.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: (
+            <TerminalQuoteCurvePanel
+              appLoading={appLoading}
+              activeTrades={visibleActiveTrades}
+              priceIndices={visiblePriceIndices}
+              formatNumber={formatNumber}
+              onOpenPriceIndexBrief={openPriceIndexBrief}
+            />
+          ),
         },
         {
           id: 'desk-snapshot',

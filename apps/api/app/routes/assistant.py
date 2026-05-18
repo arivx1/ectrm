@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from datetime import datetime, timezone
+from typing import cast
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -150,6 +151,7 @@ from apps.api.app.domains.assistant.services.role_archetypes import (
     to_role_archetype_out,
 )
 from apps.api.app.domains.assistant.services.registry import (
+    ManagedAssistantAgent,
     get_agent_record,
     list_admin_agent_records,
     list_public_agent_records,
@@ -217,6 +219,7 @@ from apps.api.app.schemas.assistant import (
     AssistantRuntimeSettingsOut,
     AssistantVoiceSpeechRequest,
     AssistantVoiceTranscriptionOut,
+    AssistantWorkspace,
 )
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
@@ -1557,6 +1560,72 @@ def simulate_admin_assistant_agent_policy(
     return simulate_assistant_agent_policy(db=db, record=record, payload=payload)
 
 
+@admin_router.post("/agents/{agent_id}/context-preview", response_model=AssistantPromptContextOut)
+def preview_admin_assistant_agent_draft_context(
+    agent_id: str,
+    payload: AssistantAgentUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantPromptContextOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    record = get_agent_record(db, agent_id.strip().lower())
+    if record is None:
+        raise HTTPException(status_code=404, detail="Assistant agent not found")
+
+    _validate_agent_hierarchy_binding(agent_id=record.agent_id, payload=payload)
+    policy_defaults = _resolve_agent_profile_defaults(payload)
+    _validate_agent_activation(db, agent_id=record.agent_id, payload=payload)
+    draft_agent = _build_admin_agent_draft_definition(
+        record=record,
+        payload=payload,
+        policy_defaults=policy_defaults,
+    )
+    preview_payload = AssistantPromptContextRequest(
+        agent_id=record.agent_id,
+        provider=payload.provider,
+        workspace=_resolve_admin_agent_draft_preview_workspace(payload),
+        context=_build_admin_agent_draft_preview_context(
+            record=record,
+            payload=payload,
+            policy_defaults=policy_defaults,
+        ),
+        use_live_tools="READ" in {capability.upper() for capability in payload.capabilities},
+    )
+    provider, model, warnings = resolve_effective_runtime(preview_payload, draft_agent)
+    prompt_context = build_prompt_context(
+        payload=preview_payload,
+        user=user,
+        db=db,
+        agent_definition=draft_agent,
+    )
+    return AssistantPromptContextOut(
+        agent_id=prompt_context.agent_id,
+        agent_name=prompt_context.agent_name,
+        agent_role_key=prompt_context.agent_role_key,
+        agent_profile_kind=prompt_context.agent_profile_kind,
+        provider=provider.provider,
+        model=model,
+        generated_at=prompt_context.generated_at,
+        warnings=[
+            (
+                "Draft preview is built from an unsaved admin agent payload; "
+                "save the agent to make these construction changes runtime-active."
+            ),
+            *warnings,
+            *prompt_context.warnings,
+            *_build_prompt_context_preview_warnings(list(prompt_context.sections)),
+        ],
+        sections=[_to_prompt_section_out(section) for section in prompt_context.sections],
+        rendered_system_prompt=prompt_context.system_prompt,
+    )
+
+
 @admin_router.post("/agents", response_model=AssistantAgentAdminOut, status_code=status.HTTP_201_CREATED)
 def create_assistant_agent(
     payload: AssistantAgentCreate,
@@ -1790,6 +1859,95 @@ def _build_agent_change_summary(
         f"{entry['label']}: {entry['current_value']} -> {entry['next_value']}"
         for entry in diff_summary[:6]
     ]
+
+
+def _build_admin_agent_draft_definition(
+    *,
+    record: AssistantAgent,
+    payload: AssistantAgentUpdate,
+    policy_defaults: AssistantAgentProfilePolicyDefaults,
+) -> ManagedAssistantAgent:
+    return ManagedAssistantAgent(
+        agent_id=record.agent_id,
+        name=payload.name,
+        description=payload.description,
+        status=payload.status,
+        scope=payload.scope,
+        provider=payload.provider,
+        model=payload.model,
+        role_key=payload.role_key,
+        profile_kind=payload.profile_kind,
+        specialization_summary=payload.specialization_summary,
+        human_owner_role=payload.human_owner_role,
+        authority_ceiling=payload.authority_ceiling,
+        activation_notes=payload.activation_notes,
+        orchestration_pattern=payload.orchestration_pattern,
+        parent_agent_id=payload.parent_agent_id,
+        managed_agent_ids=tuple(payload.managed_agent_ids),
+        delegation_guidance=payload.delegation_guidance,
+        allowed_workspaces=tuple(payload.allowed_workspaces),
+        capabilities=tuple(payload.capabilities),
+        skills=tuple(policy_defaults.skills),
+        allowed_tools=tuple(policy_defaults.allowed_tools),
+        allowed_action_types=tuple(policy_defaults.allowed_action_types),
+        system_prompt=payload.system_prompt,
+    )
+
+
+def _resolve_admin_agent_draft_preview_workspace(
+    payload: AssistantAgentUpdate,
+) -> AssistantWorkspace | None:
+    allowed_workspaces = list(payload.allowed_workspaces)
+    for preferred_workspace in ("admin", "assistant"):
+        if preferred_workspace in allowed_workspaces:
+            return cast(AssistantWorkspace, preferred_workspace)
+    if allowed_workspaces:
+        return allowed_workspaces[0]
+    return None
+
+
+def _build_admin_agent_draft_preview_context(
+    *,
+    record: AssistantAgent,
+    payload: AssistantAgentUpdate,
+    policy_defaults: AssistantAgentProfilePolicyDefaults,
+) -> str:
+    return "\n".join(
+        [
+            "Admin managed-agent draft construction preview",
+            f"saved_agent_id: {record.agent_id}",
+            f"draft_name: {payload.name}",
+            f"draft_profile_kind: {payload.profile_kind}",
+            f"draft_status: {payload.status}",
+            f"draft_scope: {payload.scope}",
+            _format_agent_draft_context_line("role_key", payload.role_key),
+            _format_agent_draft_context_line("human_owner_role", payload.human_owner_role),
+            _format_agent_draft_context_line("authority_ceiling", payload.authority_ceiling),
+            f"effective_workspaces: {_format_agent_draft_context_values(payload.allowed_workspaces)}",
+            f"effective_capabilities: {_format_agent_draft_context_values(payload.capabilities)}",
+            f"effective_skills: {_format_agent_draft_context_values(policy_defaults.skills)}",
+            f"effective_tools: {_format_agent_draft_context_values(policy_defaults.allowed_tools)}",
+            f"effective_actions: {_format_agent_draft_context_values(policy_defaults.allowed_action_types)}",
+            f"orchestration_pattern: {payload.orchestration_pattern}",
+            _format_agent_draft_context_line("parent_agent_id", payload.parent_agent_id),
+            f"managed_agent_ids: {_format_agent_draft_context_values(payload.managed_agent_ids)}",
+            _format_agent_draft_context_line("delegation_guidance", payload.delegation_guidance),
+            (
+                "review_goal: Show the unsaved context, policy, hierarchy, skills, prompt layers, "
+                "tool access, and action access before an admin saves the agent."
+            ),
+        ]
+    )
+
+
+def _format_agent_draft_context_line(label: str, value: object | None) -> str:
+    if value is None or value == "":
+        return f"{label}: none"
+    return f"{label}: {value}"
+
+
+def _format_agent_draft_context_values(values: tuple[str, ...] | list[str]) -> str:
+    return ", ".join(values) if values else "none"
 
 
 def _to_prompt_section_out(section: AssistantPromptSection) -> AssistantPromptSectionOut:

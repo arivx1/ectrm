@@ -20,6 +20,7 @@ import {
   listAdminAssistantProfileRequests,
   listAdminAssistantRoleArchetypes,
   loadAssistantRuntimeSettings,
+  previewAdminAssistantAgentDraftContext,
   previewAssistantPromptContext,
   publishAssistantAgentRevision,
   rejectAssistantAgentProfileRequest,
@@ -92,6 +93,10 @@ import type {
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { AssistantConstructionExplainerPanel } from '../assistant/AssistantConstructionExplainerPanel'
+import {
+  buildDraftConstructionDiffSummary,
+  buildDraftPreviewAgent,
+} from './assistantAgentConstructionDraft'
 import {
   AGENT_BUILDER_TEMPLATES,
   AGENT_BUILDER_WORKSPACE_OPTIONS,
@@ -544,6 +549,12 @@ function normalizeAgentPayload(form: AgentForm): CreateAssistantAgentInput {
     daily_token_allocation: dailyTokenAllocation,
     system_prompt: form.system_prompt.trim(),
   }
+}
+
+function normalizeAgentUpdatePayload(form: AgentForm): UpdateAssistantAgentInput {
+  const payload: Partial<CreateAssistantAgentInput> = { ...normalizeAgentPayload(form) }
+  delete payload.agent_id
+  return payload as UpdateAssistantAgentInput
 }
 
 function normalizeDailyTokenAllocation(value: string): number | null {
@@ -1475,6 +1486,7 @@ export function AgentManagementPanel({
 }: AgentManagementPanelProps) {
   const requestSequenceRef = useRef(0)
   const agentPromptPreviewSequenceRef = useRef(0)
+  const draftPromptPreviewSequenceRef = useRef(0)
   const appliedSupervisionIntentIdRef = useRef<number | null>(null)
   const adminEnabled = hasAdministrativeAccess(authSession)
 
@@ -1533,6 +1545,9 @@ export function AgentManagementPanel({
   const [agentPromptPreview, setAgentPromptPreview] = useState<AssistantPromptContext | null>(null)
   const [agentPromptPreviewLoading, setAgentPromptPreviewLoading] = useState(false)
   const [agentPromptPreviewError, setAgentPromptPreviewError] = useState('')
+  const [draftPromptPreview, setDraftPromptPreview] = useState<AssistantPromptContext | null>(null)
+  const [draftPromptPreviewLoading, setDraftPromptPreviewLoading] = useState(false)
+  const [draftPromptPreviewError, setDraftPromptPreviewError] = useState('')
   const [agentHealthReview, setAgentHealthReview] = useState<AssistantAgentHealthReview | null>(null)
   const [agentHealthReviewLoading, setAgentHealthReviewLoading] = useState(false)
   const [agentHealthReviewError, setAgentHealthReviewError] = useState('')
@@ -1651,6 +1666,20 @@ export function AgentManagementPanel({
       available_action_types: availableActionDefinitions,
     }),
     [availableActionDefinitions, availableSkills, availableToolDefinitions],
+  )
+  const draftPreviewAgent = useMemo(
+    () =>
+      selectedAgent && editForm.agent_id === selectedAgent.agent_id
+        ? buildDraftPreviewAgent(selectedAgent, editForm)
+        : null,
+    [editForm, selectedAgent],
+  )
+  const draftConstructionDiffRows = useMemo(
+    () =>
+      selectedAgent && editForm.agent_id === selectedAgent.agent_id
+        ? buildDraftConstructionDiffSummary(selectedAgent, editForm)
+        : [],
+    [editForm, selectedAgent],
   )
   const createWorkspaceSummary = createForm.allowed_workspaces.map((workspace) => workspaceLabel(workspace)).join(' · ')
   const createCapabilitySummary = createForm.capabilities.join(' · ')
@@ -1937,6 +1966,9 @@ export function AgentManagementPanel({
       setAgentPromptPreview(null)
       setAgentPromptPreviewError('')
       setAgentPromptPreviewLoading(false)
+      setDraftPromptPreview(null)
+      setDraftPromptPreviewError('')
+      setDraftPromptPreviewLoading(false)
       setAgentHealthReview(null)
       setAgentHealthReviewError('')
       setAgentHealthReviewLoading(false)
@@ -1997,6 +2029,9 @@ export function AgentManagementPanel({
       setAgentPromptPreview(null)
       setAgentPromptPreviewError('')
       setAgentPromptPreviewLoading(false)
+      setDraftPromptPreview(null)
+      setDraftPromptPreviewError('')
+      setDraftPromptPreviewLoading(false)
       setSelectedAgentEvalId(null)
       setAgentEvalForm(createEmptyAgentEvalForm())
       setAgentEvalRuns([])
@@ -2026,6 +2061,9 @@ export function AgentManagementPanel({
     setAgentPromptPreview(null)
     setAgentPromptPreviewError('')
     setAgentPromptPreviewLoading(false)
+    setDraftPromptPreview(null)
+    setDraftPromptPreviewError('')
+    setDraftPromptPreviewLoading(false)
     setAgentEvalRuns([])
     setAgentEvalRunsLoading(false)
     setAgentEvalError('')
@@ -2049,6 +2087,58 @@ export function AgentManagementPanel({
   useEffect(() => {
     void loadAgentPromptPreview(selectedAgent)
   }, [loadAgentPromptPreview, selectedAgent])
+
+  useEffect(() => {
+    if (
+      !adminEnabled ||
+      !selectedAgent ||
+      editForm.agent_id !== selectedAgent.agent_id ||
+      draftConstructionDiffRows.length === 0
+    ) {
+      draftPromptPreviewSequenceRef.current += 1
+      setDraftPromptPreview(null)
+      setDraftPromptPreviewError('')
+      setDraftPromptPreviewLoading(false)
+      return
+    }
+
+    const requestId = draftPromptPreviewSequenceRef.current + 1
+    draftPromptPreviewSequenceRef.current = requestId
+    setDraftPromptPreviewLoading(true)
+    setDraftPromptPreviewError('')
+
+    const timeoutId = window.setTimeout(() => {
+      void previewAdminAssistantAgentDraftContext(
+        appConfig.apiBase,
+        selectedAgent.agent_id,
+        normalizeAgentUpdatePayload(editForm),
+      )
+        .then((preview) => {
+          if (draftPromptPreviewSequenceRef.current !== requestId) {
+            return
+          }
+          setDraftPromptPreview(preview)
+        })
+        .catch((error) => {
+          if (draftPromptPreviewSequenceRef.current !== requestId) {
+            return
+          }
+          setDraftPromptPreview(null)
+          setDraftPromptPreviewError(
+            error instanceof Error ? error.message : 'Could not load draft construction preview.',
+          )
+        })
+        .finally(() => {
+          if (draftPromptPreviewSequenceRef.current === requestId) {
+            setDraftPromptPreviewLoading(false)
+          }
+        })
+    }, 250)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [adminEnabled, draftConstructionDiffRows.length, editForm, selectedAgent])
 
   useEffect(() => {
     if (!controlTowerIntent) {
@@ -2653,36 +2743,11 @@ export function AgentManagementPanel({
     setSavingAgent(true)
 
     try {
-      const payload = normalizeAgentPayload(editForm)
+      const payload = normalizeAgentUpdatePayload(editForm)
       const updated = await updateAssistantAgent(
         appConfig.apiBase,
         selectedAgent.agent_id,
-        {
-          name: payload.name,
-          description: payload.description,
-          status: payload.status,
-          scope: payload.scope,
-          provider: payload.provider,
-          model: payload.model,
-          role_key: payload.role_key,
-          profile_kind: payload.profile_kind,
-          specialization_summary: payload.specialization_summary,
-          human_owner_role: payload.human_owner_role,
-          authority_ceiling: payload.authority_ceiling,
-          activation_notes: payload.activation_notes,
-          orchestration_pattern: payload.orchestration_pattern,
-          parent_agent_id: payload.parent_agent_id,
-          managed_agent_ids: payload.managed_agent_ids,
-          delegation_guidance: payload.delegation_guidance,
-          profile_request_id: payload.profile_request_id,
-          allowed_workspaces: payload.allowed_workspaces,
-          capabilities: payload.capabilities,
-          skills: payload.skills,
-          allowed_tools: payload.allowed_tools,
-          allowed_action_types: payload.allowed_action_types,
-          daily_token_allocation: payload.daily_token_allocation,
-          system_prompt: payload.system_prompt,
-        } satisfies UpdateAssistantAgentInput,
+        payload,
       )
       await refreshAgents(updated.agent_id)
       setActiveSupervisionIntent(null)
@@ -6184,6 +6249,73 @@ export function AgentManagementPanel({
                           ? 'Loading the server-owned prompt construction preview.'
                           : 'Prompt construction preview is not loaded yet.'}
                       </small>
+                    )}
+                  </div>
+
+                  <div className="assistant-admin-construction-review assistant-admin-draft-construction-review">
+                    <div className="assistant-admin-section-head">
+                      <div>
+                        <span className="eyebrow">Pending Construction</span>
+                        <h4>Unsaved Draft Construction</h4>
+                      </div>
+                      <span>
+                        {draftConstructionDiffRows.length > 0
+                          ? `${draftConstructionDiffRows.length} pending change${
+                              draftConstructionDiffRows.length === 1 ? '' : 's'
+                            }`
+                          : 'No pending changes'}
+                      </span>
+                    </div>
+                    <p>
+                      This pre-save review compares the current form against the saved agent, then asks the backend
+                      to build the unsaved prompt construction without persisting the profile.
+                    </p>
+                    {draftPromptPreviewError ? (
+                      <div className="assistant-profile-fit-messages is-error">
+                        <small>{draftPromptPreviewError}</small>
+                      </div>
+                    ) : null}
+                    {draftConstructionDiffRows.length > 0 ? (
+                      <>
+                        <div className="assistant-construction-diff-list">
+                          {draftConstructionDiffRows.slice(0, 10).map((diffRow) => (
+                            <div key={`draft-${diffRow.field_key}`} className="assistant-construction-diff-row">
+                              <strong>{diffRow.label}</strong>
+                              <p>
+                                {diffRow.current_value}
+                                {' -> '}
+                                {diffRow.next_value}
+                              </p>
+                            </div>
+                          ))}
+                          {draftConstructionDiffRows.length > 10 ? (
+                            <small>
+                              {draftConstructionDiffRows.length - 10} additional construction field
+                              {draftConstructionDiffRows.length - 10 === 1 ? '' : 's'} will change on save.
+                            </small>
+                          ) : null}
+                        </div>
+                        {draftPromptPreviewLoading ? (
+                          <small>Refreshing the backend-owned unsaved draft preview.</small>
+                        ) : null}
+                        {draftPreviewAgent && draftPromptPreview ? (
+                          <AssistantConstructionExplainerPanel
+                            activeAgent={draftPreviewAgent}
+                            activeGroundingSections={draftPromptPreview.sections}
+                            agents={agentRecords}
+                            promptPreview={draftPromptPreview}
+                            runtimeSettings={adminConstructionRuntimeSettings}
+                            selectedRun={null}
+                            includeContext={true}
+                            useLiveTools={draftPreviewAgent.capabilities.includes('READ')}
+                            onSelectAgent={setSelectedAgentId}
+                          />
+                        ) : !draftPromptPreviewLoading && !draftPromptPreviewError ? (
+                          <small>Authoritative draft prompt preview is not loaded yet.</small>
+                        ) : null}
+                      </>
+                    ) : (
+                      <small>No pending construction changes. The edit form currently matches the saved agent.</small>
                     )}
                   </div>
 

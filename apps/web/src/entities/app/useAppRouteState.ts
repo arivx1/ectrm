@@ -226,10 +226,14 @@ export function useAppRouteState() {
     }
   }
 
-  function hrefForView(view: ViewKey, hash?: string | null) {
+  function hrefForView(view: ViewKey, hashOrOptions?: string | null | AppRouteNavigationOptions) {
+    const options =
+      typeof hashOrOptions === 'object' && hashOrOptions !== null
+        ? hashOrOptions
+        : { hash: hashOrOptions }
     const nextHash =
-      hash !== undefined
-        ? normalizeHashFragment(hash)
+      options.hash !== undefined
+        ? normalizeHashFragment(options.hash)
         : view === 'settings'
           ? window.location.hash
           : ''
@@ -238,9 +242,13 @@ export function useAppRouteState() {
         section: null,
         view,
         docsDocumentKey: activeDocumentationDocumentKey,
-        tradeId: selectedTradeId,
-        messagingConversationId: selectedMessagingConversationId,
-        libraryDocumentId: selectedLibraryDocumentId,
+        tradeId: options.tradeId !== undefined ? options.tradeId : selectedTradeId,
+        messagingConversationId:
+          options.messagingConversationId !== undefined
+            ? options.messagingConversationId
+            : selectedMessagingConversationId,
+        libraryDocumentId:
+          options.libraryDocumentId !== undefined ? options.libraryDocumentId : selectedLibraryDocumentId,
         handoff: null,
       },
       nextHash,

@@ -216,3 +216,50 @@
   box-shadow: 0 0 0 10px rgba(61, 214, 160, 0.05);
 }
 
+.terminal-quote-selector,
+.terminal-quote-chart-card,
+.terminal-curve-card {
+  border-color: rgba(126, 154, 184, 0.16);
+  background:
+    radial-gradient(circle at top right, rgba(78, 167, 255, 0.08), transparent 34%),
+    linear-gradient(180deg, rgba(11, 20, 31, 0.98), rgba(8, 15, 24, 0.98));
+}
+
+.terminal-quote-selector-row,
+.terminal-quote-stat-grid article,
+.terminal-curve-row,
+.terminal-curve-bucket {
+  border-color: rgba(126, 154, 184, 0.12);
+  background: linear-gradient(180deg, rgba(7, 14, 23, 0.96), rgba(13, 23, 35, 0.76));
+}
+
+.terminal-quote-selector-row.is-active {
+  border-color: rgba(61, 214, 160, 0.26);
+  box-shadow: 0 0 0 1px rgba(61, 214, 160, 0.08);
+}
+
+.terminal-quote-card-head strong,
+.terminal-quote-selector-head strong,
+.terminal-quote-latest strong,
+.terminal-quote-selector-row strong,
+.terminal-quote-stat-grid strong,
+.terminal-curve-row-copy strong,
+.terminal-curve-row-meta strong,
+.terminal-curve-bucket strong {
+  color: var(--terminal-text);
+}
+
+.terminal-quote-card-head p,
+.terminal-quote-latest span,
+.terminal-quote-latest small,
+.terminal-quote-selector-row span,
+.terminal-quote-stat-grid span,
+.terminal-curve-row-copy span,
+.terminal-curve-bucket span,
+.terminal-curve-bucket p {
+  color: var(--terminal-muted);
+}
+
+.terminal-curve-row-bar {
+  background: rgba(126, 154, 184, 0.12);
+}

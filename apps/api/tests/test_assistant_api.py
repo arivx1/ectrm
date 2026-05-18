@@ -4154,6 +4154,128 @@ class AssistantApiTests(unittest.TestCase):
         )
         self.assertEqual(non_admin_response.status_code, 403)
 
+    def test_admin_agent_draft_context_preview_uses_unsaved_payload_without_persisting(self) -> None:
+        admin_token = self._create_session_token(role="OPS_ADMIN")
+        self._create_agent(
+            agent_id="draft-preview-governor",
+            name="Draft Preview Governor",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["READ", "EXPLAIN", "ACTION"],
+            allowed_tools=["get_managed_agent_profile"],
+            allowed_action_types=["cancel_trade"],
+            provider="openai",
+            model="gpt-5-mini",
+            specialization_summary="Stages governed trade review actions.",
+            human_owner_role="Operations Lead",
+            authority_ceiling="STAGE",
+            activation_notes="Approved for staged cancellation review.",
+        )
+
+        response = self.client.post(
+            "/admin/assistant/agents/draft-preview-governor/context-preview",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "name": "Draft Preview Governor",
+                "description": "Draft-only governed trade review helper.",
+                "status": "DRAFT",
+                "scope": "TEAM",
+                "provider": "openai",
+                "model": "gpt-5-mini",
+                "role_key": None,
+                "profile_kind": "CUSTOM",
+                "specialization_summary": "Explains trade review evidence before action staging.",
+                "human_owner_role": "Operations Lead",
+                "authority_ceiling": "DRAFT",
+                "activation_notes": "Narrowed before save.",
+                "orchestration_pattern": "SINGLE",
+                "parent_agent_id": None,
+                "managed_agent_ids": [],
+                "delegation_guidance": None,
+                "profile_request_id": None,
+                "allowed_workspaces": ["assistant", "admin"],
+                "capabilities": ["READ", "EXPLAIN", "DRAFT"],
+                "skills": ["trade_governance"],
+                "allowed_tools": ["get_managed_agent_profile"],
+                "allowed_action_types": [],
+                "daily_token_allocation": 25000,
+                "system_prompt": "Explain trade review evidence and stop before staging actions.",
+                "updated_by": "ops_admin",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["agent_id"], "draft-preview-governor")
+        self.assertEqual(payload["agent_name"], "Draft Preview Governor")
+        self.assertEqual(payload["agent_profile_kind"], "CUSTOM")
+        self.assertIn("unsaved admin agent payload", payload["warnings"][0])
+        sections_by_key = {section["key"]: section for section in payload["sections"]}
+        agent_section = sections_by_key["managed-agent"]
+        self.assertEqual(agent_section["owner_reference"], "draft-preview-governor")
+        self.assertIn("authority_ceiling: DRAFT", agent_section["content"])
+        self.assertIn("allowed_actions: none", agent_section["content"])
+        self.assertIn("skills: trade_governance", agent_section["content"])
+        self.assertIn("Current Workspace", payload["rendered_system_prompt"])
+        self.assertIn("Admin managed-agent draft construction preview", payload["rendered_system_prompt"])
+
+        with self.SessionLocal() as session:
+            stored_agent = session.get(AssistantAgent, "draft-preview-governor")
+            self.assertIsNotNone(stored_agent)
+            assert stored_agent is not None
+            self.assertEqual(stored_agent.status, "ACTIVE")
+            self.assertEqual(stored_agent.authority_ceiling, "STAGE")
+            self.assertEqual(stored_agent.allowed_action_types, ["cancel_trade"])
+            self.assertEqual(stored_agent.version, 1)
+
+    def test_admin_agent_draft_context_preview_requires_admin_role(self) -> None:
+        trader_token = self._create_session_token(user_id="desk_trader", role="TRADER")
+        self._create_agent(
+            agent_id="draft-preview-admin-only",
+            name="Draft Preview Admin Only",
+            status="DRAFT",
+            allowed_workspaces=["assistant"],
+            capabilities=["READ", "EXPLAIN"],
+            allowed_tools=["get_managed_agent_profile"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="DRAFT",
+        )
+
+        response = self.client.post(
+            "/admin/assistant/agents/draft-preview-admin-only/context-preview",
+            headers={"Authorization": f"Bearer {trader_token}"},
+            json={
+                "name": "Draft Preview Admin Only",
+                "description": "Draft-only helper.",
+                "status": "DRAFT",
+                "scope": "TEAM",
+                "provider": "openai",
+                "model": "gpt-5-mini",
+                "role_key": None,
+                "profile_kind": "CUSTOM",
+                "specialization_summary": None,
+                "human_owner_role": "Operations Lead",
+                "authority_ceiling": "DRAFT",
+                "activation_notes": None,
+                "orchestration_pattern": "SINGLE",
+                "parent_agent_id": None,
+                "managed_agent_ids": [],
+                "delegation_guidance": None,
+                "profile_request_id": None,
+                "allowed_workspaces": ["assistant"],
+                "capabilities": ["READ", "EXPLAIN"],
+                "skills": [],
+                "allowed_tools": ["get_managed_agent_profile"],
+                "allowed_action_types": [],
+                "daily_token_allocation": None,
+                "system_prompt": "Explain only.",
+                "updated_by": "ops_admin",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+
     def test_assistant_prompt_extracts_workflow_owner_and_due_date_from_message(self) -> None:
         token = self._create_session_token()
         self._create_trade_with_event(trade_id="T-1014B")

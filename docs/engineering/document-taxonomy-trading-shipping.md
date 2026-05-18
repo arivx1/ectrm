@@ -15,6 +15,8 @@ The backend `documents/schema-registry` contract now carries that taxonomy in a
 machine-readable shape so the parser, review UI, and future matching workflows
 can all reference the same source of truth.
 
+Related extraction design: [Document Extraction Architecture](./document-extraction-architecture.md).
+
 ## Hybrid Taxonomy Model
 
 The taxonomy uses a shallow primary document family plus controlled facets.

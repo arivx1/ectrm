@@ -32,6 +32,7 @@
 .assistant-profile-fit,
 .assistant-profile-fit-grid,
 .assistant-admin-construction-review,
+.assistant-construction-diff-list,
 .assistant-builder-preview-grid,
 .assistant-builder-warning-list,
 .assistant-profile-request-panel,
@@ -822,6 +823,36 @@
 .assistant-admin-construction-review .assistant-construction-detail-list small,
 .assistant-admin-construction-review .assistant-construction-provenance-row small {
   color: #3f5161;
+}
+
+.assistant-admin-draft-construction-review {
+  background:
+    radial-gradient(circle at top left, rgba(198, 147, 46, 0.12), transparent 34%),
+    rgba(255, 250, 236, 0.82);
+}
+
+.assistant-construction-diff-list {
+  gap: 0.55rem;
+}
+
+.assistant-construction-diff-row {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.assistant-construction-diff-row strong,
+.assistant-construction-diff-list > small {
+  color: #13293d;
+}
+
+.assistant-construction-diff-row p {
+  margin: 0;
+  color: #3f5161;
+  word-break: break-word;
 }
 
 .assistant-builder-inline-action {

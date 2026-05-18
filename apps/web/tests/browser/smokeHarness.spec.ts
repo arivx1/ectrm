@@ -1976,7 +1976,7 @@ test("admin smoke shows the role-derived pilot lineup and sync action", async ({
     ).toBeVisible();
     await expect(agentControl.getByText("Evals PASS")).toBeVisible();
     const constructionReview = agentControl.locator(
-      ".assistant-admin-construction-review",
+      ".assistant-admin-construction-review:not(.assistant-admin-draft-construction-review)",
     );
     await expect(constructionReview).toContainText("Saved Construction Preview");
     await expect(constructionReview).toContainText("Context provenance");
@@ -2091,6 +2091,16 @@ test("assistant smoke submits a governed agent change request and admin marks it
       page.getByText("Loaded request #9001 into the review draft for Ops Governor."),
     ).toBeVisible();
     await expect(reviewCard.getByRole("button", { name: "Mark Applied" })).toBeDisabled();
+    const draftConstructionReview = page.locator(
+      ".assistant-admin-draft-construction-review",
+    );
+    await expect(draftConstructionReview).toContainText(
+      "Unsaved Draft Construction",
+    );
+    await expect(draftConstructionReview).toContainText("Authority ceiling");
+    await expect(draftConstructionReview).toContainText("STAGE -> DRAFT");
+    await expect(draftConstructionReview).toContainText("Allowed actions");
+    await expect(draftConstructionReview).toContainText("cancel_trade -> None");
     await page.getByRole("button", { name: "Save Agent" }).click();
     await expect(page.getByText(/Ops Governor saved as version/)).toBeVisible();
     await expect(reviewCard).toContainText("Applied revision proof");
@@ -2158,7 +2168,7 @@ test("signed-out dashboard renders only the auth gate", async ({
     await expect(page.getByLabel("Operator prompt")).toHaveCount(0);
     await expect(authGate.getByLabel("User ID or Email")).toBeVisible();
     await expect(
-      authGate.getByRole("button", { name: "Enter Console" }),
+      authGate.getByRole("button", { name: "Log In" }),
     ).toBeVisible();
 
     assertNoHarnessRequestFailures(harness);

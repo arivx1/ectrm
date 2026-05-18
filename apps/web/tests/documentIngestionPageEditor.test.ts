@@ -287,6 +287,11 @@ function buildSchema(): DocumentKindSchemaRecord {
     record_targets: [],
     matching_keys: ['invoice_number'],
     facets: [],
+    extraction_schema_code: 'INVOICE.v1',
+    deep_extraction_required: true,
+    extraction_objects: [],
+    validation_rules: [],
+    review_rules: [],
     header_fields: [],
     table_templates: [],
   }

@@ -83,6 +83,42 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-17 - Document Extraction Starts With Artifact And Structure Profiling
+
+- Type: algorithm-added
+- Domain: document ingestion, extraction schemas, structure profiling,
+  validation, and review governance
+- Applies to: `analysis_summary.artifact_profile`,
+  `analysis_summary.structure_profile`, `analysis_summary.extraction_plan`,
+  schema-registry extraction objects, and future extraction-run staging tables
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_ingestion_review.py`,
+  `apps/api/app/domains/documents/services/schema_registry.py`, and
+  `docs/engineering/document-extraction-architecture.md`
+- Lesson: extraction should not jump straight from file upload to model output.
+  The durable path is artifact profile, logical-document estimate, structure
+  profile, schema-selected extraction plan, constrained extraction,
+  normalization, validation, generic audit rows, canonical staging rows, and
+  then linkage or review. The current PDF runtime now exposes a first
+  `artifact_profile`, `structure_profile`, and `extraction_plan` in document
+  summaries while the schema registry names starter extraction objects for
+  invoice, BOL, COA, ticket, settlement, and trade-confirmation documents.
+- Deterministic opportunity: persist artifact profiles, content units,
+  structure objects, table profiles, extraction runs, extracted fields/cells,
+  document references, and canonical staging rows before widening extraction to
+  Excel, Word, CSV, images, or emails. Native parsers should own physical
+  structure; AI should label semantic structure and extract schema-constrained
+  values with evidence.
+- Agent autonomy impact: agents may explain extraction evidence or suggest
+  schema/template improvements, but they should not treat freeform model output
+  as business-ready data. Writes must flow through typed staging, validation,
+  review, and application services.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_upload_pdf_creates_document_and_page_records apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_schema_registry_exposes_supported_document_contracts`
+- Follow-up: add persisted extraction-run and generic extraction audit tables,
+  then add canonical invoice/BOL/COA staging tables behind review rules.
+
 ### 2026-05-17 - Document Taxonomy Uses Families Plus Controlled Facets
 
 - Type: algorithm-added
@@ -1026,8 +1062,11 @@ proposal form until a human owner approves the domain rule.
   `apps/api/app/domains/assistant/services/skills.py`,
   `apps/api/app/domains/assistant/services/chat.py`,
   `apps/api/app/domains/assistant/services/prompt_context.py`,
-  `apps/api/app/domains/assistant/services/registry.py`, and
+  `apps/api/app/domains/assistant/services/registry.py`,
+  `apps/api/app/routes/assistant.py`,
+  `apps/web/src/entities/assistant/api.ts`, and
   `apps/web/src/workspaces/admin/AgentManagementPanel.tsx`,
+  `apps/web/src/workspaces/admin/assistantAgentConstructionDraft.ts`,
   `apps/web/src/workspaces/assistant/AssistantConstructionExplainerPanel.tsx`,
   and `apps/web/src/workspaces/assistant/assistantConstructionExplainer.ts`
 - Lesson: users should not have to infer what an agent is from a hidden system
@@ -1039,7 +1078,12 @@ proposal form until a human owner approves the domain rule.
   reuse the server-owned prompt preview and section metadata for the saved
   construction view, so users can see source, scope, owner, freshness, fallback,
   hierarchy, skills, tools, and actions from the same contract the runtime uses
-  rather than a client-only approximation.
+  rather than a client-only approximation. Unsaved edits should be shown as a
+  separate no-persist backend draft preview with deterministic before/after
+  construction diffs, preserving the distinction between saved runtime truth
+  and reviewable pending changes before an admin clicks save. The draft preview
+  should post the proposed update payload through the same server-side
+  hierarchy, profile-policy, and activation validation path as saving.
 - Deterministic opportunity: when the same skill bundle keeps appearing for a
   role, preserve it in the governed role archetype and builder defaults rather
   than re-explaining specialization through freeform prompt text each time.
@@ -1051,12 +1095,16 @@ proposal form until a human owner approves the domain rule.
   and `npm --prefix apps/web test -- --run assistantAgentBuilder.test.ts
   assistantApi.test.ts`, plus `npm --prefix apps/web test --
   assistantConstructionExplainer.test.ts agentManagementPanel.test.ts
-  assistantApi.test.ts` and `npx playwright test
+  assistantApi.test.ts`, `npm --prefix apps/web test --
+  assistantAgentConstructionDraft.test.ts`, and `npx playwright test
   tests/browser/smokeHarness.spec.ts --grep "admin smoke shows the
-  role-derived pilot lineup"`
-- Follow-up: if consultation routing patterns or context-source warnings
-  stabilize, promote them into typed manager, workflow, or context-profile rules
-  instead of expanding skill lists or prompt prose ad hoc.
+  role-derived pilot lineup"`, plus
+  `test_admin_agent_draft_context_preview_uses_unsaved_payload_without_persisting`
+  and `previewAdminAssistantAgentDraftContext posts unsaved update payloads
+  with admin auth`
+- Follow-up: keep draft context preview read-only. If create-agent drafts need
+  the same authoritative preview before save, add a separate admin create-draft
+  preview endpoint instead of overloading the saved-agent update preview.
 
 ### 2026-05-07 - Treat Trading EOD Readiness As A Deterministic Governed Decision
 

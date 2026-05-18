@@ -47,6 +47,9 @@ surface over existing ECTRM workspaces.
 | MTERM-07 keyboard shortcuts and quick navigation | Implemented | Command, workspace, filter, tile, reset, and shortcut-reference shortcuts are available with conflict-aware handling. |
 | MTERM-08 watchlists and alerts | Implemented | Live Desk watchlists serialize safely and evaluate typed price, stale data, exposure, pricing, and settlement alert rules. |
 | MTERM-09 regression, assistant routing, and browser smoke coverage | Implemented | Focused web tests, Prompt Home fail-closed coverage, dashboard smoke, full web smoke, and assistant evals pass. |
+| MTERM-10 multi-monitor workspace sets | Implemented | Terminal mode exposes Trader Morning, Risk Review, and Ops Close workspace sets with safe route launch targets and manual pop-out guidance. |
+| MTERM-11 expanded terminal command aliases and functions | Implemented | Terminal command search supports deterministic aliases such as `TRD`, `CP`, `PX`, `MON`, `DES`, `EOD`, `SETL`, and workspace-set functions while mutation verbs remain blocked. |
+| MTERM-12 time-series, quote chart, and curve panels | Implemented | Live Desk includes a read-only quote chart and curve panel over stored price-index observations, with deterministic latest marks, deltas, curve rows, and commodity buckets. |
 | MTERM-CLOSEOUT release readiness | Implemented | Roadmap status, operator guide, and Wave 3 candidate backlog documented. |
 
 ## Current Repo Anchors
@@ -120,6 +123,9 @@ It may not:
 | Workspace layout definition | Existing | Reuse the current personal layout API before adding anything heavier. |
 | Monitor preset | Implemented | System-owned starting layouts such as Market Overview, Risk Board, and Operations Monitor. |
 | Watchlist | Implemented | Saved list of price indices, commodity classes, and desk signals for the Live Desk. |
+| Workspace set | Implemented | Named terminal-mode launch bundles for opening related safe workspaces across browser windows. |
+| Terminal function | Implemented | Deterministic command aliases that resolve to existing read, explain, and navigate actions. |
+| Quote chart and curve panel | Implemented | Read-only price-index history and curve strip built from stored observations and active trade links. |
 | Instrument brief | Implemented | Read-only drill-down object for a price index, commodity class, or market theme. |
 | Alert definition | Implemented | Typed thresholds or status triggers for watchlists and attention cards. |
 | Desk headline or attention item | Implemented | Unified stream built from market context, events, reports, docs, and messages. |
@@ -153,9 +159,9 @@ It may not:
 These are intentionally candidates, not committed scope. They should be
 selected after the Phase 1 terminal mode has been reviewed by operators.
 
-1. MTERM-10 multi-monitor workspace sets
-2. MTERM-11 expanded terminal command aliases and functions
-3. MTERM-12 time-series, quote chart, and curve panels
+1. MTERM-10 multi-monitor workspace sets - implemented
+2. MTERM-11 expanded terminal command aliases and functions - implemented
+3. MTERM-12 time-series, quote chart, and curve panels - implemented
 4. MTERM-13 persistent alert delivery and notification routing
 5. MTERM-14 deeper instrument analytics for curve, basis, volatility, and P&L
 
@@ -570,6 +576,166 @@ handoffs.
 - `make web-test`
 - `make web-smoke-test` for the seeded browser path when browser routing changes
 - `make api-assistant-evals` if prompt routing behavior changes
+
+## MTERM-10: Multi-Monitor Workspace Sets
+
+### Status
+
+Implemented.
+
+### Priority
+
+P2
+
+### Outcome
+
+Terminal mode can launch named workspace sets that mimic familiar multi-monitor
+desk setups while staying inside existing ECTRM route and workspace contracts.
+
+### Scope
+
+- define deterministic workspace sets for:
+  - Trader Morning
+  - Risk Review
+  - Ops Close
+- map each set to existing workspaces and available monitor presets
+- let the user choose and save a default workspace set in terminal mode
+- provide pop-out links for opening companion workspaces in separate browser
+  windows or tabs
+- make the browser limitation explicit: ECTRM opens safe routes, but the user
+  controls physical window placement
+
+### Out Of Scope
+
+- OS-level monitor detection or window placement
+- proprietary terminal workspace commands or vendor-specific layouts
+- direct business mutations from the workspace-set launcher
+
+### Acceptance Criteria
+
+- terminal mode shows a workspace-set launcher near the top of the app shell
+- each launch target resolves to an existing ECTRM workspace route
+- preset references fail closed if the underlying monitor preset disappears
+- default workspace-set preference is persisted locally and sanitized on read
+- companion workspaces can be opened as pop-out browser tabs or windows
+
+### Verification
+
+- focused web tests for workspace-set resolution, persistence, preset
+  references, launch targets, and launcher rendering
+
+## MTERM-11: Expanded Terminal Command Aliases And Functions
+
+### Status
+
+Implemented.
+
+### Priority
+
+P2
+
+### Outcome
+
+The terminal command bar accepts familiar short aliases and deterministic
+function-style commands without becoming a freeform mutation surface.
+
+### Scope
+
+- add bare scoped aliases such as:
+  - `TRD` or `T` for trades
+  - `CP` or `CPTY` for counterparties
+  - `CMDTY` for commodities
+  - `PX` or `IDX` for price indices
+  - `RPT` for reports
+  - `WS` for workspaces
+- add deterministic terminal functions such as:
+  - `MON` for Live Desk monitor
+  - `DES <price index or commodity class>` for read-only instrument briefs
+  - `EOD`, `CR`, and `PNL` for anchored report modules
+  - `SETL`, `OPS`, `POS`, `SCH`, `REF`, and `HELP` for common workspace jumps
+  - `WSET` or `SETUP` for workspace-set primary launches
+- keep all function results as typed navigation actions into existing
+  workspaces, reports, reference records, or instrument briefs
+- continue blocking mutation verbs before any alias resolution
+
+### Out Of Scope
+
+- arbitrary expression evaluation or command scripting
+- order entry, settlement, confirmation, approval, or workflow mutation from
+  the command bar
+- vendor-specific command semantics beyond familiar, non-branded abbreviations
+
+### Acceptance Criteria
+
+- bare aliases resolve to the same safe action contracts as prefixed searches
+- terminal functions appear as command results and show a `Function` result kind
+- `DES` opens read-only Live Desk instrument briefs through typed handoff
+  metadata
+- mutation verbs such as `settle` still fail closed even when nearby safe
+  abbreviations such as `SETL` exist
+- command-bar help text and operator docs explain the supported aliases
+
+### Verification
+
+- focused web tests for scoped aliases, function routing, `DES` handoffs, and
+  mutation blocking
+
+## MTERM-12: Time-Series, Quote Chart, And Curve Panels
+
+### Status
+
+Implemented.
+
+### Priority
+
+P2
+
+### Outcome
+
+Live Desk has a terminal-style quote chart and curve panel that make stored
+price-index observations easier to scan without adding a real-time execution
+surface.
+
+### Scope
+
+- load recent stored price-index observations for desk-linked candidate indices
+- render a selected quote history chart with latest mark, prior-observation
+  move, percent move, low, high, average, and history count
+- render a curve strip ranked by active trade usage, with normalized latest
+  marks and prior-observation deltas
+- group curve rows into commodity or provider buckets for quick desk context
+- route quote and curve rows into existing read-only price-index instrument
+  briefs
+- keep all chart and curve behavior deterministic, client-side, and read-only
+
+### Out Of Scope
+
+- real-time tick streaming, licensed-data entitlement modeling, or exchange
+  connectivity
+- curve interpolation, valuation models, basis analytics, volatility analytics,
+  or P&L attribution
+- trade capture, order entry, settlement, confirmation, or approval from chart
+  interactions
+- copying proprietary chart layouts, function keys, or vendor-specific screen
+  behavior
+
+### Acceptance Criteria
+
+- Live Desk includes a quote chart and curve panel tile in the market overview
+  layout
+- chart models sort observations chronologically and compute latest, previous,
+  delta, percent delta, low, high, and average deterministically
+- curve rows rank desk-linked indices by active trade usage and normalize
+  latest values across the visible curve set
+- curve buckets summarize commodity or provider groupings without model-written
+  business state
+- brief actions use existing read-only instrument handoff behavior
+
+### Verification
+
+- focused web tests for quote chart and curve helper calculations
+- focused dashboard rendering tests for the Live Desk tile
+- workspace layout preset tests for the market overview placement
 
 ## MTERM-CLOSEOUT: Terminal Mode Release Readiness
 

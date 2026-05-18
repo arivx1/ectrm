@@ -110,10 +110,11 @@ describe('terminal command search', () => {
       return
     }
 
-    expect(state.groups.map((group) => group.label)).toEqual(['Workspaces', 'Reports', 'Trades'])
-    expect(state.groups[0]?.results[0]?.title).toBeTruthy()
-    expect(state.groups[1]?.results[0]?.title).toBe('Reporting Overview')
-    expect(state.groups[2]?.results[0]?.title).toBe('TRD-1001')
+    expect(state.groups.map((group) => group.label)).toEqual(['Functions', 'Workspaces', 'Reports', 'Trades'])
+    expect(state.groups[0]?.results[0]?.title).toBe('MON - Live Desk Monitor')
+    expect(state.groups[1]?.results[0]?.title).toBeTruthy()
+    expect(state.groups[2]?.results[0]?.title).toBe('Reporting Overview')
+    expect(state.groups[3]?.results[0]?.title).toBe('TRD-1001')
   })
 
   test('routes trade lookups into trade navigation with a terminal handoff', () => {
@@ -140,6 +141,40 @@ describe('terminal command search', () => {
     expect(result.action.tradeId).toBe('TRD-1001')
     expect(result.action.handoff.source).toBe('terminal')
     expect(result.action.handoff.focus.type).toBe('trade')
+  })
+
+  test('accepts bare terminal aliases for common scoped searches', () => {
+    const tradeState = resolveTerminalCommandSearchState({
+      query: 'TRD TRD-1001',
+      isLoading: false,
+      trades: SAMPLE_TRADES,
+      counterparties: SAMPLE_COUNTERPARTIES,
+      commodities: SAMPLE_COMMODITIES,
+      priceIndices: SAMPLE_PRICE_INDICES,
+    })
+
+    expect(tradeState.status).toBe('results')
+    if (tradeState.status !== 'results') {
+      return
+    }
+    expect(tradeState.scope).toBe('trade')
+    expect(tradeState.groups[0]?.results[0]?.action.kind).toBe('trade')
+
+    const counterpartyState = resolveTerminalCommandSearchState({
+      query: 'CP SHELL',
+      isLoading: false,
+      trades: SAMPLE_TRADES,
+      counterparties: SAMPLE_COUNTERPARTIES,
+      commodities: SAMPLE_COMMODITIES,
+      priceIndices: SAMPLE_PRICE_INDICES,
+    })
+
+    expect(counterpartyState.status).toBe('results')
+    if (counterpartyState.status !== 'results') {
+      return
+    }
+    expect(counterpartyState.scope).toBe('counterparty')
+    expect(counterpartyState.groups[0]?.results[0]?.title).toBe('Shell Energy North America')
   })
 
   test('routes counterparty lookups into governed reference-data navigation', () => {
@@ -216,6 +251,114 @@ describe('terminal command search', () => {
     expect(result.action.handoff?.source).toBe('terminal')
   })
 
+  test('routes terminal functions into deterministic workspace and report targets', () => {
+    const monitorState = resolveTerminalCommandSearchState({
+      query: 'MON',
+      isLoading: false,
+      trades: SAMPLE_TRADES,
+      counterparties: SAMPLE_COUNTERPARTIES,
+      commodities: SAMPLE_COMMODITIES,
+      priceIndices: SAMPLE_PRICE_INDICES,
+    })
+
+    expect(monitorState.status).toBe('results')
+    if (monitorState.status !== 'results') {
+      return
+    }
+    expect(monitorState.scope).toBe('function')
+    expect(monitorState.groups[0]?.results[0]?.title).toBe('MON - Live Desk Monitor')
+    expect(monitorState.groups[0]?.results[0]?.action).toEqual({
+      kind: 'view',
+      view: 'dashboard',
+      handoff: null,
+    })
+
+    const eodState = resolveTerminalCommandSearchState({
+      query: 'EOD',
+      isLoading: false,
+      trades: SAMPLE_TRADES,
+      counterparties: SAMPLE_COUNTERPARTIES,
+      commodities: SAMPLE_COMMODITIES,
+      priceIndices: SAMPLE_PRICE_INDICES,
+    })
+
+    expect(eodState.status).toBe('results')
+    if (eodState.status !== 'results') {
+      return
+    }
+
+    const eodResult = eodState.groups[0]?.results[0]
+    assert.ok(eodResult)
+    expect(eodResult.title).toBe('EOD - Trading EOD Report')
+    expect(eodResult.action.kind).toBe('view')
+    if (eodResult.action.kind !== 'view') {
+      return
+    }
+    expect(eodResult.action.view).toBe('reports')
+    expect(eodResult.action.hash).toBe('reports-trading-eod')
+    expect(eodResult.action.handoff?.focus.type).toBe('report')
+  })
+
+  test('opens DES instrument briefs from terminal functions', () => {
+    const state = resolveTerminalCommandSearchState({
+      query: 'DES HENRY',
+      isLoading: false,
+      trades: SAMPLE_TRADES,
+      counterparties: SAMPLE_COUNTERPARTIES,
+      commodities: SAMPLE_COMMODITIES,
+      priceIndices: SAMPLE_PRICE_INDICES,
+    })
+
+    expect(state.status).toBe('results')
+    if (state.status !== 'results') {
+      return
+    }
+
+    const result = state.groups[0]?.results[0]
+    assert.ok(result)
+    expect(result.scope).toBe('function')
+    expect(result.title).toBe('DES - HENRY_DA')
+    expect(result.action.kind).toBe('view')
+    if (result.action.kind !== 'view') {
+      return
+    }
+    expect(result.action.view).toBe('dashboard')
+    expect(result.action.handoff).toMatchObject({
+      source: 'terminal',
+      focus: {
+        type: 'market_instrument',
+        id: 'price_index:HENRY_DA',
+        label: 'Henry Hub Daily',
+      },
+      filter: 'HENRY_DA',
+    })
+  })
+
+  test('routes workspace-set functions to the set primary workspace', () => {
+    const state = resolveTerminalCommandSearchState({
+      query: 'WSET ops',
+      isLoading: false,
+      trades: SAMPLE_TRADES,
+      counterparties: SAMPLE_COUNTERPARTIES,
+      commodities: SAMPLE_COMMODITIES,
+      priceIndices: SAMPLE_PRICE_INDICES,
+    })
+
+    expect(state.status).toBe('results')
+    if (state.status !== 'results') {
+      return
+    }
+
+    const result = state.groups[0]?.results[0]
+    assert.ok(result)
+    expect(result.title).toBe('WSET - Ops Close')
+    expect(result.action).toEqual({
+      kind: 'view',
+      view: 'operations',
+      handoff: null,
+    })
+  })
+
   test('routes workspace and price-index lookups with safe terminal handoffs', () => {
     const workspaceState = resolveTerminalCommandSearchState({
       query: 'workspace: live desk',
@@ -290,6 +433,40 @@ describe('terminal command search', () => {
       title: 'Terminal search is navigation only',
       detail:
         '"save" looks like a business action. Use terminal search to open the right workspace or record first, then make the change there.',
+      scope: null,
+    })
+  })
+
+  test('keeps mutation verbs blocked while allowing non-mutating abbreviations', () => {
+    const settlementFunctionState = resolveTerminalCommandSearchState({
+      query: 'SETL',
+      isLoading: false,
+      trades: SAMPLE_TRADES,
+      counterparties: SAMPLE_COUNTERPARTIES,
+      commodities: SAMPLE_COMMODITIES,
+      priceIndices: SAMPLE_PRICE_INDICES,
+    })
+
+    expect(settlementFunctionState.status).toBe('results')
+    if (settlementFunctionState.status !== 'results') {
+      return
+    }
+    expect(settlementFunctionState.groups[0]?.results[0]?.title).toBe('SETL - Settlement')
+
+    const mutationState = resolveTerminalCommandSearchState({
+      query: 'settle invoice INV-100',
+      isLoading: false,
+      trades: SAMPLE_TRADES,
+      counterparties: SAMPLE_COUNTERPARTIES,
+      commodities: SAMPLE_COMMODITIES,
+      priceIndices: SAMPLE_PRICE_INDICES,
+    })
+
+    expect(mutationState).toEqual({
+      status: 'unsupported',
+      title: 'Terminal search is navigation only',
+      detail:
+        '"settle" looks like a business action. Use terminal search to open the right workspace or record first, then make the change there.',
       scope: null,
     })
   })

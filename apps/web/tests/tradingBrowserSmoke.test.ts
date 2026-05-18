@@ -1995,7 +1995,7 @@ test(
       await authGate.waitFor()
       await page.waitForFunction(() => !document.querySelector('.start-here-dialog'))
       await authGate.getByLabel('User ID or Email').waitFor()
-      await authGate.getByRole('button', { name: 'Enter Console' }).waitFor()
+      await authGate.getByRole('button', { name: 'Log In' }).waitFor()
 
       assert.match(page.url(), /\?view=dashboard(?:&|$)/)
       assert.equal(await page.locator('.side-rail').count(), 0)

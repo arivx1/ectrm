@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+from apps.api.app.schemas.document import DocumentExtractionObjectSchemaOut
 from apps.api.app.schemas.document import DocumentFacetSchemaOut
 from apps.api.app.schemas.document import DocumentFacetValueOut
 from apps.api.app.schemas.document import DocumentFieldSchemaOut
@@ -9,7 +12,7 @@ from apps.api.app.schemas.document import DocumentSchemaRegistryOut
 from apps.api.app.schemas.document import DocumentTableColumnSchemaOut
 from apps.api.app.schemas.document import DocumentTableTemplateSchemaOut
 
-DOCUMENT_SCHEMA_REGISTRY_VERSION = "2026-05-17.review-v5"
+DOCUMENT_SCHEMA_REGISTRY_VERSION = "2026-05-17.review-v6"
 
 
 def _field(
@@ -82,6 +85,40 @@ def _facet(
         required=required,
         allowed_values=list(allowed_values),
     )
+
+
+def _extraction_object(
+    object_key: str,
+    label: str,
+    *,
+    cardinality: str = "one",
+    source_object_type: str | None = None,
+    canonical_table: str | None = None,
+    description: str | None = None,
+    field_keys: tuple[str, ...] = (),
+    table_template_keys: tuple[str, ...] = (),
+    child_object_keys: tuple[str, ...] = (),
+) -> DocumentExtractionObjectSchemaOut:
+    return DocumentExtractionObjectSchemaOut(
+        object_key=object_key,
+        label=label,
+        cardinality=cardinality,
+        source_object_type=source_object_type,
+        canonical_table=canonical_table,
+        description=description,
+        field_keys=list(field_keys),
+        table_template_keys=list(table_template_keys),
+        child_object_keys=list(child_object_keys),
+    )
+
+
+@dataclass(frozen=True)
+class ExtractionSchemaProfile:
+    schema_code: str
+    deep_extraction_required: bool
+    objects: tuple[DocumentExtractionObjectSchemaOut, ...]
+    validation_rules: tuple[str, ...] = ()
+    review_rules: tuple[str, ...] = ()
 
 
 ECONOMIC_PURPOSE_VALUES = (
@@ -264,6 +301,364 @@ QUALITY_CONTROLLED_FACETS = (
         allowed_values=QUALITY_DOCUMENT_ROLE_VALUES,
     ),
 )
+
+EXTRACTION_SCHEMA_PROFILES: dict[str, ExtractionSchemaProfile] = {
+    "INVOICE": ExtractionSchemaProfile(
+        schema_code="INVOICE.v1",
+        deep_extraction_required=True,
+        objects=(
+            _extraction_object(
+                "header",
+                "Invoice Header",
+                canonical_table="invoice_header",
+                description="Normalized invoice identity, parties, dates, currency, and totals.",
+                field_keys=(
+                    "invoice_number",
+                    "invoice_date",
+                    "due_date",
+                    "counterparty",
+                    "total_amount",
+                    "trade_id",
+                    "delivery_id",
+                ),
+                child_object_keys=("references", "invoice_lines", "tax_lines"),
+            ),
+            _extraction_object(
+                "references",
+                "Invoice References",
+                cardinality="many",
+                source_object_type="reference",
+                canonical_table="document_reference",
+                description="Trade, contract, shipment, BOL, ticket, purchase-order, and invoice references.",
+                field_keys=("reference_type", "raw_reference", "normalized_reference", "linked_entity_type", "linked_entity_id"),
+            ),
+            _extraction_object(
+                "invoice_lines",
+                "Invoice Lines",
+                cardinality="many",
+                source_object_type="table",
+                canonical_table="invoice_line",
+                description="Line-level charge rows with product, quantity, unit price, charge type, and amount.",
+                field_keys=("description", "charge_type", "quantity", "unit_of_measure", "unit_price", "line_amount"),
+                table_template_keys=("line_items",),
+            ),
+            _extraction_object(
+                "tax_lines",
+                "Tax Lines",
+                cardinality="many",
+                source_object_type="table",
+                canonical_table="invoice_tax_line",
+                description="Tax summary rows when tax is broken out separately from charge lines.",
+                field_keys=("tax_type", "tax_rate", "tax_amount", "currency"),
+            ),
+        ),
+        validation_rules=(
+            "invoice_number_required",
+            "currency_required_when_amount_present",
+            "total_amount_required",
+            "line_amounts_should_sum_to_total_when_lines_present",
+        ),
+        review_rules=(
+            "require_review_if_missing_required_field",
+            "require_review_if_total_amount_mismatch",
+            "require_review_if_unresolved_party",
+            "require_review_if_ambiguous_currency",
+        ),
+    ),
+    "BILL_OF_LADING": ExtractionSchemaProfile(
+        schema_code="BOL.v1",
+        deep_extraction_required=True,
+        objects=(
+            _extraction_object(
+                "header",
+                "BOL Header",
+                canonical_table="bol_header",
+                description="Shipment identity, issue date, transport mode, carrier, route, and presentation status.",
+                field_keys=("bill_of_lading_number", "load_date", "carrier", "origin", "destination", "trade_id", "delivery_id"),
+                child_object_keys=("parties", "cargo_lines", "transport_legs", "references"),
+            ),
+            _extraction_object(
+                "parties",
+                "BOL Parties",
+                cardinality="many",
+                source_object_type="party",
+                canonical_table="bol_party",
+                description="Carrier, shipper, consignee, notify party, terminal, or other named roles.",
+                field_keys=("party_role", "raw_party_name", "party_id", "match_confidence"),
+            ),
+            _extraction_object(
+                "cargo_lines",
+                "Cargo Lines",
+                cardinality="many",
+                source_object_type="table",
+                canonical_table="bol_cargo",
+                description="Product, package, quantity, temperature, density, hazardous indicator, and cargo reference rows.",
+                field_keys=("description", "product", "gross_quantity", "net_quantity", "unit_of_measure", "reference"),
+                table_template_keys=("shipment_lines",),
+            ),
+            _extraction_object(
+                "transport_legs",
+                "Transport Legs",
+                cardinality="many",
+                source_object_type="table",
+                canonical_table="bol_transport_leg",
+                description="Mode, origin, destination, equipment, departure, and arrival details by movement leg.",
+                field_keys=("transport_mode", "origin", "destination", "equipment_id", "departure_date", "arrival_date"),
+            ),
+            _extraction_object(
+                "references",
+                "BOL References",
+                cardinality="many",
+                source_object_type="reference",
+                canonical_table="document_reference",
+                description="Shipment, trade, contract, booking, equipment, and container references.",
+                field_keys=("reference_type", "raw_reference", "normalized_reference", "linked_entity_type", "linked_entity_id"),
+            ),
+        ),
+        validation_rules=(
+            "bol_number_required",
+            "carrier_required",
+            "origin_destination_required",
+            "quantity_requires_unit_when_present",
+        ),
+        review_rules=(
+            "require_review_if_missing_bol_number",
+            "require_review_if_transport_mode_unknown",
+            "require_review_if_product_missing",
+        ),
+    ),
+    "CERTIFICATE_OF_ANALYSIS": ExtractionSchemaProfile(
+        schema_code="QUALITY.COA.v1",
+        deep_extraction_required=True,
+        objects=(
+            _extraction_object(
+                "header",
+                "Quality Document Header",
+                canonical_table="quality_document_header",
+                description="Certificate identity, lab or issuer, product, sample metadata, and analysis dates.",
+                field_keys=("certificate_number", "sample_id", "sample_date", "product", "lot_number", "trade_id", "delivery_id"),
+                child_object_keys=("samples", "test_results", "references"),
+            ),
+            _extraction_object(
+                "samples",
+                "Quality Samples",
+                cardinality="many",
+                canonical_table="quality_sample",
+                description="Sample, lot, batch, location, and product records referenced by the analysis.",
+                field_keys=("sample_id", "lot_number", "batch_id", "sample_location", "product"),
+            ),
+            _extraction_object(
+                "test_results",
+                "Quality Test Results",
+                cardinality="many",
+                source_object_type="table",
+                canonical_table="quality_test_result",
+                description="Analyte, method, result, unit, specification limit, and pass/fail rows.",
+                field_keys=("parameter", "method", "value", "unit", "spec_min", "spec_max", "pass_fail"),
+                table_template_keys=("assay_results",),
+            ),
+            _extraction_object(
+                "references",
+                "Quality References",
+                cardinality="many",
+                source_object_type="reference",
+                canonical_table="document_reference",
+                description="Shipment, BOL, contract, batch, trade, delivery, and lot references.",
+                field_keys=("reference_type", "raw_reference", "normalized_reference", "linked_entity_type", "linked_entity_id"),
+            ),
+        ),
+        validation_rules=(
+            "certificate_number_required",
+            "at_least_one_test_result_required",
+            "test_result_requires_analyte_and_unit",
+            "pass_fail_should_match_spec_limits_when_present",
+        ),
+        review_rules=(
+            "require_review_if_no_test_results",
+            "require_review_if_sample_unresolved",
+            "require_review_if_units_incompatible_with_analyte",
+        ),
+    ),
+    "TRUCK_TICKET": ExtractionSchemaProfile(
+        schema_code="TICKET.TRUCK.v1",
+        deep_extraction_required=True,
+        objects=(
+            _extraction_object(
+                "header",
+                "Truck Ticket Header",
+                canonical_table="ticket_header",
+                description="Ticket identity, carrier, asset, route, product, and movement date.",
+                field_keys=("ticket_number", "load_date", "carrier", "carrier_reference", "asset_reference", "origin", "destination", "trade_id", "delivery_id"),
+                child_object_keys=("measurements", "movement_events", "references"),
+            ),
+            _extraction_object(
+                "measurements",
+                "Ticket Measurements",
+                cardinality="many",
+                canonical_table="ticket_measurement",
+                description="Gross, tare, net, quantity, temperature, density, and unit measurement values.",
+                field_keys=("measurement_type", "value", "unit", "temperature", "density"),
+            ),
+            _extraction_object(
+                "movement_events",
+                "Ticket Movement Events",
+                cardinality="many",
+                canonical_table="ticket_movement_event",
+                description="Load, unload, arrival, departure, and related timestamp evidence.",
+                field_keys=("event_type", "occurred_at", "location", "source_text"),
+            ),
+            _extraction_object(
+                "references",
+                "Ticket References",
+                cardinality="many",
+                source_object_type="reference",
+                canonical_table="document_reference",
+                description="BOL, delivery, shipment, contract, trade, and carrier references.",
+                field_keys=("reference_type", "raw_reference", "normalized_reference", "linked_entity_type", "linked_entity_id"),
+            ),
+        ),
+        validation_rules=("ticket_number_required", "quantity_requires_unit_when_present", "route_or_delivery_reference_required"),
+        review_rules=("require_review_if_ticket_number_missing", "require_review_if_delivery_reference_unresolved"),
+    ),
+    "WEIGH_TICKET": ExtractionSchemaProfile(
+        schema_code="TICKET.WEIGH.v1",
+        deep_extraction_required=True,
+        objects=(
+            _extraction_object(
+                "header",
+                "Weigh Ticket Header",
+                canonical_table="ticket_header",
+                description="Ticket identity, weigh date, delivery references, and measured movement context.",
+                field_keys=("ticket_number", "load_date", "trade_id", "delivery_id"),
+                child_object_keys=("measurements", "references"),
+            ),
+            _extraction_object(
+                "measurements",
+                "Weight Measurements",
+                cardinality="many",
+                source_object_type="table",
+                canonical_table="ticket_measurement",
+                description="Gross, tare, net, and unit measurements.",
+                field_keys=("measurement", "value", "unit", "gross_weight", "net_weight"),
+                table_template_keys=("weight_measurements",),
+            ),
+            _extraction_object(
+                "references",
+                "Ticket References",
+                cardinality="many",
+                source_object_type="reference",
+                canonical_table="document_reference",
+                description="BOL, delivery, shipment, contract, and trade references.",
+                field_keys=("reference_type", "raw_reference", "normalized_reference", "linked_entity_type", "linked_entity_id"),
+            ),
+        ),
+        validation_rules=("ticket_number_required", "gross_and_net_weights_should_have_units", "net_weight_should_not_exceed_gross_weight"),
+        review_rules=("require_review_if_weight_unit_missing", "require_review_if_net_weight_exceeds_gross_weight"),
+    ),
+    "SETTLEMENT_STATEMENT": ExtractionSchemaProfile(
+        schema_code="SETTLEMENT.STATEMENT.v1",
+        deep_extraction_required=True,
+        objects=(
+            _extraction_object(
+                "header",
+                "Settlement Header",
+                canonical_table="settlement_header",
+                description="Statement identity, account, period, currency, and total settlement amount.",
+                field_keys=("statement_number", "statement_date", "account", "period_start", "period_end", "currency"),
+                child_object_keys=("settlement_lines", "adjustments", "references"),
+            ),
+            _extraction_object(
+                "settlement_lines",
+                "Settlement Lines",
+                cardinality="many",
+                source_object_type="table",
+                canonical_table="settlement_line",
+                description="Trade, product, quantity, price, amount, and calculated settlement rows.",
+                field_keys=("description", "quantity", "amount", "currency", "trade_reference", "contract_reference", "product"),
+                table_template_keys=("settlement_lines",),
+            ),
+            _extraction_object(
+                "adjustments",
+                "Settlement Adjustments",
+                cardinality="many",
+                source_object_type="table",
+                canonical_table="settlement_adjustment",
+                description="Fees, taxes, deductions, and adjustment rows.",
+                field_keys=("adjustment_type", "description", "amount", "currency"),
+            ),
+            _extraction_object(
+                "references",
+                "Settlement References",
+                cardinality="many",
+                source_object_type="reference",
+                canonical_table="document_reference",
+                description="Invoice, trade, contract, shipment, account, and payment references.",
+                field_keys=("reference_type", "raw_reference", "normalized_reference", "linked_entity_type", "linked_entity_id"),
+            ),
+        ),
+        validation_rules=("statement_number_required", "settlement_period_required", "settlement_lines_should_sum_to_total_when_total_present"),
+        review_rules=("require_review_if_statement_total_mismatch", "require_review_if_counterparty_unresolved"),
+    ),
+    "TRADE_CONFIRMATION": ExtractionSchemaProfile(
+        schema_code="TRADE.CONFIRMATION.v1",
+        deep_extraction_required=True,
+        objects=(
+            _extraction_object(
+                "header",
+                "Confirmation Header",
+                canonical_table="trade_confirmation_header",
+                description="Confirmation identity, trade date, buyer, seller, broker, commodity, and direction.",
+                field_keys=("confirmation_number", "trade_id", "external_trade_id", "trade_date", "counterparty"),
+                child_object_keys=("trade_terms", "pricing_terms", "delivery_terms", "payment_terms", "references"),
+            ),
+            _extraction_object(
+                "trade_terms",
+                "Trade Terms",
+                cardinality="many",
+                source_object_type="table",
+                canonical_table="trade_term",
+                description="Commercial term name/value rows and normalized trade economics.",
+                field_keys=("term_name", "term_value", "quantity", "quantity_uom", "commodity"),
+                table_template_keys=("economic_terms",),
+            ),
+            _extraction_object(
+                "pricing_terms",
+                "Pricing Terms",
+                cardinality="many",
+                canonical_table="pricing_term",
+                description="Price, formula, currency, index, pricing period, and differential terms.",
+                field_keys=("price", "price_formula", "currency", "price_index", "pricing_period"),
+            ),
+            _extraction_object(
+                "delivery_terms",
+                "Delivery Terms",
+                cardinality="many",
+                canonical_table="delivery_term",
+                description="Location, delivery period, transport, tolerance, and incoterm terms.",
+                field_keys=("delivery_location", "delivery_start", "delivery_end", "transport_mode", "incoterm", "tolerance"),
+            ),
+            _extraction_object(
+                "payment_terms",
+                "Payment Terms",
+                cardinality="many",
+                canonical_table="payment_term",
+                description="Payment timing, due-date basis, currency, and settlement terms.",
+                field_keys=("payment_terms", "currency", "due_date_basis"),
+            ),
+            _extraction_object(
+                "references",
+                "Confirmation References",
+                cardinality="many",
+                source_object_type="reference",
+                canonical_table="document_reference",
+                description="Trade, broker, contract, and external confirmation references.",
+                field_keys=("reference_type", "raw_reference", "normalized_reference", "linked_entity_type", "linked_entity_id"),
+            ),
+        ),
+        validation_rules=("confirmation_number_required", "trade_date_required", "trade_reference_or_counterparty_required"),
+        review_rules=("require_review_if_trade_match_ambiguous", "require_review_if_economic_terms_missing"),
+    ),
+}
 
 
 DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
@@ -1352,17 +1747,32 @@ def _controlled_facets_for_kind(document_kind: str) -> tuple[DocumentFacetSchema
     return ()
 
 
-def _schema_with_controlled_facets(schema: DocumentKindSchemaOut) -> DocumentKindSchemaOut:
+def _schema_with_controlled_metadata(schema: DocumentKindSchemaOut) -> DocumentKindSchemaOut:
+    document_kind = str(schema.document_kind)
     facets = list(_controlled_facets_for_kind(str(schema.document_kind)))
-    if not facets:
+    extraction_profile = EXTRACTION_SCHEMA_PROFILES.get(document_kind)
+    if not facets and extraction_profile is None:
         return schema
-    return schema.model_copy(update={"facets": facets})
+    update: dict[str, object] = {}
+    if facets:
+        update["facets"] = facets
+    if extraction_profile is not None:
+        update.update(
+            {
+                "extraction_schema_code": extraction_profile.schema_code,
+                "deep_extraction_required": extraction_profile.deep_extraction_required,
+                "extraction_objects": list(extraction_profile.objects),
+                "validation_rules": list(extraction_profile.validation_rules),
+                "review_rules": list(extraction_profile.review_rules),
+            }
+        )
+    return schema.model_copy(update=update)
 
 
 def build_document_schema_registry() -> DocumentSchemaRegistryOut:
     return DocumentSchemaRegistryOut(
         version=DOCUMENT_SCHEMA_REGISTRY_VERSION,
-        document_kinds=[_schema_with_controlled_facets(schema) for schema in DOCUMENT_KIND_SCHEMAS],
+        document_kinds=[_schema_with_controlled_metadata(schema) for schema in DOCUMENT_KIND_SCHEMAS],
     )
 
 
@@ -1370,7 +1780,7 @@ def get_document_kind_schema(document_kind: str) -> DocumentKindSchemaOut | None
     normalized_kind = document_kind.strip().upper()
     for schema in DOCUMENT_KIND_SCHEMAS:
         if schema.document_kind == normalized_kind:
-            return _schema_with_controlled_facets(schema)
+            return _schema_with_controlled_metadata(schema)
     return None
 
 

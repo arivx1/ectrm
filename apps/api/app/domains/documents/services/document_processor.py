@@ -720,12 +720,21 @@ def _document_schema_instructions() -> str:
     for kind in registry.document_kinds:
         header_fields = ", ".join(field.field_key for field in kind.header_fields) or "none"
         table_templates = ", ".join(template.template_key for template in kind.table_templates) or "none"
+        extraction_objects = ", ".join(
+            f"{entry.object_key}->{entry.canonical_table or entry.source_object_type or 'semantic_object'}"
+            for entry in kind.extraction_objects
+        ) or "none"
         lines.append(
-            f"- {kind.document_kind}: fields [{header_fields}]; table templates [{table_templates}]"
+            f"- {kind.document_kind}: fields [{header_fields}]; table templates [{table_templates}]; "
+            f"extraction objects [{extraction_objects}]"
         )
     lines.append(
         "Use the supported field keys and template keys when they fit. "
         "If a field is useful but unsupported, create a short snake_case key."
+    )
+    lines.append(
+        "Extract only values supported by the document. Preserve table rows as table_blocks when the schema exposes a "
+        "matching table template; downstream normalization, validation, and business writes are handled by ECTRM."
     )
     lines.append(
         "If the page is unclear, set document_kind to UNKNOWN and leave fields or tables empty."

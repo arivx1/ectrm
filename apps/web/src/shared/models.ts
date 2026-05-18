@@ -1122,6 +1122,18 @@ export type DocumentFacetSchemaRecord = {
   allowed_values: DocumentFacetValueRecord[]
 }
 
+export type DocumentExtractionObjectSchemaRecord = {
+  object_key: string
+  label: string
+  cardinality: string
+  source_object_type: string | null
+  canonical_table: string | null
+  description: string | null
+  field_keys: string[]
+  table_template_keys: string[]
+  child_object_keys: string[]
+}
+
 export type DocumentKindSchemaRecord = {
   document_kind: string
   label: string
@@ -1132,6 +1144,11 @@ export type DocumentKindSchemaRecord = {
   record_targets: DocumentRecordTargetRecord[]
   matching_keys: string[]
   facets: DocumentFacetSchemaRecord[]
+  extraction_schema_code: string | null
+  deep_extraction_required: boolean
+  extraction_objects: DocumentExtractionObjectSchemaRecord[]
+  validation_rules: string[]
+  review_rules: string[]
   header_fields: DocumentFieldSchemaRecord[]
   table_templates: DocumentTableTemplateSchemaRecord[]
 }

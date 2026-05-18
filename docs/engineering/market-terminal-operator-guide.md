@@ -46,6 +46,7 @@ dashboard workspace and adds monitor-first tiles such as:
 - desk headlines
 - saved terminal watchlist
 - instrument brief
+- quote chart and curve panel
 - market prices
 - position snapshot
 - operational attention
@@ -72,6 +73,43 @@ and span through the existing workspace layout controls. If a future tile
 changes or disappears, saved layouts should fail closed through deterministic
 layout sanitization instead of silently breaking the workspace.
 
+## Workspace Sets
+
+Terminal mode includes a `Workspace Set` launcher near the top of the shell.
+Use it to choose a familiar desk setup, open the primary workspace in the
+current tab, and pop out companion workspaces into separate browser tabs or
+windows.
+
+Current workspace sets:
+
+| Workspace set | Primary workspace | Companion workspaces | Purpose |
+| --- | --- | --- | --- |
+| Trader Morning | Live Desk | Trade Capture, Exposure, Reports | Start the day with market pulse, desk work, risk, and reporting close at hand. |
+| Risk Review | Exposure | Net Positions, Live Desk, Reports | Compare risk, balances, market context, and reports during review. |
+| Ops Close | Work Queue | Settlement, Scheduling, Deliveries, Reports | Line up post-trade blockers, settlement, scheduling, and delivery execution near close. |
+
+Workspace sets do not move windows across physical monitors. The launcher
+opens safe ECTRM routes; the user arranges browser windows on monitors as
+needed. Preset recommendations such as `Market Overview`, `Risk Board`, and
+`Operations Monitor` describe the intended companion layout when that workspace
+supports monitor presets.
+
+## Quote Charts And Curve Panels
+
+Live Desk includes a `Quote Chart & Curve Panel` tile for scanning recent
+stored price-index observations. It shows:
+
+- a quote selector for desk-linked price indices
+- a history chart with latest mark, prior-observation move, percent move, low,
+  high, average, and observation count
+- a curve strip ranked by active trade usage
+- commodity or provider buckets for quick curve context
+- brief actions that open existing read-only price-index instrument briefs
+
+This panel uses stored ECTRM price-index observations. It is not a real-time
+tick feed, execution blotter, market-data entitlement system, curve valuation
+model, or order-entry path.
+
 ## Command Bar
 
 Open the command bar with `Ctrl/Cmd+K` or `/` when focus is not inside an input.
@@ -80,6 +118,7 @@ Supported scopes:
 
 | Scope | Prefixes | Examples |
 | --- | --- | --- |
+| Function | `function:`, `fn:`, `cmd:` | `MON`, `DES HENRY_DA`, `EOD`, `SETL` |
 | Workspace | `workspace:`, `ws:`, `view:` | `workspace: settlement`, `ws: risk` |
 | Trade | `trade:`, `trd:` | `trade: T-AMEND-100` |
 | Counterparty | `counterparty:`, `cp:` | `cp: acme` |
@@ -87,15 +126,42 @@ Supported scopes:
 | Price index | `index:`, `px:`, `price:` | `px: henry`, `index: HH_IFERC` |
 | Report | `report:`, `rpt:` | `report: eod`, `rpt: credit` |
 
-Blank search shows high-value workspace, report, and trade starting points.
+Bare aliases also work without a colon:
+
+| Alias | Meaning |
+| --- | --- |
+| `TRD TRD-1001` or `T TRD-1001` | Open a trade result. |
+| `CP SHELL` | Search counterparties. |
+| `CMDTY GAS` | Search commodities. |
+| `PX HENRY` or `IDX HENRY` | Search price indices. |
+| `RPT CREDIT` | Search anchored report modules. |
+| `WS RISK` | Search workspaces. |
+
+Terminal functions are deterministic shortcuts, not scripts:
+
+| Function | Opens |
+| --- | --- |
+| `MON`, `MKT`, `LIVE` | Live Desk monitor. |
+| `DES HENRY_DA` | Read-only Live Desk instrument brief for a price index. |
+| `DES GAS` | Read-only Live Desk instrument brief for a commodity class. |
+| `EOD` | Trading EOD report. |
+| `CR` or `CREDIT` | Counterparty Credit Report. |
+| `PNL` | Portfolio Snapshot report. |
+| `SETL` | Settlement workspace. |
+| `OPS`, `POS`, `SCH`, `REF`, `HELP` | Operations, Net Positions, Scheduling, Reference Data, or How It Works. |
+| `WSET risk` or `SETUP ops` | Primary workspace for a saved workspace set; use the Workspace Set launcher for companion pop-outs. |
+
+Blank search shows high-value function, workspace, report, and trade starting
+points.
 Selecting a result opens the destination workspace or record with a terminal
 handoff banner when focus context applies.
 
 Mutation-style commands fail closed. For example, commands that begin with
 verbs such as `book`, `amend`, `cancel`, `create`, `issue`, `approve`, `save`,
-`update`, `pay`, `settle`, or `schedule` are treated as unsupported in the
-terminal command bar. Use the owning workspace and governed action flow for
-those jobs.
+`update`, `pay`, `settle`, `schedule`, `confirm`, `submit`, `execute`,
+`allocate`, `nominate`, `actualize`, `release`, `post`, `send`, or `delete`
+are treated as unsupported in the terminal command bar. Use the owning
+workspace and governed action flow for those jobs.
 
 ## Keyboard Shortcuts
 
@@ -206,7 +272,11 @@ Every terminal-mode path should leave an obvious manual fallback:
 The closeout pass verified the terminal-mode slice with:
 
 - focused terminal command and prompt-navigation tests
+- focused terminal alias and function tests
 - workspace layout preset tests
+- workspace-set launch target and persistence tests
+- terminal quote and curve helper tests
+- Live Desk rendering tests for the quote chart and curve panel
 - terminal shortcut tests
 - dashboard watchlist and alert tests
 - dashboard browser smoke coverage

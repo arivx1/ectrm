@@ -12,6 +12,7 @@ import {
 import { AppStartHereOverlay } from './entities/app/AppStartHereOverlay'
 import { TerminalCommandBar } from './entities/app/TerminalCommandBar'
 import { TerminalShortcutReference } from './entities/app/TerminalShortcutReference'
+import { TerminalWorkspaceSetLauncher } from './entities/app/TerminalWorkspaceSetLauncher'
 import { AppWorkspaceContent } from './entities/app/AppWorkspaceContent'
 import {
   APP_VIEWS,
@@ -528,6 +529,32 @@ function AuthenticatedWorkspaceShell({
     )
   }
 
+  function renderWorkspaceSetLauncher() {
+    if (!appearance.isTerminalMode) {
+      return null
+    }
+
+    return (
+      <TerminalWorkspaceSetLauncher
+        hrefForView={(view) =>
+          route.hrefForView(view, {
+            tradeId: null,
+            messagingConversationId: null,
+            libraryDocumentId: null,
+          })
+        }
+        navigateToView={(view) =>
+          route.navigateToView(view, null, {
+            tradeId: null,
+            messagingConversationId: null,
+            libraryDocumentId: null,
+          })
+        }
+        onNavigate={() => shell.setMobileNavOpen(false)}
+      />
+    )
+  }
+
   return (
     <div className={`app-shell ${shellModeClassName}`.trim()}>
       <div className="app-aura app-aura-left" />
@@ -580,8 +607,6 @@ function AuthenticatedWorkspaceShell({
       >
         <div className="brand-lockup">
           <span className="brand-mark">Strata</span>
-          <h1>Operator Console</h1>
-          <p>A trading operations cockpit for ticket entry, lifecycle management, and live projection views.</p>
         </div>
 
         <button
@@ -768,6 +793,8 @@ function AuthenticatedWorkspaceShell({
             </div>
           </header>
         )}
+
+        {renderWorkspaceSetLauncher()}
 
         {!showingNavigationSectionLanding && workspaceData.error ? (
           <WorkspaceErrorBanner
