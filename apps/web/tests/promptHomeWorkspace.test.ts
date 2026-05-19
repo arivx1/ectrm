@@ -22,16 +22,33 @@ const defaultCounts = {
   pendingSettlementTrades: 6,
 };
 
+const defaultPriceIndices = [
+  {
+    code: "HH_NATGAS",
+    name: "Henry Hub Natural Gas",
+    description: null,
+    is_active: true,
+    commodity_code: "NATGAS",
+    currency_code: "USD",
+    unit_code: "MMBTU",
+    provider: "EIA",
+    market: "US",
+    location_code: "HENRY_HUB",
+  },
+];
+
 test("prompt home renders guided prompts without legacy home actions", () => {
   const markup = renderToStaticMarkup(
     createElement(PromptHomeWorkspace, {
       authSession: null,
       health: "ok",
       counts: defaultCounts,
+      priceIndices: defaultPriceIndices,
       onOpenView: () => undefined,
     }),
   );
   const deskTimeIndex = markup.indexOf("Desk Time");
+  const pricesIndex = markup.indexOf("Market Prices");
   const mapIndex = markup.indexOf("Open Map Workspace");
   const documentUploadIndex = markup.indexOf("Upload documents");
   const communicationIndex = markup.indexOf("Communication center");
@@ -73,7 +90,8 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.doesNotMatch(markup, /Review queue/);
   assert.doesNotMatch(markup, /Sign in to review PDFs/);
   assert.ok(deskTimeIndex >= 0);
-  assert.ok(mapIndex > deskTimeIndex);
+  assert.ok(pricesIndex > deskTimeIndex);
+  assert.ok(mapIndex > pricesIndex);
   assert.ok(documentUploadIndex > mapIndex);
   assert.ok(communicationIndex > documentUploadIndex);
   assert.ok(promptCardIndex > documentUploadIndex);
@@ -81,6 +99,21 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.ok(operatorPromptIndex > promptCardIndex);
   assert.match(markup, />Voice Unavailable</);
   assert.match(markup, /Desk Time/);
+  assert.match(
+    markup,
+    /<span class="eyebrow">Prices<\/span><strong>Market Prices<\/strong>/,
+  );
+  assert.match(
+    markup,
+    /aria-expanded="true" aria-controls="prompt-home-prices-panel"/,
+  );
+  assert.match(
+    markup,
+    /id="prompt-home-prices-panel" class="prompt-home-prices-card-body"/,
+  );
+  assert.match(markup, /HH_NATGAS/);
+  assert.match(markup, /No mark yet/);
+  assert.match(markup, /Open Dashboard/);
   assert.doesNotMatch(markup, /Desk clocks and calendars/);
   assert.match(
     markup,

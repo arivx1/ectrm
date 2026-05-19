@@ -4,6 +4,7 @@
 }
 
 .prompt-home-timeframe-panel-head,
+.prompt-home-prices-card-head,
 .prompt-home-map-card-head,
 .prompt-home-communication-card-head,
 .prompt-home-document-upload-card-head,
@@ -164,6 +165,150 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: 0.6rem;
+}
+
+.prompt-home-prices-card {
+  display: grid;
+  gap: 0.6rem;
+  width: 100%;
+  margin: 0 auto;
+  min-width: 0;
+  padding: 0.72rem 0.85rem;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.16);
+  border-radius: 0.95rem;
+  background:
+    linear-gradient(180deg, rgb(61 214 160 / 0.07), transparent),
+    rgba(255, 255, 255, 0.04);
+}
+
+.prompt-home-prices-card-toggle {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.prompt-home-prices-card-toggle:focus-visible {
+  outline: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.38);
+  outline-offset: 3px;
+}
+
+.prompt-home-prices-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.7rem 1rem;
+  align-items: center;
+  width: 100%;
+}
+
+.prompt-home-prices-card-copy {
+  display: grid;
+  gap: 0.14rem;
+  min-width: 0;
+}
+
+.prompt-home-prices-card-copy strong {
+  font-size: 1rem;
+  line-height: 1.12;
+}
+
+.prompt-home-prices-card-copy p,
+.prompt-home-price-row-copy small,
+.prompt-home-price-row-mark small,
+.prompt-home-prices-card-footer span {
+  margin: 0;
+  color: var(--color-copy-muted, #66717c);
+  line-height: 1.5;
+}
+
+.prompt-home-prices-card-toggle-side {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: end;
+  justify-self: end;
+  align-content: center;
+  min-width: 0;
+}
+
+.prompt-home-prices-card-toggle-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.prompt-home-prices-card-toggle-meta small {
+  color: var(--color-copy-muted, #66717c);
+  line-height: 1.4;
+}
+
+.prompt-home-prices-card-body {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.prompt-home-prices-card-body[hidden] {
+  display: none;
+}
+
+.prompt-home-prices-grid,
+.prompt-home-prices-skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.6rem;
+}
+
+.prompt-home-price-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(8rem, auto);
+  gap: 0.75rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.12);
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.prompt-home-price-row-copy,
+.prompt-home-price-row-mark {
+  display: grid;
+  gap: 0.16rem;
+  min-width: 0;
+}
+
+.prompt-home-price-row-copy span {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.16rem 0.45rem;
+  border-radius: 999px;
+  background: rgb(61 214 160 / 0.1);
+  color: var(--terminal-accent-strong, #0f7b63);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.prompt-home-price-row-copy strong,
+.prompt-home-price-row-mark strong {
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+.prompt-home-price-row-mark {
+  justify-items: end;
+  text-align: right;
+}
+
+.prompt-home-prices-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
 .prompt-home-map-card {
@@ -1945,6 +2090,7 @@
     grid-template-columns: 1fr;
   }
 
+  .prompt-home-prices-card-head,
   .prompt-home-map-card-head {
     grid-template-columns: 1fr;
   }
@@ -1957,6 +2103,7 @@
     grid-template-columns: 1fr;
   }
 
+  .prompt-home-prices-card-toggle-side,
   .prompt-home-map-card-toggle-side {
     justify-items: start;
   }
@@ -1995,6 +2142,15 @@
   }
 
   .prompt-home-time-meter-card-meta small {
+    text-align: left;
+  }
+
+  .prompt-home-price-row {
+    grid-template-columns: 1fr;
+  }
+
+  .prompt-home-price-row-mark {
+    justify-items: start;
     text-align: left;
   }
 

@@ -32,6 +32,7 @@ import {
   type InvoiceIssueCandidateRecord,
   type TradeAttentionCandidateRecord,
 } from "../../entities/app/api";
+import { useLatestPriceIndexMarks } from "../../entities/market-data/useLatestPriceIndexMarks";
 import {
   buildPromptNavigationIntentKey,
   buildPromptNavigationRouteHandoff,
@@ -60,6 +61,7 @@ import { appConfig } from "../../shared/config";
 import { usePersistentCollapsibleCardState } from "../../shared/collapsibleCardState";
 import { usePersistentPromptHomeCalendarCardState } from "../../shared/promptHomeCalendarSettings";
 import type { AppRouteHandoff } from "../../shared/appRouteHandoff";
+import { formatDateOnly, formatNumber } from "../../shared/format";
 import type {
   AssistantActionRequest,
   AssistantPromptNavigationFocusType,
@@ -69,6 +71,8 @@ import type {
   AssistantWorkspaceSummaryTarget,
   AssetRecord,
   LocationRecord,
+  PriceIndexObservationRecord,
+  PriceIndexRecord,
   SpatialFeatureRecord,
   ViewKey,
   WeatherLocationRecord,
@@ -145,6 +149,7 @@ type PromptHomeWorkspaceProps = {
   authSession: StoredAuthSession | null;
   health: string;
   counts: PromptHomeCounts;
+  priceIndices?: PriceIndexRecord[];
   assets?: AssetRecord[];
   locations?: LocationRecord[];
   spatialFeatures?: SpatialFeatureRecord[];
@@ -191,6 +196,7 @@ const PROMPT_HOME_TIMEFRAME_PANEL_ID = "prompt-home-timeframe-panel";
 const PROMPT_HOME_DAY_PANEL_ID = "prompt-home-day-panel";
 const PROMPT_HOME_WEEK_PANEL_ID = "prompt-home-week-panel";
 const PROMPT_HOME_MONTH_PANEL_ID = "prompt-home-month-panel";
+const PROMPT_HOME_PRICES_PANEL_ID = "prompt-home-prices-panel";
 const PROMPT_HOME_MAP_PANEL_ID = "prompt-home-map-panel";
 const PROMPT_HOME_TRADING_HOURS_PANEL_ID = "prompt-home-trading-hours-panel";
 const PROMPT_HOME_DAY_CALENDAR_MARKER_LIMIT = 3;
@@ -201,6 +207,7 @@ const PROMPT_HOME_CALENDAR_MARKER_DETAIL_ITEM_LIMIT = 3;
 const PROMPT_HOME_DAY_HOURS = 24;
 const PROMPT_HOME_DAY_MINUTES = PROMPT_HOME_DAY_HOURS * 60;
 const PROMPT_HOME_WEEK_DAYS = 7;
+const PROMPT_HOME_PRICE_INDEX_LIMIT = 6;
 const PROMPT_HOME_WEEK_MINUTES =
   PROMPT_HOME_WEEK_DAYS * PROMPT_HOME_DAY_MINUTES;
 const PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING = 7;
@@ -1513,6 +1520,194 @@ function PromptHomeTimeMeterCard({
   );
 }
 
+function selectPromptHomePriceIndices(
+  priceIndices: PriceIndexRecord[],
+): PriceIndexRecord[] {
+  return priceIndices
+    .filter((priceIndex) => priceIndex.is_active)
+    .sort((left, right) => {
+      const providerCompare = left.provider.localeCompare(right.provider);
+      if (providerCompare !== 0) {
+        return providerCompare;
+      }
+
+      const nameCompare = left.name.localeCompare(right.name);
+      return nameCompare !== 0 ? nameCompare : left.code.localeCompare(right.code);
+    });
+}
+
+function priceObservationDigits(
+  observation: PriceIndexObservationRecord | null,
+  priceIndex: PriceIndexRecord,
+): number {
+  const unitCode = observation?.unit_code ?? priceIndex.unit_code;
+  return unitCode === "GAL" ? 3 : 2;
+}
+
+function formatPromptHomePriceValue(
+  observation: PriceIndexObservationRecord | null,
+  priceIndex: PriceIndexRecord,
+): string {
+  if (!observation) {
+    return "No mark yet";
+  }
+
+  const currencyCode = observation.currency_code ?? priceIndex.currency_code;
+  const currencyPrefix = currencyCode ? `${currencyCode} ` : "";
+  return `${currencyPrefix}${formatNumber(
+    observation.value,
+    priceObservationDigits(observation, priceIndex),
+  )} / ${observation.unit_code}`;
+}
+
+function formatPromptHomePriceMeta(
+  observation: PriceIndexObservationRecord | null,
+  priceIndex: PriceIndexRecord,
+): string {
+  const provider = observation?.source_provider ?? priceIndex.provider;
+  if (!observation) {
+    return `${provider} · awaiting observation`;
+  }
+
+  return `${provider} · ${formatDateOnly(observation.observation_date)}`;
+}
+
+function PromptHomePricesCard({
+  priceIndices,
+  referenceDataLoading,
+  onOpenPricesWorkspace,
+}: {
+  priceIndices: PriceIndexRecord[];
+  referenceDataLoading?: boolean;
+  onOpenPricesWorkspace: () => void;
+}) {
+  const pricesExpandedState = usePersistentCollapsibleCardState(
+    "prompt-home.prices-card",
+    true,
+  );
+  const activePriceIndices = useMemo(
+    () => selectPromptHomePriceIndices(priceIndices),
+    [priceIndices],
+  );
+  const displayedPriceIndices = useMemo(
+    () => activePriceIndices.slice(0, PROMPT_HOME_PRICE_INDEX_LIMIT),
+    [activePriceIndices],
+  );
+  const displayedPriceIndexCodes = useMemo(
+    () => displayedPriceIndices.map((priceIndex) => priceIndex.code),
+    [displayedPriceIndices],
+  );
+  const { latestMarksByCode, error } = useLatestPriceIndexMarks(
+    displayedPriceIndexCodes,
+  );
+
+  return (
+    <article className="prompt-home-prices-card">
+      <button
+        type="button"
+        className="prompt-home-prices-card-toggle"
+        aria-expanded={pricesExpandedState.expanded}
+        aria-controls={PROMPT_HOME_PRICES_PANEL_ID}
+        onClick={() =>
+          pricesExpandedState.setExpanded((current) => !current)
+        }
+      >
+        <div className="prompt-home-prices-card-head">
+          <div className="prompt-home-prices-card-copy">
+            <span className="eyebrow">Prices</span>
+            <strong>Market Prices</strong>
+          </div>
+          <div className="prompt-home-prices-card-toggle-side">
+            <div className="prompt-home-prices-card-toggle-meta">
+              <small>
+                {pricesExpandedState.expanded ? "Hide card" : "Show card"}
+              </small>
+              <span
+                className="prompt-home-support-toggle-indicator"
+                aria-hidden="true"
+              >
+                {pricesExpandedState.expanded ? "−" : "+"}
+              </span>
+            </div>
+          </div>
+        </div>
+      </button>
+
+      <div
+        id={PROMPT_HOME_PRICES_PANEL_ID}
+        className="prompt-home-prices-card-body"
+        hidden={!pricesExpandedState.expanded}
+      >
+        {referenceDataLoading && displayedPriceIndices.length === 0 ? (
+          <div className="prompt-home-prices-skeleton-grid">
+            <div className="skeleton-block" />
+            <div className="skeleton-block" />
+            <div className="skeleton-block" />
+          </div>
+        ) : displayedPriceIndices.length > 0 ? (
+          <>
+            {error ? <p className="form-note form-note-error">{error}</p> : null}
+            <div className="prompt-home-prices-grid">
+              {displayedPriceIndices.map((priceIndex) => {
+                const latestMark = latestMarksByCode[priceIndex.code] ?? null;
+
+                return (
+                  <article
+                    key={priceIndex.code}
+                    className="prompt-home-price-row"
+                  >
+                    <div className="prompt-home-price-row-copy">
+                      <span>{priceIndex.code}</span>
+                      <strong>{priceIndex.name}</strong>
+                      <small>{formatPromptHomePriceMeta(latestMark, priceIndex)}</small>
+                    </div>
+                    <div className="prompt-home-price-row-mark">
+                      <strong>
+                        {formatPromptHomePriceValue(latestMark, priceIndex)}
+                      </strong>
+                      <small>
+                        {priceIndex.market ||
+                          priceIndex.location_code ||
+                          priceIndex.commodity_code}
+                      </small>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <div className="empty-state">
+            <strong>No active price indices</strong>
+            <p>Price marks appear here after reference data includes active indices.</p>
+          </div>
+        )}
+
+        <div className="prompt-home-prices-card-footer">
+          {activePriceIndices.length > displayedPriceIndices.length ? (
+            <span>
+              Showing {displayedPriceIndices.length} of{" "}
+              {activePriceIndices.length} active indices
+            </span>
+          ) : (
+            <span>
+              {displayedPriceIndices.length} active{" "}
+              {displayedPriceIndices.length === 1 ? "index" : "indices"} shown
+            </span>
+          )}
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={onOpenPricesWorkspace}
+          >
+            Open Dashboard
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function PromptHomeMapTile({
   authSession,
   assets,
@@ -2722,6 +2917,7 @@ export function PromptHomeWorkspace({
   authSession,
   health,
   counts,
+  priceIndices = [],
   assets = [],
   locations = [],
   spatialFeatures = [],
@@ -3549,6 +3745,11 @@ export function PromptHomeWorkspace({
             });
             setTimeDisplaySettings(savedSettings);
           }}
+        />
+        <PromptHomePricesCard
+          priceIndices={priceIndices}
+          referenceDataLoading={referenceDataLoading}
+          onOpenPricesWorkspace={() => onOpenView("dashboard")}
         />
         <PromptHomeMapTile
           authSession={authSession}

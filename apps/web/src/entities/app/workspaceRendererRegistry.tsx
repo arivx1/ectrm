@@ -1008,6 +1008,7 @@ export const WORKSPACE_RENDERERS: Record<
           pendingSettlementTrades:
             context.workspaceData.workspaceBootstrapSummary?.trades.pending_settlement_count ?? null,
         }}
+        priceIndices={context.workspaceData.priceIndices}
         assets={context.workspaceData.assets}
         locations={context.workspaceData.locations}
         spatialFeatures={context.workspaceData.spatialFeatures}
