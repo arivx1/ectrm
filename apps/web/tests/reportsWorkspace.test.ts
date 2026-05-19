@@ -33,6 +33,7 @@ describe('ReportsWorkspace', () => {
 
     expect(markup).toContain('Reporting Overview')
     expect(markup).toContain('Trading EOD')
+    expect(markup).toContain('Draft Validator')
     expect(markup).toContain('Global Report Filter')
     expect(markup).toContain('Desk-wide end-of-day posture rolled up from pricing, workflow, settlement, projection-integrity, and accrual evidence.')
   })

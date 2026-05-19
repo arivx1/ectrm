@@ -1666,6 +1666,74 @@ export type SemanticDatasetDefinition = {
   status: SemanticDatasetStatus
 }
 
+export type ReportDefinitionValidationStatus = 'valid' | 'invalid'
+export type ReportDefinitionIssueSeverity = 'error' | 'warning'
+export type ReportDefinitionDependencyRole = 'source' | 'field' | 'parameter' | 'formula_input' | 'prior_run'
+export type ReportDefinitionScope = 'personal' | 'team' | 'global'
+export type WorkbookSheetKind = 'manual' | 'dataset' | 'report' | 'workbook_run' | 'formula'
+
+export type ReportDefinitionColumnDraft = {
+  field_key: string
+  label?: string | null
+}
+
+export type ReportDefinitionDraft = {
+  report_key: string
+  name: string
+  description?: string | null
+  scope?: ReportDefinitionScope
+  dataset_id: string
+  columns?: ReportDefinitionColumnDraft[]
+  parameter_keys?: string[]
+  default_sort?: string[]
+}
+
+export type WorkbookSheetDefinitionDraft = {
+  sheet_key: string
+  sheet_name: string
+  sheet_kind: WorkbookSheetKind
+  dataset_id?: string | null
+  report_key?: string | null
+  run_id?: string | null
+  columns?: ReportDefinitionColumnDraft[]
+  depends_on?: string[]
+  formulas?: string[]
+}
+
+export type WorkbookDefinitionDraft = {
+  workbook_key: string
+  name: string
+  description?: string | null
+  scope?: ReportDefinitionScope
+  parameter_keys?: string[]
+  sheets?: WorkbookSheetDefinitionDraft[]
+}
+
+export type ReportDefinitionValidationIssue = {
+  severity: ReportDefinitionIssueSeverity
+  code: string
+  message: string
+  location: string
+}
+
+export type ReportDefinitionDependencyEdge = {
+  from_ref: string
+  to_kind: string
+  to_ref: string
+  dependency_role: ReportDefinitionDependencyRole
+  field_ref?: string | null
+}
+
+export type ReportDefinitionValidationResult = {
+  status: ReportDefinitionValidationStatus
+  valid: boolean
+  error_count: number
+  warning_count: number
+  issues: ReportDefinitionValidationIssue[]
+  dependency_edges: ReportDefinitionDependencyEdge[]
+  referenced_dataset_ids: string[]
+}
+
 export type ReportingOverview = {
   active_trade_count: number
   tracked_commodity_count: number

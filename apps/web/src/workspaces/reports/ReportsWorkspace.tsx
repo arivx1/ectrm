@@ -8,6 +8,7 @@ import {
   loadReportingOverview,
   loadSemanticDatasets,
   loadTradingEodReport,
+  validateReportDefinitionDraft,
 } from '../../entities/reports/api'
 import { appConfig } from '../../shared/config'
 import { formatCurrencyAmount } from '../../shared/format'
@@ -22,6 +23,8 @@ import type {
   PnlTradeValuation,
   PnlHistoryReport,
   PortfolioRecord,
+  ReportDefinitionDraft,
+  ReportDefinitionValidationResult,
   ReportingOverview,
   SemanticDatasetDefinition,
   Trade,
@@ -318,6 +321,41 @@ function summarizeAttributionRows(rows: PnlTradeAttributionRow[]): {
   )
 }
 
+function buildDraftReportKey(datasetId: string): string {
+  const normalized = datasetId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 74)
+  return `draft_${normalized || 'report'}`
+}
+
+function defaultReportBuilderFieldKeys(dataset: SemanticDatasetDefinition): string[] {
+  const eligibleFields = dataset.fields.filter((field) => field.formula_eligible)
+  const fields = eligibleFields.length > 0 ? eligibleFields : dataset.fields
+  return fields.slice(0, 6).map((field) => field.field_key)
+}
+
+function buildReportDefinitionDraft(
+  dataset: SemanticDatasetDefinition,
+  selectedFieldKeys: string[],
+): ReportDefinitionDraft {
+  const selectedFieldKeySet = new Set(selectedFieldKeys)
+  const selectedFields = dataset.fields.filter((field) => selectedFieldKeySet.has(field.field_key))
+  return {
+    report_key: buildDraftReportKey(dataset.dataset_id),
+    name: `${dataset.name} Draft`,
+    scope: 'personal',
+    dataset_id: dataset.dataset_id,
+    columns: selectedFields.map((field) => ({
+      field_key: field.field_key,
+      label: field.label,
+    })),
+    parameter_keys: dataset.parameter_keys,
+    default_sort: dataset.default_sort,
+  }
+}
+
+function validationStatusTone(result: ReportDefinitionValidationResult): 'active' | 'blocked' {
+  return result.valid ? 'active' : 'blocked'
+}
+
 export function ReportsWorkspace({
   activeTrades,
   authSession,
@@ -336,6 +374,11 @@ export function ReportsWorkspace({
   const hasGlobalFilter = globalFilter.trim().length > 0
   const [overview, setOverview] = useState<ReportingOverview | null>(null)
   const [semanticDatasets, setSemanticDatasets] = useState<SemanticDatasetDefinition[]>([])
+  const [builderDatasetId, setBuilderDatasetId] = useState('')
+  const [builderSelectedFieldKeys, setBuilderSelectedFieldKeys] = useState<string[]>([])
+  const [builderValidation, setBuilderValidation] = useState<ReportDefinitionValidationResult | null>(null)
+  const [builderValidationLoading, setBuilderValidationLoading] = useState(false)
+  const [builderValidationError, setBuilderValidationError] = useState('')
   const [tradingEod, setTradingEod] = useState<TradingEodReport | null>(null)
   const [exposureSummary, setExposureSummary] = useState<ExposureSummaryRow[]>([])
   const [activitySummary, setActivitySummary] = useState<ActivitySummaryRow[]>([])
@@ -461,6 +504,40 @@ export function ReportsWorkspace({
       })
       .slice(0, 6)
   }, [semanticDatasets])
+  const builderDataset = useMemo(
+    () => workbookReadyDatasets.find((dataset) => dataset.dataset_id === builderDatasetId) ?? null,
+    [builderDatasetId, workbookReadyDatasets],
+  )
+  const builderPreviewFields = useMemo(() => builderDataset?.fields.slice(0, 10) ?? [], [builderDataset])
+  const builderReportDraft = useMemo(
+    () => (builderDataset ? buildReportDefinitionDraft(builderDataset, builderSelectedFieldKeys) : null),
+    [builderDataset, builderSelectedFieldKeys],
+  )
+
+  useEffect(() => {
+    if (workbookReadyDatasets.length === 0) {
+      setBuilderDatasetId('')
+      return
+    }
+
+    if (!workbookReadyDatasets.some((dataset) => dataset.dataset_id === builderDatasetId)) {
+      setBuilderDatasetId(workbookReadyDatasets[0].dataset_id)
+    }
+  }, [builderDatasetId, workbookReadyDatasets])
+
+  useEffect(() => {
+    if (!builderDataset) {
+      setBuilderSelectedFieldKeys([])
+      setBuilderValidation(null)
+      setBuilderValidationError('')
+      return
+    }
+
+    setBuilderSelectedFieldKeys(defaultReportBuilderFieldKeys(builderDataset))
+    setBuilderValidation(null)
+    setBuilderValidationError('')
+  }, [builderDataset])
+
   const visibleRankedCounterparties = useMemo(
     () => rankedCounterparties.filter((row) => matchesCounterpartyCreditFilter(row, globalFilter)),
     [globalFilter, rankedCounterparties],
@@ -735,6 +812,33 @@ export function ReportsWorkspace({
     setComparisonEndDate(latestAvailableSnapshotDate)
   }
 
+  function toggleBuilderField(fieldKey: string) {
+    setBuilderSelectedFieldKeys((current) =>
+      current.includes(fieldKey) ? current.filter((selectedFieldKey) => selectedFieldKey !== fieldKey) : [...current, fieldKey],
+    )
+    setBuilderValidation(null)
+    setBuilderValidationError('')
+  }
+
+  async function validateBuilderDraft() {
+    if (!builderReportDraft) {
+      return
+    }
+
+    setBuilderValidationLoading(true)
+    setBuilderValidationError('')
+
+    try {
+      const nextValidation = await validateReportDefinitionDraft(appConfig.apiBase, builderReportDraft, reportAccessToken)
+      setBuilderValidation(nextValidation)
+    } catch (nextError) {
+      setBuilderValidation(null)
+      setBuilderValidationError(nextError instanceof Error ? nextError.message : 'Unable to validate the draft report.')
+    } finally {
+      setBuilderValidationLoading(false)
+    }
+  }
+
   const reportsOverviewCards: TileSectionGridItem[] = [
     {
       id: 'active-trades',
@@ -891,6 +995,140 @@ export function ReportsWorkspace({
             <div className="empty-state">
               <strong>No workbook sources registered</strong>
               <p>The semantic dataset catalog will appear here once the reporting API exposes source metadata.</p>
+            </div>
+          ),
+        },
+        {
+          id: 'reports-draft-validator',
+          eyebrow: 'Builder',
+          title: 'Draft Validator',
+          description: 'Validate a personal report definition against approved source metadata before save or run.',
+          span: 'wide',
+          availableSpans: ['full', 'wide', 'half'],
+          content: loading ? (
+            <div className="skeleton-stack">
+              <div className="skeleton-block" />
+              <div className="skeleton-block" />
+            </div>
+          ) : error ? (
+            reportErrorState(error)
+          ) : workbookReadyDatasets.length > 0 && builderDataset && builderReportDraft ? (
+            <div className="pnl-trend-panel">
+              <div className="pnl-trend-toolbar">
+                <div className="pnl-trend-copy">
+                  <span>Personal Draft</span>
+                  <strong>{builderReportDraft.name}</strong>
+                  <p>{builderDataset.grain}</p>
+                </div>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={validateBuilderDraft}
+                  disabled={builderValidationLoading}
+                >
+                  {builderValidationLoading ? 'Validating' : 'Validate Draft'}
+                </button>
+              </div>
+
+              <div className="pnl-trend-filter-grid">
+                <label className="field">
+                  <span>Source</span>
+                  <select
+                    className="control"
+                    value={builderDataset.dataset_id}
+                    onChange={(event) => setBuilderDatasetId(event.target.value)}
+                  >
+                    {workbookReadyDatasets.map((dataset) => (
+                      <option key={dataset.dataset_id} value={dataset.dataset_id}>
+                        {dataset.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Draft Key</span>
+                  <input className="control" value={builderReportDraft.report_key} readOnly />
+                </label>
+              </div>
+
+              <div className="position-list">
+                {builderPreviewFields.map((field) => (
+                  <label key={field.field_key} className="position-card">
+                    <div>
+                      <strong>{field.label}</strong>
+                      <span>{field.field_key}</span>
+                    </div>
+                    <div className="position-value">
+                      <input
+                        type="checkbox"
+                        checked={builderSelectedFieldKeys.includes(field.field_key)}
+                        onChange={() => toggleBuilderField(field.field_key)}
+                        aria-label={`Include ${field.label}`}
+                      />
+                      <span>{formatCodeLabel(field.data_type)}</span>
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              {builderValidationError ? <p className="field-error">{builderValidationError}</p> : null}
+
+              {builderValidation ? (
+                <>
+                  <div className="pnl-trend-summary-grid">
+                    <article className="pnl-trend-stat-card pnl-trend-stat-card-emphasis">
+                      <span>Status</span>
+                      <strong>
+                        <span className={`status-pill status-pill-${validationStatusTone(builderValidation)}`}>
+                          {builderValidation.status.toUpperCase()}
+                        </span>
+                      </strong>
+                      <p>
+                        {formatNumber(builderValidation.error_count, 0)} error
+                        {builderValidation.error_count === 1 ? '' : 's'} ·{' '}
+                        {formatNumber(builderValidation.warning_count, 0)} warning
+                        {builderValidation.warning_count === 1 ? '' : 's'}
+                      </p>
+                    </article>
+                    <article className="pnl-trend-stat-card">
+                      <span>Dependencies</span>
+                      <strong>{formatNumber(builderValidation.dependency_edges.length, 0)}</strong>
+                      <p>{formatNumber(builderValidation.referenced_dataset_ids.length, 0)} dataset references.</p>
+                    </article>
+                    <article className="pnl-trend-stat-card">
+                      <span>Columns</span>
+                      <strong>{formatNumber(builderReportDraft.columns?.length ?? 0, 0)}</strong>
+                      <p>{formatNumber(builderDataset.fields.length, 0)} fields available.</p>
+                    </article>
+                  </div>
+
+                  {builderValidation.issues.length > 0 ? (
+                    <div className="position-list">
+                      {builderValidation.issues.slice(0, 4).map((issue) => (
+                        <article key={`${issue.code}-${issue.location}`} className="position-card">
+                          <div>
+                            <strong>{formatCodeLabel(issue.code)}</strong>
+                            <span>{issue.location}</span>
+                            <span>{issue.message}</span>
+                          </div>
+                          <div className="position-value">
+                            <b>{formatCodeLabel(issue.severity)}</b>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="pnl-trend-note">No validation issues returned.</p>
+                  )}
+                </>
+              ) : (
+                <p className="pnl-trend-note">No validation run yet.</p>
+              )}
+            </div>
+          ) : (
+            <div className="empty-state">
+              <strong>No workbook-ready source</strong>
+              <p>Report draft validation will appear once at least one active semantic dataset is available.</p>
             </div>
           ),
         },
