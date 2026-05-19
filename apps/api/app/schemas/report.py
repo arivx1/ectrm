@@ -8,6 +8,42 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from apps.api.app.schemas._validation import normalize_required_text
 
 
+SemanticDatasetFieldType = Literal["string", "integer", "number", "boolean", "date", "datetime"]
+SemanticDatasetFieldRole = Literal["identifier", "dimension", "measure", "status", "timestamp", "narrative"]
+SemanticDatasetSourceKind = Literal["projection", "reference_data", "report_service", "external_series", "manual"]
+SemanticDatasetStatus = Literal["active", "planned"]
+
+
+class SemanticDatasetField(BaseModel):
+    field_key: str
+    label: str
+    data_type: SemanticDatasetFieldType
+    role: SemanticDatasetFieldRole
+    nullable: bool = False
+    filterable: bool = True
+    groupable: bool = True
+    aggregatable: bool = False
+    formula_eligible: bool = True
+    description: str | None = None
+    source_path: str | None = None
+
+
+class SemanticDatasetDefinition(BaseModel):
+    dataset_id: str
+    name: str
+    description: str
+    owning_domain: str
+    source_kind: SemanticDatasetSourceKind
+    source_ref: str
+    grain: str
+    fields: list[SemanticDatasetField]
+    parameter_keys: list[str] = Field(default_factory=list)
+    default_sort: list[str] = Field(default_factory=list)
+    freshness_policy: str
+    access_policy_key: str
+    status: SemanticDatasetStatus = "active"
+
+
 class ExposureSummaryRow(BaseModel):
     commodity: str
     net_volume: float

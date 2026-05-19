@@ -6,6 +6,7 @@ import {
   loadExposureSummary,
   loadPnlHistoryReport,
   loadReportingOverview,
+  loadSemanticDatasets,
   loadTradingEodReport,
 } from '../../entities/reports/api'
 import { appConfig } from '../../shared/config'
@@ -22,6 +23,7 @@ import type {
   PnlHistoryReport,
   PortfolioRecord,
   ReportingOverview,
+  SemanticDatasetDefinition,
   Trade,
   TradingEodReport,
 } from '../../shared/models'
@@ -333,6 +335,7 @@ export function ReportsWorkspace({
   const reportAccessToken = authSession?.accessToken
   const hasGlobalFilter = globalFilter.trim().length > 0
   const [overview, setOverview] = useState<ReportingOverview | null>(null)
+  const [semanticDatasets, setSemanticDatasets] = useState<SemanticDatasetDefinition[]>([])
   const [tradingEod, setTradingEod] = useState<TradingEodReport | null>(null)
   const [exposureSummary, setExposureSummary] = useState<ExposureSummaryRow[]>([])
   const [activitySummary, setActivitySummary] = useState<ActivitySummaryRow[]>([])
@@ -362,12 +365,14 @@ export function ReportsWorkspace({
       try {
         const [
           nextOverview,
+          nextSemanticDatasets,
           nextTradingEod,
           nextExposureSummary,
           nextActivitySummary,
           nextPnlHistory,
         ] = await Promise.all([
           loadReportingOverview(appConfig.apiBase, reportAccessToken),
+          loadSemanticDatasets(appConfig.apiBase, reportAccessToken),
           loadTradingEodReport(appConfig.apiBase, {}, reportAccessToken),
           loadExposureSummary(appConfig.apiBase, reportAccessToken),
           loadActivitySummary(appConfig.apiBase, reportAccessToken),
@@ -379,6 +384,7 @@ export function ReportsWorkspace({
         }
 
         setOverview(nextOverview)
+        setSemanticDatasets(nextSemanticDatasets)
         setTradingEod(nextTradingEod)
         setExposureSummary(nextExposureSummary)
         setActivitySummary(nextActivitySummary)
@@ -424,6 +430,37 @@ export function ReportsWorkspace({
     () => activitySummary.filter((row) => matchesActivitySummaryFilter(row, globalFilter)),
     [activitySummary, globalFilter],
   )
+  const semanticDatasetKindCounts = useMemo(() => {
+    return semanticDatasets.reduce<Record<string, number>>((counts, dataset) => {
+      counts[dataset.source_kind] = (counts[dataset.source_kind] ?? 0) + 1
+      return counts
+    }, {})
+  }, [semanticDatasets])
+  const workbookReadyDatasets = useMemo(
+    () => semanticDatasets.filter((dataset) => dataset.status === 'active'),
+    [semanticDatasets],
+  )
+  const featuredSemanticDatasets = useMemo(() => {
+    const preferredOrder = [
+      'report_settlement_aging_rows',
+      'report_cash_forecast_points',
+      'report_settlement_exception_rows',
+      'report_pnl_trade_valuations',
+      'current_trades',
+      'current_positions',
+    ]
+    const orderById = new Map(preferredOrder.map((datasetId, index) => [datasetId, index]))
+    return [...semanticDatasets]
+      .sort((left, right) => {
+        const leftOrder = orderById.get(left.dataset_id) ?? preferredOrder.length
+        const rightOrder = orderById.get(right.dataset_id) ?? preferredOrder.length
+        if (leftOrder !== rightOrder) {
+          return leftOrder - rightOrder
+        }
+        return left.name.localeCompare(right.name)
+      })
+      .slice(0, 6)
+  }, [semanticDatasets])
   const visibleRankedCounterparties = useMemo(
     () => rankedCounterparties.filter((row) => matchesCounterpartyCreditFilter(row, globalFilter)),
     [globalFilter, rankedCounterparties],
@@ -798,6 +835,65 @@ export function ReportsWorkspace({
         },
       ]}
       tiles={[
+        {
+          id: 'reports-data-sources',
+          eyebrow: 'Builder',
+          title: 'Workbook Data Sources',
+          description: 'Approved semantic datasets that future Excel-style reports and workbook sheets can consume without direct table access.',
+          span: 'wide',
+          availableSpans: ['full', 'wide', 'half'],
+          content: loading ? (
+            <div className="skeleton-stack">
+              <div className="skeleton-block" />
+              <div className="skeleton-block" />
+            </div>
+          ) : error ? (
+            reportErrorState(error)
+          ) : semanticDatasets.length > 0 ? (
+            <div className="pnl-trend-panel">
+              <div className="pnl-trend-summary-grid">
+                <article className="pnl-trend-stat-card pnl-trend-stat-card-emphasis">
+                  <span>Active Sources</span>
+                  <strong>{formatNumber(workbookReadyDatasets.length, 0)}</strong>
+                  <p>Workbook-ready semantic datasets.</p>
+                </article>
+                <article className="pnl-trend-stat-card">
+                  <span>Report Outputs</span>
+                  <strong>{formatNumber(semanticDatasetKindCounts.report_service ?? 0, 0)}</strong>
+                  <p>Typed report-service tables.</p>
+                </article>
+                <article className="pnl-trend-stat-card">
+                  <span>Reference Sources</span>
+                  <strong>{formatNumber(semanticDatasetKindCounts.reference_data ?? 0, 0)}</strong>
+                  <p>Governed dimensions for joins and filters.</p>
+                </article>
+              </div>
+              <div className="position-list">
+                {featuredSemanticDatasets.map((dataset) => (
+                  <article key={dataset.dataset_id} className="position-card">
+                    <div>
+                      <strong>{dataset.name}</strong>
+                      <span>{dataset.grain}</span>
+                    </div>
+                    <div className="position-value">
+                      <b>{formatNumber(dataset.fields.length, 0)}</b>
+                      <span>{formatCodeLabel(dataset.source_kind)}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <p className="pnl-trend-note">
+                These are metadata contracts only for now. Workbook execution, formulas, immutable runs, and XLSX artifacts
+                come in later phases.
+              </p>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <strong>No workbook sources registered</strong>
+              <p>The semantic dataset catalog will appear here once the reporting API exposes source metadata.</p>
+            </div>
+          ),
+        },
         {
           id: 'reports-overview',
           eyebrow: 'Summary',

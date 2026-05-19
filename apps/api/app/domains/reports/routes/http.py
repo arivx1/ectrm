@@ -25,6 +25,10 @@ from apps.api.app.domains.reports.services.overview import (
     build_exposure_summary,
     build_reporting_overview,
 )
+from apps.api.app.domains.reports.services.semantic_datasets import (
+    get_semantic_dataset_definition,
+    list_semantic_dataset_definitions,
+)
 from apps.api.app.domains.reports.services.settlement import (
     build_cash_forecast_report,
     build_settlement_exception_report,
@@ -52,6 +56,7 @@ from apps.api.app.schemas.report import (
     PnlHistoryReport,
     PnlComparisonReport,
     ReportingOverview,
+    SemanticDatasetDefinition,
     SettlementReportFilterOptions,
     SettlementReportFilters,
     SettlementReportPresetCreate,
@@ -97,6 +102,22 @@ def _parse_settlement_exception_filters(
         )
     except ValidationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
+
+
+@router.get("/datasets", response_model=list[SemanticDatasetDefinition])
+def get_semantic_datasets() -> list[SemanticDatasetDefinition]:
+    return list_semantic_dataset_definitions()
+
+
+@router.get("/datasets/{dataset_id}/schema", response_model=SemanticDatasetDefinition)
+def get_semantic_dataset_schema(dataset_id: str) -> SemanticDatasetDefinition:
+    definition = get_semantic_dataset_definition(dataset_id)
+    if definition is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Semantic dataset '{dataset_id}' was not found.",
+        )
+    return definition
 
 
 @router.get("/exposure-summary", response_model=list[ExposureSummaryRow])

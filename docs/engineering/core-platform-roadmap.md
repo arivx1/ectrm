@@ -24,6 +24,7 @@ position, and settlement spine can safely support.
 - [Agent Action Request Contract](./agent-action-request-contract.md)
 - [Agent Knowledge Base](./agent-knowledge-base.md)
 - [Governed Core Platform Work Packages](./core-platform-work-packages.md)
+- [Excel-Style Reporting Architecture](./excel-style-reporting-architecture.md)
 
 ## Roadmap Goal
 

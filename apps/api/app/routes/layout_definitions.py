@@ -80,10 +80,18 @@ WORKSPACE_TILE_SPANS: dict[str, dict[str, tuple[LayoutTileSpan, ...]]] = {
         "settlement-queue": ("full", "wide"),
     },
     "reports": {
+        "reports-data-sources": ("full", "wide", "half"),
         "reports-overview": ("full", "wide"),
+        "reports-trading-eod": ("full", "wide"),
         "reports-exposure": ("full", "wide", "half"),
         "reports-activity": ("full", "wide", "half"),
+        "reports-valuation-snapshot": ("full", "wide"),
+        "reports-valuation-compare": ("full", "wide"),
         "reports-credit": ("full", "wide"),
+        "reports-settlement-lens": ("full", "wide"),
+        "reports-settlement-aging": ("full", "wide"),
+        "reports-cash-forecast": ("full", "wide", "half"),
+        "reports-settlement-exceptions": ("full", "wide"),
     },
 }
 WORKSPACE_TILE_IDS: dict[str, tuple[str, ...]] = {

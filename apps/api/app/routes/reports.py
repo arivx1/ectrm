@@ -9,6 +9,8 @@ from apps.api.app.domains.reports.routes.http import get_exposure_summary
 from apps.api.app.domains.reports.routes.http import get_pnl_comparison
 from apps.api.app.domains.reports.routes.http import get_pnl_history
 from apps.api.app.domains.reports.routes.http import get_reporting_overview
+from apps.api.app.domains.reports.routes.http import get_semantic_dataset_schema
+from apps.api.app.domains.reports.routes.http import get_semantic_datasets
 from apps.api.app.domains.reports.routes.http import get_settlement_aging_report
 from apps.api.app.domains.reports.routes.http import get_settlement_exceptions
 from apps.api.app.domains.reports.routes.http import get_settlement_filter_options
@@ -22,6 +24,8 @@ __all__ = [
     "get_exposure_summary",
     "get_activity_summary",
     "get_reporting_overview",
+    "get_semantic_datasets",
+    "get_semantic_dataset_schema",
     "get_counterparty_credit_report",
     "get_pnl_history",
     "get_pnl_comparison",

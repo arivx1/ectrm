@@ -83,6 +83,68 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-19 - Workbook Reports Need Immutable Runs And Deterministic Formulas
+
+- Type: algorithm-candidate
+- Domain: reporting, extensibility, formulas, workbook artifacts, and
+  assistant-drafted reports
+- Applies to: future `report_definitions`, `workbook_definitions`,
+  `workbook_sheet_definitions`, `formula_definitions`, report/workbook runs,
+  Excel-style imports, and report artifacts
+- Status: proposed
+- Source: [Excel-Style Reporting Architecture](./excel-style-reporting-architecture.md)
+- Lesson: Excel-style reporting should be modeled as governed workbook and
+  report definitions over curated semantic datasets, with deterministic formula
+  validation and immutable report/workbook runs. Spreadsheet familiarity should
+  not create a side channel around typed services, permissions, lineage,
+  freshness, or audit.
+- Deterministic opportunity: add semantic dataset definitions, workbook
+  definitions, formula parsing/validation/evaluation, dependency edges,
+  immutable runs, and generated artifacts before allowing shared report
+  publication or assistant-authored report packs.
+- Agent autonomy impact: agents may draft workbook definitions, suggest
+  formulas, and summarize completed runs, but they must not be the source of
+  trusted formula values or claim execution/publication without a typed service
+  result. Shared publication should stay governed by permissions or staged
+  action review.
+- Tests or evidence: implementation should add service tests for formula type
+  safety, allowed functions, dependency cycles, lineage, row-level access,
+  immutable run replay, artifact generation, and assistant evals when agents can
+  draft report/workbook definitions.
+- Follow-up: start with the settlement pack vertical slice described in the
+  architecture note before opening broader spreadsheet import or freeform
+  builder capabilities.
+
+### 2026-05-19 - Semantic Dataset Registry Starts As Metadata
+
+- Type: algorithm-added
+- Domain: reporting, semantic datasets, workbook inputs, and UI source
+  discovery
+- Applies to: `/reports/datasets`, `/reports/datasets/{dataset_id}/schema`,
+  the Reports workspace source catalog tile, and future workbook/report
+  builders
+- Status: implemented
+- Source:
+  `apps/api/app/domains/reports/services/semantic_datasets.py`,
+  `apps/api/app/domains/reports/routes/http.py`, and
+  `apps/web/src/workspaces/reports/ReportsWorkspace.tsx`
+- Lesson: the first executable reporting-builder slice should expose approved
+  semantic dataset contracts before adding workbook definitions, formulas, run
+  persistence, or import/export. A metadata-only registry lets the UI and future
+  assistant tooling discover safe report inputs without granting raw table
+  access.
+- Deterministic opportunity: evolve the static registry into persisted
+  `semantic_dataset_definitions` only after the field schema, access policy,
+  freshness metadata, and workbook source UX prove stable.
+- Agent autonomy impact: agents may refer to the dataset catalog when drafting
+  workbook/report ideas, but they still cannot execute formulas, publish shared
+  reports, or treat catalog metadata as row data.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_reports_api.ReportsApiTests.test_semantic_dataset_catalog_lists_workbook_ready_sources apps.api.tests.test_reports_api.ReportsApiTests.test_semantic_dataset_schema_endpoint_returns_one_dataset_or_404`
+  and `npm --prefix apps/web run build`.
+- Follow-up: next phase should add draft workbook/report definition contracts
+  that reference these dataset IDs instead of inventing source names inline.
+
 ### 2026-05-17 - Mixed Document Packets Require Page-Level Classification
 
 - Type: algorithm-added

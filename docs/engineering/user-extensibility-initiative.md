@@ -626,6 +626,10 @@ Goal:
 
 - let users define reusable reports and calculated outputs on curated datasets
 
+Detailed architecture:
+
+- [Excel-Style Reporting Architecture](./excel-style-reporting-architecture.md)
+
 Backend deliverables:
 
 - define approved semantic datasets backed by current projections and

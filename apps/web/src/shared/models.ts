@@ -1631,6 +1631,41 @@ export type ActivitySummaryRow = {
   last_occurred_at: string
 }
 
+export type SemanticDatasetFieldType = 'string' | 'integer' | 'number' | 'boolean' | 'date' | 'datetime'
+export type SemanticDatasetFieldRole = 'identifier' | 'dimension' | 'measure' | 'status' | 'timestamp' | 'narrative'
+export type SemanticDatasetSourceKind = 'projection' | 'reference_data' | 'report_service' | 'external_series' | 'manual'
+export type SemanticDatasetStatus = 'active' | 'planned'
+
+export type SemanticDatasetField = {
+  field_key: string
+  label: string
+  data_type: SemanticDatasetFieldType
+  role: SemanticDatasetFieldRole
+  nullable: boolean
+  filterable: boolean
+  groupable: boolean
+  aggregatable: boolean
+  formula_eligible: boolean
+  description?: string | null
+  source_path?: string | null
+}
+
+export type SemanticDatasetDefinition = {
+  dataset_id: string
+  name: string
+  description: string
+  owning_domain: string
+  source_kind: SemanticDatasetSourceKind
+  source_ref: string
+  grain: string
+  fields: SemanticDatasetField[]
+  parameter_keys: string[]
+  default_sort: string[]
+  freshness_policy: string
+  access_policy_key: string
+  status: SemanticDatasetStatus
+}
+
 export type ReportingOverview = {
   active_trade_count: number
   tracked_commodity_count: number

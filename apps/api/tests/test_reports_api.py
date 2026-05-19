@@ -374,6 +374,55 @@ class ReportsApiTests(unittest.TestCase):
             )
             session.commit()
 
+    def test_semantic_dataset_catalog_lists_workbook_ready_sources(self) -> None:
+        response = self.client.get("/reports/datasets", headers=self.report_headers)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        dataset_ids = {dataset["dataset_id"] for dataset in payload}
+
+        self.assertIn("current_trades", dataset_ids)
+        self.assertIn("current_positions", dataset_ids)
+        self.assertIn("reference_books", dataset_ids)
+        self.assertIn("report_settlement_aging_rows", dataset_ids)
+        self.assertIn("report_cash_forecast_points", dataset_ids)
+        self.assertIn("report_settlement_exception_rows", dataset_ids)
+        self.assertIn("report_pnl_trade_valuations", dataset_ids)
+
+        aging_dataset = next(dataset for dataset in payload if dataset["dataset_id"] == "report_settlement_aging_rows")
+        self.assertEqual(aging_dataset["source_kind"], "report_service")
+        self.assertEqual(aging_dataset["source_ref"], "GET /reports/settlement-aging -> rows")
+        self.assertEqual(aging_dataset["parameter_keys"], ["as_of", "book", "counterparty", "currency"])
+        self.assertIn("as_of", aging_dataset["parameter_keys"])
+        self.assertEqual(aging_dataset["access_policy_key"], "reports.read")
+
+        field_keys = {field["field_key"] for field in aging_dataset["fields"]}
+        self.assertIn("total_outstanding_amount", field_keys)
+        self.assertIn("past_due_31_plus_amount", field_keys)
+        self.assertIn("oldest_due_at", field_keys)
+
+    def test_semantic_dataset_schema_endpoint_returns_one_dataset_or_404(self) -> None:
+        response = self.client.get(
+            "/reports/datasets/report_cash_forecast_points/schema",
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["dataset_id"], "report_cash_forecast_points")
+        self.assertEqual(payload["grain"], "one row per forecast date and currency")
+        self.assertEqual(payload["parameter_keys"], ["as_of", "book", "counterparty", "currency", "horizon_days"])
+        amount_field = next(field for field in payload["fields"] if field["field_key"] == "expected_amount")
+        self.assertEqual(amount_field["data_type"], "number")
+        self.assertTrue(amount_field["aggregatable"])
+
+        missing_response = self.client.get("/reports/datasets/not-a-dataset/schema", headers=self.report_headers)
+        self.assertEqual(missing_response.status_code, 404)
+        self.assertEqual(
+            missing_response.json()["detail"],
+            "Semantic dataset 'not-a-dataset' was not found.",
+        )
+
     def test_pnl_history_report_accepts_as_of_and_portfolio_filters(self) -> None:
         self._seed_trade(trade_id="T-PNL-1", counterparty="SHELL_TRADING", book="CRUDE_PHYS", portfolio="PROMPT")
         self._seed_trade(

@@ -6,6 +6,7 @@ import type {
   PnlComparisonReport,
   PnlHistoryReport,
   ReportingOverview,
+  SemanticDatasetDefinition,
   SettlementReportFilterOptions,
   SettlementReportFilters,
   SettlementReportPresetRecord,
@@ -158,6 +159,13 @@ export async function loadPnlComparisonReport(
 
 export async function loadReportingOverview(apiBase: string, accessToken?: string): Promise<ReportingOverview> {
   return fetchJson<ReportingOverview>(`${apiBase}/reports/overview`, {
+    cache: 'no-store',
+    ...authenticatedRequestInit(accessToken),
+  })
+}
+
+export async function loadSemanticDatasets(apiBase: string, accessToken?: string): Promise<SemanticDatasetDefinition[]> {
+  return fetchJson<SemanticDatasetDefinition[]>(`${apiBase}/reports/datasets`, {
     cache: 'no-store',
     ...authenticatedRequestInit(accessToken),
   })
