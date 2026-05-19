@@ -38,6 +38,7 @@ from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
 from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.models.position import Position
 from apps.api.app.models.price_index_observation import PriceIndexObservation
+from apps.api.app.models.report_definition import ReportDefinition
 from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.models.roadmap_document import RoadmapDocument
 from apps.api.app.models.roadmap_document_revision import RoadmapDocumentRevision
@@ -88,6 +89,7 @@ from apps.api.app.models.weather_location import WeatherLocation
 from apps.api.app.models.weather_observation import WeatherObservation
 from apps.api.app.models.wiki_page import WikiPage
 from apps.api.app.models.wiki_page_revision import WikiPageRevision
+from apps.api.app.models.workbook_definition import WorkbookDefinition
 
 __all__ = [
     "AssistantActionRequest",
@@ -131,6 +133,7 @@ __all__ = [
     "OptionExposure",
     "Position",
     "PriceIndexObservation",
+    "ReportDefinition",
     "ReportPreset",
     "RoadmapDocument",
     "RoadmapDocumentRevision",
@@ -179,4 +182,5 @@ __all__ = [
     "WeatherObservation",
     "WikiPage",
     "WikiPageRevision",
+    "WorkbookDefinition",
 ]

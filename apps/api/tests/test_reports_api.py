@@ -23,6 +23,7 @@ from apps.api.app.models import Base
 from apps.api.app.models.event import Event
 from apps.api.app.models.position import Position
 from apps.api.app.models.price_index_observation import PriceIndexObservation
+from apps.api.app.models.report_definition import ReportDefinition
 from apps.api.app.models.report_preset import ReportPreset
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_accrual_lot import TradeAccrualLot
@@ -32,6 +33,7 @@ from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
+from apps.api.app.models.workbook_definition import WorkbookDefinition
 
 
 class ReportsApiTests(unittest.TestCase):
@@ -68,6 +70,8 @@ class ReportsApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.now = datetime(2026, 4, 6, 18, 0, tzinfo=timezone.utc)
         with self.SessionLocal() as session:
+            session.query(WorkbookDefinition).delete()
+            session.query(ReportDefinition).delete()
             session.query(ReportPreset).delete()
             session.query(UserSession).delete()
             session.query(UserAccount).delete()
@@ -620,6 +624,265 @@ class ReportsApiTests(unittest.TestCase):
         self.assertIn("unknown_dataset", issue_codes)
         self.assertIn("missing_report", issue_codes)
         self.assertIn("missing_run", issue_codes)
+
+    def test_report_definition_lifecycle_persists_valid_personal_drafts(self) -> None:
+        create_payload = {
+            "definition": {
+                "report_key": "settlement-aging-summary",
+                "name": "Settlement Aging Summary",
+                "dataset_id": "report_settlement_aging_rows",
+                "columns": [
+                    {"field_key": "counterparty_code"},
+                    {"field_key": "total_outstanding_amount"},
+                ],
+                "parameter_keys": ["as_of", "currency"],
+                "default_sort": ["counterparty_code"],
+            }
+        }
+
+        create_response = self.client.post(
+            "/reports/definitions",
+            json=create_payload,
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        created = create_response.json()
+        definition_id = created["definition_id"]
+        self.assertEqual(created["lifecycle_status"], "draft")
+        self.assertEqual(created["definition_version"], 1)
+        self.assertEqual(created["version"], 1)
+        self.assertTrue(created["validation_result"]["valid"])
+        self.assertTrue(created["can_edit"])
+        self.assertTrue(created["can_publish"])
+        self.assertTrue(created["can_retire"])
+
+        update_payload = {
+            "definition": {
+                **create_payload["definition"],
+                "name": "Settlement Aging Review",
+                "columns": [
+                    {"field_key": "counterparty_code"},
+                    {"field_key": "total_outstanding_amount"},
+                    {"field_key": "past_due_31_plus_amount"},
+                ],
+            }
+        }
+        update_response = self.client.patch(
+            f"/reports/definitions/{definition_id}",
+            json=update_payload,
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        updated = update_response.json()
+        self.assertEqual(updated["name"], "Settlement Aging Review")
+        self.assertEqual(updated["definition_version"], 2)
+        self.assertEqual(updated["version"], 2)
+
+        publish_response = self.client.post(
+            f"/reports/definitions/{definition_id}/publish",
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(publish_response.status_code, 200)
+        published = publish_response.json()
+        self.assertEqual(published["lifecycle_status"], "published")
+        self.assertEqual(published["published_by"], "reports_viewer")
+        self.assertFalse(published["can_edit"])
+        self.assertFalse(published["can_publish"])
+        self.assertTrue(published["can_retire"])
+
+        patch_published = self.client.patch(
+            f"/reports/definitions/{definition_id}",
+            json=update_payload,
+            headers=self.report_headers,
+        )
+        self.assertEqual(patch_published.status_code, 403)
+
+        retire_response = self.client.post(
+            f"/reports/definitions/{definition_id}/retire",
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(retire_response.status_code, 200)
+        retired = retire_response.json()
+        self.assertEqual(retired["lifecycle_status"], "retired")
+        self.assertEqual(retired["retired_by"], "reports_viewer")
+        self.assertFalse(retired["can_edit"])
+        self.assertFalse(retired["can_publish"])
+        self.assertFalse(retired["can_retire"])
+
+    def test_report_definition_create_rejects_invalid_draft_before_persistence(self) -> None:
+        response = self.client.post(
+            "/reports/definitions",
+            json={
+                "definition": {
+                    "report_key": "bad-aging-summary",
+                    "name": "Bad Aging Summary",
+                    "dataset_id": "report_settlement_aging_rows",
+                    "columns": [{"field_key": "missing_field"}],
+                }
+            },
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(response.status_code, 422)
+        detail = response.json()["detail"]
+        self.assertEqual(detail["message"], "Report definition validation failed.")
+        self.assertFalse(detail["validation_result"]["valid"])
+        self.assertEqual(detail["validation_result"]["issues"][0]["code"], "unknown_field")
+
+        list_response = self.client.get("/reports/definitions", headers=self.report_headers)
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.json(), [])
+
+    def test_global_report_definition_publication_requires_admin_and_controls_visibility(self) -> None:
+        admin_token = self._create_user_session(
+            user_id="reports_admin",
+            email="reports-admin@example.com",
+            display_name="Reports Admin",
+            role="OPS_ADMIN",
+        )
+        other_token = self._create_user_session(
+            user_id="reports_other",
+            email="reports-other@example.com",
+            display_name="Reports Other",
+        )
+        create_response = self.client.post(
+            "/reports/definitions",
+            json={
+                "definition": {
+                    "report_key": "global-cash-forecast",
+                    "name": "Global Cash Forecast",
+                    "scope": "global",
+                    "dataset_id": "report_cash_forecast_points",
+                    "columns": [
+                        {"field_key": "forecast_date"},
+                        {"field_key": "expected_amount"},
+                    ],
+                    "parameter_keys": ["as_of", "horizon_days"],
+                    "default_sort": ["forecast_date"],
+                }
+            },
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        draft = create_response.json()
+        definition_id = draft["definition_id"]
+        self.assertEqual(draft["scope"], "global")
+        self.assertEqual(draft["lifecycle_status"], "draft")
+        self.assertFalse(draft["can_publish"])
+
+        other_list_before_publish = self.client.get(
+            "/reports/definitions",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        self.assertEqual(other_list_before_publish.status_code, 200)
+        self.assertEqual(other_list_before_publish.json(), [])
+
+        trader_publish = self.client.post(
+            f"/reports/definitions/{definition_id}/publish",
+            headers=self.report_headers,
+        )
+        self.assertEqual(trader_publish.status_code, 403)
+
+        admin_publish = self.client.post(
+            f"/reports/definitions/{definition_id}/publish",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(admin_publish.status_code, 200)
+        self.assertEqual(admin_publish.json()["lifecycle_status"], "published")
+        self.assertEqual(admin_publish.json()["published_by"], "reports_admin")
+
+        other_list_after_publish = self.client.get(
+            "/reports/definitions",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        self.assertEqual(other_list_after_publish.status_code, 200)
+        visible = other_list_after_publish.json()
+        self.assertEqual(len(visible), 1)
+        self.assertEqual(visible[0]["report_key"], "global-cash-forecast")
+        self.assertFalse(visible[0]["can_edit"])
+        self.assertFalse(visible[0]["can_retire"])
+
+    def test_workbook_definition_lifecycle_persists_dataset_and_formula_sheets(self) -> None:
+        create_response = self.client.post(
+            "/reports/workbooks",
+            json={
+                "definition": {
+                    "workbook_key": "settlement-pack",
+                    "name": "Settlement Pack",
+                    "parameter_keys": ["as_of", "book"],
+                    "sheets": [
+                        {
+                            "sheet_key": "aging",
+                            "sheet_name": "Aging",
+                            "sheet_kind": "dataset",
+                            "dataset_id": "report_settlement_aging_rows",
+                            "columns": [
+                                {"field_key": "counterparty_code"},
+                                {"field_key": "total_outstanding_amount"},
+                            ],
+                        },
+                        {
+                            "sheet_key": "summary",
+                            "sheet_name": "Summary",
+                            "sheet_kind": "formula",
+                            "depends_on": ["aging"],
+                            "formulas": ["SUM(aging[total_outstanding_amount])"],
+                        },
+                    ],
+                }
+            },
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        created = create_response.json()
+        self.assertEqual(created["lifecycle_status"], "draft")
+        self.assertTrue(created["validation_result"]["valid"])
+        self.assertEqual(created["validation_result"]["warning_count"], 1)
+        self.assertEqual(created["referenced_dataset_ids"], ["report_settlement_aging_rows"])
+
+        publish_response = self.client.post(
+            f"/reports/workbooks/{created['definition_id']}/publish",
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(publish_response.status_code, 200)
+        published = publish_response.json()
+        self.assertEqual(published["lifecycle_status"], "published")
+        self.assertEqual(published["definition_version"], 1)
+        self.assertFalse(published["can_edit"])
+
+    def test_workbook_definition_create_rejects_invalid_sheet_references(self) -> None:
+        response = self.client.post(
+            "/reports/workbooks",
+            json={
+                "definition": {
+                    "workbook_key": "bad-settlement-pack",
+                    "name": "Bad Settlement Pack",
+                    "sheets": [
+                        {
+                            "sheet_key": "summary",
+                            "sheet_name": "Summary",
+                            "sheet_kind": "formula",
+                            "depends_on": ["missing"],
+                        }
+                    ],
+                }
+            },
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(response.status_code, 422)
+        issue_codes = {
+            issue["code"]
+            for issue in response.json()["detail"]["validation_result"]["issues"]
+        }
+        self.assertIn("unknown_sheet_dependency", issue_codes)
 
     def test_pnl_history_report_accepts_as_of_and_portfolio_filters(self) -> None:
         self._seed_trade(trade_id="T-PNL-1", counterparty="SHELL_TRADING", book="CRUDE_PHYS", portfolio="PROMPT")

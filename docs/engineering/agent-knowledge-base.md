@@ -174,6 +174,37 @@ proposal form until a human owner approves the domain rule.
 - Follow-up: add persisted draft/published/retired definitions and reuse this
   validator before saving, publishing, or running any workbook.
 
+### 2026-05-19 - Report Definitions Persist Only After Typed Validation
+
+- Type: algorithm-added
+- Domain: reporting, workbook definitions, lifecycle governance, versioning,
+  publication permissions, and audit
+- Applies to: `report_definitions`, `workbook_definitions`,
+  `/reports/definitions`, `/reports/workbooks`, definition publish/retire
+  routes, and future run execution
+- Status: implemented
+- Source:
+  `apps/api/app/domains/reports/services/definitions.py`,
+  `apps/api/app/models/report_definition.py`,
+  `apps/api/app/models/workbook_definition.py`, and
+  `apps/api/app/domains/reports/routes/http.py`
+- Lesson: persisted report and workbook definitions should store validated
+  definition JSON, validation results, dependency references, lifecycle state,
+  version counters, and audit metadata together. Invalid drafts should not be
+  saved, published, or used as run inputs.
+- Deterministic opportunity: reuse this lifecycle service when adding
+  immutable runs, formula evaluation, assistant-authored drafts, or scheduled
+  report jobs. Shared/global publication remains a permissioned service action,
+  not a client or assistant convention.
+- Agent autonomy impact: agents may draft definitions and submit them to the
+  create/update endpoints, but publication and retirement must flow through the
+  typed lifecycle service and its permission checks.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_reports_api` and
+  `./.venv/bin/python -m unittest apps.api.tests.test_layout_definitions_api.LayoutDefinitionsApiTests.test_layout_definitions_are_scoped_to_user_and_workspace`
+- Follow-up: build the definition list/editor UI over these persisted records,
+  then add immutable run records that can only reference published definitions.
+
 ### 2026-05-17 - Mixed Document Packets Require Page-Level Classification
 
 - Type: algorithm-added

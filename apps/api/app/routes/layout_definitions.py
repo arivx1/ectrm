@@ -81,6 +81,7 @@ WORKSPACE_TILE_SPANS: dict[str, dict[str, tuple[LayoutTileSpan, ...]]] = {
     },
     "reports": {
         "reports-data-sources": ("full", "wide", "half"),
+        "reports-draft-validator": ("full", "wide", "half"),
         "reports-overview": ("full", "wide"),
         "reports-trading-eod": ("full", "wide"),
         "reports-exposure": ("full", "wide", "half"),

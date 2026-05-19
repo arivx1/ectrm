@@ -20,6 +20,27 @@ from apps.api.app.domains.reports.services.definition_validation import (
     validate_report_definition_draft,
     validate_workbook_definition_draft,
 )
+from apps.api.app.domains.reports.services.definitions import (
+    ReportDefinitionConflictError,
+    ReportDefinitionLifecycleError,
+    ReportDefinitionNotFoundError,
+    ReportDefinitionPermissionError,
+    ReportDefinitionValidationError,
+    create_report_definition_record,
+    create_workbook_definition_record,
+    get_visible_report_definition,
+    get_visible_workbook_definition,
+    list_visible_report_definitions,
+    list_visible_workbook_definitions,
+    publish_report_definition_record,
+    publish_workbook_definition_record,
+    retire_report_definition_record,
+    retire_workbook_definition_record,
+    to_report_definition_out,
+    to_workbook_definition_out,
+    update_report_definition_record,
+    update_workbook_definition_record,
+)
 from apps.api.app.domains.reports.services.pnl_history import (
     build_pnl_comparison_report,
     build_pnl_history_report,
@@ -59,7 +80,10 @@ from apps.api.app.schemas.report import (
     ExposureSummaryRow,
     PnlHistoryReport,
     PnlComparisonReport,
+    ReportDefinitionCreate,
     ReportDefinitionDraft,
+    ReportDefinitionRecordOut,
+    ReportDefinitionUpdate,
     ReportDefinitionValidationResult,
     ReportingOverview,
     SemanticDatasetDefinition,
@@ -71,7 +95,10 @@ from apps.api.app.schemas.report import (
     SettlementExceptionReport,
     SettlementAgingReport,
     TradingEodReport,
+    WorkbookDefinitionCreate,
     WorkbookDefinitionDraft,
+    WorkbookDefinitionRecordOut,
+    WorkbookDefinitionUpdate,
 )
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -135,6 +162,295 @@ def validate_report_definition(payload: ReportDefinitionDraft) -> ReportDefiniti
 @router.post("/workbooks/validate", response_model=ReportDefinitionValidationResult)
 def validate_workbook_definition(payload: WorkbookDefinitionDraft) -> ReportDefinitionValidationResult:
     return validate_workbook_definition_draft(payload)
+
+
+def _validation_error_detail(exc: ReportDefinitionValidationError) -> dict[str, object]:
+    return {
+        "message": str(exc),
+        "validation_result": exc.validation_result.model_dump(mode="json"),
+    }
+
+
+@router.get("/definitions", response_model=list[ReportDefinitionRecordOut])
+def get_report_definitions(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[ReportDefinitionRecordOut]:
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
+    records = list_visible_report_definitions(db, actor_id=actor_id, actor_role=actor_role)
+    return [
+        to_report_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+        for record in records
+    ]
+
+
+@router.post("/definitions", response_model=ReportDefinitionRecordOut, status_code=status.HTTP_201_CREATED)
+def create_report_definition(
+    payload: ReportDefinitionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ReportDefinitionRecordOut:
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
+    try:
+        record = create_report_definition_record(
+            db,
+            actor_id=actor_id,
+            definition=payload.definition,
+        )
+    except ReportDefinitionValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=_validation_error_detail(exc),
+        ) from exc
+    except ReportDefinitionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return to_report_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+
+
+@router.get("/definitions/{definition_id}", response_model=ReportDefinitionRecordOut)
+def get_report_definition(
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ReportDefinitionRecordOut:
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
+    record = get_visible_report_definition(
+        db,
+        actor_id=actor_id,
+        actor_role=actor_role,
+        definition_id=definition_id,
+    )
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report definition was not found.")
+    return to_report_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+
+
+@router.patch("/definitions/{definition_id}", response_model=ReportDefinitionRecordOut)
+def update_report_definition(
+    definition_id: int,
+    payload: ReportDefinitionUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ReportDefinitionRecordOut:
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
+    try:
+        record = update_report_definition_record(
+            db,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            definition_id=definition_id,
+            definition=payload.definition,
+        )
+    except ReportDefinitionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ReportDefinitionPermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ReportDefinitionValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=_validation_error_detail(exc),
+        ) from exc
+    except ReportDefinitionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return to_report_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+
+
+@router.post("/definitions/{definition_id}/publish", response_model=ReportDefinitionRecordOut)
+def publish_report_definition(
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ReportDefinitionRecordOut:
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
+    try:
+        record = publish_report_definition_record(
+            db,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            definition_id=definition_id,
+        )
+    except ReportDefinitionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ReportDefinitionPermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ReportDefinitionLifecycleError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ReportDefinitionValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=_validation_error_detail(exc),
+        ) from exc
+    return to_report_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+
+
+@router.post("/definitions/{definition_id}/retire", response_model=ReportDefinitionRecordOut)
+def retire_report_definition(
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ReportDefinitionRecordOut:
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
+    try:
+        record = retire_report_definition_record(
+            db,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            definition_id=definition_id,
+        )
+    except ReportDefinitionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ReportDefinitionPermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ReportDefinitionLifecycleError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return to_report_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+
+
+@router.get("/workbooks", response_model=list[WorkbookDefinitionRecordOut])
+def get_workbook_definitions(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[WorkbookDefinitionRecordOut]:
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
+    records = list_visible_workbook_definitions(db, actor_id=actor_id, actor_role=actor_role)
+    return [
+        to_workbook_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+        for record in records
+    ]
+
+
+@router.post("/workbooks", response_model=WorkbookDefinitionRecordOut, status_code=status.HTTP_201_CREATED)
+def create_workbook_definition(
+    payload: WorkbookDefinitionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> WorkbookDefinitionRecordOut:
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
+    try:
+        record = create_workbook_definition_record(
+            db,
+            actor_id=actor_id,
+            definition=payload.definition,
+        )
+    except ReportDefinitionValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=_validation_error_detail(exc),
+        ) from exc
+    except ReportDefinitionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return to_workbook_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+
+
+@router.get("/workbooks/{definition_id}", response_model=WorkbookDefinitionRecordOut)
+def get_workbook_definition(
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> WorkbookDefinitionRecordOut:
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
+    record = get_visible_workbook_definition(
+        db,
+        actor_id=actor_id,
+        actor_role=actor_role,
+        definition_id=definition_id,
+    )
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workbook definition was not found.")
+    return to_workbook_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+
+
+@router.patch("/workbooks/{definition_id}", response_model=WorkbookDefinitionRecordOut)
+def update_workbook_definition(
+    definition_id: int,
+    payload: WorkbookDefinitionUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> WorkbookDefinitionRecordOut:
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
+    try:
+        record = update_workbook_definition_record(
+            db,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            definition_id=definition_id,
+            definition=payload.definition,
+        )
+    except ReportDefinitionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ReportDefinitionPermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ReportDefinitionValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=_validation_error_detail(exc),
+        ) from exc
+    except ReportDefinitionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return to_workbook_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+
+
+@router.post("/workbooks/{definition_id}/publish", response_model=WorkbookDefinitionRecordOut)
+def publish_workbook_definition(
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> WorkbookDefinitionRecordOut:
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
+    try:
+        record = publish_workbook_definition_record(
+            db,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            definition_id=definition_id,
+        )
+    except ReportDefinitionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ReportDefinitionPermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ReportDefinitionLifecycleError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ReportDefinitionValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=_validation_error_detail(exc),
+        ) from exc
+    return to_workbook_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+
+
+@router.post("/workbooks/{definition_id}/retire", response_model=WorkbookDefinitionRecordOut)
+def retire_workbook_definition(
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> WorkbookDefinitionRecordOut:
+    actor_id = require_authenticated_actor(request)
+    actor_role = authenticated_actor_role(request)
+    try:
+        record = retire_workbook_definition_record(
+            db,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            definition_id=definition_id,
+        )
+    except ReportDefinitionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ReportDefinitionPermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ReportDefinitionLifecycleError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return to_workbook_definition_out(record, actor_id=actor_id, actor_role=actor_role)
 
 
 @router.get("/exposure-summary", response_model=list[ExposureSummaryRow])

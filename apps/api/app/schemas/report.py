@@ -16,6 +16,7 @@ ReportDefinitionValidationStatus = Literal["valid", "invalid"]
 ReportDefinitionIssueSeverity = Literal["error", "warning"]
 ReportDefinitionDependencyRole = Literal["source", "field", "parameter", "formula_input", "prior_run"]
 ReportDefinitionScope = Literal["personal", "team", "global"]
+ReportDefinitionLifecycleStatus = Literal["draft", "published", "retired"]
 WorkbookSheetKind = Literal["manual", "dataset", "report", "workbook_run", "formula"]
 
 
@@ -192,6 +193,80 @@ class ReportDefinitionValidationResult(BaseModel):
     issues: list[ReportDefinitionValidationIssue] = Field(default_factory=list)
     dependency_edges: list[ReportDefinitionDependencyEdge] = Field(default_factory=list)
     referenced_dataset_ids: list[str] = Field(default_factory=list)
+
+
+class ReportDefinitionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    definition: ReportDefinitionDraft
+
+
+class ReportDefinitionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    definition: ReportDefinitionDraft
+
+
+class WorkbookDefinitionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    definition: WorkbookDefinitionDraft
+
+
+class WorkbookDefinitionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    definition: WorkbookDefinitionDraft
+
+
+class ReportDefinitionRecordOut(BaseModel):
+    definition_id: int
+    report_key: str
+    name: str
+    description: str | None = None
+    scope: ReportDefinitionScope
+    lifecycle_status: ReportDefinitionLifecycleStatus
+    definition_version: int
+    version: int
+    definition: ReportDefinitionDraft
+    validation_result: ReportDefinitionValidationResult
+    referenced_dataset_ids: list[str] = Field(default_factory=list)
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    published_at: datetime | None = None
+    published_by: str | None = None
+    retired_at: datetime | None = None
+    retired_by: str | None = None
+    can_edit: bool
+    can_publish: bool
+    can_retire: bool
+
+
+class WorkbookDefinitionRecordOut(BaseModel):
+    definition_id: int
+    workbook_key: str
+    name: str
+    description: str | None = None
+    scope: ReportDefinitionScope
+    lifecycle_status: ReportDefinitionLifecycleStatus
+    definition_version: int
+    version: int
+    definition: WorkbookDefinitionDraft
+    validation_result: ReportDefinitionValidationResult
+    referenced_dataset_ids: list[str] = Field(default_factory=list)
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    published_at: datetime | None = None
+    published_by: str | None = None
+    retired_at: datetime | None = None
+    retired_by: str | None = None
+    can_edit: bool
+    can_publish: bool
+    can_retire: bool
 
 
 class ExposureSummaryRow(BaseModel):
