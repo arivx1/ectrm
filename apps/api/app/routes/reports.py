@@ -17,6 +17,8 @@ from apps.api.app.domains.reports.routes.http import get_settlement_filter_optio
 from apps.api.app.domains.reports.routes.http import get_settlement_presets
 from apps.api.app.domains.reports.routes.http import get_trading_eod_report
 from apps.api.app.domains.reports.routes.http import update_settlement_preset
+from apps.api.app.domains.reports.routes.http import validate_report_definition
+from apps.api.app.domains.reports.routes.http import validate_workbook_definition
 from apps.api.app.domains.reports.routes import router
 
 __all__ = [
@@ -38,4 +40,6 @@ __all__ = [
     "create_settlement_preset",
     "update_settlement_preset",
     "delete_settlement_preset",
+    "validate_report_definition",
+    "validate_workbook_definition",
 ]

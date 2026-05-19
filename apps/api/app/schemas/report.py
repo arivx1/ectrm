@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from apps.api.app.schemas._validation import normalize_required_text
 
@@ -12,6 +12,11 @@ SemanticDatasetFieldType = Literal["string", "integer", "number", "boolean", "da
 SemanticDatasetFieldRole = Literal["identifier", "dimension", "measure", "status", "timestamp", "narrative"]
 SemanticDatasetSourceKind = Literal["projection", "reference_data", "report_service", "external_series", "manual"]
 SemanticDatasetStatus = Literal["active", "planned"]
+ReportDefinitionValidationStatus = Literal["valid", "invalid"]
+ReportDefinitionIssueSeverity = Literal["error", "warning"]
+ReportDefinitionDependencyRole = Literal["source", "field", "parameter", "formula_input", "prior_run"]
+ReportDefinitionScope = Literal["personal", "team", "global"]
+WorkbookSheetKind = Literal["manual", "dataset", "report", "workbook_run", "formula"]
 
 
 class SemanticDatasetField(BaseModel):
@@ -42,6 +47,151 @@ class SemanticDatasetDefinition(BaseModel):
     freshness_policy: str
     access_policy_key: str
     status: SemanticDatasetStatus = "active"
+
+
+class ReportDefinitionColumnDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field_key: str
+    label: str | None = Field(default=None, max_length=120)
+
+    @field_validator("field_key")
+    @classmethod
+    def normalize_field_key(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="field_key")
+
+    @field_validator("label")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return normalize_required_text(value, field_name="label")
+
+
+class ReportDefinitionDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    report_key: str = Field(..., min_length=1, max_length=80)
+    name: str = Field(..., min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+    scope: ReportDefinitionScope = "personal"
+    dataset_id: str = Field(..., min_length=1, max_length=120)
+    columns: list[ReportDefinitionColumnDraft] = Field(default_factory=list)
+    parameter_keys: list[str] = Field(default_factory=list)
+    default_sort: list[str] = Field(default_factory=list)
+
+    @field_validator("report_key", "name", "dataset_id")
+    @classmethod
+    def normalize_required_values(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="report_definition")
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("parameter_keys", "default_sort")
+    @classmethod
+    def normalize_reference_list(cls, values: list[str], info: ValidationInfo) -> list[str]:
+        return [
+            normalize_required_text(value, field_name=f"{info.field_name}[{index}]")
+            for index, value in enumerate(values)
+        ]
+
+
+class WorkbookSheetDefinitionDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sheet_key: str = Field(..., min_length=1, max_length=80)
+    sheet_name: str = Field(..., min_length=1, max_length=120)
+    sheet_kind: WorkbookSheetKind
+    dataset_id: str | None = Field(default=None, max_length=120)
+    report_key: str | None = Field(default=None, max_length=80)
+    run_id: str | None = Field(default=None, max_length=120)
+    columns: list[ReportDefinitionColumnDraft] = Field(default_factory=list)
+    depends_on: list[str] = Field(default_factory=list)
+    formulas: list[str] = Field(default_factory=list)
+
+    @field_validator("sheet_key", "sheet_name")
+    @classmethod
+    def normalize_required_values(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="workbook_sheet")
+
+    @field_validator("dataset_id", "report_key", "run_id")
+    @classmethod
+    def normalize_optional_ref(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("depends_on", "formulas")
+    @classmethod
+    def normalize_reference_list(cls, values: list[str], info: ValidationInfo) -> list[str]:
+        return [
+            normalize_required_text(value, field_name=f"{info.field_name}[{index}]")
+            for index, value in enumerate(values)
+        ]
+
+
+class WorkbookDefinitionDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workbook_key: str = Field(..., min_length=1, max_length=80)
+    name: str = Field(..., min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+    scope: ReportDefinitionScope = "personal"
+    parameter_keys: list[str] = Field(default_factory=list)
+    sheets: list[WorkbookSheetDefinitionDraft] = Field(default_factory=list)
+
+    @field_validator("workbook_key", "name")
+    @classmethod
+    def normalize_required_values(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="workbook_definition")
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("parameter_keys")
+    @classmethod
+    def normalize_parameter_keys(cls, values: list[str]) -> list[str]:
+        return [
+            normalize_required_text(value, field_name=f"parameter_keys[{index}]")
+            for index, value in enumerate(values)
+        ]
+
+
+class ReportDefinitionValidationIssue(BaseModel):
+    severity: ReportDefinitionIssueSeverity
+    code: str
+    message: str
+    location: str
+
+
+class ReportDefinitionDependencyEdge(BaseModel):
+    from_ref: str
+    to_kind: str
+    to_ref: str
+    dependency_role: ReportDefinitionDependencyRole
+    field_ref: str | None = None
+
+
+class ReportDefinitionValidationResult(BaseModel):
+    status: ReportDefinitionValidationStatus
+    valid: bool
+    error_count: int
+    warning_count: int
+    issues: list[ReportDefinitionValidationIssue] = Field(default_factory=list)
+    dependency_edges: list[ReportDefinitionDependencyEdge] = Field(default_factory=list)
+    referenced_dataset_ids: list[str] = Field(default_factory=list)
 
 
 class ExposureSummaryRow(BaseModel):

@@ -145,6 +145,35 @@ proposal form until a human owner approves the domain rule.
 - Follow-up: next phase should add draft workbook/report definition contracts
   that reference these dataset IDs instead of inventing source names inline.
 
+### 2026-05-19 - Report Definition Validation Runs Before Persistence
+
+- Type: algorithm-added
+- Domain: reporting, workbook definitions, semantic dataset references,
+  parameter validation, and dependency lineage
+- Applies to: `/reports/definitions/validate`,
+  `/reports/workbooks/validate`, draft report/workbook schemas, and future
+  persisted definition services
+- Status: implemented
+- Source:
+  `apps/api/app/domains/reports/services/definition_validation.py`,
+  `apps/api/app/domains/reports/routes/http.py`, and
+  `apps/api/app/schemas/report.py`
+- Lesson: workbook/report builders should validate draft source references,
+  selected fields, declared parameters, duplicate keys, and sheet dependencies
+  before any definition is persisted or executed. Validation should return a
+  typed issue list and dependency graph so UI and assistant flows can explain
+  what will be used without mutating business records.
+- Deterministic opportunity: promote this validation contract into the
+  persisted definition service when lifecycle/versioning is added; do not let
+  assistants bypass it when drafting reports or formulas.
+- Agent autonomy impact: agents may assemble draft definitions and submit them
+  for validation, but only typed services should decide whether references,
+  parameters, and dependencies are acceptable.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_reports_api`
+- Follow-up: add persisted draft/published/retired definitions and reuse this
+  validator before saving, publishing, or running any workbook.
+
 ### 2026-05-17 - Mixed Document Packets Require Page-Level Classification
 
 - Type: algorithm-added

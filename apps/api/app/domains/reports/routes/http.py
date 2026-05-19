@@ -16,6 +16,10 @@ from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reports.services.counterparty_credit import (
     build_counterparty_credit_report,
 )
+from apps.api.app.domains.reports.services.definition_validation import (
+    validate_report_definition_draft,
+    validate_workbook_definition_draft,
+)
 from apps.api.app.domains.reports.services.pnl_history import (
     build_pnl_comparison_report,
     build_pnl_history_report,
@@ -55,6 +59,8 @@ from apps.api.app.schemas.report import (
     ExposureSummaryRow,
     PnlHistoryReport,
     PnlComparisonReport,
+    ReportDefinitionDraft,
+    ReportDefinitionValidationResult,
     ReportingOverview,
     SemanticDatasetDefinition,
     SettlementReportFilterOptions,
@@ -65,6 +71,7 @@ from apps.api.app.schemas.report import (
     SettlementExceptionReport,
     SettlementAgingReport,
     TradingEodReport,
+    WorkbookDefinitionDraft,
 )
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -118,6 +125,16 @@ def get_semantic_dataset_schema(dataset_id: str) -> SemanticDatasetDefinition:
             detail=f"Semantic dataset '{dataset_id}' was not found.",
         )
     return definition
+
+
+@router.post("/definitions/validate", response_model=ReportDefinitionValidationResult)
+def validate_report_definition(payload: ReportDefinitionDraft) -> ReportDefinitionValidationResult:
+    return validate_report_definition_draft(payload)
+
+
+@router.post("/workbooks/validate", response_model=ReportDefinitionValidationResult)
+def validate_workbook_definition(payload: WorkbookDefinitionDraft) -> ReportDefinitionValidationResult:
+    return validate_workbook_definition_draft(payload)
 
 
 @router.get("/exposure-summary", response_model=list[ExposureSummaryRow])

@@ -423,6 +423,204 @@ class ReportsApiTests(unittest.TestCase):
             "Semantic dataset 'not-a-dataset' was not found.",
         )
 
+    def test_report_definition_validate_accepts_known_dataset_fields(self) -> None:
+        response = self.client.post(
+            "/reports/definitions/validate",
+            json={
+                "report_key": "settlement-aging-summary",
+                "name": "Settlement Aging Summary",
+                "dataset_id": "report_settlement_aging_rows",
+                "columns": [
+                    {"field_key": "counterparty_code", "label": "Counterparty"},
+                    {"field_key": "total_outstanding_amount", "label": "Outstanding"},
+                    {"field_key": "past_due_31_plus_amount", "label": "31+ Past Due"},
+                ],
+                "parameter_keys": ["as_of", "currency"],
+                "default_sort": ["counterparty_code"],
+            },
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["valid"])
+        self.assertEqual(payload["status"], "valid")
+        self.assertEqual(payload["error_count"], 0)
+        self.assertEqual(payload["referenced_dataset_ids"], ["report_settlement_aging_rows"])
+        dependencies = payload["dependency_edges"]
+        self.assertTrue(
+            any(
+                edge["dependency_role"] == "source"
+                and edge["to_kind"] == "semantic_dataset"
+                and edge["to_ref"] == "report_settlement_aging_rows"
+                for edge in dependencies
+            )
+        )
+        self.assertTrue(
+            any(edge["dependency_role"] == "field" and edge["field_ref"] == "total_outstanding_amount" for edge in dependencies)
+        )
+        self.assertTrue(
+            any(edge["dependency_role"] == "parameter" and edge["field_ref"] == "currency" for edge in dependencies)
+        )
+
+    def test_report_definition_validate_rejects_unknown_dataset_fields(self) -> None:
+        response = self.client.post(
+            "/reports/definitions/validate",
+            json={
+                "report_key": "bad-aging-summary",
+                "name": "Bad Aging Summary",
+                "dataset_id": "report_settlement_aging_rows",
+                "columns": [
+                    {"field_key": "not_a_real_field"},
+                    {"field_key": "not_a_real_field"},
+                ],
+                "parameter_keys": ["not_a_real_parameter", "not_a_real_parameter"],
+                "default_sort": ["also_not_real"],
+            },
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["valid"])
+        self.assertEqual(payload["status"], "invalid")
+        issue_codes = {issue["code"] for issue in payload["issues"]}
+        self.assertIn("unknown_field", issue_codes)
+        self.assertIn("duplicate_column", issue_codes)
+        self.assertIn("unknown_parameter", issue_codes)
+        self.assertIn("duplicate_parameter", issue_codes)
+        self.assertIn("unknown_sort_field", issue_codes)
+
+    def test_workbook_definition_validate_accepts_dataset_and_formula_sheet_draft(self) -> None:
+        response = self.client.post(
+            "/reports/workbooks/validate",
+            json={
+                "workbook_key": "settlement-pack",
+                "name": "Settlement Pack",
+                "parameter_keys": ["as_of", "book"],
+                "sheets": [
+                    {
+                        "sheet_key": "aging",
+                        "sheet_name": "Aging",
+                        "sheet_kind": "dataset",
+                        "dataset_id": "report_settlement_aging_rows",
+                        "columns": [
+                            {"field_key": "counterparty_code"},
+                            {"field_key": "total_outstanding_amount"},
+                        ],
+                    },
+                    {
+                        "sheet_key": "summary",
+                        "sheet_name": "Summary",
+                        "sheet_kind": "formula",
+                        "depends_on": ["aging"],
+                        "formulas": ["SUM(aging[total_outstanding_amount])"],
+                    },
+                ],
+            },
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["valid"])
+        self.assertEqual(payload["error_count"], 0)
+        self.assertEqual(payload["warning_count"], 1)
+        self.assertEqual(payload["issues"][0]["code"], "formula_parse_not_enabled")
+        self.assertEqual(payload["referenced_dataset_ids"], ["report_settlement_aging_rows"])
+        self.assertTrue(
+            any(
+                edge["from_ref"] == "workbook_definition:settlement-pack.sheet:summary"
+                and edge["to_kind"] == "workbook_sheet"
+                and edge["to_ref"] == "aging"
+                and edge["dependency_role"] == "formula_input"
+                for edge in payload["dependency_edges"]
+            )
+        )
+
+    def test_workbook_definition_validate_warns_for_report_sheet_parameters(self) -> None:
+        response = self.client.post(
+            "/reports/workbooks/validate",
+            json={
+                "workbook_key": "report-backed-pack",
+                "name": "Report Backed Pack",
+                "parameter_keys": ["as_of"],
+                "sheets": [
+                    {
+                        "sheet_key": "aging_report",
+                        "sheet_name": "Aging Report",
+                        "sheet_kind": "report",
+                        "report_key": "settlement-aging-summary",
+                    },
+                ],
+            },
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["valid"])
+        self.assertEqual(payload["error_count"], 0)
+        issue_codes = {issue["code"] for issue in payload["issues"]}
+        self.assertIn("parameter_resolution_not_enabled", issue_codes)
+        self.assertIn("report_sheet_resolution_not_enabled", issue_codes)
+        self.assertTrue(
+            any(
+                edge["from_ref"] == "workbook_definition:report-backed-pack.sheet:aging_report"
+                and edge["to_kind"] == "report_definition"
+                and edge["to_ref"] == "settlement-aging-summary"
+                and edge["dependency_role"] == "source"
+                for edge in payload["dependency_edges"]
+            )
+        )
+
+    def test_workbook_definition_validate_rejects_duplicate_and_unknown_sheet_dependencies(self) -> None:
+        response = self.client.post(
+            "/reports/workbooks/validate",
+            json={
+                "workbook_key": "bad-settlement-pack",
+                "name": "Bad Settlement Pack",
+                "parameter_keys": ["not_supported"],
+                "sheets": [
+                    {
+                        "sheet_key": "summary",
+                        "sheet_name": "Summary",
+                        "sheet_kind": "formula",
+                        "depends_on": ["missing"],
+                    },
+                    {
+                        "sheet_key": "summary",
+                        "sheet_name": "Duplicate Summary",
+                        "sheet_kind": "dataset",
+                        "dataset_id": "missing_dataset",
+                    },
+                    {
+                        "sheet_key": "report_ref",
+                        "sheet_name": "Report Ref",
+                        "sheet_kind": "report",
+                    },
+                    {
+                        "sheet_key": "prior_run",
+                        "sheet_name": "Prior Run",
+                        "sheet_kind": "workbook_run",
+                    },
+                ],
+            },
+            headers=self.report_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["valid"])
+        self.assertEqual(payload["status"], "invalid")
+        issue_codes = {issue["code"] for issue in payload["issues"]}
+        self.assertIn("duplicate_sheet_key", issue_codes)
+        self.assertIn("unknown_sheet_dependency", issue_codes)
+        self.assertIn("unknown_parameter", issue_codes)
+        self.assertIn("unknown_dataset", issue_codes)
+        self.assertIn("missing_report", issue_codes)
+        self.assertIn("missing_run", issue_codes)
+
     def test_pnl_history_report_accepts_as_of_and_portfolio_filters(self) -> None:
         self._seed_trade(trade_id="T-PNL-1", counterparty="SHELL_TRADING", book="CRUDE_PHYS", portfolio="PROMPT")
         self._seed_trade(
