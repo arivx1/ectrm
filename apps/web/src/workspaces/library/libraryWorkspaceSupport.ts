@@ -1,6 +1,8 @@
 import {
+  documentFacetDisplayValues,
   documentNeedsProcessing,
   dominantDocumentKind,
+  formatDocumentFacetLabel,
   reviewReady,
 } from '../../features/documents/documentIngestionUtils'
 import type { DocumentIngestionRecord, DocumentKindSchemaRecord } from '../../shared/models'
@@ -68,6 +70,10 @@ export function documentHasAiAssist(document: DocumentIngestionRecord): boolean 
 
 export function documentReviewQueue(document: DocumentIngestionRecord): boolean {
   return document.review_status !== 'VERIFIED'
+}
+
+export function documentCanBeVerified(document: DocumentIngestionRecord): boolean {
+  return document.review_status !== 'VERIFIED' && !documentNeedsProcessing(document)
 }
 
 export function formatDocumentLibraryLabel(value: string): string {
@@ -236,6 +242,14 @@ export function matchesDocumentLibraryCollection(
 }
 
 function documentSearchIndex(document: DocumentIngestionRecord): string {
+  const facetTokens = documentFacetDisplayValues(document).flatMap((value) => [
+    value.facet_key,
+    value.facet_label,
+    value.value_code,
+    value.value_label,
+    formatDocumentFacetLabel(value),
+  ])
+
   return [
     document.display_name,
     document.original_filename,
@@ -243,6 +257,7 @@ function documentSearchIndex(document: DocumentIngestionRecord): string {
     document.review_status,
     document.review_notes ?? '',
     ...document.record_links.map((link) => link.record_label),
+    ...facetTokens,
   ]
     .join(' ')
     .toLowerCase()

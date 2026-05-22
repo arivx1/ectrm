@@ -2,16 +2,12 @@ import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from
 
 import {
   isPrimaryNavigationSectionKey,
+  primaryNavigationSectionLandingView,
   type PrimaryNavigationSectionKey,
   shouldHandleClientSideNavigation,
 } from '../../app/navigation'
-import type { DocumentationDocumentKey } from '../../workspaces/docs/DocumentationWorkspace'
 import type { ViewKey } from '../../shared/models'
-import {
-  DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
-  isDocumentationDocumentKey,
-  isViewKey,
-} from './appViews'
+import { isViewKey } from './appViews'
 import {
   getAppearanceSettingsSnapshot,
   resolvePreferredHomeView,
@@ -35,7 +31,6 @@ function defaultAppViewKey(): ViewKey {
 export type AppRouteState = {
   section: PrimaryNavigationSectionKey | null
   view: ViewKey
-  docsDocumentKey: DocumentationDocumentKey
   tradeId: string | null
   messagingConversationId: string | null
   libraryDocumentId: string | null
@@ -54,7 +49,6 @@ function readAppRouteState(): AppRouteState {
     return {
       section: null,
       view: DEFAULT_APP_VIEW_KEY,
-      docsDocumentKey: DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
       tradeId: null,
       messagingConversationId: null,
       libraryDocumentId: null,
@@ -65,22 +59,20 @@ function readAppRouteState(): AppRouteState {
   const params = new URLSearchParams(window.location.search)
   const sectionParam = params.get('section')
   const viewParam = params.get('view')
-  const docsParam = params.get('doc')
   const preferredDefaultView = defaultAppViewKey()
   const view: ViewKey = isViewKey(viewParam) ? viewParam : preferredDefaultView
+  const section = isPrimaryNavigationSectionKey(sectionParam) ? sectionParam : null
+  const sectionLandingView = section === null ? null : primaryNavigationSectionLandingView(section)
+  const routeView = sectionLandingView ?? view
 
   return {
-    section: isPrimaryNavigationSectionKey(sectionParam) ? sectionParam : null,
-    view,
-    docsDocumentKey:
-      view === 'guide' && isDocumentationDocumentKey(docsParam)
-        ? docsParam
-        : DEFAULT_DOCUMENTATION_DOCUMENT_KEY,
-    tradeId: view === 'trades' ? params.get('trade')?.trim() || null : null,
+    section: sectionLandingView === null ? section : null,
+    view: routeView,
+    tradeId: routeView === 'trades' ? params.get('trade')?.trim() || null : null,
     messagingConversationId:
-      view === 'messages' ? params.get('conversation')?.trim() || null : null,
+      routeView === 'messages' ? params.get('conversation')?.trim() || null : null,
     libraryDocumentId:
-      view === 'library' ? params.get('document')?.trim() || null : null,
+      routeView === 'library' ? params.get('document')?.trim() || null : null,
     handoff: readAppRouteHandoff(params),
   }
 }
@@ -115,9 +107,6 @@ function buildAppRouteUrl(route: AppRouteState, hash: string): string {
     if (route.view !== preferredDefaultView) {
       params.set('view', route.view)
     }
-    if (route.view === 'guide' && route.docsDocumentKey !== DEFAULT_DOCUMENTATION_DOCUMENT_KEY) {
-      params.set('doc', route.docsDocumentKey)
-    }
     if (route.view === 'trades' && route.tradeId) {
       params.set('trade', route.tradeId)
     }
@@ -139,8 +128,6 @@ export function useAppRouteState() {
   const [activeNavigationSectionKey, setActiveNavigationSectionKey] =
     useState<PrimaryNavigationSectionKey | null>(initialRoute.section)
   const [currentView, setCurrentView] = useState<ViewKey>(initialRoute.view)
-  const [activeDocumentationDocumentKey, setActiveDocumentationDocumentKey] =
-    useState<DocumentationDocumentKey>(initialRoute.docsDocumentKey)
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(initialRoute.tradeId)
   const [selectedMessagingConversationId, setSelectedMessagingConversationId] =
     useState<string | null>(initialRoute.messagingConversationId)
@@ -203,7 +190,6 @@ export function useAppRouteState() {
       {
         section: null,
         view,
-        docsDocumentKey: activeDocumentationDocumentKey,
         tradeId: nextTradeId,
         messagingConversationId: nextMessagingConversationId,
         libraryDocumentId: nextLibraryDocumentId,
@@ -241,7 +227,6 @@ export function useAppRouteState() {
       {
         section: null,
         view,
-        docsDocumentKey: activeDocumentationDocumentKey,
         tradeId: options.tradeId !== undefined ? options.tradeId : selectedTradeId,
         messagingConversationId:
           options.messagingConversationId !== undefined
@@ -266,11 +251,16 @@ export function useAppRouteState() {
   }
 
   function navigateToSection(sectionKey: PrimaryNavigationSectionKey) {
+    const sectionLandingView = primaryNavigationSectionLandingView(sectionKey)
+    if (sectionLandingView !== null) {
+      navigateToView(sectionLandingView)
+      return
+    }
+
     syncRouteState(
       {
         section: sectionKey,
         view: currentView,
-        docsDocumentKey: activeDocumentationDocumentKey,
         tradeId: selectedTradeId,
         messagingConversationId: selectedMessagingConversationId,
         libraryDocumentId: selectedLibraryDocumentId,
@@ -298,7 +288,6 @@ export function useAppRouteState() {
       {
         section: null,
         view: 'trades',
-        docsDocumentKey: activeDocumentationDocumentKey,
         tradeId,
         messagingConversationId: selectedMessagingConversationId,
         libraryDocumentId: selectedLibraryDocumentId,
@@ -312,41 +301,12 @@ export function useAppRouteState() {
     setRouteHandoff(nextHandoff)
   }
 
-  function handleDocumentationDocumentChange(nextDocumentKey: DocumentationDocumentKey) {
-    if (currentView === 'guide' && activeDocumentationDocumentKey === nextDocumentKey) {
-      return
-    }
-
-    syncRouteState(
-      {
-        section: null,
-        view: 'guide',
-        docsDocumentKey: nextDocumentKey,
-        tradeId: selectedTradeId,
-        messagingConversationId: selectedMessagingConversationId,
-        libraryDocumentId: selectedLibraryDocumentId,
-        handoff: null,
-      },
-      'push',
-      currentView === 'guide' && nextDocumentKey === DEFAULT_DOCUMENTATION_DOCUMENT_KEY
-        ? window.location.hash
-        : '',
-    )
-    setActiveNavigationSectionKey(null)
-    setActiveDocumentationDocumentKey(nextDocumentKey)
-    setCurrentView('guide')
-    setRouteHandoff(null)
-  }
-
   useEffect(() => {
     function handlePopState() {
       const nextRoute = readAppRouteState()
       setActiveNavigationSectionKey(nextRoute.section)
       setCurrentView(nextRoute.view)
       setRouteHandoff(nextRoute.handoff)
-      if (nextRoute.view === 'guide') {
-        setActiveDocumentationDocumentKey(nextRoute.docsDocumentKey)
-      }
       if (nextRoute.view === 'trades') {
         setSelectedTradeId(nextRoute.tradeId)
       }
@@ -367,23 +327,17 @@ export function useAppRouteState() {
       {
         section: activeNavigationSectionKey,
         view: currentView,
-        docsDocumentKey: activeDocumentationDocumentKey,
         tradeId: selectedTradeId,
         messagingConversationId: selectedMessagingConversationId,
         libraryDocumentId: selectedLibraryDocumentId,
         handoff: routeHandoff,
       },
       'replace',
-      currentView === 'settings' ||
-        (currentView === 'guide' &&
-          activeDocumentationDocumentKey === DEFAULT_DOCUMENTATION_DOCUMENT_KEY)
-        ? window.location.hash
-        : '',
+      currentView === 'settings' ? window.location.hash : '',
     )
   }, [
     activeNavigationSectionKey,
     currentView,
-    activeDocumentationDocumentKey,
     selectedTradeId,
     selectedMessagingConversationId,
     selectedLibraryDocumentId,
@@ -391,10 +345,8 @@ export function useAppRouteState() {
   ])
 
   return {
-    activeDocumentationDocumentKey,
     activeNavigationSectionKey,
     currentView,
-    handleDocumentationDocumentChange,
     handleViewLinkClick,
     hrefForView,
     navigateToSection,

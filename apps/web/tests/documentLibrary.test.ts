@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
-import type { DocumentIngestionRecord, DocumentIngestionUnderstandingRecord } from '../src/shared/models'
+import type {
+  DocumentFacetAssignmentRecord,
+  DocumentIngestionRecord,
+  DocumentIngestionUnderstandingRecord,
+} from '../src/shared/models'
 import {
   buildDocumentLibraryCollectionCounts,
   buildDocumentLibraryFolderDescendantIds,
   buildDocumentLibraryFolderCounts,
   buildDocumentLibraryFolderTree,
+  documentCanBeVerified,
   filterDocumentLibraryDocuments,
   sortDocumentLibraryKindOptions,
 } from '../src/workspaces/library/libraryWorkspaceSupport'
@@ -97,6 +102,28 @@ function buildDocument(overrides: Partial<DocumentIngestionRecord> = {}): Docume
     record_links: [],
     pages: [],
     understanding: buildDocumentUnderstanding(),
+    ...overrides,
+  }
+}
+
+function buildFacetValue(overrides: Partial<DocumentFacetAssignmentRecord> = {}): DocumentFacetAssignmentRecord {
+  return {
+    facet_value_id: 1,
+    document_id: 'DOC-1',
+    page_id: null,
+    facet_key: 'commodity',
+    facet_label: 'Commodity',
+    value_code: 'NATURAL_GAS',
+    value_label: 'Natural Gas',
+    source: 'MANUAL',
+    confidence: null,
+    review_status: 'CONFIRMED',
+    evidence: [],
+    created_at: '2026-05-10T10:00:00Z',
+    created_by: 'ops.docs',
+    updated_at: '2026-05-10T11:00:00Z',
+    updated_by: 'ops.docs',
+    version: 1,
     ...overrides,
   }
 }
@@ -223,6 +250,14 @@ describe('document library helpers', () => {
     })
   })
 
+  it('allows Library verification actions for analyzed documents that are not already verified', () => {
+    expect(documentCanBeVerified(buildDocument({ review_status: 'UNREVIEWED' }))).toBe(true)
+    expect(documentCanBeVerified(buildDocument({ review_status: 'IN_REVIEW' }))).toBe(true)
+
+    expect(documentCanBeVerified(buildDocument({ review_status: 'VERIFIED' }))).toBe(false)
+    expect(documentCanBeVerified(buildDocument({ status: 'PROCESSING' }))).toBe(false)
+  })
+
   it('filters and sorts documents for the active library collection', () => {
     const documents = [
       buildDocument({
@@ -265,6 +300,56 @@ describe('document library helpers', () => {
         documents,
         collectionKey: 'ready',
         query: 'invoice',
+        sortMode: 'name',
+      }).map((document) => document.document_id),
+    ).toEqual(['DOC-2'])
+  })
+
+  it('matches document facet tags in library search', () => {
+    const documents = [
+      buildDocument({
+        document_id: 'DOC-2',
+        display_name: 'Contract Packet',
+        original_filename: 'contract-packet.pdf',
+        facet_values: [
+          buildFacetValue({
+            document_id: 'DOC-2',
+            facet_key: 'commodity',
+            facet_label: 'Commodity',
+            value_code: 'NATURAL_GAS',
+            value_label: 'Natural Gas',
+          }),
+          buildFacetValue({
+            facet_value_id: 2,
+            document_id: 'DOC-2',
+            facet_key: 'transport_mode',
+            facet_label: 'Mode of Transportation',
+            value_code: 'PIPELINE',
+            value_label: 'Pipeline',
+          }),
+        ],
+      }),
+      buildDocument({
+        document_id: 'DOC-3',
+        display_name: 'Invoice Packet',
+        original_filename: 'invoice-packet.pdf',
+      }),
+    ]
+
+    expect(
+      filterDocumentLibraryDocuments({
+        documents,
+        collectionKey: 'all',
+        query: 'natural gas',
+        sortMode: 'name',
+      }).map((document) => document.document_id),
+    ).toEqual(['DOC-2'])
+
+    expect(
+      filterDocumentLibraryDocuments({
+        documents,
+        collectionKey: 'all',
+        query: 'mode of transportation',
         sortMode: 'name',
       }).map((document) => document.document_id),
     ).toEqual(['DOC-2'])

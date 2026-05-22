@@ -25,6 +25,8 @@ from apps.api.app.schemas.document import DocumentTableBlockOut
 from .document_ingestion_common import build_raw_text_excerpt
 from .document_ingestion_common import clean_optional_text
 from .document_action_planning import build_document_action_plan
+from .document_facets import load_document_facet_values_by_document_id
+from .document_facets import to_document_facet_assignment_out
 from .document_linkage import build_document_linkage_assessment
 from .document_routing import build_document_page_routing_assessment
 from .document_record_links import load_document_record_links_by_document_id
@@ -115,11 +117,25 @@ def serialize_documents(
     for page in pages:
         pages_by_document[page.document_id].append(page)
     record_links_by_document = load_document_record_links_by_document_id(db, document_ids=document_ids)
+    facet_values_by_document = load_document_facet_values_by_document_id(db, document_ids=document_ids)
 
     serialized: list[DocumentIngestionOut] = []
     for document in documents:
         document_pages = pages_by_document.get(document.document_id, [])
         document_record_links = record_links_by_document.get(document.document_id, [])
+        document_facet_values = facet_values_by_document.get(document.document_id, [])
+        facet_values_by_page = {
+            page.page_id: [
+                to_document_facet_assignment_out(facet_value)
+                for facet_value in document_facet_values
+                if facet_value.page_id == page.page_id
+            ]
+            for page in document_pages
+        }
+        serialized_document_facet_values = [
+            to_document_facet_assignment_out(facet_value)
+            for facet_value in document_facet_values
+        ]
         source_available = stored_pdf_absolute_path(document.storage_key).exists()
         document_summary = build_document_summary(document_pages, review_status=document.review_status)
         document_routing_payload = document_summary.get("routing_assessment")
@@ -206,6 +222,7 @@ def serialize_documents(
                     reviewed_at=page.reviewed_at,
                     reviewed_by=page.reviewed_by,
                     processed_at=page.processed_at,
+                    facet_values=facet_values_by_page.get(page.page_id, []),
                     processor_trace=serialized_page_processor_traces[page_index],
                     routing_assessment=build_document_page_routing_assessment(
                         document_kind=page.document_kind,
@@ -251,6 +268,7 @@ def serialize_documents(
                     DocumentRecordLinkOut.model_validate(to_document_record_link_out(link))
                     for link in document_record_links
                 ],
+                facet_values=serialized_document_facet_values,
                 pages=serialized_pages,
                 understanding=build_document_understanding(
                     original_filename=document.original_filename,

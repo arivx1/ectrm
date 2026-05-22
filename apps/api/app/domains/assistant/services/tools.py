@@ -2098,6 +2098,7 @@ async def _consult_managed_agent(
         display_name=actor.display_name,
         role=actor.role,
         email=actor.email,
+        default_persona=actor.default_assistant_persona,
         session_id=None,
         session_expires_at=None,
     )
@@ -2196,6 +2197,7 @@ async def _enlist_managed_agent(
         display_name=actor.display_name,
         role=delegated_role,
         email=actor.email,
+        default_persona=actor.default_assistant_persona,
         session_id=delegated_session_id,
         session_expires_at=None,
     )
@@ -4226,6 +4228,7 @@ def _serialize_reference_record(record: Any) -> dict[str, Any]:
         payload["currency_code"] = record.currency_code
         payload["unit_code"] = record.unit_code
         payload["provider"] = record.provider
+        payload["quote_type"] = record.quote_type
         payload["market"] = record.market
         payload["location_code"] = record.location_code
         payload["calendar_code"] = record.calendar_code

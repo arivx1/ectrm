@@ -4370,6 +4370,29 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/market-data/price-indices/observations/latest' && method === 'GET') {
+      writeJson(response, [
+        {
+          id: 1,
+          price_index_code: 'HH_IFERC',
+          observation_date: '2026-04-11',
+          value: 3.21,
+          unit_code: 'USD/MMBTU',
+          currency_code: 'USD',
+          source_provider: 'ICE',
+          source_series_id: 'HH_IFERC',
+          source_frequency: 'DAILY',
+          source_published_at: '2026-04-11T00:00:00Z',
+          source_revision: null,
+          downloaded_at: '2026-04-11T00:00:00Z',
+          run_id: 1,
+          created_at: '2026-04-11T00:00:00Z',
+          updated_at: '2026-04-11T00:00:00Z',
+        },
+      ])
+      return
+    }
+
     if (url.pathname === '/market-data/price-indices/HH_IFERC/observations' && method === 'GET') {
       writeJson(response, [
         {

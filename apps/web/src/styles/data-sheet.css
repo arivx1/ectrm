@@ -1247,29 +1247,6 @@
   min-width: 11rem;
 }
 
-.asset-map-weather-legend-marker {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.35rem;
-  height: 1.35rem;
-  border: 2px solid rgba(255, 255, 255, 0.96);
-  border-radius: 0.45rem;
-  background: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
-}
-
-.asset-map-weather-marker-label {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.45rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #ffffff;
-}
-
 .asset-map-canvas-frame,
 .asset-map-empty {
   position: relative;
@@ -1336,56 +1313,6 @@
 
 body.is-map-resizing {
   cursor: ns-resize;
-}
-
-.asset-map-weather-preview {
-  position: absolute;
-  inset: 3.8rem 0.9rem auto auto;
-  z-index: 2;
-  display: grid;
-  gap: 0.75rem;
-  width: min(22rem, calc(100vw - 4rem));
-  padding: 0.85rem 0.95rem;
-  border: 1px solid rgba(18, 42, 56, 0.12);
-  border-radius: 0.95rem;
-  background: rgba(248, 250, 249, 0.97);
-  color: #13293d;
-  box-shadow: 0 14px 32px rgba(19, 41, 61, 0.16);
-}
-
-.asset-map-weather-preview-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.8rem;
-  align-items: start;
-}
-
-.asset-map-weather-preview-head p,
-.asset-map-weather-preview p {
-  margin: 0;
-  color: #66717c;
-  line-height: 1.45;
-}
-
-.asset-map-weather-preview strong {
-  color: #13293d;
-}
-
-.asset-map-weather-preview-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.asset-map-weather-preview-close {
-  width: 1.9rem;
-  height: 1.9rem;
-  padding: 0;
-  border: 1px solid rgba(18, 42, 56, 0.08);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.86);
-  color: #30404d;
-  line-height: 1;
 }
 
 .asset-map-control-feedback {
@@ -1522,20 +1449,25 @@ body.is-map-resizing {
     0 10px 18px rgba(19, 41, 61, 0.16);
 }
 
-.asset-map-weather-marker {
+.asset-map-vessel-marker,
+.asset-map-vessel-legend-marker {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 1.45rem;
+  height: 1.45rem;
   padding: 0;
   border: 2px solid rgba(255, 255, 255, 0.96);
   border-radius: 0.45rem;
-  background: #2563eb;
+  background: #0891b2;
   box-shadow:
-    0 0 0 3px rgba(37, 99, 235, 0.18),
+    0 0 0 3px rgba(8, 145, 178, 0.18),
     0 10px 18px rgba(19, 41, 61, 0.18);
+  color: #ffffff;
+}
+
+.asset-map-vessel-marker {
   cursor: pointer;
   transition:
     transform 180ms ease,
@@ -1543,40 +1475,43 @@ body.is-map-resizing {
     background-color 180ms ease;
 }
 
-.asset-map-weather-marker:hover,
-.asset-map-weather-marker.is-selected {
+.asset-map-vessel-marker:hover,
+.asset-map-vessel-marker.is-selected {
   transform: scale(1.12) translateY(-1px);
   box-shadow:
-    0 0 0 4px rgba(37, 99, 235, 0.22),
-    0 14px 24px rgba(19, 41, 61, 0.22);
+    0 0 0 4px rgba(8, 145, 178, 0.24),
+    0 14px 24px rgba(19, 41, 61, 0.24);
 }
 
-.asset-map-weather-marker.is-healthy {
-  background: #2563eb;
-}
-
-.asset-map-weather-marker.is-stale,
-.asset-map-weather-marker.is-degraded {
-  background: #c2410c;
+.asset-map-vessel-marker.is-watch {
+  background: #ca8a04;
   box-shadow:
-    0 0 0 3px rgba(194, 65, 12, 0.18),
+    0 0 0 3px rgba(202, 138, 4, 0.18),
     0 10px 18px rgba(19, 41, 61, 0.18);
 }
 
-.asset-map-weather-marker.is-missing,
-.asset-map-weather-marker.is-failed,
-.asset-map-weather-marker.is-unknown {
-  background: #7c3aed;
+.asset-map-vessel-marker.is-action-required {
+  background: #b91c1c;
   box-shadow:
-    0 0 0 3px rgba(124, 58, 237, 0.18),
+    0 0 0 3px rgba(185, 28, 28, 0.18),
     0 10px 18px rgba(19, 41, 61, 0.18);
 }
 
-.asset-map-weather-marker.is-running {
-  background: #0f766e;
+.asset-map-vessel-marker.is-unknown {
+  background: #475569;
   box-shadow:
-    0 0 0 3px rgba(15, 118, 110, 0.18),
+    0 0 0 3px rgba(71, 85, 105, 0.18),
     0 10px 18px rgba(19, 41, 61, 0.18);
+}
+
+.asset-map-vessel-marker-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .asset-map-user-marker {
@@ -1643,8 +1578,8 @@ body.is-map-resizing {
 
 .asset-map-marker:hover .asset-map-marker-tooltip,
 .asset-map-marker:focus-visible .asset-map-marker-tooltip,
-.asset-map-weather-marker:hover .asset-map-marker-tooltip,
-.asset-map-weather-marker:focus-visible .asset-map-marker-tooltip,
+.asset-map-vessel-marker:hover .asset-map-marker-tooltip,
+.asset-map-vessel-marker:focus-visible .asset-map-marker-tooltip,
 .asset-map-user-marker:hover .asset-map-marker-tooltip {
   opacity: 1;
   visibility: visible;

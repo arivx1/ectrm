@@ -40,6 +40,8 @@ import type {
   AssistantConversationSummary,
   AssistantPromptContext,
   AssistantPromptSection,
+  AssistantPersona,
+  AssistantPersonaDefinition,
   AssistantPromptRequest,
   AssistantProvider,
   AssistantRun,
@@ -96,6 +98,72 @@ type ChatMessage = {
   toolCalls?: AssistantToolCall[]
   actionRequests?: AssistantActionRequest[]
   feedback?: AssistantRunFeedback | null
+}
+
+const FALLBACK_ASSISTANT_PERSONAS: AssistantPersonaDefinition[] = [
+  {
+    key: 'operator',
+    label: 'Operator',
+    description: 'General operator-console lens for triage, routing, workflow state, and manual fallback.',
+    default_for_roles: ['OPS_USER', 'VIEWER'],
+    guidance: [],
+  },
+  {
+    key: 'trader',
+    label: 'Trader',
+    description: 'Commercial lens for trade economics, book exposure, market context, and pre-trade drafting.',
+    default_for_roles: ['TRADER', 'DESK_LEAD'],
+    guidance: [],
+  },
+  {
+    key: 'risk',
+    label: 'Risk',
+    description: 'Risk and credit lens for exposure, limits, stale evidence, sensitivities, and escalation posture.',
+    default_for_roles: ['RISK', 'RISK_MANAGER', 'CREDIT_APPROVER', 'CREDIT'],
+    guidance: [],
+  },
+  {
+    key: 'admin',
+    label: 'Admin',
+    description: 'Platform-stewardship lens for configuration, audit, permissions, agents, policy, and controls.',
+    default_for_roles: ['OPS_ADMIN', 'ADMIN'],
+    guidance: [],
+  },
+  {
+    key: 'operations',
+    label: 'Operations',
+    description: 'Operations lens for confirmations, scheduling, delivery readiness, blockers, and handoffs.',
+    default_for_roles: ['OPERATIONS'],
+    guidance: [],
+  },
+  {
+    key: 'settlement',
+    label: 'Settlement',
+    description: 'Settlement and accounting lens for invoices, payments, accruals, exceptions, and finance follow-up.',
+    default_for_roles: ['SETTLEMENT', 'ACCOUNTING', 'ACCOUNTANT', 'CONTROLLER'],
+    guidance: [],
+  },
+  {
+    key: 'reference_data',
+    label: 'Reference Data',
+    description: 'Reference-data stewardship lens for governed lists, codes, lifecycle status, and data quality.',
+    default_for_roles: ['REFERENCE_DATA', 'DATA_STEWARD'],
+    guidance: [],
+  },
+]
+
+function resolveAssistantPersonaFromRole(
+  personas: AssistantPersonaDefinition[],
+  role: string | undefined,
+): AssistantPersona {
+  const normalizedRole = role?.trim().toUpperCase()
+  if (normalizedRole) {
+    const matchedPersona = personas.find((persona) => persona.default_for_roles.includes(normalizedRole))
+    if (matchedPersona) {
+      return matchedPersona.key
+    }
+  }
+  return 'operator'
 }
 
 function createChatMessageId(): string {
@@ -603,6 +671,7 @@ export function AssistantWorkspace({
   const [agentBudgetRefreshing, setAgentBudgetRefreshing] = useState(false)
   const [selectedProvider, setSelectedProvider] = useState<AssistantProvider | ''>('')
   const [selectedAgentId, setSelectedAgentId] = useState('')
+  const [selectedPersona, setSelectedPersona] = useState<AssistantPersona | ''>('')
   const [includeContext, setIncludeContext] = useState(true)
   const [useLiveTools, setUseLiveTools] = useState(true)
   const [draft, setDraft] = useState('')
@@ -980,6 +1049,13 @@ export function AssistantWorkspace({
   }, [agents, selectedAgentId])
 
   useEffect(() => {
+    const available = runtimeSettings?.available_personas
+    if (selectedPersona && available?.length && !available.some((persona) => persona.key === selectedPersona)) {
+      setSelectedPersona('')
+    }
+  }, [runtimeSettings, selectedPersona])
+
+  useEffect(() => {
     let cancelled = false
 
     async function loadSelectedConversation() {
@@ -1053,6 +1129,7 @@ export function AssistantWorkspace({
             agent_id: selectedAgentId || undefined,
             provider: selectedProvider,
             workspace: 'assistant',
+            persona: selectedPersona || undefined,
             context: includeContext ? contextSummary : undefined,
             use_live_tools: useLiveTools,
           },
@@ -1082,7 +1159,7 @@ export function AssistantWorkspace({
     return () => {
       cancelled = true
     }
-  }, [authSession, contextSummary, includeContext, runtimeSettings, selectedAgentId, selectedProvider, useLiveTools])
+  }, [authSession, contextSummary, includeContext, runtimeSettings, selectedAgentId, selectedPersona, selectedProvider, useLiveTools])
 
   useEffect(() => {
     let cancelled = false
@@ -1156,6 +1233,7 @@ export function AssistantWorkspace({
         agent_id: selectedAgentId || undefined,
         provider: selectedProvider,
         workspace: 'assistant',
+        persona: selectedPersona || undefined,
         context: includeContext ? contextSummary : undefined,
         use_live_tools: useLiveTools,
         messages: nextMessages.map((message) => ({
@@ -1412,6 +1490,22 @@ export function AssistantWorkspace({
   const selectedProviderDetails =
     runtimeSettings?.providers.find((provider) => provider.provider === selectedProvider) ?? null
   const selectedAgent = agents.find((agent) => agent.agent_id === selectedAgentId) ?? null
+  const availablePersonas = runtimeSettings?.available_personas?.length
+    ? runtimeSettings.available_personas
+    : FALLBACK_ASSISTANT_PERSONAS
+  const defaultPersonaKey =
+    authSession?.user.default_assistant_persona ||
+    resolveAssistantPersonaFromRole(availablePersonas, authSession?.user.role)
+  const effectivePersonaKey = selectedPersona || defaultPersonaKey
+  const selectedPersonaDetails =
+    availablePersonas.find((persona) => persona.key === effectivePersonaKey) ??
+    availablePersonas.find((persona) => persona.key === 'operator') ??
+    null
+  const defaultPersonaDetails =
+    availablePersonas.find((persona) => persona.key === defaultPersonaKey) ??
+    availablePersonas.find((persona) => persona.key === 'operator') ??
+    null
+  const personaSelectionSource = selectedPersona ? 'Override' : 'User default'
   const activeConstructionAgent = useMemo(() => {
     if (selectedRun?.agent_id) {
       return agents.find((agent) => agent.agent_id === selectedRun.agent_id) ?? null
@@ -1855,6 +1949,27 @@ export function AssistantWorkspace({
                 </select>
               </label>
 
+              <label className="field">
+                <span>Persona</span>
+                <select
+                  className="control"
+                  value={selectedPersona}
+                  onChange={(event) => {
+                    setSubmitError('')
+                    setSelectedPersona(event.target.value as AssistantPersona | '')
+                  }}
+                >
+                  <option value="">
+                    {defaultPersonaDetails ? `User default (${defaultPersonaDetails.label})` : 'User default'}
+                  </option>
+                  {availablePersonas.map((persona) => (
+                    <option key={persona.key} value={persona.key}>
+                      {persona.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               <label className="assistant-toggle">
                 <input
                   type="checkbox"
@@ -1880,6 +1995,15 @@ export function AssistantWorkspace({
               <div className="assistant-sidebar-block">
                 <strong>Selected agent</strong>
                 <small>{selectedAgent ? selectedAgent.description : 'Platform foundation with no named agent override.'}</small>
+              </div>
+
+              <div className="assistant-sidebar-block">
+                <strong>Active persona</strong>
+                <small>
+                  {selectedPersonaDetails
+                    ? `${personaSelectionSource}: ${selectedPersonaDetails.label}. ${selectedPersonaDetails.description}`
+                    : 'Persona context will be resolved by the API.'}
+                </small>
               </div>
 
               <div className="assistant-sidebar-block">

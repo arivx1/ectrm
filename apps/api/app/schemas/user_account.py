@@ -5,6 +5,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from apps.api.app.schemas.assistant import AssistantPersona
 from apps.api.app.schemas._validation import (
     normalize_optional_text,
     normalize_required_text,
@@ -17,6 +18,7 @@ class UserAccountCreate(BaseModel):
     email: str = Field(..., min_length=3, max_length=255)
     display_name: str = Field(..., min_length=1, max_length=160)
     role: str = Field(..., min_length=1, max_length=50)
+    default_assistant_persona: Optional[AssistantPersona] = None
     password: str = Field(..., min_length=8, max_length=128)
     created_by: str = Field(..., min_length=1, max_length=128)
     last_login_at: Optional[datetime] = None
@@ -41,6 +43,14 @@ class UserAccountCreate(BaseModel):
     def normalize_role(cls, value: str) -> str:
         return normalize_required_text(value, field_name="role", uppercase=True)
 
+    @field_validator("default_assistant_persona", mode="before")
+    @classmethod
+    def normalize_default_assistant_persona(cls, value: object) -> object:
+        if value is None or not isinstance(value, str):
+            return value
+        normalized = normalize_optional_text(value, field_name="default_assistant_persona", lowercase=True)
+        return normalized.replace("-", "_") if normalized is not None else None
+
     @field_validator("password")
     @classmethod
     def validate_password(cls, value: str) -> str:
@@ -56,6 +66,7 @@ class UserAccountUpdate(BaseModel):
     email: Optional[str] = Field(None, min_length=3, max_length=255)
     display_name: Optional[str] = Field(None, min_length=1, max_length=160)
     role: Optional[str] = Field(None, min_length=1, max_length=50)
+    default_assistant_persona: Optional[AssistantPersona] = None
     password: Optional[str] = Field(None, min_length=8, max_length=128)
     last_login_at: Optional[datetime] = None
     updated_by: str = Field(..., min_length=1, max_length=128)
@@ -74,6 +85,14 @@ class UserAccountUpdate(BaseModel):
     @classmethod
     def normalize_role(cls, value: Optional[str]) -> Optional[str]:
         return normalize_optional_text(value, field_name="role", uppercase=True)
+
+    @field_validator("default_assistant_persona", mode="before")
+    @classmethod
+    def normalize_default_assistant_persona(cls, value: object) -> object:
+        if value is None or not isinstance(value, str):
+            return value
+        normalized = normalize_optional_text(value, field_name="default_assistant_persona", lowercase=True)
+        return normalized.replace("-", "_") if normalized is not None else None
 
     @field_validator("password")
     @classmethod
@@ -102,6 +121,7 @@ class UserAccountOut(BaseModel):
     email: str
     display_name: str
     role: str
+    default_assistant_persona: AssistantPersona
     is_active: bool
     password_set: bool
     last_login_at: Optional[datetime]

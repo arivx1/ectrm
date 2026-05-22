@@ -42,6 +42,7 @@ from apps.api.app.domains.assistant.services.policies import (
     authority_allows_execution,
     evaluate_tool_policy,
 )
+from apps.api.app.domains.assistant.personas import normalize_assistant_persona_key
 from apps.api.app.domains.assistant.services.registry import (
     ACTIVE_ASSISTANT_AGENT_STATUS,
     ManagedAssistantAgent,
@@ -218,6 +219,7 @@ def resolve_prompt_user(
         display_name=record.display_name,
         role=record.role,
         email=record.email,
+        default_persona=normalize_assistant_persona_key(record.default_assistant_persona),
         session_id=principal.session_id,
         session_expires_at=principal.expires_at,
     )

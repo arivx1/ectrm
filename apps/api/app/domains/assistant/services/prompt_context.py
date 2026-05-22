@@ -13,6 +13,10 @@ from apps.api.app.domains.assistant.services.app_context_catalog import build_ap
 from apps.api.app.domains.assistant.services.organization_context_registry import (
     list_published_organization_context_prompt_sections,
 )
+from apps.api.app.domains.assistant.personas import (
+    get_assistant_persona_definition,
+    resolve_assistant_persona,
+)
 from apps.api.app.domains.assistant.services.registry import ManagedAssistantAgent
 from apps.api.app.domains.wiki.services.pages import WikiPageSearchMatch, rank_wiki_pages_for_query
 from apps.api.app.models.event import Event
@@ -56,6 +60,7 @@ class AssistantPromptUser:
     display_name: str
     role: str
     email: str
+    default_persona: str | None
     session_id: str | None
     session_expires_at: datetime | None
 
@@ -136,6 +141,15 @@ PROMPT_SECTION_CONTRACTS: dict[str, AssistantPromptSectionContract] = {
         kind="GENERATED",
         owner="authenticated-user",
         freshness="SESSION",
+    ),
+    "persona": AssistantPromptSectionContract(
+        contract_key="persona",
+        default_title="Active Persona",
+        source="user",
+        scope="REQUEST",
+        kind="GENERATED",
+        owner="assistant-persona-catalog",
+        freshness="REQUEST",
     ),
     "business-model": AssistantPromptSectionContract(
         contract_key="business-model",
@@ -323,6 +337,7 @@ def build_prompt_context(
         _build_system_section(),
         organization_sections.organization,
         _build_user_section(user),
+        _build_persona_section(payload=payload, user=user),
         organization_sections.business_model,
         *organization_sections.supplemental,
         _build_data_semantics_section(),
@@ -443,11 +458,42 @@ def _build_user_section(user: AssistantPromptUser) -> AssistantPromptSection:
             f"display_name: {user.display_name}\n"
             f"email: {user.email}\n"
             f"role: {user.role}\n"
+            f"default_persona: {user.default_persona or 'role-derived'}\n"
             f"session_id: {user.session_id or 'unknown'}\n"
             f"session_expires_at: {expires_at}\n"
             "Treat the role as workflow context, not as permission to invent approvals or completed actions."
         ),
         owner_reference=user.user_id,
+    )
+
+
+def _build_persona_section(
+    *,
+    payload: AssistantPromptContextRequest,
+    user: AssistantPromptUser,
+) -> AssistantPromptSection:
+    resolution = resolve_assistant_persona(
+        requested_persona=payload.persona,
+        default_persona=user.default_persona,
+        user_role=user.role,
+        user_id=user.user_id,
+    )
+    definition = get_assistant_persona_definition(resolution.key)
+    lines = [
+        f"persona_key: {definition.key}",
+        f"label: {definition.label}",
+        f"description: {definition.description}",
+        f"resolved_from: {resolution.resolved_from}",
+        "Use this persona as an interpretation lens for ambiguous requests, terminology, priorities, and evidence emphasis.",
+        "This persona does not change authenticated role, permissions, row access, allowed tools, allowed action types, reviewer roles, or policy checks.",
+        "If persona guidance conflicts with live evidence, managed-agent instructions, workspace context, or governance policy, state the conflict and follow the stricter governed context.",
+        "Persona guidance:",
+        *[f"- {guidance}" for guidance in definition.guidance],
+    ]
+    return build_prompt_section(
+        contract_key="persona",
+        content="\n".join(lines),
+        owner_reference=f"{definition.key}:{resolution.resolved_from}",
     )
 
 

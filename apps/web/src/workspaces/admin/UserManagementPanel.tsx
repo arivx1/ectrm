@@ -11,6 +11,7 @@ import {
 } from '../../entities/users/api'
 import { appConfig } from '../../shared/config'
 import { type StoredAuthSession } from '../../shared/mutation'
+import type { AssistantPersona } from '../../shared/models'
 
 type FlashMessage = {
   tone: 'success' | 'error'
@@ -22,6 +23,7 @@ type UserCreateForm = {
   email: string
   displayName: string
   role: string
+  defaultAssistantPersona: AssistantPersona | ''
   password: string
 }
 
@@ -29,6 +31,7 @@ type UserEditForm = {
   email: string
   displayName: string
   role: string
+  defaultAssistantPersona: AssistantPersona
   password: string
 }
 
@@ -41,12 +44,22 @@ type UserManagementPanelProps = {
 }
 
 const USER_ROLE_SUGGESTIONS = ['OPS_ADMIN', 'ADMIN', 'CREDIT_APPROVER', 'TRADER', 'OPERATIONS', 'ACCOUNTING', 'VIEWER']
+const USER_PERSONA_OPTIONS: { value: AssistantPersona; label: string }[] = [
+  { value: 'operator', label: 'Operator' },
+  { value: 'trader', label: 'Trader' },
+  { value: 'risk', label: 'Risk' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'operations', label: 'Operations' },
+  { value: 'settlement', label: 'Settlement' },
+  { value: 'reference_data', label: 'Reference Data' },
+]
 
 const EMPTY_CREATE_FORM: UserCreateForm = {
   userId: '',
   email: '',
   displayName: '',
   role: 'TRADER',
+  defaultAssistantPersona: '',
   password: '',
 }
 
@@ -54,6 +67,7 @@ const EMPTY_EDIT_FORM: UserEditForm = {
   email: '',
   displayName: '',
   role: '',
+  defaultAssistantPersona: 'operator',
   password: '',
 }
 
@@ -72,8 +86,13 @@ function buildEditForm(user: UserAccountRecord): UserEditForm {
     email: user.email,
     displayName: user.display_name,
     role: user.role,
+    defaultAssistantPersona: user.default_assistant_persona,
     password: '',
   }
+}
+
+function formatAssistantPersona(persona: AssistantPersona | string | null | undefined): string {
+  return USER_PERSONA_OPTIONS.find((option) => option.value === persona)?.label ?? 'Operator'
 }
 
 function UserMetaRow({
@@ -304,6 +323,9 @@ export function UserManagementPanel({
         email,
         display_name: displayName,
         role,
+        ...(createForm.defaultAssistantPersona
+          ? { default_assistant_persona: createForm.defaultAssistantPersona }
+          : {}),
         password,
       })
 
@@ -356,6 +378,7 @@ export function UserManagementPanel({
         email,
         display_name: displayName,
         role,
+        default_assistant_persona: editForm.defaultAssistantPersona,
         ...(password ? { password } : {}),
       })
 
@@ -566,6 +589,7 @@ export function UserManagementPanel({
                   <p>{user.email}</p>
                   <div className="user-account-meta">
                     <span>{user.role}</span>
+                    <span>{formatAssistantPersona(user.default_assistant_persona)} persona</span>
                     <span>{user.password_set ? 'Password set' : 'No password'}</span>
                     <span>Updated {formatDate(user.updated_at)}</span>
                   </div>
@@ -593,6 +617,7 @@ export function UserManagementPanel({
               <>
                 <div className="settings-kv">
                   <UserMetaRow label="User ID" value={selectedUser.user_id} />
+                  <UserMetaRow label="Default persona" value={formatAssistantPersona(selectedUser.default_assistant_persona)} />
                   <UserMetaRow label="Created" value={formatDate(selectedUser.created_at)} detail={`By ${selectedUser.created_by}`} />
                   <UserMetaRow label="Last login" value={selectedUser.last_login_at ? formatDate(selectedUser.last_login_at) : 'Never'} />
                   <UserMetaRow label="Version" value={String(selectedUser.version)} detail={`Updated ${formatDate(selectedUser.updated_at)} by ${selectedUser.updated_by}`} />
@@ -637,6 +662,26 @@ export function UserManagementPanel({
                         }}
                         placeholder="TRADER"
                       />
+                    </label>
+                    <label className="field">
+                      <span>Default Persona</span>
+                      <select
+                        className="control"
+                        value={editForm.defaultAssistantPersona}
+                        onChange={(event) => {
+                          setUserFlash(null)
+                          setEditForm((current) => ({
+                            ...current,
+                            defaultAssistantPersona: event.target.value as AssistantPersona,
+                          }))
+                        }}
+                      >
+                        {USER_PERSONA_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                     <label className="field">
                       <span>Reset Password</span>
@@ -754,6 +799,27 @@ export function UserManagementPanel({
                     }}
                     placeholder="TRADER"
                   />
+                </label>
+                <label className="field">
+                  <span>Default Persona</span>
+                  <select
+                    className="control"
+                    value={createForm.defaultAssistantPersona}
+                    onChange={(event) => {
+                      setUserFlash(null)
+                      setCreateForm((current) => ({
+                        ...current,
+                        defaultAssistantPersona: event.target.value as AssistantPersona | '',
+                      }))
+                    }}
+                  >
+                    <option value="">Role default</option>
+                    {USER_PERSONA_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label className="field field-wide">
                   <span>Initial Password</span>

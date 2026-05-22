@@ -154,6 +154,7 @@ export type DocumentIngestionController = {
   updateDocumentDraft: (documentId: string, updater: DocumentDraftUpdater) => void
   updatePageDraft: (documentId: string, pageId: number, updater: PageDraftUpdater) => void
   handleSaveDocument: (document: DocumentIngestionRecord) => Promise<void>
+  handleVerifyDocument: (document: DocumentIngestionRecord) => Promise<void>
   handleSetDocumentKind: (document: DocumentIngestionRecord, documentKind: string) => Promise<void>
   handleSavePage: (document: DocumentIngestionRecord, page: DocumentIngestionPageRecord) => Promise<void>
   handleReprocessDocument: (document: DocumentIngestionRecord) => Promise<void>
@@ -848,6 +849,32 @@ export function useDocumentIngestionController({
     }
   }
 
+  async function handleVerifyDocument(document: DocumentIngestionRecord) {
+    if (!authSession) {
+      return
+    }
+    const target = `document:${document.document_id}`
+    clearSaveError(target)
+    setSavingTarget(target)
+    try {
+      const verifiedDocument = await updateDocumentIngestion(
+        appConfig.apiBase,
+        authSession,
+        document.document_id,
+        {
+          review_status: 'VERIFIED',
+          verification_mode: 'STATUS_ONLY',
+          review_notes: document.review_notes,
+        },
+      )
+      replaceDocument(verifiedDocument)
+    } catch (error) {
+      setSaveError(target, error instanceof Error ? error.message : 'Unable to verify the document.')
+    } finally {
+      setSavingTarget(null)
+    }
+  }
+
   async function handleSetDocumentKind(document: DocumentIngestionRecord, documentKind: string) {
     if (!authSession) {
       return
@@ -1270,6 +1297,7 @@ export function useDocumentIngestionController({
     updateDocumentDraft,
     updatePageDraft,
     handleSaveDocument,
+    handleVerifyDocument,
     handleSetDocumentKind,
     handleSavePage,
     handleReprocessDocument,

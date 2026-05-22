@@ -1514,12 +1514,6 @@ export function DashboardWorkspace(props: DashboardWorkspaceProps) {
       view: 'operations',
       actionLabel: 'Open Work Queue',
     },
-    {
-      title: 'Learn the workflow',
-      detail: 'Open the in-product guide when someone needs onboarding help or a quick explanation of how the platform works.',
-      view: 'guide',
-      actionLabel: 'Open How It Works',
-    },
   ] satisfies Array<{
     title: string
     detail: string

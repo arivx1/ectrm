@@ -196,6 +196,111 @@ class RunMarketDataSchedulerScriptTests(unittest.TestCase):
         eia_fundamentals_mock.assert_called_once()
         self.assertIn("EIA_FUNDAMENTALS scheduler run", buffer.getvalue())
 
+    def test_main_runs_eia_wholesale_power_provider_when_due(self) -> None:
+        session = _FakeSession()
+        with patch.object(run_market_data_scheduler, "SessionLocal", return_value=session), patch.object(
+            run_market_data_scheduler,
+            "build_external_data_sync_status",
+            return_value={"providers": [{"provider": "EIA_WHOLESALE_POWER", "due_for_sync": True}]},
+        ), patch.object(
+            run_market_data_scheduler,
+            "sync_eia_wholesale_power_series",
+            return_value=SimpleNamespace(
+                id=15,
+                status="SUCCEEDED",
+                series_count=1,
+                observation_count=1,
+                error_summary=None,
+            ),
+        ) as eia_wholesale_power_mock, patch(
+            "sys.argv",
+            [
+                "run_market_data_scheduler.py",
+                "--provider",
+                "eia-wholesale-power",
+                "--max-cycles",
+                "1",
+            ],
+        ):
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = run_market_data_scheduler.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(session.closed)
+        eia_wholesale_power_mock.assert_called_once()
+        self.assertIn("EIA_WHOLESALE_POWER scheduler run", buffer.getvalue())
+
+    def test_main_runs_miso_provider_when_due(self) -> None:
+        session = _FakeSession()
+        with patch.object(run_market_data_scheduler, "SessionLocal", return_value=session), patch.object(
+            run_market_data_scheduler,
+            "build_external_data_sync_status",
+            return_value={"providers": [{"provider": "MISO", "due_for_sync": True}]},
+        ), patch.object(
+            run_market_data_scheduler,
+            "sync_miso_series",
+            return_value=SimpleNamespace(
+                id=16,
+                status="SUCCEEDED",
+                series_count=8,
+                observation_count=8,
+                error_summary=None,
+            ),
+        ) as miso_mock, patch(
+            "sys.argv",
+            [
+                "run_market_data_scheduler.py",
+                "--provider",
+                "miso",
+                "--max-cycles",
+                "1",
+            ],
+        ):
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = run_market_data_scheduler.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(session.closed)
+        miso_mock.assert_called_once()
+        self.assertIn("MISO scheduler run", buffer.getvalue())
+
+    def test_main_runs_nyiso_provider_when_due(self) -> None:
+        session = _FakeSession()
+        with patch.object(run_market_data_scheduler, "SessionLocal", return_value=session), patch.object(
+            run_market_data_scheduler,
+            "build_external_data_sync_status",
+            return_value={"providers": [{"provider": "NYISO", "due_for_sync": True}]},
+        ), patch.object(
+            run_market_data_scheduler,
+            "sync_nyiso_series",
+            return_value=SimpleNamespace(
+                id=17,
+                status="SUCCEEDED",
+                series_count=11,
+                observation_count=11,
+                error_summary=None,
+            ),
+        ) as nyiso_mock, patch(
+            "sys.argv",
+            [
+                "run_market_data_scheduler.py",
+                "--provider",
+                "nyiso",
+                "--max-cycles",
+                "1",
+            ],
+        ):
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = run_market_data_scheduler.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(session.closed)
+        nyiso_mock.assert_called_once()
+        self.assertIn("NYISO scheduler run", buffer.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

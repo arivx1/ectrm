@@ -1,11 +1,13 @@
 import { fetchJson, postJson, putJson } from '../../shared/api'
 import { buildMutationHeaders, getMutationContext } from '../../shared/mutation'
+import type { AssistantPersona } from '../../shared/models'
 
 export type UserAccountRecord = {
   user_id: string
   email: string
   display_name: string
   role: string
+  default_assistant_persona: AssistantPersona
   is_active: boolean
   password_set: boolean
   last_login_at: string | null
@@ -21,6 +23,7 @@ export type CreateUserAccountInput = {
   email: string
   display_name: string
   role: string
+  default_assistant_persona?: AssistantPersona
   password: string
 }
 
@@ -28,6 +31,7 @@ export type UpdateUserAccountInput = {
   email?: string
   display_name?: string
   role?: string
+  default_assistant_persona?: AssistantPersona
   password?: string
 }
 

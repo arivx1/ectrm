@@ -90,7 +90,29 @@
   align-items: start;
   justify-items: center;
   position: relative;
+  z-index: 3;
+}
+
+.auth-gate-corner-logo {
+  position: absolute;
+  left: clamp(1rem, 3vw, 2.2rem);
+  bottom: clamp(1rem, 3vw, 2.2rem);
   z-index: 2;
+  box-sizing: border-box;
+  width: clamp(7.5rem, 16vw, 15rem);
+  max-width: calc(100vw - 2rem);
+  height: auto;
+  filter:
+    drop-shadow(0 12px 22px rgba(0, 0, 0, 0.3))
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.42));
+  pointer-events: none;
+}
+
+@media (max-width: 46rem), (max-height: 42rem) {
+  .auth-gate-corner-logo {
+    width: clamp(5.75rem, 26vw, 8.5rem);
+    opacity: 0.9;
+  }
 }
 
 .auth-gate-wordmark {

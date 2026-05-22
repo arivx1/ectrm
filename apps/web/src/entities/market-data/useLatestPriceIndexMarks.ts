@@ -25,11 +25,17 @@ function buildMarksMap(
 
 export function useLatestPriceIndexMarks(
   priceIndexCodes: Array<string | null | undefined>,
+  options: {
+    refreshIntervalMs?: number
+    pauseWhenHidden?: boolean
+  } = {},
 ): {
   latestMarksByCode: Record<string, PriceIndexObservationRecord>
   loading: boolean
   error: string
 } {
+  const refreshIntervalMs = Math.max(0, options.refreshIntervalMs ?? 0)
+  const pauseWhenHidden = options.pauseWhenHidden ?? true
   const normalizedCodes = useMemo(
     () =>
       Array.from(
@@ -47,16 +53,47 @@ export function useLatestPriceIndexMarks(
 
   useEffect(() => {
     let cancelled = false
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null
 
-    async function load() {
+    function clearRefreshTimer() {
+      if (refreshTimer !== null) {
+        clearTimeout(refreshTimer)
+        refreshTimer = null
+      }
+    }
+
+    function documentIsHidden() {
+      return pauseWhenHidden && typeof document !== 'undefined' && document.visibilityState === 'hidden'
+    }
+
+    function scheduleRefresh() {
+      clearRefreshTimer()
+      if (cancelled || refreshIntervalMs <= 0 || normalizedCodes.length === 0) {
+        return
+      }
+
+      refreshTimer = setTimeout(() => {
+        if (documentIsHidden()) {
+          scheduleRefresh()
+          return
+        }
+
+        void load({ background: true })
+      }, refreshIntervalMs)
+    }
+
+    async function load({ background = false }: { background?: boolean } = {}) {
       if (normalizedCodes.length === 0) {
+        clearRefreshTimer()
         setLatestMarksByCode({})
         setError('')
         setLoading(false)
         return
       }
 
-      setLoading(true)
+      if (!background) {
+        setLoading(true)
+      }
       setError('')
       try {
         const payload = await loadLatestPriceIndexObservations(appConfig.apiBase, normalizedCodes)
@@ -69,16 +106,42 @@ export function useLatestPriceIndexMarks(
         }
       } finally {
         if (!cancelled) {
-          setLoading(false)
+          if (!background) {
+            setLoading(false)
+          }
+          scheduleRefresh()
         }
       }
+    }
+
+    function handleVisibilityChange() {
+      if (
+        cancelled ||
+        !pauseWhenHidden ||
+        refreshIntervalMs <= 0 ||
+        typeof document === 'undefined' ||
+        document.visibilityState !== 'visible'
+      ) {
+        return
+      }
+
+      clearRefreshTimer()
+      void load({ background: true })
+    }
+
+    if (pauseWhenHidden && typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange)
     }
 
     void load()
     return () => {
       cancelled = true
+      clearRefreshTimer()
+      if (pauseWhenHidden && typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
     }
-  }, [normalizedCodes])
+  }, [normalizedCodes, pauseWhenHidden, refreshIntervalMs])
 
   return {
     latestMarksByCode,

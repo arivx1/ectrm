@@ -64,6 +64,7 @@ function buildController(overrides: Partial<DocumentIngestionController> = {}): 
     updateDocumentDraft: () => undefined,
     updatePageDraft: () => undefined,
     handleSaveDocument: async () => undefined,
+    handleVerifyDocument: async () => undefined,
     handleSetDocumentKind: async () => undefined,
     handleSavePage: async () => undefined,
     handleReprocessDocument: async () => undefined,

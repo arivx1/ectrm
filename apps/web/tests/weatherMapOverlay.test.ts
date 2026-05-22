@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  buildRainViewerRadarTileProvider,
   buildWeatherOverlayPointFeatureCollection,
   buildWeatherOverlayPointRecord,
   buildWeatherOverlayWindVectorFeatureCollection,
@@ -162,5 +163,65 @@ test("overlay feature builders emit map-ready GeoJSON and filter empty values", 
   assert.notDeepEqual(
     windCollection.features[0]?.geometry.coordinates[0],
     windCollection.features[0]?.geometry.coordinates[1],
+  );
+});
+
+test("buildRainViewerRadarTileProvider selects the latest global radar frame", () => {
+  const provider = buildRainViewerRadarTileProvider({
+    host: "https://tilecache.rainviewer.com/",
+    radar: {
+      past: [
+        {
+          time: 1_609_401_600,
+          path: "/v2/radar/1609401600",
+        },
+        {
+          time: 1_609_402_200,
+          path: "/v2/radar/1609402200",
+        },
+      ],
+    },
+  });
+
+  assert.equal(provider.id, "rainviewer-global");
+  assert.equal(provider.statusLabel, "Global radar");
+  assert.equal(provider.coverageLabel, "Global provider coverage");
+  assert.equal(provider.generatedAt, "2020-12-31T08:10:00.000Z");
+  assert.equal(
+    provider.tileUrl,
+    "https://tilecache.rainviewer.com/v2/radar/1609402200/256/{z}/{x}/{y}/2/1_1.png",
+  );
+});
+
+test("buildRainViewerRadarTileProvider falls back to nowcast frames when past frames are missing", () => {
+  const provider = buildRainViewerRadarTileProvider({
+    host: "https://tilecache.rainviewer.com",
+    radar: {
+      past: [],
+      nowcast: [
+        {
+          time: 1_609_402_800,
+          path: "/v2/radar/nowcast_1609402800",
+        },
+      ],
+    },
+  });
+
+  assert.equal(
+    provider.tileUrl,
+    "https://tilecache.rainviewer.com/v2/radar/nowcast_1609402800/256/{z}/{x}/{y}/2/1_1.png",
+  );
+});
+
+test("buildRainViewerRadarTileProvider rejects manifests without radar frames", () => {
+  assert.throws(
+    () =>
+      buildRainViewerRadarTileProvider({
+        host: "https://tilecache.rainviewer.com",
+        radar: {
+          past: [],
+        },
+      }),
+    /available radar frame/,
   );
 });

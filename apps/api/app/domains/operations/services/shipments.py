@@ -73,6 +73,7 @@ from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.delivery_power_detail import DeliveryPowerDetail
 from apps.api.app.models.delivery_rail_detail import DeliveryRailDetail
 from apps.api.app.models.delivery_tracking_signal import DeliveryTrackingSignal
+from apps.api.app.models.delivery_vessel_detail import DeliveryVesselDetail
 from apps.api.app.models.delivery_truck_detail import DeliveryTruckDetail
 from apps.api.app.models.delivery_truck_movement import DeliveryTruckMovement
 from apps.api.app.models.delivery_event import DeliveryEvent
@@ -88,6 +89,8 @@ from apps.api.app.schemas.shipment import DeliverySchedulingWorkflowItemOut
 from apps.api.app.schemas.shipment import DeliveryObligationOut
 from apps.api.app.schemas.shipment import DeliverySyncResultOut
 from apps.api.app.schemas.shipment import DeliveryTruckDetailOut
+from apps.api.app.schemas.shipment import DeliveryVesselDetailOut
+from apps.api.app.domains.operations.services.vessel_tracking_health import vessel_tracking_health_to_out
 from apps.api.app.shared.enums import ActualizationStatus
 from apps.api.app.shared.enums import AllocationStatus
 from apps.api.app.shared.enums import ConfirmationStatus
@@ -292,6 +295,7 @@ class DeliveryListContext:
     truck_details_by_id: dict[str, DeliveryTruckDetail]
     truck_movement_count_by_delivery_id: dict[str, int]
     active_truck_movement_count_by_delivery_id: dict[str, int]
+    vessel_details_by_id: dict[str, DeliveryVesselDetail]
     pipeline_details_by_id: dict[str, DeliveryPipelineDetail]
     rail_details_by_id: dict[str, DeliveryRailDetail]
     rail_routes_by_code: dict[str, ReferenceRailRoute]
@@ -890,6 +894,47 @@ def _truck_detail_to_out(detail: DeliveryTruckDetail) -> DeliveryTruckDetailOut:
     )
 
 
+def _vessel_detail_to_out(
+    detail: DeliveryVesselDetail,
+    *,
+    delivery_end: date | None,
+    execution_status: str | None,
+    as_of: datetime | None = None,
+) -> DeliveryVesselDetailOut:
+    tracking_health = vessel_tracking_health_to_out(
+        detail,
+        delivery_end=delivery_end,
+        execution_status=execution_status,
+        as_of=as_of,
+    )
+    return DeliveryVesselDetailOut(
+        delivery_id=detail.delivery_id,
+        vessel_name=detail.vessel_name,
+        imo_number=detail.imo_number,
+        mmsi_number=detail.mmsi_number,
+        call_sign=detail.call_sign,
+        voyage_number=detail.voyage_number,
+        tracking_provider=detail.tracking_provider,
+        tracking_policy=detail.tracking_policy,
+        last_signal_at=_coerce_utc(detail.last_signal_at),
+        last_position_at=_coerce_utc(detail.last_position_at),
+        last_latitude=float(detail.last_latitude) if detail.last_latitude is not None else None,
+        last_longitude=float(detail.last_longitude) if detail.last_longitude is not None else None,
+        last_speed_knots=float(detail.last_speed_knots) if detail.last_speed_knots is not None else None,
+        last_course_degrees=float(detail.last_course_degrees) if detail.last_course_degrees is not None else None,
+        last_heading_degrees=float(detail.last_heading_degrees) if detail.last_heading_degrees is not None else None,
+        last_navigational_status=detail.last_navigational_status,
+        current_destination=detail.current_destination,
+        current_eta_at_destination=_coerce_utc(detail.current_eta_at_destination),
+        tracking_health=tracking_health,
+        created_at=_coerce_utc(detail.created_at) or datetime.now(timezone.utc),
+        created_by=detail.created_by,
+        updated_at=_coerce_utc(detail.updated_at) or datetime.now(timezone.utc),
+        updated_by=detail.updated_by,
+        version=detail.version,
+    )
+
+
 def _delivery_events_by_delivery_id(
     db: Session,
     *,
@@ -1098,12 +1143,13 @@ def _persisted_delivery_context_by_id(
     dict[str, DeliveryTruckDetail],
     dict[str, int],
     dict[str, int],
+    dict[str, DeliveryVesselDetail],
     dict[str, DeliveryPipelineDetail],
     dict[str, DeliveryRailDetail],
     dict[str, DeliveryPowerDetail],
 ]:
     if not trade_ids:
-        return {}, {}, {}, {}, {}, {}, {}, {}
+        return {}, {}, {}, {}, {}, {}, {}, {}, {}
 
     persisted_deliveries = db.execute(
         select(DeliveryObligation)
@@ -1111,13 +1157,16 @@ def _persisted_delivery_context_by_id(
     ).scalars().all()
     delivery_ids = [delivery.delivery_id for delivery in persisted_deliveries]
     if not delivery_ids:
-        return {}, {}, {}, {}, {}, {}, {}, {}
+        return {}, {}, {}, {}, {}, {}, {}, {}, {}
 
     logistics_details = db.execute(
         select(DeliveryLogisticsDetail).where(DeliveryLogisticsDetail.delivery_id.in_(delivery_ids))
     ).scalars().all()
     truck_details = db.execute(
         select(DeliveryTruckDetail).where(DeliveryTruckDetail.delivery_id.in_(delivery_ids))
+    ).scalars().all()
+    vessel_details = db.execute(
+        select(DeliveryVesselDetail).where(DeliveryVesselDetail.delivery_id.in_(delivery_ids))
     ).scalars().all()
     truck_movement_counts = dict(
         db.execute(
@@ -1163,6 +1212,7 @@ def _persisted_delivery_context_by_id(
         {detail.delivery_id: detail for detail in truck_details},
         {delivery_id: int(count) for delivery_id, count in truck_movement_counts.items()},
         {delivery_id: int(count) for delivery_id, count in active_truck_movement_counts.items()},
+        {detail.delivery_id: detail for detail in vessel_details},
         {detail.delivery_id: detail for detail in pipeline_details},
         {detail.delivery_id: detail for detail in rail_details},
         {detail.delivery_id: detail for detail in power_details},
@@ -1772,6 +1822,7 @@ def _build_delivery_obligation(
     truck_detail: DeliveryTruckDetail | None = None,
     truck_movement_count: int = 0,
     active_truck_movement_count: int = 0,
+    vessel_detail: DeliveryVesselDetail | None = None,
     pipeline_detail: DeliveryPipelineDetail | None = None,
     rail_detail: DeliveryRailDetail | None = None,
     rail_route: ReferenceRailRoute | None = None,
@@ -1947,6 +1998,7 @@ def _build_delivery_obligation(
     detail_updated_at = _detail_updated_at(
         logistics_detail,
         truck_detail,
+        vessel_detail,
         pipeline_detail,
         rail_detail,
         power_detail,
@@ -2135,6 +2187,26 @@ def _build_delivery_obligation(
         truck_detail=_truck_detail_to_out(truck_detail) if truck_detail is not None else None,
         truck_movement_count=truck_movement_count,
         active_truck_movement_count=active_truck_movement_count,
+        vessel_detail=(
+            _vessel_detail_to_out(
+                vessel_detail,
+                delivery_end=delivery_end,
+                execution_status=execution_status,
+                as_of=reference_time,
+            )
+            if vessel_detail is not None
+            else None
+        ),
+        vessel_tracking_health=(
+            vessel_tracking_health_to_out(
+                vessel_detail,
+                delivery_end=delivery_end,
+                execution_status=execution_status,
+                as_of=reference_time,
+            )
+            if classification.transport_mode == TransportMode.VESSEL
+            else None
+        ),
         rail_route_code=rail_route_code,
         rail_route_code_source=rail_route_code_source,
         rail_line_code=rail_line_code,
@@ -2467,6 +2539,7 @@ def _load_delivery_context(
         truck_details_by_id,
         truck_movement_count_by_delivery_id,
         active_truck_movement_count_by_delivery_id,
+        vessel_details_by_id,
         pipeline_details_by_id,
         rail_details_by_id,
         power_details_by_id,
@@ -2481,6 +2554,7 @@ def _load_delivery_context(
         truck_details_by_id=truck_details_by_id,
         truck_movement_count_by_delivery_id=truck_movement_count_by_delivery_id,
         active_truck_movement_count_by_delivery_id=active_truck_movement_count_by_delivery_id,
+        vessel_details_by_id=vessel_details_by_id,
         pipeline_details_by_id=pipeline_details_by_id,
         rail_details_by_id=rail_details_by_id,
         rail_routes_by_code=rail_routes_by_code,
@@ -2532,6 +2606,7 @@ def _build_delivery_list_item(
         truck_detail=context.truck_details_by_id.get(row.delivery_id),
         truck_movement_count=context.truck_movement_count_by_delivery_id.get(row.delivery_id, 0),
         active_truck_movement_count=context.active_truck_movement_count_by_delivery_id.get(row.delivery_id, 0),
+        vessel_detail=context.vessel_details_by_id.get(row.delivery_id),
         pipeline_detail=context.pipeline_details_by_id.get(row.delivery_id),
         rail_detail=rail_detail,
         rail_route=rail_route,
@@ -2564,6 +2639,7 @@ DELIVERY_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
         "update_pipeline_detail",
         "update_rail_detail",
         "update_power_detail",
+        "update_vessel_detail",
         "append_event",
     ),
     surface=OperationalResourceSurface(
@@ -2608,6 +2684,12 @@ DELIVERY_RESOURCE_DESCRIPTOR = OperationalResourceDescriptor[
                 key="update_power_detail",
                 label="Update Power Detail",
                 detail="Persist power scheduling detail for the selected delivery obligation.",
+                permission_message="Sign in to sync delivery projections and edit execution detail.",
+            ),
+            OperationalResourceSurfaceAction(
+                key="update_vessel_detail",
+                label="Update Vessel Tracking",
+                detail="Persist vessel identity and AIS-style tracking detail for vessel obligations.",
                 permission_message="Sign in to sync delivery projections and edit execution detail.",
             ),
             OperationalResourceSurfaceAction(
@@ -3741,6 +3823,10 @@ def synchronize_delivery_obligations_from_trades(
         detail.delivery_id: detail
         for detail in db.execute(select(DeliveryTruckDetail)).scalars().all()
     }
+    existing_vessel_details = {
+        detail.delivery_id: detail
+        for detail in db.execute(select(DeliveryVesselDetail)).scalars().all()
+    }
     existing_truck_movements_by_delivery_id: dict[str, list[DeliveryTruckMovement]] = {}
     for movement in db.execute(select(DeliveryTruckMovement)).scalars().all():
         existing_truck_movements_by_delivery_id.setdefault(movement.delivery_id, []).append(movement)
@@ -3965,8 +4051,24 @@ def synchronize_delivery_obligations_from_trades(
                     db.delete(movement)
                     details_changed = True
                 for signal in existing_tracking_signals_by_delivery_id.pop(delivery_id, []):
-                    db.delete(signal)
+                    if signal.movement_id is not None or effective_classification.transport_mode != TransportMode.VESSEL:
+                        db.delete(signal)
+                        details_changed = True
+
+            if effective_classification.transport_mode != TransportMode.VESSEL:
+                stale_vessel_detail = existing_vessel_details.pop(delivery_id, None)
+                if stale_vessel_detail is not None:
+                    db.delete(stale_vessel_detail)
                     details_changed = True
+                remaining_signals = []
+                for signal in existing_tracking_signals_by_delivery_id.pop(delivery_id, []):
+                    if signal.movement_id is None:
+                        db.delete(signal)
+                        details_changed = True
+                    else:
+                        remaining_signals.append(signal)
+                if remaining_signals:
+                    existing_tracking_signals_by_delivery_id[delivery_id] = remaining_signals
 
             if effective_classification.mode_family == DeliveryModeFamily.LOGISTICS:
                 logistics_detail = existing_logistics.get(delivery_id)
@@ -4090,6 +4192,7 @@ def synchronize_delivery_obligations_from_trades(
         rail_detail = existing_rail.pop(obsolete_delivery.delivery_id, None)
         power_detail = existing_power.pop(obsolete_delivery.delivery_id, None)
         truck_detail = existing_truck_details.pop(obsolete_delivery.delivery_id, None)
+        vessel_detail = existing_vessel_details.pop(obsolete_delivery.delivery_id, None)
         truck_movements = existing_truck_movements_by_delivery_id.pop(obsolete_delivery.delivery_id, [])
         tracking_signals = existing_tracking_signals_by_delivery_id.pop(obsolete_delivery.delivery_id, [])
         if logistics_detail is not None:
@@ -4102,6 +4205,8 @@ def synchronize_delivery_obligations_from_trades(
             db.delete(power_detail)
         if truck_detail is not None:
             db.delete(truck_detail)
+        if vessel_detail is not None:
+            db.delete(vessel_detail)
         for movement in truck_movements:
             db.delete(movement)
         for signal in tracking_signals:

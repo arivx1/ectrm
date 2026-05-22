@@ -3,7 +3,11 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DocumentIngestionController } from '../src/features/documents/useDocumentIngestionController'
-import type { DocumentIngestionRecord, DocumentIngestionUnderstandingRecord } from '../src/shared/models'
+import type {
+  DocumentFacetAssignmentRecord,
+  DocumentIngestionRecord,
+  DocumentIngestionUnderstandingRecord,
+} from '../src/shared/models'
 import { LibraryWorkspace } from '../src/workspaces/library/LibraryWorkspace'
 
 const {
@@ -211,6 +215,28 @@ function buildDocument(overrides: Partial<DocumentIngestionRecord> = {}): Docume
   }
 }
 
+function buildFacetValue(overrides: Partial<DocumentFacetAssignmentRecord> = {}): DocumentFacetAssignmentRecord {
+  return {
+    facet_value_id: 1,
+    document_id: 'DOC-225186',
+    page_id: null,
+    facet_key: 'commodity',
+    facet_label: 'Commodity',
+    value_code: 'NATURAL_GAS',
+    value_label: 'Natural Gas',
+    source: 'MANUAL',
+    confidence: null,
+    review_status: 'CONFIRMED',
+    evidence: [],
+    created_at: '2026-05-15T21:28:00Z',
+    created_by: 'ops.docs',
+    updated_at: '2026-05-15T21:28:00Z',
+    updated_by: 'ops.docs',
+    version: 1,
+    ...overrides,
+  }
+}
+
 function buildController(overrides: Partial<DocumentIngestionController> = {}): DocumentIngestionController {
   return {
     documents: [buildDocument()],
@@ -309,6 +335,7 @@ function buildController(overrides: Partial<DocumentIngestionController> = {}): 
     updateDocumentDraft: () => undefined,
     updatePageDraft: () => undefined,
     handleSaveDocument: async () => undefined,
+    handleVerifyDocument: async () => undefined,
     handleSetDocumentKind: async () => undefined,
     handleSavePage: async () => undefined,
     handleReprocessDocument: async () => undefined,
@@ -355,7 +382,52 @@ describe('LibraryWorkspace', () => {
   })
 
   it('renders an inline type picker in the library list for uploaded documents', () => {
-    useDocumentIngestionControllerMock.mockReturnValue(buildController())
+    useDocumentIngestionControllerMock.mockReturnValue(
+      buildController({
+        documents: [
+          buildDocument({
+            facet_values: [
+              buildFacetValue(),
+              buildFacetValue({
+                facet_value_id: 2,
+                facet_key: 'commercial_side',
+                facet_label: 'Purchase or Sale',
+                value_code: 'BUY',
+                value_label: 'Purchase',
+              }),
+              buildFacetValue({
+                facet_value_id: 3,
+                facet_key: 'transport_mode',
+                facet_label: 'Mode of Transportation',
+                value_code: 'PIPELINE',
+                value_label: 'Pipeline',
+              }),
+              buildFacetValue({
+                facet_value_id: 4,
+                facet_key: 'asset',
+                facet_label: 'Asset',
+                value_code: 'UPSTREAM',
+                value_label: 'Upstream',
+              }),
+              buildFacetValue({
+                facet_value_id: 5,
+                facet_key: 'commodity',
+                facet_label: 'Commodity',
+                value_code: 'CRUDE_OIL',
+                value_label: 'Crude',
+              }),
+              buildFacetValue({
+                facet_value_id: 6,
+                facet_key: 'transport_mode',
+                facet_label: 'Mode of Transportation',
+                value_code: 'VESSEL',
+                value_label: 'Vessel',
+              }),
+            ],
+          }),
+        ],
+      }),
+    )
 
     const markup = renderToStaticMarkup(
       createElement(LibraryWorkspace, {
@@ -376,10 +448,22 @@ describe('LibraryWorkspace', () => {
     )
 
     expect(markup).toContain('Set document type for 225186 VESSEL NOMINATION')
+    expect(markup).toContain('Tags')
+    expect(markup).toContain('Natural Gas')
+    expect(markup).toContain('Purchase')
+    expect(markup).toContain('+1')
+    expect(markup).toContain('Actions')
+    expect(markup).toContain('Verify 225186 VESSEL NOMINATION')
+    expect(markup).toContain('Reclassify 225186 VESSEL NOMINATION')
+    expect(markup).toContain('Open workflows for 225186 VESSEL NOMINATION')
+    expect(markup).toContain('Workflows')
+    expect(markup).toContain('Verify')
+    expect(markup).toContain('Reclassify')
     expect(markup).toContain('Delivery Confirmation')
     expect(markup).toContain('<option value="UNKNOWN" selected="">Unknown</option>')
     expect(markup).toContain('Resize Name column')
     expect(markup).toContain('Resize Size column')
+    expect(markup).toContain('Resize Actions column')
   })
 
   it('does not render custom library folders while folders are disabled', () => {
@@ -440,6 +524,21 @@ describe('LibraryWorkspace', () => {
       review_status: 'VERIFIED',
       reviewed_at: '2026-05-16T18:00:00Z',
       reviewed_by: 'ops_reviewer',
+      facet_values: [
+        buildFacetValue({
+          facet_key: 'commodity',
+          facet_label: 'Commodity',
+          value_code: 'NATURAL_GAS',
+          value_label: 'Natural Gas',
+        }),
+        buildFacetValue({
+          facet_value_id: 2,
+          facet_key: 'asset',
+          facet_label: 'Asset',
+          value_code: 'PIPELINE',
+          value_label: 'Pipeline',
+        }),
+      ],
     })
     const firstPage = baseDocument.pages[0]
     useDocumentIngestionControllerMock.mockReturnValue(
@@ -524,12 +623,19 @@ describe('LibraryWorkspace', () => {
     expect(markup).toContain('Authenticated PDF upload')
     expect(markup).toContain('Uploaded By')
     expect(markup).toContain('ops_admin')
+    expect(markup).toContain('Reclassify')
     expect(markup).toContain('Open Source PDF')
+    expect(markup).toContain('Commodity: Natural Gas')
+    expect(markup).toContain('Asset: Pipeline')
     expect(markup).toContain('Pages')
     expect(markup).toContain('Page 1')
     expect(markup).toContain('Page 2')
     expect(markup).toContain('DELIVERY CONFIRMATION')
     expect(markup).toContain('Selected Page')
+    expect(markup).toContain('Classification Explanation')
+    expect(markup).toContain('Deterministic scoring classified this page as UNKNOWN with 12% confidence.')
+    expect(markup).toContain('No stable document-specific signals were found in the extracted content.')
+    expect(markup).toContain('Review Flags')
     expect(markup).toContain('Extracted Text')
     expect(markup).toContain('Vessel nomination details for review.')
     expect(markup).toContain('Preview for page 1')

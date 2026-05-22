@@ -210,6 +210,7 @@ test('deliveries workspace applies map-sourced rail-route focus before local tex
       onSaveDeliveryPipelineDetails: async () => undefined,
       onSaveDeliveryPowerDetails: async () => undefined,
       onSaveDeliveryTruckDetails: async () => undefined,
+      onSaveDeliveryVesselDetails: async () => undefined,
       onCreateDeliveryTruckMovement: async () => undefined,
       onSaveDeliveryTruckMovement: async () => undefined,
       onCancelDeliveryTruckMovement: async () => undefined,
@@ -376,6 +377,7 @@ test('deliveries workspace renders the truck dispatch editor for truck deliverie
       onSaveDeliveryPipelineDetails: async () => undefined,
       onSaveDeliveryPowerDetails: async () => undefined,
       onSaveDeliveryTruckDetails: async () => undefined,
+      onSaveDeliveryVesselDetails: async () => undefined,
       onCreateDeliveryTruckMovement: async () => undefined,
       onSaveDeliveryTruckMovement: async () => undefined,
       onCancelDeliveryTruckMovement: async () => undefined,
@@ -398,4 +400,131 @@ test('deliveries workspace renders the truck dispatch editor for truck deliverie
   assert.match(markup, /Truck checkpoint correction: Arrived pickup/)
   assert.match(markup, /Corrected truck checkpoint: Arrived pickup/)
   assert.match(markup, /Correction/)
+})
+
+test('deliveries workspace renders vessel tracking controls for vessel deliveries', () => {
+  const trackingHealth = {
+    last_evaluated_at: '2026-05-18T10:00:00Z',
+    tracking_freshness_status: 'FRESH',
+    tracking_freshness_reason: 'Last vessel signal is 60 minutes old.',
+    eta_status: 'ON_TIME',
+    eta_status_reason: 'Current vessel ETA is inside the delivery window.',
+    exception_severity: 'CLEAR',
+    primary_exception: null,
+    stale_after_minutes: 720,
+    minutes_since_last_signal: 60,
+    eta_late_minutes: null,
+  }
+  const markup = renderToStaticMarkup(
+    createElement(DeliveryWorkspace, {
+      authSession: null,
+      routeHandoff: null,
+      globalFilter: '',
+      commodities: [
+        {
+          code: 'WTI',
+          name: 'WTI',
+          description: 'Test crude commodity',
+          is_active: true,
+          commodity_class: 'CRUDE_OIL',
+          allowed_transport_modes: ['VESSEL'],
+        },
+      ],
+      deliveries: [
+        buildDelivery({
+          delivery_id: 'DLV-VESSEL-4004',
+          trade_id: 'TRD-VESSEL-4004',
+          transport_mode: 'VESSEL',
+          commodity_class: 'CRUDE_OIL',
+          commodity: 'WTI',
+          volume: 750000,
+          unit_of_measure: 'BBL',
+          counterparty: 'Marine Buyer',
+          location_code: 'USGC',
+          origin_location_code: 'HOUSTON',
+          destination_location_code: 'ROTTERDAM',
+          carrier_name: 'Bluewater Tankers',
+          asset_reference: 'MARINE-VOYAGE-12',
+          equipment_type: 'AFRAMAX',
+          rail_route_code: null,
+          rail_route_code_source: null,
+          rail_line_code: null,
+          railroad_code: null,
+          rail_route_direction: null,
+          rail_schedule_timezone: null,
+          rail_service_calendar_code: null,
+          rail_placement_cutoff_time_local: null,
+          rail_release_cutoff_time_local: null,
+          rail_placement_free_time_hours: null,
+          rail_release_free_time_hours: null,
+          vessel_detail: {
+            delivery_id: 'DLV-VESSEL-4004',
+            vessel_name: 'MT Horizon',
+            imo_number: '9401234',
+            mmsi_number: '366999111',
+            call_sign: 'WXYZ',
+            voyage_number: 'VOY-12',
+            tracking_provider: 'AIS_DEMO',
+            tracking_policy: 'Refresh twice daily',
+            last_signal_at: '2026-05-18T09:00:00Z',
+            last_position_at: '2026-05-18T09:00:00Z',
+            last_latitude: 29.7604,
+            last_longitude: -95.3698,
+            last_speed_knots: 12.4,
+            last_course_degrees: 83,
+            last_heading_degrees: 84,
+            last_navigational_status: 'UNDER_WAY',
+            current_destination: 'ROTTERDAM',
+            current_eta_at_destination: '2026-05-20T18:00:00Z',
+            tracking_health: trackingHealth,
+            created_at: '2026-05-18T08:00:00Z',
+            created_by: 'ops@example.com',
+            updated_at: '2026-05-18T09:00:00Z',
+            updated_by: 'ops@example.com',
+            version: 2,
+          },
+          vessel_tracking_health: trackingHealth,
+        }),
+      ],
+      operationalResourceDescriptors: [],
+      formatCommodityClass: (value: string) => value,
+      formatDate: (value: string | null | undefined) => value ?? 'n/a',
+      formatDateOnly: (value: string | null | undefined) => value ?? 'n/a',
+      formatNumber: (value: number | null) => (value == null ? '-' : String(value)),
+      deliveryMutationError: '',
+      deliveryMutationPendingId: null,
+      deliverySyncError: '',
+      deliverySyncSuccess: '',
+      deliveriesSyncing: false,
+      onOpenTrade: () => undefined,
+      onClearHandoff: () => undefined,
+      onSyncDeliveriesFromTrades: async () => undefined,
+      onSaveDelivery: async () => undefined,
+      onSaveDeliveryLogisticsDetails: async () => undefined,
+      onSaveDeliveryPipelineDetails: async () => undefined,
+      onSaveDeliveryPowerDetails: async () => undefined,
+      onSaveDeliveryTruckDetails: async () => undefined,
+      onSaveDeliveryVesselDetails: async () => undefined,
+      onCreateDeliveryTruckMovement: async () => undefined,
+      onSaveDeliveryTruckMovement: async () => undefined,
+      onCancelDeliveryTruckMovement: async () => undefined,
+      onCreateDeliveryTruckStop: async () => undefined,
+      onSaveDeliveryTruckStop: async () => undefined,
+      onSkipDeliveryTruckStop: async () => undefined,
+      onCancelDeliveryTruckStop: async () => undefined,
+      onRecordDeliveryTruckStopCheckpoint: async () => undefined,
+      onReverseDeliveryTruckStopCheckpoint: async () => undefined,
+      onCreateDeliveryEvent: async () => undefined,
+    }),
+  )
+
+  assert.match(markup, /Vessel Moves/)
+  assert.match(markup, /Vessel Tracking/)
+  assert.match(markup, /MT Horizon/)
+  assert.match(markup, /IMO 9401234/)
+  assert.match(markup, /MMSI 366999111/)
+  assert.match(markup, /29\.7604, -95\.3698/)
+  assert.match(markup, /Refresh AISStream/)
+  assert.match(markup, /Record Vessel Signal/)
+  assert.match(markup, /Latest vessel tracking: MT Horizon clear/)
 })

@@ -18,6 +18,7 @@ ROUTING_STRATEGY_BY_FAMILY = {
     "SETTLEMENT": "SETTLEMENT_FIRST",
     "QUALITY": "ATTACHMENT_FIRST",
     "COMPLIANCE": "ATTACHMENT_FIRST",
+    "MARKET_DATA": "MARKET_DATA_FIRST",
     "GENERAL": "MANUAL_REVIEW",
 }
 
@@ -127,6 +128,20 @@ STRATEGY_KEY_WEIGHTS: dict[str, dict[str, float]] = {
         "event_start": 0.25,
         "event_end": 0.2,
         "currency": 0.2,
+    },
+    "MARKET_DATA_FIRST": {
+        "price_index_code": 1.0,
+        "observation_date": 0.9,
+        "publication_date": 0.72,
+        "source_provider": 0.72,
+        "source_series_id": 0.72,
+        "publication_reference": 0.55,
+        "commodity": 0.42,
+        "market": 0.32,
+        "location": 0.32,
+        "price": 0.45,
+        "currency": 0.2,
+        "unit": 0.2,
     },
     "ATTACHMENT_FIRST": {
         "delivery_id": 0.95,
@@ -372,6 +387,29 @@ TARGET_KEY_WEIGHTS: dict[str, dict[str, float]] = {
         "account": 0.55,
         "statement_number": 0.45,
     },
+    "PRICE_INDEX_OBSERVATION": {
+        "price_index_code": 1.0,
+        "observation_date": 0.92,
+        "publication_date": 0.62,
+        "source_provider": 0.72,
+        "source_series_id": 0.72,
+        "publication_reference": 0.48,
+        "price": 0.4,
+        "currency": 0.2,
+        "unit": 0.2,
+        "commodity": 0.18,
+        "location": 0.18,
+    },
+    "PRICE_INDEX": {
+        "price_index_code": 1.0,
+        "source_provider": 0.55,
+        "source_series_id": 0.42,
+        "commodity": 0.5,
+        "market": 0.35,
+        "location": 0.35,
+        "currency": 0.24,
+        "unit": 0.24,
+    },
     "COMPLIANCE_RECORD": {
         "certificate_number": 0.92,
         "force_majeure_notice_number": 0.92,
@@ -406,6 +444,7 @@ TABLE_BONUS_BY_STRATEGY: dict[str, set[str]] = {
     "TRADE_FIRST": {"economic_terms", "commercial_terms", "execution_lines", "statement_lines"},
     "DELIVERY_FIRST": {"shipment_lines", "flow_lines", "inventory_lines", "delivered_lines", "measurement_lines", "weight_measurements"},
     "SETTLEMENT_FIRST": {"line_items", "settlement_lines", "statement_lines", "claim_lines"},
+    "MARKET_DATA_FIRST": {"price_lines"},
     "ATTACHMENT_FIRST": {"quality_results", "analyte_results", "assay_results", "parameter_limits", "hazardous_components"},
 }
 
@@ -436,6 +475,8 @@ HIGH_SIGNAL_KEYS = {
     "document_number",
     "origin_country",
     "un_number",
+    "price_index_code",
+    "source_series_id",
 }
 
 

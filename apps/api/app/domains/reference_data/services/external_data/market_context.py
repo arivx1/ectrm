@@ -232,6 +232,7 @@ def _serialize_price_index_context_row(
         "price_index_code": price_index.code,
         "name": price_index.name,
         "commodity_code": price_index.commodity_code,
+        "quote_type": price_index.quote_type,
         "market": price_index.market,
         "location_code": price_index.location_code,
         "observation_date": observation.observation_date,

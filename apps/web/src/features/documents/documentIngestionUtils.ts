@@ -1,5 +1,6 @@
 import type {
   DocumentActionPlanRecord,
+  DocumentFacetAssignmentRecord,
   DocumentExtractedFieldRecord,
   DocumentLinkageAssessmentRecord,
   DocumentProcessorDocumentTraceRecord,
@@ -91,6 +92,41 @@ export function documentActionPlan(document: DocumentIngestionRecord): DocumentA
 
 export function documentRecordLinks(document: DocumentIngestionRecord): DocumentRecordLinkRecord[] {
   return document.record_links
+}
+
+export function activeDocumentFacetValues(values: DocumentFacetAssignmentRecord[] | null | undefined): DocumentFacetAssignmentRecord[] {
+  const seen = new Set<string>()
+  const activeValues: DocumentFacetAssignmentRecord[] = []
+  for (const value of values ?? []) {
+    if (value.review_status === 'REJECTED') {
+      continue
+    }
+    const key = `${value.page_id ?? 'document'}:${value.facet_key}:${value.value_code}`
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    activeValues.push(value)
+  }
+  return activeValues
+}
+
+export function documentFacetDisplayValues(document: DocumentIngestionRecord): DocumentFacetAssignmentRecord[] {
+  const seen = new Set<string>()
+  const values: DocumentFacetAssignmentRecord[] = []
+  for (const value of activeDocumentFacetValues(document.facet_values)) {
+    const key = `${value.facet_key}:${value.value_code}`
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    values.push(value)
+  }
+  return values
+}
+
+export function formatDocumentFacetLabel(value: DocumentFacetAssignmentRecord): string {
+  return `${value.facet_label}: ${value.value_label}`
 }
 
 export function documentProcessorTrace(document: DocumentIngestionRecord): DocumentProcessorDocumentTraceRecord | null {
@@ -350,6 +386,9 @@ export function uniqueCustomFieldKey(fields: DocumentExtractedFieldRecord[]): st
 export function toDocumentUpdatePayload(document: DocumentIngestionRecord): UpdateDocumentIngestionInput {
   return {
     display_name: document.display_name,
+    facet_values: activeDocumentFacetValues(document.facet_values)
+      .filter((facetValue) => facetValue.page_id === null)
+      .map(toDocumentFacetAssignmentInput),
     review_status: document.review_status,
     review_notes: document.review_notes,
   }
@@ -374,7 +413,20 @@ export function toPageUpdatePayload(page: DocumentIngestionPageRecord): UpdateDo
       header_row_detected: table.header_row_detected,
       source: table.source,
     })),
+    facet_values: activeDocumentFacetValues(page.facet_values).map(toDocumentFacetAssignmentInput),
     review_status: page.review_status,
     review_notes: page.review_notes,
+  }
+}
+
+function toDocumentFacetAssignmentInput(value: DocumentFacetAssignmentRecord) {
+  return {
+    facet_key: value.facet_key,
+    value_code: value.value_code,
+    value_label: value.value_label,
+    source: value.source,
+    confidence: value.confidence,
+    review_status: value.review_status,
+    evidence: value.evidence,
   }
 }

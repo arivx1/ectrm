@@ -191,6 +191,11 @@ test("prompt home timeline cards render cached Google Calendar agenda items", ()
   assert.match(markup, /Weekend nominations/);
   assert.match(
     markup,
+    /id="prompt-home-calendar-event-tooltip-day-\d-evt-1" role="tooltip"/,
+  );
+  assert.match(markup, /prompt-home-time-meter-marker-tooltip/);
+  assert.match(
+    markup,
     /Review the overnight hedge report with Houston before the desk opens\./,
   );
   assert.match(markup, /Confirm invoices before the cash settlement run\./);
@@ -206,6 +211,100 @@ test("prompt home timeline cards render cached Google Calendar agenda items", ()
     markup,
     /Connect Google Calendar in Settings to overlay schedule events here\./,
   );
+});
+
+test("prompt home month timeline keeps past markers without rendering past event details", () => {
+  vi.setSystemTime(new Date("2026-05-20T19:00:00.000Z"));
+
+  globalThis.window?.localStorage.setItem(
+    "ectrm.google-calendar.cached-at",
+    "2026-05-20T18:30:00.000Z",
+  );
+  globalThis.window?.localStorage.setItem(
+    "ectrm.google-calendar.cached-events",
+    JSON.stringify([
+      {
+        id: "past-hotel",
+        summary: "Stay at Newark Liberty International Airport Marriott",
+        description: null,
+        location: "Newark Liberty International Airport Marriott, Newark",
+        htmlLink: "https://calendar.google.com/calendar/event?eid=past-hotel",
+        status: "confirmed",
+        creatorEmail: null,
+        organizerEmail: "travel@example.com",
+        start: {
+          date: "2026-05-16",
+          dateTime: null,
+          timeZone: null,
+        },
+        end: {
+          date: "2026-05-18",
+          dateTime: null,
+          timeZone: null,
+        },
+      },
+      {
+        id: "past-flight",
+        summary: "Flight to San Francisco (UA 1227)",
+        description: null,
+        location: "Newark EWR",
+        htmlLink: "https://calendar.google.com/calendar/event?eid=past-flight",
+        status: "confirmed",
+        creatorEmail: null,
+        organizerEmail: "travel@example.com",
+        start: {
+          date: null,
+          dateTime: "2026-05-16T17:30:00.000Z",
+          timeZone: "UTC",
+        },
+        end: {
+          date: null,
+          dateTime: "2026-05-16T23:41:00.000Z",
+          timeZone: "UTC",
+        },
+      },
+      {
+        id: "future-hotel",
+        summary: "Stay at Hotel Trio Healdsburg",
+        description: null,
+        location: "Hotel Trio Healdsburg, Healdsburg",
+        htmlLink: "https://calendar.google.com/calendar/event?eid=future-hotel",
+        status: "confirmed",
+        creatorEmail: null,
+        organizerEmail: "travel@example.com",
+        start: {
+          date: "2026-05-28",
+          dateTime: null,
+          timeZone: null,
+        },
+        end: {
+          date: "2026-05-30",
+          dateTime: null,
+          timeZone: null,
+        },
+      },
+    ]),
+  );
+
+  const markup = renderToStaticMarkup(
+    createElement(PromptHomeWorkspace, {
+      authSession: null,
+      health: "ok",
+      counts: defaultCounts,
+      onOpenView: () => undefined,
+    }),
+  );
+
+  assert.match(markup, /Day 16/);
+  assert.match(markup, /Day 16<\/span><strong>2 events/);
+  assert.match(markup, /Day 28/);
+  assert.match(markup, /3 events this month/);
+  assert.match(markup, /Stay at Hotel Trio Healdsburg/);
+  assert.doesNotMatch(
+    markup,
+    /Stay at Newark Liberty International Airport Marriott/,
+  );
+  assert.doesNotMatch(markup, /Flight to San Francisco \(UA 1227\)/);
 });
 
 test("prompt home timeline cards do not duplicate disconnected calendar guidance", () => {

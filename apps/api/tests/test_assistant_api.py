@@ -41,6 +41,7 @@ from apps.api.app.domains.assistant.services.action_planners import (
     ACTION_PLANNERS,
 )
 from apps.api.app.domains.assistant.services.chat import ASSISTANT_ACTION_DEFINITIONS
+from apps.api.app.domains.assistant.personas import default_assistant_persona_for_role
 from apps.api.app.domains.assistant.services.policies import POLICY_RULES
 from apps.api.app.domains.assistant.services.role_archetypes import validate_role_archetype_registry
 from apps.api.app.domains.assistant.services.execution import prepare_assistant_execution
@@ -292,6 +293,17 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("read_codebase_file", {row["name"] for row in payload["available_tools"]})
         self.assertGreaterEqual(len(payload["available_skills"]), 1)
         self.assertEqual(payload["available_skills"][0]["name"], "market_intelligence")
+        personas = {row["key"]: row for row in payload["available_personas"]}
+        self.assertIn("operator", personas)
+        self.assertIn("trader", personas)
+        self.assertIn("admin", personas)
+        self.assertIn("OPS_ADMIN", personas["admin"]["default_for_roles"])
+        personas_response = self.client.get("/assistant/personas")
+        self.assertEqual(personas_response.status_code, 200)
+        self.assertEqual(
+            [row["key"] for row in personas_response.json()[:3]],
+            ["operator", "trader", "risk"],
+        )
 
         providers = {row["provider"]: row for row in payload["providers"]}
         self.assertTrue(providers["openai"]["enabled"])
@@ -1346,6 +1358,7 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("system-mission", section_keys)
         self.assertIn("organization", section_keys)
         self.assertIn("user", section_keys)
+        self.assertIn("persona", section_keys)
         self.assertIn("data-inventory", section_keys)
         self.assertIn("application-surface", section_keys)
         self.assertIn("world-model", section_keys)
@@ -1367,6 +1380,15 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(sections_by_key["organization"]["uses_fallback"], True)
         self.assertEqual(sections_by_key["business-model"]["uses_fallback"], True)
         self.assertEqual(sections_by_key["user"]["owner_reference"], "assistant_user")
+        self.assertEqual(sections_by_key["persona"]["contract_key"], "persona")
+        self.assertEqual(sections_by_key["persona"]["scope"], "REQUEST")
+        self.assertEqual(sections_by_key["persona"]["owner"], "assistant-persona-catalog")
+        self.assertIn("persona_key: admin", sections_by_key["persona"]["content"])
+        self.assertIn("resolved_from: user-default:assistant_user", sections_by_key["persona"]["content"])
+        self.assertIn(
+            "does not change authenticated role, permissions",
+            sections_by_key["persona"]["content"],
+        )
         self.assertEqual(sections_by_key["application-context"]["scope"], "REQUEST")
         self.assertEqual(sections_by_key["application-context"]["kind"], "GENERATED")
         self.assertEqual(sections_by_key["application-context"]["merge_strategy"], "APPEND_IF_PRESENT")
@@ -1383,6 +1405,41 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("Acme Energy", payload["rendered_system_prompt"])
         self.assertIn("assistant_user", payload["rendered_system_prompt"])
         self.assertIn("Loaded trades: 0.", payload["rendered_system_prompt"])
+
+    def test_assistant_prompt_context_persona_can_be_overridden_per_request(self) -> None:
+        token = self._create_session_token(role="OPS_ADMIN")
+
+        response = self.client.post(
+            "/assistant/context",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "workspace": "assistant",
+                "persona": "trader",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        persona_section = next(section for section in response.json()["sections"] if section["key"] == "persona")
+        self.assertEqual(persona_section["owner_reference"], "trader:request-payload")
+        self.assertIn("persona_key: trader", persona_section["content"])
+        self.assertIn("resolved_from: request-payload", persona_section["content"])
+        self.assertIn("Do not claim to book, amend, hedge, or externally commit", persona_section["content"])
+
+    def test_assistant_prompt_context_uses_user_default_persona_before_role_fallback(self) -> None:
+        token = self._create_session_token(role="OPS_ADMIN", default_persona="risk")
+
+        response = self.client.post(
+            "/assistant/context",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"workspace": "assistant"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        persona_section = next(section for section in response.json()["sections"] if section["key"] == "persona")
+        self.assertEqual(persona_section["owner_reference"], "risk:user-default:assistant_user")
+        self.assertIn("persona_key: risk", persona_section["content"])
+        self.assertIn("resolved_from: user-default:assistant_user", persona_section["content"])
+        self.assertIn("Separate facts, assumptions, missing evidence", persona_section["content"])
 
     def test_assistant_prompt_context_preview_includes_active_wiki_grounding(self) -> None:
         token = self._create_session_token()
@@ -8283,6 +8340,7 @@ class AssistantApiTests(unittest.TestCase):
         email: str | None = None,
         display_name: str | None = None,
         role: str = "OPS_ADMIN",
+        default_persona: str | None = None,
     ) -> str:
         now = datetime.now(timezone.utc)
         resolved_email = email or f"{user_id}@example.com"
@@ -8296,6 +8354,7 @@ class AssistantApiTests(unittest.TestCase):
                         email=resolved_email,
                         display_name=resolved_display_name,
                         role=role,
+                        default_assistant_persona=default_persona or default_assistant_persona_for_role(role),
                         password_hash=hash_password("supersecret1"),
                         is_active=True,
                         last_login_at=now,
@@ -8310,6 +8369,7 @@ class AssistantApiTests(unittest.TestCase):
                 user.email = resolved_email
                 user.display_name = resolved_display_name
                 user.role = role
+                user.default_assistant_persona = default_persona or default_assistant_persona_for_role(role)
                 user.last_login_at = now
                 user.updated_at = now
                 user.updated_by = "test-suite"

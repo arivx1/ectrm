@@ -146,36 +146,55 @@ class Settings(BaseSettings):
     EIA_API_KEY: str = ""
     EIA_BASE_URL: str = "https://api.eia.gov/v2"
     EIA_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
-    EIA_SYNC_INTERVAL_MINUTES: int = Field(default=360, ge=5, le=10080)
+    EIA_SYNC_INTERVAL_MINUTES: int = Field(default=60, ge=5, le=10080)
     EIA_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=30, ge=1, le=3650)
     EIA_SYNC_SUCCESS_SLA_HOURS: int = Field(default=48, ge=1, le=336)
-    EIA_FUNDAMENTALS_SYNC_INTERVAL_MINUTES: int = Field(default=1440, ge=5, le=10080)
+    EIA_FUNDAMENTALS_SYNC_INTERVAL_MINUTES: int = Field(default=360, ge=5, le=10080)
     EIA_FUNDAMENTALS_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=120, ge=1, le=3650)
     EIA_FUNDAMENTALS_SYNC_SUCCESS_SLA_HOURS: int = Field(default=240, ge=1, le=336)
     FRED_API_KEY: str = ""
     FRED_BASE_URL: str = "https://api.stlouisfed.org/fred"
+    FRED_GRAPH_BASE_URL: str = "https://fred.stlouisfed.org/graph"
     FRED_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
-    FRED_SYNC_INTERVAL_MINUTES: int = Field(default=360, ge=5, le=10080)
-    FRED_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=30, ge=1, le=3650)
+    FRED_SYNC_INTERVAL_MINUTES: int = Field(default=60, ge=5, le=10080)
+    FRED_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=365, ge=1, le=3650)
     FRED_SYNC_SUCCESS_SLA_HOURS: int = Field(default=48, ge=1, le=336)
+    EIA_WHOLESALE_POWER_BASE_URL: str = "https://www.eia.gov/electricity/wholesale/xls"
+    EIA_WHOLESALE_POWER_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    EIA_WHOLESALE_POWER_SYNC_INTERVAL_MINUTES: int = Field(default=60, ge=5, le=10080)
+    EIA_WHOLESALE_POWER_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=30, ge=1, le=3650)
+    EIA_WHOLESALE_POWER_SYNC_SUCCESS_SLA_HOURS: int = Field(default=336, ge=1, le=336)
+    AISSTREAM_API_KEY: str = ""
+    AISSTREAM_URL: str = "wss://stream.aisstream.io/v0/stream"
+    AISSTREAM_REFRESH_TIMEOUT_SECONDS: int = Field(default=30, ge=5, le=120)
     CFTC_BASE_URL: str = "https://publicreporting.cftc.gov"
     CFTC_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
-    CFTC_SYNC_INTERVAL_MINUTES: int = Field(default=1440, ge=5, le=10080)
+    CFTC_SYNC_INTERVAL_MINUTES: int = Field(default=360, ge=5, le=10080)
     CFTC_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=60, ge=1, le=3650)
     CFTC_SYNC_SUCCESS_SLA_HOURS: int = Field(default=192, ge=1, le=336)
     CAISO_BASE_URL: str = "https://oasis.caiso.com/oasisapi"
     CAISO_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
-    CAISO_SYNC_INTERVAL_MINUTES: int = Field(default=15, ge=5, le=1440)
+    CAISO_SYNC_INTERVAL_MINUTES: int = Field(default=5, ge=5, le=1440)
     CAISO_SYNC_SUCCESS_SLA_HOURS: int = Field(default=2, ge=1, le=24)
     ERCOT_BASE_URL: str = "https://www.ercot.com/content/cdr/html"
     ERCOT_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
-    ERCOT_SYNC_INTERVAL_MINUTES: int = Field(default=15, ge=5, le=1440)
+    ERCOT_SYNC_INTERVAL_MINUTES: int = Field(default=5, ge=5, le=1440)
     ERCOT_SYNC_SUCCESS_SLA_HOURS: int = Field(default=2, ge=1, le=24)
+    MISO_BASE_URL: str = "https://public-api.misoenergy.org"
+    MISO_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    MISO_SYNC_INTERVAL_MINUTES: int = Field(default=5, ge=5, le=1440)
+    MISO_SYNC_SUCCESS_SLA_HOURS: int = Field(default=2, ge=1, le=24)
+    NYISO_BASE_URL: str = "https://mis.nyiso.com/public"
+    NYISO_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    NYISO_SYNC_INTERVAL_MINUTES: int = Field(default=5, ge=5, le=1440)
+    NYISO_SYNC_SUCCESS_SLA_HOURS: int = Field(default=2, ge=1, le=24)
     KALSHI_BASE_URL: str = "https://api.elections.kalshi.com/trade-api/v2"
     KALSHI_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
-    KALSHI_SYNC_INTERVAL_MINUTES: int = Field(default=360, ge=5, le=10080)
+    KALSHI_SYNC_INTERVAL_MINUTES: int = Field(default=60, ge=5, le=10080)
     KALSHI_DEFAULT_LOOKBACK_DAYS: int = Field(default=90, ge=1, le=3650)
     KALSHI_SYNC_SUCCESS_SLA_HOURS: int = Field(default=24, ge=1, le=336)
+    MARKET_DATA_LOGIN_SYNC_ENABLED: bool = True
+    MARKET_DATA_LOGIN_SYNC_PROVIDERS: str = "EIA,EIA_FUNDAMENTALS,FRED,EIA_WHOLESALE_POWER,CFTC,CAISO,ERCOT,MISO,NYISO,KALSHI"
     NWS_BASE_URL: str = "https://api.weather.gov"
     NWS_USER_AGENT: str = ""
     NWS_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)

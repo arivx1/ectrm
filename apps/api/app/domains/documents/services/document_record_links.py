@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.document_record_link import DocumentRecordLink
+from apps.api.app.models.price_index_observation import PriceIndexObservation
+from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
@@ -235,6 +237,29 @@ def _resolve_record_target(
             record_label=f"Delivery {delivery.delivery_id}",
             summary=f"Trade {delivery.trade_id} • {delivery.execution_status.replace('_', ' ').title()}",
         )
+    elif normalized_type == "PRICE_INDEX":
+        price_index = db.get(ReferencePriceIndex, normalized_id)
+        if price_index is None:
+            raise LookupError(f"Price index '{normalized_id}' was not found.")
+        resolved = ResolvedRecordTarget(
+            record_type=normalized_type,
+            record_id=price_index.code,
+            record_label=f"Price Index {price_index.code}",
+            summary=_summarize_price_index(price_index),
+        )
+    elif normalized_type == "PRICE_INDEX_OBSERVATION":
+        observation = db.get(PriceIndexObservation, _coerce_int_id(normalized_id, label="price observation"))
+        if observation is None:
+            raise LookupError(f"Price observation '{normalized_id}' was not found.")
+        resolved = ResolvedRecordTarget(
+            record_type=normalized_type,
+            record_id=str(observation.id),
+            record_label=f"Price Observation {observation.price_index_code} {observation.observation_date.isoformat()}",
+            summary=(
+                f"{observation.source_provider} • {observation.source_series_id} • "
+                f"{observation.value} {observation.currency_code or ''}/{observation.unit_code}"
+            ),
+        )
     else:
         raise ValueError(f"Document links do not support record type '{normalized_type}'.")
 
@@ -246,6 +271,12 @@ def _summarize_trade(trade: Trade) -> str:
     parts = [trade.counterparty, trade.commodity, trade.book]
     normalized_parts = [str(part).strip() for part in parts if str(part or "").strip()]
     return " • ".join(normalized_parts) or "Linked trade record"
+
+
+def _summarize_price_index(price_index: ReferencePriceIndex) -> str:
+    parts = [price_index.provider, price_index.commodity_code, price_index.market, price_index.location_code]
+    normalized_parts = [str(part).strip() for part in parts if str(part or "").strip()]
+    return " • ".join(normalized_parts) or "Linked price index"
 
 
 def _coerce_int_id(value: str, *, label: str) -> int:

@@ -214,6 +214,23 @@
       }
     },
     {
+      "case_id": "price_publication_index_assessment",
+      "filename": "price-publication-wti-cushing.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Price Publication\nPublication Date: 2026-04-15\nObservation Date: 2026-04-15\nPrice Index Code: WTI_CUSHING_D\nPublisher: EIA\nSource Series ID: PET.RWTC.D\nCommodity: WTI\nLocation: Cushing\nPrice: USD 84.25\nCurrency: USD\nUnit: BBL\n\nPrice Index Code  Commodity  Location  Price\nWTI_CUSHING_D  WTI  Cushing  84.25",
+      "expectations": {
+        "expected_document_kind": "PRICE_PUBLICATION",
+        "min_confidence": 0.80,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected price publication terminology",
+          "Matched required price publication fields"
+        ]
+      }
+    },
+    {
       "case_id": "scanned_invoice_ocr",
       "filename": "scan-ocr-1007.pdf",
       "text_source": "ocr",

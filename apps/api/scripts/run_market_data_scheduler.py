@@ -20,13 +20,27 @@ from apps.api.app.domains.reference_data.services.external_data import (
     sync_cftc_series,
     sync_eia_fundamental_series,
     sync_eia_series,
+    sync_eia_wholesale_power_series,
     sync_ercot_series,
     sync_fred_series,
     sync_kalshi_series,
+    sync_miso_series,
+    sync_nyiso_series,
 )
 from apps.api.app.domains.reference_data.services.external_data.sync_status import build_external_data_sync_status
 
-DEFAULT_PROVIDERS = ("EIA", "EIA_FUNDAMENTALS", "FRED", "CFTC", "CAISO", "ERCOT", "KALSHI")
+DEFAULT_PROVIDERS = (
+    "EIA",
+    "EIA_FUNDAMENTALS",
+    "FRED",
+    "EIA_WHOLESALE_POWER",
+    "CFTC",
+    "CAISO",
+    "ERCOT",
+    "MISO",
+    "NYISO",
+    "KALSHI",
+)
 
 
 def main() -> int:
@@ -35,7 +49,18 @@ def main() -> int:
         "--provider",
         dest="providers",
         action="append",
-        choices=("eia", "eia-fundamentals", "fred", "cftc", "caiso", "ercot", "kalshi"),
+        choices=(
+            "eia",
+            "eia-fundamentals",
+            "fred",
+            "eia-wholesale-power",
+            "cftc",
+            "caiso",
+            "ercot",
+            "miso",
+            "nyiso",
+            "kalshi",
+        ),
     )
     parser.add_argument("--poll-seconds", dest="poll_seconds", type=int, default=60)
     parser.add_argument("--requested-by", dest="requested_by", default="scheduler")
@@ -103,6 +128,12 @@ def _sync_provider(*, provider: str, requested_by: str, db):
             lookback_days=settings.FRED_SYNC_DEFAULT_LOOKBACK_DAYS,
             requested_by=requested_by,
         )
+    if provider == "EIA_WHOLESALE_POWER":
+        return sync_eia_wholesale_power_series(
+            db,
+            lookback_days=settings.EIA_WHOLESALE_POWER_SYNC_DEFAULT_LOOKBACK_DAYS,
+            requested_by=requested_by,
+        )
     if provider == "CFTC":
         return sync_cftc_series(
             db,
@@ -116,6 +147,16 @@ def _sync_provider(*, provider: str, requested_by: str, db):
         )
     if provider == "ERCOT":
         return sync_ercot_series(
+            db,
+            requested_by=requested_by,
+        )
+    if provider == "MISO":
+        return sync_miso_series(
+            db,
+            requested_by=requested_by,
+        )
+    if provider == "NYISO":
+        return sync_nyiso_series(
             db,
             requested_by=requested_by,
         )

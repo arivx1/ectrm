@@ -5,13 +5,74 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { test } from "vitest";
 
 import { MapWorkspace } from "../src/workspaces/map/MapWorkspace";
+import { VIEW_DATA_GROUPS } from "../src/entities/app/workspaceRendererRegistry";
 import {
   AssetMapPanel,
+  buildAssetMapViewportCoordinates,
   syncAssetActivityVisibilityState,
   setAllAssetGeographyVisibilityState,
   setAllAssetSubtypeVisibilityState,
   syncAssetSubtypeVisibilityState,
 } from "../src/workspaces/reference-data/tabs/AssetMapPanel";
+import type { DeliveryRecord } from "../src/shared/models";
+
+function buildVesselDelivery(overrides: Partial<DeliveryRecord> = {}): DeliveryRecord {
+  return {
+    delivery_id: "DEL-VESSEL-1",
+    trade_id: "TRD-VESSEL-1",
+    leg_no: null,
+    external_trade_id: null,
+    status: "IN_PROGRESS",
+    direction: "SELL",
+    mode_family: "LOGISTICS",
+    transport_mode: "VESSEL",
+    commodity: "CRUDE",
+    commodity_class: "OIL",
+    vessel_detail: {
+      delivery_id: "DEL-VESSEL-1",
+      vessel_name: "MV Signal",
+      imo_number: "IMO1234567",
+      mmsi_number: "366123456",
+      call_sign: "WABC",
+      voyage_number: "VOY-1",
+      tracking_provider: "AISSTREAM",
+      tracking_policy: "LIVE_WHEN_AVAILABLE",
+      last_signal_at: "2026-04-11T02:30:00Z",
+      last_position_at: "2026-04-11T02:30:00Z",
+      last_latitude: 29.7604,
+      last_longitude: -95.3698,
+      last_speed_knots: 12.4,
+      last_course_degrees: 184,
+      last_heading_degrees: 181,
+      last_navigational_status: "UNDER_WAY",
+      current_destination: "HOUSTON",
+      current_eta_at_destination: "2026-04-12T12:00:00Z",
+      tracking_health: {
+        last_evaluated_at: "2026-04-11T02:31:00Z",
+        tracking_freshness_status: "FRESH",
+        tracking_freshness_reason: "Recent position",
+        eta_status: "ON_TRACK",
+        eta_status_reason: "ETA on track",
+        exception_severity: "CLEAR",
+        primary_exception: null,
+        stale_after_minutes: 90,
+        minutes_since_last_signal: 1,
+        eta_late_minutes: null,
+      },
+      created_at: "2026-04-11T00:00:00Z",
+      created_by: "test-user",
+      updated_at: "2026-04-11T02:30:00Z",
+      updated_by: "test-user",
+      version: 1,
+    },
+    vessel_tracking_health: null,
+    ...overrides,
+  } as DeliveryRecord;
+}
+
+test("map workspace requests deliveries so vessel overlays load on direct navigation", () => {
+  assert.deepEqual(VIEW_DATA_GROUPS.map, ["reference", "deliveries"]);
+});
 
 test("map workspace renders a dedicated asset map screen without requiring a selection", () => {
   const markup = renderToStaticMarkup(
@@ -52,6 +113,7 @@ test("map workspace renders a dedicated asset map screen without requiring a sel
           operating_status: "OPERATING",
         },
       ],
+      deliveries: [buildVesselDelivery()],
       locations: [
         {
           code: "HOUSTON",
@@ -132,66 +194,7 @@ test("map workspace renders a dedicated asset map screen without requiring a sel
           is_primary: true,
         },
       ],
-      weatherLocations: [
-        {
-          code: "HOUSTON_GC",
-          name: "Houston Gulf Coast",
-          reference_location_code: "HOUSTON",
-          latitude: 29.7604,
-          longitude: -95.3698,
-          timezone: "America/Chicago",
-          source_provider: "NWS",
-          cwa: "HGX",
-          grid_id: "HGX",
-          grid_x: 83,
-          grid_y: 95,
-          station_id: "KHOU",
-          description: "Tracked load and storm point",
-          is_active: true,
-          created_at: "2026-04-11T00:00:00Z",
-          created_by: "test-user",
-          updated_at: "2026-04-11T00:00:00Z",
-          updated_by: "test-user",
-          version: 1,
-        },
-      ],
-      weatherSyncStatus: {
-        provider: "NWS",
-        label: "NWS Weather Sync",
-        health_status: "healthy",
-        latest_run_status: "SUCCEEDED",
-        success_sla_hours: 6,
-        scheduler_interval_minutes: 60,
-        forecast_freshness_hours: 6,
-        observation_freshness_hours: 2,
-        last_run_at: "2026-04-11T00:00:00Z",
-        last_success_at: "2026-04-11T00:00:00Z",
-        latest_data_at: "2026-04-11T00:00:00Z",
-        error_summary: null,
-        active_location_count: 1,
-        healthy_location_count: 1,
-        stale_location_count: 0,
-        missing_location_count: 0,
-        latest_run: null,
-        latest_success: null,
-        locations: [
-          {
-            code: "HOUSTON_GC",
-            name: "Houston Gulf Coast",
-            reference_location_code: "HOUSTON",
-            station_id: "KHOU",
-            is_active: true,
-            health_status: "healthy",
-            last_forecast_downloaded_at: "2026-04-11T00:00:00Z",
-            last_observation_at: "2026-04-11T00:00:00Z",
-            last_observation_downloaded_at: "2026-04-11T00:00:00Z",
-            forecast_age_hours: 1,
-            observation_age_hours: 0.5,
-          },
-        ],
-      },
       globalFilter: "",
-      weatherDataLoaded: true,
       onOpenReferenceData: () => undefined,
       onPrepareReferenceAsset: () => undefined,
       onOpenReferenceRailRoute: () => undefined,
@@ -205,13 +208,15 @@ test("map workspace renders a dedicated asset map screen without requiring a sel
   assert.match(markup, /Map Asset Directory/);
   assert.match(
     markup,
-    /No asset is selected\. The map is currently showing every map-ready asset in the current filter\./,
+    /No asset or vessel is selected\. The map is currently showing every map-ready asset and saved\s+vessel position in the current filter\./,
   );
   assert.match(markup, /Only map-ready assets are included here\./);
+  assert.match(markup, /Saved vessel\s+positions plot as a separate tracking layer\./);
   assert.match(markup, />Show</);
   assert.match(markup, /My Location/);
   assert.match(markup, /Assets/);
   assert.match(markup, /Rail Routes/);
+  assert.match(markup, /Vessels/);
   assert.match(markup, /Weather/);
   assert.match(markup, /Map Filters/);
   assert.match(
@@ -235,17 +240,15 @@ test("map workspace renders a dedicated asset map screen without requiring a sel
   assert.match(markup, /aria-label="Check all weather overlays"/);
   assert.match(markup, /Weather overlay layers/);
   assert.match(markup, /Opacity/);
-  assert.match(markup, /Markers only/);
   assert.match(markup, /Radar/);
-  assert.match(markup, /Precipitation/);
-  assert.match(markup, /Wind/);
-  assert.match(markup, /Temperature/);
-  assert.match(markup, /Humidity/);
-  assert.match(markup, /Pressure/);
   assert.match(markup, /Radar overlay opacity/);
-  assert.match(markup, /Humidity overlay opacity/);
   assert.match(markup, /aria-label="Show Radar overlay details"/);
   assert.doesNotMatch(markup, /aria-label="Weather overlay layer"/);
+  assert.doesNotMatch(markup, /Markers only/);
+  assert.doesNotMatch(markup, /Precipitation/);
+  assert.doesNotMatch(markup, /Temperature/);
+  assert.doesNotMatch(markup, /Humidity/);
+  assert.doesNotMatch(markup, /Pressure/);
   assert.match(markup, /Activity/);
   assert.match(markup, /Positions/);
   assert.match(markup, /Shipments/);
@@ -280,9 +283,14 @@ test("map workspace renders a dedicated asset map screen without requiring a sel
   );
   assert.match(markup, /Pipeline/);
   assert.match(markup, /Other/);
-  assert.match(markup, /1 tracked weather point visible/);
-  assert.match(markup, /1 weather points/);
+  assert.doesNotMatch(markup, /tracked weather point/);
+  assert.doesNotMatch(markup, /weather points/);
   assert.match(markup, /1 rail overlays/);
+  assert.match(markup, /1 vessels/);
+  assert.match(markup, /Vessel Positions/);
+  assert.match(markup, /MV Signal/);
+  assert.match(markup, /366123456/);
+  assert.match(markup, /Selected Vessel/);
   assert.match(markup, /Asset Class/);
   assert.match(markup, /Asset Type/);
   assert.match(markup, /Commodity/);
@@ -359,8 +367,6 @@ test("asset map panel surfaces selected rail route actions beside the asset summ
           is_primary: true,
         },
       ],
-      weatherLocations: [],
-      weatherSyncStatus: null,
       selectedAssetCode: null,
       selectedRailRouteCode: "BNSF_WAHA_TO_HSC",
       onSelectAsset: () => undefined,
@@ -384,6 +390,73 @@ test("asset map panel surfaces selected rail route actions beside the asset summ
   assert.match(markup, />Clear Route Focus</);
 });
 
+test("asset map panel surfaces selected vessel actions beside the map summary cards", () => {
+  const markup = renderToStaticMarkup(
+    createElement(AssetMapPanel, {
+      assets: [],
+      locations: [],
+      railRoutes: [],
+      spatialFeatures: [],
+      vesselPositions: [
+        {
+          deliveryId: "DEL-VESSEL-1",
+          tradeId: "TRD-VESSEL-1",
+          label: "MV Signal",
+          vesselName: "MV Signal",
+          imoNumber: "IMO1234567",
+          mmsiNumber: "366123456",
+          commodity: "CRUDE",
+          status: "IN_PROGRESS",
+          latitude: 29.7604,
+          longitude: -95.3698,
+          lastPositionAt: "2026-04-11T02:30:00Z",
+          lastSignalAt: "2026-04-11T02:30:00Z",
+          speedKnots: 12.4,
+          courseDegrees: 184,
+          headingDegrees: 181,
+          navigationalStatus: "UNDER_WAY",
+          destination: "HOUSTON",
+          etaAtDestination: "2026-04-12T12:00:00Z",
+          healthSeverity: "WATCH",
+          primaryException: "ETA_MONITOR",
+        },
+      ],
+      selectedAssetCode: null,
+      selectedVesselDeliveryId: "DEL-VESSEL-1",
+      onSelectAsset: () => undefined,
+      onSelectVessel: () => undefined,
+      onOpenVesselDelivery: () => undefined,
+      onClearVesselSelection: () => undefined,
+    }),
+  );
+
+  assert.match(markup, /Vessels/);
+  assert.match(markup, /1 vessels/);
+  assert.match(markup, /Selected Vessel/);
+  assert.match(markup, /DEL-VESSEL-1/);
+  assert.match(markup, /MV Signal/);
+  assert.match(markup, /CRUDE/);
+  assert.match(markup, /12\.4 kn/);
+  assert.match(markup, /Course 184°/);
+  assert.match(markup, /ETA MONITOR/);
+  assert.match(markup, />Open Delivery</);
+  assert.match(markup, />Clear Vessel Focus</);
+});
+
+test("asset map viewport coordinates include my location beside visible vessels", () => {
+  const coordinates = buildAssetMapViewportCoordinates({
+    recordCoordinates: [],
+    spatialFeatureCoordinates: [],
+    vesselCoordinates: [[-95.3698, 29.7604]],
+    userLocation: { latitude: 40.7128, longitude: -74.006 },
+  });
+
+  assert.deepEqual(coordinates, [
+    [-95.3698, 29.7604],
+    [-74.006, 40.7128],
+  ]);
+});
+
 test("map workspace keeps the live map canvas available even when no assets are plottable", () => {
   const markup = renderToStaticMarkup(
     createElement(MapWorkspace, {
@@ -404,13 +477,11 @@ test("map workspace keeps the live map canvas available even when no assets are 
           operating_status: "OPERATING",
         },
       ],
+      deliveries: [],
       locations: [],
       railRoutes: [],
       spatialFeatures: [],
-      weatherLocations: [],
-      weatherSyncStatus: null,
       globalFilter: "",
-      weatherDataLoaded: true,
       onOpenReferenceData: () => undefined,
       onPrepareReferenceAsset: () => undefined,
       onOpenReferenceRailRoute: () => undefined,
@@ -450,7 +521,7 @@ test("map workspace keeps the live map canvas available even when no assets are 
   assert.match(markup, /Other/);
   assert.match(markup, /Map Records/);
   assert.match(markup, /0 map records/);
-  assert.match(markup, /No tracked weather points loaded/);
+  assert.doesNotMatch(markup, /tracked weather/);
   assert.doesNotMatch(markup, />Where I am</);
   assert.match(markup, /No filtered assets are map-ready yet\./);
   assert.match(
@@ -460,30 +531,6 @@ test("map workspace keeps the live map canvas available even when no assets are 
   assert.match(markup, /1 hidden/);
   assert.match(markup, /aria-label="Resize map height"/);
   assert.doesNotMatch(markup, /class="asset-map-empty"/);
-});
-
-test("map workspace surfaces weather layer load failures in the control row", () => {
-  const markup = renderToStaticMarkup(
-    createElement(MapWorkspace, {
-      assets: [],
-      locations: [],
-      railRoutes: [],
-      spatialFeatures: [],
-      weatherLocations: [],
-      weatherSyncStatus: null,
-      weatherDataLoaded: false,
-      weatherDataLoading: false,
-      weatherDataError: "Request failed: 404",
-      globalFilter: "",
-      onOpenReferenceData: () => undefined,
-      onPrepareReferenceAsset: () => undefined,
-      onOpenReferenceRailRoute: () => undefined,
-      onOpenRailRouteDeliveries: () => undefined,
-    }),
-  );
-
-  assert.match(markup, /Weather Error/);
-  assert.doesNotMatch(markup, /Request failed: 404/);
 });
 
 test("syncAssetSubtypeVisibilityState keeps existing subtype choices while defaulting new subtypes on", () => {

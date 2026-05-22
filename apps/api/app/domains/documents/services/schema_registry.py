@@ -12,7 +12,9 @@ from apps.api.app.schemas.document import DocumentSchemaRegistryOut
 from apps.api.app.schemas.document import DocumentTableColumnSchemaOut
 from apps.api.app.schemas.document import DocumentTableTemplateSchemaOut
 
-DOCUMENT_SCHEMA_REGISTRY_VERSION = "2026-05-17.review-v6"
+from .document_facets import DOCUMENT_FACET_SCHEMAS
+
+DOCUMENT_SCHEMA_REGISTRY_VERSION = "2026-05-20.review-v7"
 
 
 def _field(
@@ -882,6 +884,59 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
             _field("currency", "Currency", value_type="identifier"),
         ],
         table_templates=[],
+    ),
+    DocumentKindSchemaOut(
+        document_kind="PRICE_PUBLICATION",
+        label="Price Publication Report",
+        document_family="MARKET_DATA",
+        description="Published commodity price assessment, bulletin, or index sheet used to support price-index observations.",
+        review_guidance="Verify the publisher, publication date, price index code, commodity, location, units, currency, and published price before linking it to market data.",
+        linkage_summary="Links primarily to price-index observations and price-index reference records using price index code, observation date, publisher, source series, commodity, and location.",
+        record_targets=[
+            _target(
+                "PRICE_INDEX_OBSERVATION",
+                "Price Observation",
+                "Match using price index code, observation date, source provider, source series ID, and published date.",
+            ),
+            _target(
+                "PRICE_INDEX",
+                "Price Index",
+                "Use the price index code, publisher, commodity, market, and location when an exact observation is not loaded yet.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=["price_index_code", "observation_date", "source_provider", "source_series_id", "commodity", "location"],
+        header_fields=[
+            _field("publication_reference", "Publication Reference", value_type="identifier"),
+            _field("publication_date", "Publication Date", value_type="date", required=True),
+            _field("observation_date", "Observation Date", value_type="date"),
+            _field("price_index_code", "Price Index Code", value_type="identifier", required=True),
+            _field("source_provider", "Source Provider", required=True),
+            _field("source_series_id", "Source Series ID", value_type="identifier"),
+            _field("commodity", "Commodity", required=True),
+            _field("market", "Market"),
+            _field("location", "Location"),
+            _field("price", "Price", value_type="currency", required=True),
+            _field("currency", "Currency", value_type="identifier"),
+            _field("unit", "Unit", value_type="identifier"),
+        ],
+        table_templates=[
+            DocumentTableTemplateSchemaOut(
+                template_key="price_lines",
+                label="Price Lines",
+                description="Published price assessment rows keyed by index, commodity, location, date, currency, and unit.",
+                min_occurrences=0,
+                columns=[
+                    _column("price_index_code", "Price Index Code", required=True),
+                    _column("commodity", "Commodity", required=True),
+                    _column("location", "Location"),
+                    _column("observation_date", "Observation Date", value_type="date"),
+                    _column("price", "Price", value_type="currency", required=True),
+                    _column("currency", "Currency"),
+                    _column("unit", "Unit"),
+                ],
+            )
+        ],
     ),
     DocumentKindSchemaOut(
         document_kind="LETTER_OF_CREDIT",
@@ -1773,6 +1828,7 @@ def build_document_schema_registry() -> DocumentSchemaRegistryOut:
     return DocumentSchemaRegistryOut(
         version=DOCUMENT_SCHEMA_REGISTRY_VERSION,
         document_kinds=[_schema_with_controlled_metadata(schema) for schema in DOCUMENT_KIND_SCHEMAS],
+        document_facets=list(DOCUMENT_FACET_SCHEMAS),
     )
 
 

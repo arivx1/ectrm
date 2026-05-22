@@ -574,17 +574,6 @@ function buildStaticFunctionShortcuts(): TerminalFunctionShortcut[] {
         handoff: null,
       },
     },
-    {
-      id: 'help',
-      title: 'HELP - How It Works',
-      detail: 'Open the in-product guide when the right workspace or shortcut is unclear.',
-      aliases: ['help', 'guide', 'how it works'],
-      action: {
-        kind: 'view',
-        view: 'guide',
-        handoff: null,
-      },
-    },
   ]
 }
 

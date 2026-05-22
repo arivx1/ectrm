@@ -26,15 +26,9 @@ import {
 } from '../../shared/appRouteHandoff'
 import type { ViewKey } from '../../shared/models'
 import { resolveTradeFormMetadata } from '../../shared/tradeMetadata'
-import type { DocumentationDocumentKey } from '../../workspaces/docs/DocumentationWorkspace'
 import { resolveTradeInspectorTabForEvent } from '../../workspaces/events/eventHelpers'
 import { SETTINGS_CUSTOM_EVENTS_CARD_ANCHOR_ID } from '../../workspaces/settings/userEventsPanelShared'
 
-const DocumentationWorkspace = lazy(() =>
-  import('../../workspaces/docs/DocumentationWorkspace').then((module) => ({
-    default: module.DocumentationWorkspace,
-  })),
-)
 const PromptHomeWorkspace = lazy(() =>
   import('../../workspaces/prompt/PromptHomeWorkspace').then((module) => ({
     default: module.PromptHomeWorkspace,
@@ -228,7 +222,6 @@ type WorkspaceWindowNoticeContext = {
 }
 
 export type WorkspaceViewRenderContext = {
-  activeDocumentationDocumentKey: DocumentationDocumentKey
   captureForm: ReturnType<typeof useTradeCaptureForm>
   amendForm: ReturnType<typeof useTradeAmendForm>
   appearance: Pick<
@@ -240,7 +233,6 @@ export type WorkspaceViewRenderContext = {
     'tradeCaptureSettings' | 'handleTradeCaptureSettingsChange' | 'handleTradeCaptureSettingsReset'
   >
   currentView: ReturnType<typeof useAppRouteState>['currentView']
-  handleDocumentationDocumentChange: ReturnType<typeof useAppRouteState>['handleDocumentationDocumentChange']
   navigateToTrade: ReturnType<typeof useAppRouteState>['navigateToTrade']
   navigateToView: ReturnType<typeof useAppRouteState>['navigateToView']
   replaceView: ReturnType<typeof useAppRouteState>['replaceView']
@@ -734,16 +726,6 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     dataGroups: ['trades', 'events', 'positions', 'reference'],
     blockingGroups: ['trades', 'events', 'positions', 'reference'],
   },
-  guide: {
-    key: 'guide',
-    label: 'How It Works',
-    kicker: 'Learn',
-    heroTitle: 'Start here for onboarding and workflow help',
-    heroBody:
-      'Use the in-product handbook to choose the right workflow, explain the operating model, and jump into the next job without leaving the app.',
-    dataGroups: [],
-    blockingGroups: [],
-  },
   pretrade: {
     key: 'pretrade',
     label: 'Pre-Trade',
@@ -923,7 +905,7 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     heroTitle: 'Physical footprint and governed overlays',
     heroBody:
       'Review map-ready assets, linked locations, and shared routes or regions from one navigable spatial workspace.',
-    dataGroups: ['reference', 'weather'],
+    dataGroups: ['reference', 'deliveries'],
     blockingGroups: ['reference'],
   },
   reference: {
@@ -1010,10 +992,9 @@ export const WORKSPACE_RENDERERS: Record<
         }}
         priceIndices={context.workspaceData.priceIndices}
         assets={context.workspaceData.assets}
+        deliveries={context.workspaceData.deliveries}
         locations={context.workspaceData.locations}
         spatialFeatures={context.workspaceData.spatialFeatures}
-        weatherLocations={context.workspaceData.weatherLocations}
-        weatherSyncStatus={context.workspaceData.weatherSyncStatus}
         referenceDataLoaded={context.workspaceData.groupLoaded.reference}
         referenceDataLoading={context.workspaceData.groupLoading.reference}
         onEnsureReferenceData={() =>
@@ -1022,13 +1003,13 @@ export const WORKSPACE_RENDERERS: Record<
             force: false,
           })
         }
-        weatherDataLoaded={context.workspaceData.groupLoaded.weather}
-        weatherDataLoading={context.workspaceData.groupLoading.weather}
-        weatherDataError={context.workspaceData.groupErrors.weather}
         customEventsHref={context.hrefForView('settings', SETTINGS_CUSTOM_EVENTS_CARD_ANCHOR_ID)}
-        onEnsureWeatherData={() =>
+        deliveriesDataLoaded={context.workspaceData.groupLoaded.deliveries}
+        deliveriesDataLoading={context.workspaceData.groupLoading.deliveries}
+        deliveriesDataError={context.workspaceData.groupErrors.deliveries}
+        onEnsureDeliveriesData={() =>
           context.workspaceData.loadData({
-            groups: ['weather'],
+            groups: ['deliveries'],
             force: false,
           })
         }
@@ -1039,18 +1020,6 @@ export const WORKSPACE_RENDERERS: Record<
           })
         }
         onRefreshData={context.workspaceData.loadData}
-      />
-    ),
-  },
-  guide: {
-    render: (context) => (
-      <DocumentationWorkspace
-        activeDocumentKey={context.activeDocumentationDocumentKey}
-        authSession={context.workspaceData.authSession}
-        getViewHref={context.hrefForView}
-        onDocumentKeyChange={context.handleDocumentationDocumentChange}
-        onOpenView={context.navigateToView}
-        roadmapRefreshVersion={context.roadmapRefreshVersion}
       />
     ),
   },
@@ -1367,6 +1336,7 @@ export const WORKSPACE_RENDERERS: Record<
         onSaveDeliveryPipelineDetails={context.workspaceData.handleUpdateDeliveryPipelineDetails}
         onSaveDeliveryPowerDetails={context.workspaceData.handleUpdateDeliveryPowerDetails}
         onSaveDeliveryTruckDetails={context.workspaceData.handleUpdateDeliveryTruckDetails}
+        onSaveDeliveryVesselDetails={context.workspaceData.handleUpdateDeliveryVesselDetails}
         onCreateDeliveryTruckMovement={context.workspaceData.handleCreateDeliveryTruckMovement}
         onSaveDeliveryTruckMovement={context.workspaceData.handleUpdateDeliveryTruckMovement}
         onCancelDeliveryTruckMovement={context.workspaceData.handleCancelDeliveryTruckMovement}
@@ -1544,14 +1514,10 @@ export const WORKSPACE_RENDERERS: Record<
     render: (context) => (
       <MapWorkspace
         assets={context.workspaceData.assets}
+        deliveries={context.workspaceData.deliveries}
         locations={context.workspaceData.locations}
         railRoutes={context.workspaceData.railRoutes}
         spatialFeatures={context.workspaceData.spatialFeatures}
-        weatherLocations={context.workspaceData.weatherLocations}
-        weatherSyncStatus={context.workspaceData.weatherSyncStatus}
-        weatherDataLoaded={context.workspaceData.groupLoaded.weather}
-        weatherDataLoading={context.workspaceData.groupLoading.weather}
-        weatherDataError={context.workspaceData.groupErrors.weather}
         globalFilter={GLOBAL_FILTER_DISABLED}
         onOpenReferenceData={() => context.navigateToView('reference')}
         onPrepareReferenceAsset={(code) => {
@@ -1562,6 +1528,35 @@ export const WORKSPACE_RENDERERS: Record<
           context.referenceState.setReferenceTab('rail-routes')
           context.referenceState.startEditRailRoute(code)
           context.navigateToView('reference')
+        }}
+        onOpenVesselDelivery={(deliveryId) => {
+          const delivery = context.workspaceData.deliveries.find((record) => record.delivery_id === deliveryId) ?? null
+          const vesselLabel =
+            delivery?.vessel_detail?.vessel_name ??
+            delivery?.vessel_detail?.imo_number ??
+            delivery?.vessel_detail?.mmsi_number ??
+            deliveryId
+          context.navigateToView(
+            'shipments',
+            {
+              source: 'map',
+              tradeId: delivery?.trade_id ?? deliveryId,
+              focus: {
+                type: 'trade',
+                id: delivery?.trade_id ?? deliveryId,
+                label: vesselLabel,
+              },
+              tradeInspectorTab: null,
+              eventType: null,
+              label: `Open delivery ${deliveryId}`,
+              rationale:
+                'This workspace started from a selected vessel position so you can review the delivery and tracking detail before widening back to the full board.',
+              filter: deliveryId,
+              sourceRunId: null,
+              sourceConversationId: null,
+              sourceActionRequestId: null,
+            },
+          )
         }}
         onOpenRailRouteDeliveries={(code) => {
           const railRoute = context.workspaceData.railRoutes.find((record) => record.code === code) ?? null

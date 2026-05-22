@@ -157,52 +157,6 @@ async function expectLocatorNearRightEdge(
   ).toBeLessThanOrEqual(threshold);
 }
 
-async function expectMarkersInsideFrame(
-  page: Page,
-  frameSelector: string,
-  markerSelector: string,
-  expectedCount: number,
-): Promise<void> {
-  await expect
-    .poll(async () =>
-      page.evaluate(
-        ({
-          frameSelector: nextFrameSelector,
-          markerSelector: nextMarkerSelector,
-        }) => {
-          const frame = document.querySelector(nextFrameSelector);
-          if (!(frame instanceof HTMLElement)) {
-            return -1;
-          }
-
-          const frameRect = frame.getBoundingClientRect();
-          return Array.from(
-            document.querySelectorAll(nextMarkerSelector),
-          ).filter((node) => {
-            if (!(node instanceof HTMLElement)) {
-              return false;
-            }
-
-            const rect = node.getBoundingClientRect();
-            const centerX = rect.left + rect.width / 2;
-            const centerY = rect.top + rect.height / 2;
-            return (
-              centerX >= frameRect.left &&
-              centerX <= frameRect.right &&
-              centerY >= frameRect.top &&
-              centerY <= frameRect.bottom
-            );
-          }).length;
-        },
-        {
-          frameSelector,
-          markerSelector,
-        },
-      ),
-    )
-    .toBe(expectedCount);
-}
-
 async function expectLocatorAbove(
   first: Locator,
   second: Locator,
@@ -773,58 +727,6 @@ test("single-user smoke signs into the prompt home when one-click access is enab
   }
 });
 
-test("prompt home prompt kits load guided prompts into the composer", async ({
-  page,
-}) => {
-  const harness = await startSmokeHarness();
-
-  try {
-    await seedSignedInSession(page, harness);
-    await page.goto(harness.origin, {
-      waitUntil: "domcontentloaded",
-    });
-
-    const operatorPrompt = page.getByLabel("Operator prompt");
-
-    await expect(
-      page.getByText(
-        "Choose one to reveal a few suggested prompts and direct workspace links.",
-      ),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", {
-        name: "Tell me updates about the Strait of Hormuz.",
-      }),
-    ).toHaveCount(0);
-
-    await page.getByRole("button", { name: "Trade", exact: true }).click();
-    await page
-      .getByRole("button", { name: "Walk me through building a trade draft." })
-      .click();
-    await expect(operatorPrompt).toHaveValue(/I would like to build a trade\./);
-    await expect(operatorPrompt).toHaveValue(/real or simulated/i);
-    await expect(operatorPrompt).toHaveValue(
-      /look for arbitrage opportunities/i,
-    );
-
-    await page
-      .getByRole("button", { name: "Manage Risk", exact: true })
-      .click();
-    await page
-      .getByRole("button", {
-        name: "Tell me updates about the Strait of Hormuz.",
-      })
-      .click();
-    await expect(operatorPrompt).toHaveValue(
-      "Tell me updates about the Strait of Hormuz.",
-    );
-
-    assertNoHarnessRequestFailures(harness);
-  } finally {
-    await harness.close();
-  }
-});
-
 test("prompt home prompt card expands and collapses independently", async ({
   page,
 }) => {
@@ -842,28 +744,25 @@ test("prompt home prompt card expands and collapses independently", async ({
       ".prompt-home-prompt-card-toggle",
     );
     const operatorPrompt = page.getByLabel("Operator prompt");
-    const quickPrompts = page.locator(".prompt-home-quick-prompts");
     const currentPromptThread = promptCard.locator(".prompt-home-chat");
 
     await expect(promptCard).toContainText("Ask the desk assistant");
     await expect(promptCardToggle).toContainText("Hide card");
     await expect(promptCardBody).toBeVisible();
     await expect(operatorPrompt).toBeVisible();
-    await expect(quickPrompts).toBeVisible();
+    await expect(page.locator(".prompt-home-quick-prompts")).toHaveCount(0);
     await expect(currentPromptThread).toBeVisible();
 
     await promptCardToggle.click();
     await expect(promptCardToggle).toContainText("Show card");
     await expect(promptCardBody).toBeHidden();
     await expect(operatorPrompt).toBeHidden();
-    await expect(quickPrompts).toBeHidden();
     await expect(currentPromptThread).toBeHidden();
 
     await promptCardToggle.click();
     await expect(promptCardToggle).toContainText("Hide card");
     await expect(promptCardBody).toBeVisible();
     await expect(operatorPrompt).toBeVisible();
-    await expect(quickPrompts).toBeVisible();
     await expect(currentPromptThread).toBeVisible();
 
     assertNoHarnessRequestFailures(harness);
@@ -952,7 +851,6 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     );
     const deskTimeCopy = page.locator(".prompt-home-timeframe-panel-copy");
     const mapToggle = page.locator(".prompt-home-map-card-toggle");
-    const mapFrameSelector = ".prompt-home-map-card .asset-map-canvas-frame";
     const mapFiltersCard = page.locator(
       ".prompt-home-map-card .asset-map-filters-card",
     );
@@ -1009,21 +907,6 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     const radarOverlayToggle = weatherOverlayControls.getByRole("checkbox", {
       name: "Radar",
     });
-    const precipitationOverlayToggle =
-      weatherOverlayControls.getByRole("checkbox", {
-        name: "Precipitation",
-      });
-    const temperatureOverlayToggle = weatherOverlayControls.getByRole(
-      "checkbox",
-      {
-        name: "Temperature",
-      },
-    );
-    const weatherMarkerTooltip = page
-      .locator(".asset-map-weather-marker")
-      .nth(1)
-      .locator(".asset-map-marker-tooltip");
-    const weatherPreview = page.locator(".asset-map-weather-preview");
     const dayCard = page
       .locator(".prompt-home-time-meter-card")
       .filter({ has: dayPanel });
@@ -1113,11 +996,13 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(tooltipToggle).toBeChecked();
     await expect(weatherOverlayControls).toBeVisible();
     await expect(radarOverlayToggle).toBeVisible();
-    await expect(radarOverlayToggle).not.toBeChecked();
-    await expect(precipitationOverlayToggle).toBeVisible();
-    await expect(precipitationOverlayToggle).not.toBeChecked();
-    await expect(temperatureOverlayToggle).toBeVisible();
-    await expect(temperatureOverlayToggle).not.toBeChecked();
+    await expect(radarOverlayToggle).toBeChecked();
+    await expect(
+      weatherOverlayControls.getByRole("checkbox", { name: "Precipitation" }),
+    ).toHaveCount(0);
+    await expect(
+      weatherOverlayControls.getByRole("checkbox", { name: "Temperature" }),
+    ).toHaveCount(0);
     await expect(page.getByText("Asset Types")).toBeVisible();
     await expect(
       assetTypeControls.getByRole("button", { name: "Uncheck all" }),
@@ -1135,39 +1020,9 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(
       page.getByRole("checkbox", { name: "Pipeline" }),
     ).toBeChecked();
-    await expect(
-      page.getByText("2 tracked weather points visible"),
-    ).toBeVisible();
-    await expect(page.locator(".asset-map-weather-marker")).toHaveCount(2);
-    await expect(
-      page.locator(".asset-map-weather-marker").first(),
-    ).toContainText("Wx");
-    const weatherOverlayMarkerBox = await page
-      .locator(".asset-map-weather-marker")
-      .nth(1)
-      .boundingBox();
-    expect(weatherOverlayMarkerBox).not.toBeNull();
-    const initialMapFrameBox = await page.locator(mapFrameSelector).boundingBox();
-    expect(initialMapFrameBox).not.toBeNull();
-    const weatherOverlayMarkerTarget =
-      weatherOverlayMarkerBox && initialMapFrameBox
-        ? {
-            x:
-              weatherOverlayMarkerBox.x +
-              weatherOverlayMarkerBox.width / 2 -
-              initialMapFrameBox.x,
-            y:
-              weatherOverlayMarkerBox.y +
-              weatherOverlayMarkerBox.height / 2 -
-              initialMapFrameBox.y,
-          }
-        : null;
-    await expectMarkersInsideFrame(
-      page,
-      mapFrameSelector,
-      ".asset-map-weather-marker",
-      2,
-    );
+    await expect(page.getByText(/tracked weather points visible/)).toHaveCount(0);
+    await expect(page.locator(".asset-map-weather-marker")).toHaveCount(0);
+    await expect(page.locator(".asset-map-weather-preview")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Where I am" })).toHaveCount(
       0,
     );
@@ -1230,11 +1085,6 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(positionsActivityToggle).toBeChecked();
     await expect(shipmentsActivityToggle).toBeChecked();
     await expect(page.locator(".asset-map-marker")).toHaveCount(1);
-    await page.locator(".asset-map-weather-marker").nth(1).hover();
-    await expect(weatherMarkerTooltip).toBeVisible();
-    await expect(weatherMarkerTooltip).toContainText(
-      "HENRY_HUB_WX · Henry Hub Weather",
-    );
     await expect(mapRecordsCard).toContainText("Map Records");
     await expect(mapRecordsCard).toContainText(/\d+ map records?/);
     await expect(mapRecordsToggle).toContainText("Show card");
@@ -1262,26 +1112,6 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(
       page.getByRole("checkbox", { name: "Pipeline" }),
     ).toBeChecked();
-    await temperatureOverlayToggle.check();
-    await expect(page.locator(".asset-map-weather-marker")).toHaveCount(0);
-    await expect(weatherOverlayControls).toContainText(
-      "Tracked Wx markers hide while point overlays are active. Click the weather graphic on the map to open the location preview.",
-    );
-    if (weatherOverlayMarkerTarget) {
-      await page.locator(mapFrameSelector).scrollIntoViewIfNeeded();
-      const mapFrameBox = await page.locator(mapFrameSelector).boundingBox();
-      expect(mapFrameBox).not.toBeNull();
-      if (mapFrameBox) {
-        await page.mouse.click(
-          mapFrameBox.x + weatherOverlayMarkerTarget.x,
-          mapFrameBox.y + weatherOverlayMarkerTarget.y,
-        );
-      }
-    }
-    await expect(weatherPreview).toContainText("HENRY_HUB_WX");
-    await expect(weatherPreview).toContainText("Latest obs:");
-    await temperatureOverlayToggle.uncheck();
-    await expect(page.locator(".asset-map-weather-marker")).toHaveCount(2);
     await geographyControls
       .getByRole("button", { name: "Uncheck all" })
       .click();
@@ -1295,8 +1125,6 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     ).toBeVisible();
     await expect(northAmericaToggle).toBeChecked();
     await tooltipToggle.check();
-    await page.locator(".asset-map-weather-marker").nth(1).hover();
-    await expect(weatherMarkerTooltip).toBeVisible();
     await mapRecordsToggle.click();
     await expect(mapRecordsToggle).toContainText("Hide card");
     await expect(mapRecordsBody).toBeVisible();
@@ -1367,15 +1195,8 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await page.waitForFunction(
       () => document.querySelectorAll(".asset-map-marker").length > 0,
     );
-    await page
-      .locator(".asset-map-weather-marker")
-      .first()
-      .evaluate((node) => {
-        (node as HTMLButtonElement).click();
-      });
-    await expect(weatherPreview).toContainText("HOUSTON_GC");
-    await expect(weatherPreview).toContainText("Latest obs:");
-    await expect(weatherPreview).toContainText("Next forecast:");
+    await expect(page.locator(".asset-map-weather-marker")).toHaveCount(0);
+    await expect(page.locator(".asset-map-weather-preview")).toHaveCount(0);
 
     await myLocationToggle.uncheck();
     await expect(page.locator(".asset-map-user-marker")).toHaveCount(0);
@@ -1391,9 +1212,9 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
 
     await weatherToggle.uncheck();
     await expect(page.locator(".asset-map-weather-marker")).toHaveCount(0);
-    await expect(weatherPreview).toHaveCount(0);
+    await expect(page.locator(".asset-map-weather-preview")).toHaveCount(0);
     await weatherToggle.check();
-    await expect(page.locator(".asset-map-weather-marker")).toHaveCount(2);
+    await expect(page.locator(".asset-map-weather-marker")).toHaveCount(0);
 
     await mapToggle.click();
     await expect(mapPanel).toBeHidden();
@@ -2255,9 +2076,7 @@ test("signed-in start-here stays hidden after the user's first-login session", a
   }
 });
 
-test("documentation wiki smoke supports seeded pages and revision restore", async ({
-  page,
-}) => {
+test("legacy guide route is no longer exposed", async ({ page }) => {
   const harness = await startSmokeHarness();
 
   try {
@@ -2268,133 +2087,9 @@ test("documentation wiki smoke supports seeded pages and revision restore", asyn
 
     await dismissStartHereOverlay(page);
 
-    await page.getByRole("tab", { name: "Wiki" }).click();
-    await expect(page).toHaveURL(/view=guide/);
-    await expect(page).toHaveURL(/doc=wiki/);
-    await expect(page.getByRole("heading", { name: "Desk Wiki" }).first()).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: /Desk Handbook/ }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: /Confirmations/ }),
-    ).toBeVisible();
-
-    await page.getByLabel("New Page Template").first().selectOption("runbook");
-    await page.getByRole("button", { name: "New Child Page" }).click();
-
-    const titleField = page.getByRole("textbox", { name: "Page Title" });
-    const markdownField = page.getByRole("textbox", { name: "Markdown" });
-    await expect(titleField).toHaveValue("Untitled Runbook");
-    await expect(markdownField).toHaveValue(/## Stop Conditions/);
-
-    await titleField.fill("Broker Escalations");
-    await markdownField.fill(
-      [
-        "# Broker Escalations",
-        "",
-        "See [[Confirmations|wiki-confirmations]] before you escalate.",
-        "Track [[Missing Runbook]] if the route is not documented yet.",
-        "",
-        "- Start in Operations.",
-        "- Capture the blocker owner.",
-        "- Escalate with trade and counterparty context.",
-      ].join("\n"),
-    );
-
-    await page.getByRole("button", { name: "Save Changes" }).click();
-    await expect(page.getByText("Saved wiki changes.")).toBeVisible();
-    await expect(titleField).toHaveValue("Broker Escalations");
-    await expect(page.getByText("Unresolved links")).toBeVisible();
-    await expect(
-      page.locator(".wiki-link-warning").getByText("Missing Runbook"),
-    ).toBeVisible();
-
-    await page.reload({ waitUntil: "domcontentloaded" });
-    const startHereOverlay = page.locator(".start-here-dialog");
-    if (await startHereOverlay.isVisible()) {
-      await startHereOverlay.getByRole("button", { name: "Not Now" }).click();
-      await startHereOverlay.waitFor({ state: "hidden" });
-    }
-
-    await expect(page).toHaveURL(/doc=wiki/);
-
-    const searchPagesField = page.getByLabel("Search Pages");
-    await searchPagesField.fill("Broker Escalations");
-
-    const createdPageTreeButton = page.getByRole("button", {
-      name: /Broker Escalations/,
-    });
-    await expect(createdPageTreeButton).toBeVisible();
-    await createdPageTreeButton.click();
-    await searchPagesField.fill("");
-
-    await page
-      .locator(".wiki-preview")
-      .getByRole("link", { name: "Confirmations" })
-      .click();
-    await expect(page.getByRole("textbox", { name: "Page Title" })).toHaveValue("Confirmations");
-
-    const brokerEscalationsBacklink = page
-      .locator(".wiki-backlink-card")
-      .filter({ hasText: "Broker Escalations" });
-    await expect(brokerEscalationsBacklink).toBeVisible();
-    await expect(
-      brokerEscalationsBacklink.getByText("See Confirmations before you escalate."),
-    ).toBeVisible();
-    await brokerEscalationsBacklink.click();
-    await expect(page.getByRole("textbox", { name: "Page Title" })).toHaveValue("Broker Escalations");
-
-    const versionOneCard = page
-      .locator(".wiki-revision-card")
-      .filter({ hasText: "Version 1" });
-    await expect(versionOneCard).toBeVisible();
-    await versionOneCard.getByRole("button", { name: "Restore" }).click();
-
-    await expect(page.getByText("Restored revision 6.")).toBeVisible();
-    await expect(page.getByRole("textbox", { name: "Page Title" })).toHaveValue("Untitled Runbook");
-    await expect(page.getByRole("textbox", { name: "Markdown" })).toHaveValue(/## Stop Conditions/);
-
-    page.once("dialog", (dialog) => dialog.accept());
-    await page.getByRole("button", { name: "Archive Page" }).click();
-    await expect(page.getByText("Archived this wiki page.")).toBeVisible();
-    await expect(
-      page.getByText("This page is archived and read-only until you restore it."),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Archived Pages" }),
-    ).toBeVisible();
-    await page.getByRole("button", { name: "Restore Page" }).click();
-    await expect(
-      page.getByText("Restored this wiki page from archive."),
-    ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Archive Page" })).toBeVisible();
-
-    expect(harness.mutationRequests).toHaveLength(5);
-    expect(harness.mutationRequests[0]).toEqual({
-      method: "POST",
-      path: "/wiki/pages",
-      search: "",
-    });
-    expect(harness.mutationRequests[1]?.method).toBe("PATCH");
-    expect(harness.mutationRequests[1]?.path).toMatch(
-      /^\/wiki\/pages\/wiki-page-\d{4}$/,
-    );
-    expect(harness.mutationRequests[1]?.search).toBe("");
-    expect(harness.mutationRequests[2]?.method).toBe("POST");
-    expect(harness.mutationRequests[2]?.path).toMatch(
-      /^\/wiki\/pages\/wiki-page-\d{4}\/revisions\/6\/restore$/,
-    );
-    expect(harness.mutationRequests[2]?.search).toBe("");
-    expect(harness.mutationRequests[3]).toEqual({
-      method: "POST",
-      path: "/wiki/pages/wiki-page-0006/archive",
-      search: "",
-    });
-    expect(harness.mutationRequests[4]).toEqual({
-      method: "POST",
-      path: "/wiki/pages/wiki-page-0006/unarchive",
-      search: "",
-    });
+    await expect(page).not.toHaveURL(/view=guide/);
+    await expect(page.getByRole("link", { name: /How It Works/ })).toHaveCount(0);
+    expect(harness.mutationRequests).toHaveLength(0);
     expect(
       harness.unexpectedRequests,
       `Unhandled mock API requests:\n${formatRecordedRequests(

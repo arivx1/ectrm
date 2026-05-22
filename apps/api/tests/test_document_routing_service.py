@@ -104,6 +104,35 @@ class DocumentRoutingServiceTests(unittest.TestCase):
         self.assertEqual(assessment.primary_record_type, "QUALITY_RECORD")
         self.assertIn("sample_id", assessment.matched_keys)
 
+    def test_price_publication_routes_market_data_first(self) -> None:
+        assessment = build_document_page_routing_assessment(
+            document_kind="PRICE_PUBLICATION",
+            header_fields=[
+                {"field_key": "publication_date", "value": "2026-04-15"},
+                {"field_key": "observation_date", "value": "2026-04-15"},
+                {"field_key": "price_index_code", "value": "WTI_CUSHING_D"},
+                {"field_key": "source_provider", "value": "EIA"},
+                {"field_key": "source_series_id", "value": "PET.RWTC.D"},
+                {"field_key": "commodity", "value": "WTI"},
+                {"field_key": "location", "value": "Cushing"},
+                {"field_key": "price", "value": "84.25"},
+            ],
+            table_blocks=[
+                {
+                    "template_key": "price_lines",
+                    "columns": ["price_index_code", "commodity", "price"],
+                    "rows": [{"price_index_code": "WTI_CUSHING_D", "commodity": "WTI", "price": "84.25"}],
+                    "source": "review",
+                }
+            ],
+            review_status="REVIEWED",
+        )
+
+        self.assertEqual(assessment.routing_strategy, "MARKET_DATA_FIRST")
+        self.assertEqual(assessment.status, "READY")
+        self.assertEqual(assessment.primary_record_type, "PRICE_INDEX_OBSERVATION")
+        self.assertIn("price_index_code", assessment.matched_keys)
+
 
 if __name__ == "__main__":
     unittest.main()

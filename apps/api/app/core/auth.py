@@ -17,6 +17,10 @@ from sqlalchemy.orm import Session
 from apps.api.app.config import settings
 from apps.api.app.core.logging import get_logger, log_outbound_request
 from apps.api.app.core.request_context import get_request_identity
+from apps.api.app.domains.assistant.personas import (
+    default_assistant_persona_for_role,
+    normalize_assistant_persona_key,
+)
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 from apps.api.app.schemas._validation import normalize_required_text
@@ -215,6 +219,7 @@ def _ensure_god_login_user(db: Session) -> UserAccount:
             email=_allocate_god_login_email(db),
             display_name=GOD_LOGIN_DISPLAY_NAME,
             role="OPS_ADMIN",
+            default_assistant_persona=default_assistant_persona_for_role("OPS_ADMIN"),
             password_hash=hash_password(GOD_LOGIN_PASSWORD),
             is_active=True,
             last_login_at=None,
@@ -240,6 +245,10 @@ def _ensure_god_login_user(db: Session) -> UserAccount:
 
     if not verify_password(GOD_LOGIN_PASSWORD, record.password_hash):
         record.password_hash = hash_password(GOD_LOGIN_PASSWORD)
+        updated = True
+
+    if normalize_assistant_persona_key(record.default_assistant_persona) is None:
+        record.default_assistant_persona = default_assistant_persona_for_role(record.role)
         updated = True
 
     if updated:
@@ -305,6 +314,7 @@ def authenticate_google_user(
             google_subject=identity.subject,
             display_name=identity.display_name,
             role=config.default_role,
+            default_assistant_persona=default_assistant_persona_for_role(config.default_role),
             password_hash=None,
             is_active=True,
             last_login_at=now,
@@ -335,6 +345,8 @@ def authenticate_google_user(
     user.google_subject = identity.subject
     if user.email != identity.email:
         user.email = identity.email
+    if normalize_assistant_persona_key(user.default_assistant_persona) is None:
+        user.default_assistant_persona = default_assistant_persona_for_role(user.role)
     user.last_login_at = datetime.now(timezone.utc)
     user.updated_at = datetime.now(timezone.utc)
     user.updated_by = user.user_id
@@ -480,6 +492,7 @@ def provision_single_user_auth_user(db: Session) -> tuple[UserAccount, bool]:
             email=config.email,
             display_name=config.display_name,
             role=config.role,
+            default_assistant_persona=default_assistant_persona_for_role(config.role),
             password_hash=None,
             is_active=True,
             last_login_at=now,
@@ -494,6 +507,8 @@ def provision_single_user_auth_user(db: Session) -> tuple[UserAccount, bool]:
         user.email = config.email
         user.display_name = config.display_name
         user.role = config.role
+        if normalize_assistant_persona_key(user.default_assistant_persona) is None:
+            user.default_assistant_persona = default_assistant_persona_for_role(user.role)
         user.is_active = True
         user.last_login_at = now
         user.updated_at = now

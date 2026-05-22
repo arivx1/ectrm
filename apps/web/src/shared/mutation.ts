@@ -1,3 +1,5 @@
+import type { AssistantPersona } from './models'
+
 const AUTH_SESSION_STORAGE_KEY = 'ectrm.auth-session'
 
 export type StoredAuthUser = {
@@ -5,6 +7,7 @@ export type StoredAuthUser = {
   email: string
   display_name: string
   role: string
+  default_assistant_persona?: AssistantPersona | null
 }
 
 export type StoredAuthSession = {

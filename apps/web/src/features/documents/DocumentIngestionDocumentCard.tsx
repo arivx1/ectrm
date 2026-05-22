@@ -6,6 +6,7 @@ import {
   correctedPageCount,
   documentActionPlan,
   documentActionAlreadyApplied,
+  documentFacetDisplayValues,
   documentLinkageAssessment,
   documentProcessorTrace,
   documentRecordLinks,
@@ -16,6 +17,7 @@ import {
   documentStatusTone,
   dominantDocumentKind,
   formatBytes,
+  formatDocumentFacetLabel,
   linkagePrimaryLabel,
   linkageStatusTone,
   processorLabel,
@@ -27,6 +29,7 @@ import {
   learnedPageCount,
   reviewedPageCount,
 } from './documentIngestionUtils'
+import { DocumentFacetEditor } from './DocumentFacetEditor'
 import { DocumentIngestionPageEditor } from './DocumentIngestionPageEditor'
 import type { DocumentIngestionController } from './useDocumentIngestionController'
 
@@ -66,6 +69,8 @@ export function DocumentIngestionDocumentCard({
   const canExecuteAction = actionPlanExecutable(actionPlan) && !actionApplied && !isDocumentProcessing
   const correctedPages = correctedPageCount(document)
   const learnedPages = learnedPageCount(document)
+  const facetDisplayValues = documentFacetDisplayValues(document)
+  const documentLevelFacetValues = (document.facet_values ?? []).filter((value) => value.page_id === null)
 
   return (
     <article className="position-card shipment-card workflow-item-card document-ingestion-card">
@@ -112,6 +117,15 @@ export function DocumentIngestionDocumentCard({
       <div className="shipment-card-meta">
         <span className="entity-chip entity-chip-soft">{document.page_count} page{document.page_count === 1 ? '' : 's'}</span>
         <span className="entity-chip entity-chip-soft">{dominantDocumentKind(document)}</span>
+        {facetDisplayValues.map((value) => (
+          <span
+            key={`${value.facet_key}-${value.value_code}`}
+            className={`entity-chip entity-chip-soft document-facet-chip document-facet-chip-${value.review_status.toLowerCase()}`}
+          >
+            {formatDocumentFacetLabel(value)}
+            {value.review_status === 'SUGGESTED' ? ' • Suggested' : ''}
+          </span>
+        ))}
         {document.processor_provider ? (
           <span className="entity-chip entity-chip-soft">
             {processorLabel(document.processor_provider)}
@@ -268,6 +282,22 @@ export function DocumentIngestionDocumentCard({
                 </label>
               ) : null}
             </div>
+            <DocumentFacetEditor
+              documentId={document.document_id}
+              pageId={null}
+              title="Document Tags"
+              values={documentLevelFacetValues}
+              facetSchemas={controller.schemaRegistry?.document_facets}
+              onChange={(nextValues) =>
+                controller.updateDocumentDraft(document.document_id, (current) => ({
+                  ...current,
+                  facet_values: [
+                    ...(current.facet_values ?? []).filter((value) => value.page_id !== null),
+                    ...nextValues,
+                  ],
+                }))
+              }
+            />
             <label>
               <span>Document Review Notes</span>
               <textarea

@@ -61,14 +61,20 @@ class UserAccountsApiTests(unittest.TestCase):
                 db=session,
             )
             self.assertEqual(created.role, "OPS_ADMIN")
+            self.assertEqual(created.default_assistant_persona, "admin")
             self.assertTrue(created.password_set)
 
             updated = update_user(
                 "ops_lead",
-                UserAccountUpdate(display_name="Operations Lead", updated_by="admin"),
+                UserAccountUpdate(
+                    display_name="Operations Lead",
+                    default_assistant_persona="risk",
+                    updated_by="admin",
+                ),
                 db=session,
             )
             self.assertEqual(updated.display_name, "Operations Lead")
+            self.assertEqual(updated.default_assistant_persona, "risk")
 
             inactive = deactivate_user(
                 "ops_lead",
@@ -86,6 +92,7 @@ class UserAccountsApiTests(unittest.TestCase):
 
             fetched = get_user("ops_lead", db=session)
             self.assertEqual(fetched.email, "ops@example.com")
+            self.assertEqual(fetched.default_assistant_persona, "risk")
 
             rows = list_users(q="operations", is_active=True, limit=50, offset=0, db=session)
             self.assertEqual([row.user_id for row in rows], ["ops_lead"])
@@ -136,6 +143,9 @@ class UserAccountsApiTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             UserAccountUpdate(role="   ", updated_by="admin")
+
+        with self.assertRaises(ValidationError):
+            UserAccountUpdate(default_assistant_persona="unknown", updated_by="admin")
 
     def test_password_hash_requires_exact_non_blank_input(self) -> None:
         encoded = hash_password("supersecret1 ")

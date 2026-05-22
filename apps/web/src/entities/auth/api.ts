@@ -1,3 +1,4 @@
+import type { AssistantPersona } from '../../shared/models'
 import { fetchJson, postJson, requestOk } from '../../shared/api'
 import { buildMutationHeaders } from '../../shared/mutation'
 
@@ -6,6 +7,7 @@ export type AuthenticatedUser = {
   email: string
   display_name: string
   role: string
+  default_assistant_persona: AssistantPersona
 }
 
 export type SessionResponse = {

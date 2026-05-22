@@ -138,6 +138,7 @@ test("asset map filter presets save and replace entries by name", () => {
         showUserLocation: false,
         showAssets: true,
         showRailRoutes: false,
+        showVessels: true,
         showWeather: true,
         showTooltips: false,
         weatherOverlayVisibility: {
@@ -210,6 +211,7 @@ test("asset map filter presets backfill overlay defaults for legacy saved entrie
         showUserLocation: true,
         showAssets: false,
         showRailRoutes: true,
+        showVessels: true,
         showWeather: true,
         showTooltips: true,
         weatherOverlayVisibility: {
@@ -275,6 +277,7 @@ test("asset map filter presets migrate legacy single-overlay selections into mul
         showUserLocation: true,
         showAssets: true,
         showRailRoutes: true,
+        showVessels: true,
         showWeather: true,
         showTooltips: true,
         weatherOverlayVisibility: {

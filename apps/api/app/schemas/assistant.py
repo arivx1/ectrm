@@ -55,6 +55,15 @@ AssistantWorkspace = Literal[
     "settings",
     "assistant",
 ]
+AssistantPersona = Literal[
+    "operator",
+    "trader",
+    "risk",
+    "admin",
+    "operations",
+    "settlement",
+    "reference_data",
+]
 AssistantWorkspaceSummaryTarget = Literal[
     "dashboard.attention.confirmation_backlog_count",
     "dashboard.attention.nomination_backlog_count",
@@ -231,6 +240,14 @@ class AssistantActionDefinitionOut(BaseModel):
     description: str
 
 
+class AssistantPersonaDefinitionOut(BaseModel):
+    key: AssistantPersona
+    label: str
+    description: str
+    default_for_roles: list[str] = Field(default_factory=list)
+    guidance: list[str] = Field(default_factory=list)
+
+
 class AssistantPolicyDecisionOut(BaseModel):
     resource_type: AssistantPolicyResourceType
     resource_id: str
@@ -346,6 +363,7 @@ class AssistantRuntimeSettingsOut(BaseModel):
     available_skills: list[AssistantAgentSkillDefinitionOut]
     available_tools: list[AssistantToolDefinitionOut]
     available_action_types: list[AssistantActionDefinitionOut]
+    available_personas: list[AssistantPersonaDefinitionOut]
 
 
 class AssistantMessageIn(BaseModel):
@@ -367,6 +385,7 @@ class AssistantPromptContextRequest(BaseModel):
     agent_id: Optional[str] = Field(default=None, max_length=64)
     provider: Optional[AssistantProvider] = None
     workspace: Optional[AssistantWorkspace] = None
+    persona: Optional[AssistantPersona] = None
     context: Optional[str] = Field(default=None, max_length=20_000)
     summary_targets: list[AssistantWorkspaceSummaryTarget] = Field(default_factory=list, max_length=12)
     use_live_tools: bool = True
@@ -385,6 +404,14 @@ class AssistantPromptContextRequest(BaseModel):
     @classmethod
     def normalize_context(cls, value: Optional[str]) -> Optional[str]:
         return normalize_optional_text(value, field_name="context")
+
+    @field_validator("persona", mode="before")
+    @classmethod
+    def normalize_persona(cls, value: object) -> object:
+        if value is None or not isinstance(value, str):
+            return value
+        normalized = normalize_optional_text(value, field_name="persona", lowercase=True)
+        return normalized.replace("-", "_") if normalized is not None else None
 
     @field_validator("summary_targets")
     @classmethod

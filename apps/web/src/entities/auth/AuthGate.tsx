@@ -4,6 +4,7 @@ import authGateCornLogoUrl from '../../assets/auth-gate-logo-corn.png'
 import authGateLogoUrl from '../../assets/auth-gate-logo.png'
 import authGateRocksLogoUrl from '../../assets/auth-gate-logo-rocks.png'
 import authGateTransmissionLogoUrl from '../../assets/auth-gate-logo-transmission.png'
+import tonysSkunkworksLogoUrl from '../../assets/tonys-skunkworks-logo.png'
 import {
   bootstrapAdminSession,
   createAuthSession,
@@ -332,6 +333,7 @@ export function AuthGate({
           className={`auth-gate-background-layer auth-gate-background-layer-current auth-gate-stage-${timeOfDay}`}
         />
       </div>
+      <img className="auth-gate-corner-logo" src={tonysSkunkworksLogoUrl} alt="Tony's Skunkworks" />
       <section className="auth-gate-frame">
         <header className="auth-gate-wordmark" aria-label="Strata">
           <span className="brand-mark">Strata</span>

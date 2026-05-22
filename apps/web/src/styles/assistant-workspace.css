@@ -1175,7 +1175,7 @@
 }
 
 .assistant-composer-toolbar-agents {
-  grid-template-columns: minmax(0, 13rem) minmax(0, 13rem) auto;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
 }
 
 .assistant-toggle {

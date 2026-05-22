@@ -118,6 +118,47 @@ FIELD_DEFINITIONS: dict[str, tuple[FieldDefinition, ...]] = {
         FieldDefinition("period_end", "Period End", (r"period\s*end\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
         FieldDefinition("currency", "Currency", (r"currency\s*[:#]?\s*([A-Z]{3})",)),
     ),
+    "PRICE_PUBLICATION": (
+        FieldDefinition(
+            "publication_reference",
+            "Publication Reference",
+            (r"(?:publication|bulletin|assessment)\s*(?:reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",),
+        ),
+        FieldDefinition(
+            "publication_date",
+            "Publication Date",
+            (
+                r"publication\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",
+                r"published\s*(?:on|date)?\s*[:#]?\s*([A-Z0-9,\/\- ]+)",
+            ),
+        ),
+        FieldDefinition(
+            "observation_date",
+            "Observation Date",
+            (
+                r"observation\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",
+                r"price\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",
+                r"assessment\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",
+            ),
+        ),
+        FieldDefinition(
+            "price_index_code",
+            "Price Index Code",
+            (r"price\s*index\s*(?:code|id|identifier)\s*[:#]?\s*([A-Z0-9_\-\/]+)", r"index\s*code\s*[:#]?\s*([A-Z0-9_\-\/]+)"),
+        ),
+        FieldDefinition("source_provider", "Source Provider", (r"(?:source\s*)?(?:provider|publisher)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("source_series_id", "Source Series ID", (r"source\s*series\s*(?:id|identifier)\s*[:#]?\s*([A-Z0-9_.\-\/]+)", r"series\s*(?:id|identifier)\s*[:#]?\s*([A-Z0-9_.\-\/]+)")),
+        FieldDefinition("commodity", "Commodity", (r"commodity\s*[:#]?\s*(.+)", r"product\s*[:#]?\s*(.+)")),
+        FieldDefinition("market", "Market", (r"market\s*[:#]?\s*(.+)",)),
+        FieldDefinition("location", "Location", (r"location\s*[:#]?\s*(.+)",)),
+        FieldDefinition(
+            "price",
+            "Price",
+            (r"^(?:published\s*)?price\s*[:#]\s*([$A-Z0-9,.\-\/ ]+)", r"^assessment\s*price\s*[:#]\s*([$A-Z0-9,.\-\/ ]+)"),
+        ),
+        FieldDefinition("currency", "Currency", (r"currency\s*[:#]?\s*([A-Z]{3})",)),
+        FieldDefinition("unit", "Unit", (r"(?:unit|uom|unit\s*of\s*measure)\s*[:#]?\s*([A-Z0-9\/]+)",)),
+    ),
     "LETTER_OF_CREDIT": (
         FieldDefinition(
             "letter_of_credit_number",
@@ -439,6 +480,7 @@ CLASSIFICATION_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("TRADE_CONTRACT", ("purchase and sale agreement", "sales contract", "trade contract", "master agreement")),
     ("DEAL_RECAP", ("deal recap", "trade recap", "commercial recap", "recap date")),
     ("BROKER_STATEMENT", ("broker statement", "futures statement", "clearing statement", "account statement")),
+    ("PRICE_PUBLICATION", ("price publication", "daily price bulletin", "price bulletin", "published index price", "price assessment")),
     ("LETTER_OF_CREDIT", ("letter of credit", "standby letter of credit", "documentary credit", "lc number", "l/c number")),
     ("NOMINATION", ("nomination", "nomination reference", "gas nomination", "pipeline nomination")),
     ("PIPELINE_STATEMENT", ("pipeline statement", "nomination statement", "allocation statement", "pipeline allocation")),

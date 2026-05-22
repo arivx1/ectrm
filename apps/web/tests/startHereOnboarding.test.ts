@@ -18,6 +18,7 @@ const authenticatedSession = {
     email: 'ops@example.com',
     display_name: 'Ops Admin',
     role: 'OPS_ADMIN',
+    default_assistant_persona: 'admin',
   },
 } as const
 

@@ -24,6 +24,7 @@ export const smokeSession = {
     email: "ops@example.com",
     display_name: "Ops Admin",
     role: "OPS_ADMIN",
+    default_assistant_persona: "admin",
   },
 } as const;
 
@@ -67,6 +68,7 @@ export const publicRuntimeSettings = {
     available_skills: [],
     available_tools: [],
     available_action_types: [],
+    available_personas: [],
   },
   pagination: {
     standard_default: 100,
@@ -140,6 +142,22 @@ export const assistantRuntimeSettings = {
       label: "Cancel trade",
       description:
         "Cancel a trade through the approval queue when the live trade evidence supports it.",
+    },
+  ],
+  available_personas: [
+    {
+      key: "operator",
+      label: "Operator",
+      description: "General operator-console lens for triage and workflow routing.",
+      default_for_roles: ["OPS_USER", "VIEWER"],
+      guidance: [],
+    },
+    {
+      key: "admin",
+      label: "Admin",
+      description: "Platform-stewardship lens for configuration, audit, and controls.",
+      default_for_roles: ["OPS_ADMIN", "ADMIN"],
+      guidance: [],
     },
   ],
 } as const;
@@ -1325,6 +1343,7 @@ export const userAccounts = [
     email: "ops@example.com",
     display_name: "Ops Admin",
     role: "OPS_ADMIN",
+    default_assistant_persona: "admin",
     is_active: true,
     password_set: true,
     last_login_at: "2026-04-11T07:55:00Z",
@@ -1339,6 +1358,7 @@ export const userAccounts = [
     email: "trader.alpha@example.com",
     display_name: "Trader Alpha",
     role: "TRADER",
+    default_assistant_persona: "trader",
     is_active: true,
     password_set: true,
     last_login_at: "2026-04-11T08:20:00Z",

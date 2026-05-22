@@ -17,6 +17,7 @@ export type AssetMapFilterPresetRecord = {
     showUserLocation: boolean;
     showAssets: boolean;
     showRailRoutes: boolean;
+    showVessels: boolean;
     showWeather: boolean;
     showTooltips: boolean;
     weatherOverlayVisibility: WeatherOverlayVisibilityState;
@@ -56,6 +57,7 @@ function normalizeAssetMapFilterPresetRecord(
       showUserLocation?: unknown;
       showAssets?: unknown;
       showRailRoutes?: unknown;
+      showVessels?: unknown;
       showWeather?: unknown;
       showTooltips?: unknown;
       weatherOverlayMode?: unknown;
@@ -86,6 +88,7 @@ function normalizeAssetMapFilterPresetRecord(
       showUserLocation: candidate.filters?.showUserLocation !== false,
       showAssets: candidate.filters?.showAssets !== false,
       showRailRoutes: candidate.filters?.showRailRoutes !== false,
+      showVessels: candidate.filters?.showVessels !== false,
       showWeather: candidate.filters?.showWeather !== false,
       showTooltips: candidate.filters?.showTooltips !== false,
       weatherOverlayVisibility: normalizeWeatherOverlayVisibility(

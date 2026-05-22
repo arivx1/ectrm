@@ -18,9 +18,12 @@ from apps.api.app.domains.reference_data.services.external_data import (
     sync_cftc_series,
     sync_eia_fundamental_series,
     sync_eia_series,
+    sync_eia_wholesale_power_series,
     sync_ercot_series,
     sync_fred_series,
     sync_kalshi_series,
+    sync_miso_series,
+    sync_nyiso_series,
 )
 from apps.api.app.domains.reference_data.services.external_data.market_context import build_market_context
 from apps.api.app.domains.reference_data.services.external_data.sync_status import build_external_data_sync_status
@@ -124,6 +127,21 @@ def trigger_eia_fundamentals_sync(
     return _to_run_out(run)
 
 
+@admin_router.post("/eia-wholesale-power/sync", response_model=ExternalDataRunOut)
+def trigger_eia_wholesale_power_sync(
+    payload: ExternalSeriesSyncRequest,
+    db: Session = Depends(get_db),
+) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_eia_wholesale_power_series(
+        db,
+        price_index_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
 @admin_router.post("/cftc/sync", response_model=ExternalDataRunOut)
 def trigger_cftc_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
     actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
@@ -154,6 +172,30 @@ def trigger_ercot_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends
     run = sync_ercot_series(
         db,
         series_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/miso/sync", response_model=ExternalDataRunOut)
+def trigger_miso_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_miso_series(
+        db,
+        price_index_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/nyiso/sync", response_model=ExternalDataRunOut)
+def trigger_nyiso_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_nyiso_series(
+        db,
+        price_index_code=payload.series_code,
         lookback_days=payload.lookback_days,
         requested_by=actor_id,
     )

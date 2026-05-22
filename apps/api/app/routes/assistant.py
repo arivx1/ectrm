@@ -100,6 +100,7 @@ from apps.api.app.domains.assistant.services.organization_context_registry impor
     retire_organization_context_definition,
     update_organization_context_definition,
 )
+from apps.api.app.domains.assistant.personas import list_assistant_persona_definitions
 from apps.api.app.domains.assistant.services.execution import (
     approve_assistant_action_request_for_user,
     execute_assistant_execution,
@@ -201,6 +202,7 @@ from apps.api.app.schemas.assistant import (
     AssistantConversationSummaryOut,
     AssistantAgentUpdate,
     AssistantOutcomeMetricsOut,
+    AssistantPersonaDefinitionOut,
     AssistantPolicySimulationOut,
     AssistantPolicySimulationRequest,
     AssistantPromptContextOut,
@@ -260,6 +262,11 @@ def get_assistant_service(db: Session, *, actor_id: str | None = None) -> Assist
 @router.get("/settings", response_model=AssistantRuntimeSettingsOut)
 def get_assistant_settings() -> AssistantRuntimeSettingsOut:
     return build_assistant_runtime_settings()
+
+
+@router.get("/personas", response_model=list[AssistantPersonaDefinitionOut])
+def list_assistant_personas() -> list[AssistantPersonaDefinitionOut]:
+    return [definition.to_out() for definition in list_assistant_persona_definitions()]
 
 
 @router.get("/agents", response_model=list[AssistantAgentOut])

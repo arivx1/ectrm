@@ -35,17 +35,26 @@ envelope with these sections:
 1. `System Mission`
 2. `Organization Context`
 3. `Authenticated User`
-4. `Business Operating Model`
-5. `Organization Glossary` when published definitions are active
-6. `Organization Guardrails` when published definitions are active
-7. `Data Landscape`
-8. `Live Data Inventory`
-9. `Application Access Surface`
-10. `Desk Wiki Knowledge`
-11. `World And Time`
-12. `Managed Agent Profile` when an agent is selected
-13. `Current Workspace` when provided
-14. `Application Context` when provided
+4. `Active Persona`
+5. `Business Operating Model`
+6. `Organization Glossary` when published definitions are active
+7. `Organization Guardrails` when published definitions are active
+8. `Data Landscape`
+9. `Live Data Inventory`
+10. `Application Access Surface`
+11. `Desk Wiki Knowledge`
+12. `World And Time`
+13. `Managed Agent Profile` when an agent is selected
+14. `Current Workspace` when provided
+15. `Application Context` when provided
+
+The `Active Persona` section is a request-interpretation lens such as
+`operator`, `trader`, `risk`, `admin`, `operations`, `settlement`, or
+`reference_data`. Resolution order is request override, then the authenticated
+user's saved default persona, then a role-derived fallback, then `operator`.
+Persona context shapes terminology, priorities, evidence emphasis, and likely
+workflow intent, but it does not change permissions, row access, allowed tools,
+allowed actions, reviewer roles, or deterministic policy checks.
 
 Organization and operating-model sections now prefer published organization
 context definitions from the backend registry when they exist. Until those

@@ -83,6 +83,102 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-22 - Assistant Personas Are Interpretation Context Only
+
+- Type: lesson
+- Domain: assistant prompt foundation, user context, and managed-agent runs
+- Applies to: `/assistant/context`, `/assistant/respond`, prompt preview, run
+  traces, user-account defaults, and assistant console persona selection
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/personas.py`,
+  `apps/api/app/domains/assistant/services/prompt_context.py`,
+  `apps/api/app/models/user_account.py`, and
+  `docs/engineering/ai-workflow.md`
+- Lesson: persona context should be a first-class prompt section that explains
+  how to interpret ambiguous user requests for operator, trader, risk, admin,
+  operations, settlement, or reference-data work. It should not be hidden in
+  ad hoc prompt prose. Each user has a saved default persona for normal chat
+  and agent interactions, while request-level surfaces may override it at a
+  particular juncture. The prompt section must explicitly say that persona does
+  not alter authenticated role, permissions, tool access, action types,
+  reviewer roles, or deterministic policy checks.
+- Deterministic opportunity: if users repeatedly select the same persona to
+  route prompts within a workspace, promote that routing into a team or
+  workspace context profile rather than relying on repeated request overrides.
+- Agent autonomy impact: personas can improve framing and terminology across
+  chat and managed-agent interactions without widening autonomy. Authority
+  still comes from managed-agent policy, typed action contracts, and human or
+  policy-controlled review.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_prompt_context_preview_includes_business_user_and_data_sections apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_prompt_context_persona_can_be_overridden_per_request apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_prompt_context_uses_user_default_persona_before_role_fallback`
+- Follow-up: evaluate team and workspace persona defaults once context-profile
+  work packages are implemented.
+
+### 2026-05-20 - Price Publication Workflows Need Typed Market-Data Loaders
+
+- Type: algorithm-added
+- Domain: document workflows, market-data ingestion, price-index
+  observations, and Library actions
+- Applies to: `PRICE_PUBLICATION` documents, the Library Workflows action,
+  `process_prices`, `price_index_observations`, `external_data_runs`, and
+  document record-link provenance
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_workflows.py`,
+  `apps/api/app/routes/documents.py`, and
+  `apps/web/src/workspaces/library/LibraryWorkspace.tsx`
+- Lesson: document-created price observations must run through a named,
+  typed document workflow instead of a generic attachment action or freeform
+  assistant mutation. The first approved workflow is `Process Prices` for
+  `PRICE_PUBLICATION` / Price Publication Report documents, and it requires a
+  verified document, configured active price-index codes, deterministic row
+  extraction, idempotent upsert keys, an `external_data_runs` audit row, and
+  document links back to loaded observations and price indices.
+- Deterministic opportunity: add persisted workflow definitions and approval
+  policy only after more document-type workflows need runtime configuration;
+  keep the execution service as the source of market-data truth until then.
+- Agent autonomy impact: agents may explain or route users to the Library
+  workflow, but price-table writes remain a deterministic workflow execution
+  behind role checks and reviewed document evidence.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_workflows_service`
+  and `npm --prefix apps/web run test -- libraryWorkspace.test.ts`
+- Follow-up: add browser smoke coverage once more custom document workflows
+  share this Library popup pattern.
+
+### 2026-05-20 - Document Matching Workflows Need Deterministic Owner Gates
+
+- Type: algorithm-candidate
+- Domain: document ingestion, record matching, workflow action planning, and
+  Library workflow execution
+- Applies to: document schema registry targets, linkage scoring, document
+  action plans, create-from-document workflows, and future Library `Workflows`
+  actions
+- Status: proposed
+- Source: [Document Record Matching And Workflows](./document-record-matching-workflows.md)
+- Lesson: document matching should resolve through deterministic record-target
+  metadata, normalized extracted identifiers, ranked candidates, owner
+  requirements, and governed workflow keys. A document can suggest a new trade,
+  shipment, invoice, payment, quality record, or compliance record, but
+  creation must stay behind typed services, review rules, idempotency, and
+  stale-state checks.
+- Deterministic opportunity: add workflow metadata to the schema registry,
+  promote linkage thresholds and owner requirements into named policy
+  constants, and add create-candidate planners for trade and delivery records
+  before exposing those actions from the Library workflow button.
+- Agent autonomy impact: agents may explain match evidence, compare candidate
+  records, and draft workflow payloads, but they should stage creation actions
+  only after a workflow has a typed payload, owner gate, policy checks, and
+  tests. Freeform extraction output must not directly create business records.
+- Tests or evidence: current document routing, linkage, action-planning,
+  governance, and execution service tests cover the first attach/create slices;
+  new trade-from-document and delivery-from-document slices need focused
+  service tests plus assistant evals when agents can stage them.
+- Follow-up: wire the Library `Workflows` button to a workflow summary powered
+  by schema-registry workflow keys, action-plan governance, and candidate
+  evidence.
+
 ### 2026-05-19 - Workbook Reports Need Immutable Runs And Deterministic Formulas
 
 - Type: algorithm-candidate
@@ -4245,6 +4341,39 @@ independently"`.
   replay set with confusion-matrix reporting and promotion thresholds for new
   document kinds.
 
+### 2026-05-20 - Price Publications Are Market Data Evidence, Not Settlement Documents
+
+- Type: algorithm-added
+- Domain: document ingestion, document taxonomy, deterministic classification,
+  and market-data provenance
+- Applies to: document-kind schema registry, price-publication
+  classification, market-data routing, price-index observation linkage, and
+  Library type overrides
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/schema_registry.py`,
+  `apps/api/app/domains/documents/services/document_ingestion_analysis.py`,
+  `apps/api/app/domains/documents/services/document_routing.py`,
+  `apps/api/app/domains/documents/services/document_linkage.py`, and
+  `docs/engineering/document-taxonomy-trading-shipping.md`
+- Lesson: price publications should classify as `PRICE_PUBLICATION` under a
+  market-data family instead of being folded into generic statements,
+  invoices, or settlement documents. They are evidence for published
+  price-index observations and price-index reference records, with durable
+  keys such as price index code, observation date, source provider, source
+  series ID, commodity, location, currency, unit, and published price.
+- Deterministic opportunity: any future document-created market-data writes
+  should remain behind a typed loader or staged review service because price
+  observations can affect pricing, risk, settlement, and reporting. The
+  current path is attachment/linkage to existing price-index records only.
+- Agent autonomy impact: agents may explain or suggest price-publication
+  linkage, but they should not create or overwrite official price observations
+  from uploaded document text without a governed market-data ingestion action.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_schema_registry_exposes_supported_document_contracts apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_trade_shipping_taxonomy_classifies_additional_document_types apps.api.tests.test_document_routing_service apps.api.tests.test_document_linkage_service.DocumentLinkageServiceTests.test_price_publication_links_to_existing_price_observation`
+- Follow-up: add reviewed replay examples from real publisher bulletins before
+  enabling document-sourced price observation staging.
+
 ### 2026-05-17 - Commodity Document Taxonomy Should Prefer Specific Trade Lifecycle Buckets
 
 - Type: algorithm-added
@@ -4422,3 +4551,191 @@ independently"`.
 - Follow-up: replace the metadata-only attachment prototype with real file
   storage and add mention-driven notifications once ownership and delivery
   rules are defined.
+
+### 2026-05-18 - Price Index Sources Must Sync Into Market Marks
+
+- Type: lesson
+- Domain: market data sync, price-index observations, and external provider
+  status
+- Applies to: `ReferencePriceIndexSource`, provider-specific sync jobs, and
+  market price marks shown in product surfaces
+- Status: implemented
+- Source:
+  `apps/api/app/domains/reference_data/services/external_data/fred_sync.py`,
+  `apps/api/app/domains/reference_data/services/external_data/caiso_sync.py`,
+  `apps/api/app/domains/reference_data/services/external_data/ercot_sync.py`,
+  and `apps/api/app/domains/reference_data/services/external_data/price_index_observation_writer.py`
+- Lesson: seeded price-index and source rows are only catalog entries until a
+  provider sync writes `PriceIndexObservation` rows. Providers that expose both
+  operational series and market marks should load both definitions and
+  price-index source mappings, fetch the source once where possible, and report
+  mixed health/status from both observation tables. When an open series is only
+  a proxy for a proprietary benchmark, the price-index name and description
+  must explicitly say it is a proxy rather than presenting it as the licensed
+  assessment. Spot, futures, forward, index, and other quote distinctions
+  belong in `ReferencePriceIndex.quote_type` so product surfaces and filters do
+  not infer instrument type from names or provider strings. Provider freshness
+  should combine interval-based scheduler runs with due-only event triggers,
+  such as user login, so critical price marks refresh opportunistically without
+  every UI render calling external providers. If a public provider has both a
+  keyed API and a no-key public download, the client may fall back to the
+  no-key path only when the source provider, series identity, and raw payload
+  provenance remain explicit in the stored mark. File-backed public sources,
+  such as EIA wholesale power workbooks, need provider-owned parsers that
+  tolerate missing historical files while still failing the latest requested
+  source instead of silently turning current prices into stale seeded rows.
+- Deterministic opportunity: keep source-to-mark normalization in typed mappers
+  and shared upsert services. Prompt instructions should not compensate for a
+  provider that only seeds source rows without wiring the sync path.
+- Agent autonomy impact: agents may suggest new open data sources, but pricing
+  marks should become product behavior only through source mappings,
+  provider-owned sync jobs, audit-linked runs, and tested idempotent writes.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_caiso_sync apps.api.tests.test_ercot_sync apps.api.tests.test_fred_sync apps.api.tests.test_admin_seed_api apps.api.tests.test_external_data_api apps.api.tests.test_run_market_data_scheduler_script`
+  and `make api-test`
+- Follow-up: when adding more public price providers, add the source catalog,
+  mapper, sync writer, provider status kind, and seeded coverage in the same
+  change.
+
+### 2026-05-22 - Market Aggregators Are Not Price Provenance
+
+- Type: lesson
+- Domain: market data source selection, price-index candidates, and licensing
+- Applies to: Trading Economics-style market screens, source-candidate
+  registers, and future market quote integrations
+- Status: implemented
+- Source:
+  `docs/engineering/trading-source-candidates.md` and
+  `docs/engineering/trading-source-candidates.csv`
+- Lesson: market-data aggregators can be useful comparison feeds, but they
+  should not be treated as the underlying source for official marks when their
+  upstream providers are undisclosed. Trading Economics documents market quotes
+  as aggregated third-party data and describes many commodity values as OTC/CFD
+  references rather than official settlement prices. When users ask to add an
+  aggregator's "sources", add the aggregator as a comparison candidate and add
+  identifiable official exchange, index publisher, benchmark publisher, or
+  FRED-hosted daily-close candidates with explicit license restrictions instead
+  of implying that the aggregator reveals source provenance.
+- Deterministic opportunity: source-candidate promotion should require a
+  license posture, golden-source role, fallback role, freshness expectation,
+  and a provider-owned ingestion path before it can become an active price
+  source mapping.
+- Agent autonomy impact: agents may document and shortlist candidate sources,
+  but should not wire copyrighted or subscription market data into live marks
+  without an approved entitlement and provenance-preserving sync.
+- Tests or evidence:
+  `python3 - <<'PY' ... csv.reader(...) ... PY` against
+  `docs/engineering/trading-source-candidates.csv`
+- Follow-up: when a desk approves a non-public index or exchange feed, promote
+  it from the candidate register into source mappings and provider sync code in
+  the same change.
+
+### 2026-05-19 - Vessel Tracking Health Belongs In Deterministic Ops Services
+
+- Type: algorithm-added
+- Domain: vessel tracking, AIS-style signal ingest, delivery ETA health, and
+  logistics exception triage
+- Applies to: `TransportMode.VESSEL` delivery obligations and typed vessel
+  tracking signals
+- Status: implemented
+- Source:
+  `apps/api/app/domains/operations/services/aisstream_client.py`,
+  `apps/api/app/domains/operations/services/vessel_tracking.py`,
+  `apps/api/app/domains/operations/services/vessel_tracking_health.py`,
+  `apps/api/app/models/delivery_vessel_detail.py`, and
+  `apps/api/app/models/delivery_tracking_signal.py`
+- Lesson: vessel identity, position, destination ETA, freshness, and exception
+  state should be persisted and evaluated by typed operations services. Agents
+  may summarize a voyage or suggest follow-up, but accepted tracking signals
+  must update `DeliveryVesselDetail` through the governed ingest path rather
+  than freeform assistant output. Live provider adapters, starting with
+  AISStream, should normalize provider messages into `DeliveryTrackingSignal`
+  payloads and reuse the same audit, dedupe, and health classification path as
+  manual vessel updates.
+- Deterministic opportunity: owner is Operations. Inputs are delivery window,
+  execution status, vessel identity, provider/source identifiers, signal
+  timestamp, lat/lon pair, speed/course/heading/draught, destination, ETA, and
+  optional provider evidence. Outputs are deduped signal records, vessel detail
+  projections, freshness status, ETA status, severity, primary exception, and
+  minutes since signal or late ETA. The rule set uses a 720-minute vessel signal
+  staleness threshold, delivery-end ETA comparison, idempotent source-event
+  dedupe, identifier validation for IMO/MMSI, and fail-closed validation for
+  non-vessel obligations or incomplete coordinates.
+- Agent autonomy impact: agents should stage or explain vessel tracking actions
+  unless the operator submits them through the typed API. Stop conditions are
+  invalid vessel identifiers, non-vessel transport mode, missing paired
+  coordinates, out-of-range signal values, completed or cancelled deliveries
+  where tracking is not required, and any future rule affecting external
+  commitments beyond operations visibility.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_vessel_tracking_api apps.api.tests.test_truck_tracking_api`,
+  `npm test -- shipmentsWorkspace.test.ts`, file-scoped shipment `eslint`, and
+  `npm run build`
+- Follow-up: before allowing unattended AIS updates, add provider-owned source
+  mappings, scheduled ingest status, permission checks for automated runs,
+  provider health/freshness monitoring, and rollback/idempotency expectations.
+
+### 2026-05-20 - Library Verification Is Separate From Page Extraction Approval
+
+- Type: lesson
+- Domain: document library, document review status, page extraction review, and
+  document workflows
+- Applies to: uploaded document records and page-level extraction validation
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/ingestion.py`,
+  `apps/api/app/schemas/document.py`,
+  `apps/web/src/features/documents/useDocumentIngestionController.ts`, and
+  `apps/web/src/workspaces/library/LibraryWorkspace.tsx`
+- Lesson: a Library operator may mark a document record `VERIFIED` as a
+  document-status decision without approving every extracted page field. Strict
+  page review remains the default for normal page saves and still enforces
+  schema-required fields before page review. Use explicit `verification_mode:
+  STATUS_ONLY` only for the Library status transition; downstream workflows
+  must continue to validate their own required business inputs before writing
+  records.
+- Deterministic opportunity: keep document status, page extraction approval,
+  and workflow execution as separate typed service decisions. Price, settlement,
+  or trade writes should not treat status-only verification as sufficient
+  extracted-data approval.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_reviewed_page_can_be_saved_and_document_can_be_verified apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_status_only_document_verification_does_not_require_extracted_page_fields`
+  and `npm run test -- documentLibrary.test.ts libraryWorkspace.test.ts documentIngestionPageEditor.test.ts documentIngestionSelectors.test.ts promptHomeDocumentUploadCard.test.ts documentApi.test.ts`
+
+### 2026-05-22 - Document Tags Are Controlled Facets With Provenance
+
+- Type: algorithm-added
+- Domain: document ingestion, document review, search facets, and future
+  document matching
+- Applies to: `document_facet_values`, `/documents/schema-registry`
+  `document_facets`, document/page patch payloads, Library tag preview columns,
+  Library detail views, and Library search
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_facets.py`,
+  `apps/api/app/models/document_facet_value.py`,
+  `apps/api/app/schemas/document.py`,
+  `apps/web/src/features/documents/DocumentFacetEditor.tsx`,
+  `apps/web/src/workspaces/library/LibraryWorkspace.tsx`, and
+  `apps/web/src/workspaces/library/libraryWorkspaceSupport.ts`
+- Lesson: document tags that affect routing, filtering, or matching should be
+  typed facet assignments, not loose strings. The first controlled set covers
+  commodity, purchase/sale side, transport mode, and asset context. Each value
+  stores normalized codes, display snapshots, page/document scope, source,
+  confidence, review status, evidence, and audit fields so suggested tags can
+  remain reviewable until an operator confirms them.
+- Deterministic opportunity: expand extraction and matching against these
+  facets through typed services. Owner is Document Operations. Inputs are page
+  text, reviewed page fields, linked records, reference data, and operator
+  corrections. Outputs are suggested, confirmed, or rejected facet values.
+  Stop conditions are ambiguous company perspective for purchase/sale, unknown
+  controlled values outside open commodity codes, conflicting page-level tags,
+  and any proposed tag that would mutate trade, settlement, logistics, risk, or
+  compliance records without a separate governed action.
+- Agent autonomy impact: agents may explain or suggest document facet values,
+  but durable tags must be saved through the typed document facet service. Do
+  not let prompt-only labels drive routing, matching, policy, or record writes.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_patch_persists_controlled_facet_values apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_page_patch_persists_page_level_facet_values apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_patch_rejects_invalid_facet_values apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_facet_suggester_extracts_starter_tags_from_text apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_schema_registry_exposes_supported_document_contracts`,
+  `npm --prefix apps/web test -- libraryWorkspace.test.ts documentLibrary.test.ts documentIngestionSelectors.test.ts documentIngestionPageEditor.test.ts`,
+  and `npm --prefix apps/web run build`

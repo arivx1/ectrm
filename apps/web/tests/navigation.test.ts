@@ -7,6 +7,7 @@ import {
   MOBILE_NAVIGATION_PANEL_ID,
   mobileNavigationToggleLabel,
   PRIMARY_NAV_SECTIONS,
+  primaryNavigationSectionLandingView,
   primaryNavigationSectionForView,
   shouldHandleClientSideNavigation,
   shouldHideMobileNavigation,
@@ -76,6 +77,11 @@ describe('mobile navigation helpers', () => {
 
   it('defines clear start paths for each section landing', () => {
     for (const section of PRIMARY_NAV_SECTIONS) {
+      if (section.landingViewKey !== null) {
+        expect(section.startPaths).toEqual([])
+        continue
+      }
+
       expect(section.startPaths.length).toBeGreaterThan(0)
 
       const sectionViewKeys = new Set(section.views.map((view) => view.key))
@@ -92,6 +98,11 @@ describe('mobile navigation helpers', () => {
       'Check exposure',
       'Inspect net positions',
     ])
+  })
+
+  it('routes Start directly to Home instead of rendering a duplicate landing page', () => {
+    expect(primaryNavigationSectionLandingView('overview')).toBe('prompt')
+    expect(primaryNavigationSectionLandingView('trading')).toBeNull()
   })
 
   it('maps representative workspaces into their grouped nav sections', () => {

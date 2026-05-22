@@ -697,6 +697,7 @@ export function isPriceIndexFormDirty(
       !sameText(priceIndexForm.currency_code, 'USD') ||
       !sameText(priceIndexForm.unit_code, 'BBL') ||
       !sameText(priceIndexForm.provider, '') ||
+      !sameText(priceIndexForm.quote_type, 'SPOT') ||
       !sameText(priceIndexForm.market, '') ||
       !sameText(priceIndexForm.location_code, '') ||
       !sameText(priceIndexForm.calendar_code, '')
@@ -711,6 +712,7 @@ export function isPriceIndexFormDirty(
     !sameText(priceIndexForm.currency_code, selectedPriceIndex.currency_code) ||
     !sameText(priceIndexForm.unit_code, selectedPriceIndex.unit_code) ||
     !sameText(priceIndexForm.provider, selectedPriceIndex.provider) ||
+    !sameText(priceIndexForm.quote_type, selectedPriceIndex.quote_type ?? 'SPOT') ||
     !sameText(priceIndexForm.market, selectedPriceIndex.market) ||
     !sameText(priceIndexForm.location_code, selectedPriceIndex.location_code) ||
     !sameText(priceIndexForm.calendar_code, selectedPriceIndex.calendar_code)

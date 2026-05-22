@@ -6,6 +6,10 @@ import type {
   DeliveryRecord,
   DeliveryTrackingSignalIngestResultRecord,
   DeliveryTrackingSignalRecord,
+  DeliveryVesselAisstreamRefreshRecord,
+  DeliveryVesselDetailRecord,
+  DeliveryVesselTrackingHealthRecord,
+  DeliveryVesselTrackingSignalIngestResultRecord,
   DeliveryTruckMovementRecord,
   DeliveryTruckMovementSummaryRecord,
   DeliveryTruckMovementTrackingHealthRecord,
@@ -141,6 +145,16 @@ export type UpdateDeliveryTruckDetailInput = {
   destination_geofence_code?: string | null
 }
 
+export type UpdateDeliveryVesselDetailInput = {
+  vessel_name?: string | null
+  imo_number?: string | null
+  mmsi_number?: string | null
+  call_sign?: string | null
+  voyage_number?: string | null
+  tracking_provider?: string | null
+  tracking_policy?: string | null
+}
+
 export type CreateDeliveryEventInput = {
   event_type: DeliveryEventType
   occurred_at: string
@@ -251,7 +265,12 @@ export type DeliveryTrackingSignalCreateInput = {
   stop_id?: string | null
   latitude?: number | null
   longitude?: number | null
+  speed_knots?: number | null
+  course_degrees?: number | null
+  heading_degrees?: number | null
+  draught_meters?: number | null
   location_code?: string | null
+  destination?: string | null
   external_status?: string | null
   normalized_status?: string | null
   match_confidence?: number | null
@@ -373,6 +392,20 @@ export async function updateDeliveryTruckDetails(
   })
 }
 
+export async function updateDeliveryVesselDetails(
+  apiBase: string,
+  args: {
+    deliveryId: string
+    payload: UpdateDeliveryVesselDetailInput
+  },
+): Promise<DeliveryVesselDetailRecord> {
+  const { deliveryId, payload } = args
+
+  return patchJson(`${apiBase}/deliveries/${deliveryId}/vessel-detail`, payload, {
+    headers: shipmentHeaders(),
+  })
+}
+
 export async function updateDeliveryRailDetails(
   apiBase: string,
   args: {
@@ -385,6 +418,70 @@ export async function updateDeliveryRailDetails(
   return patchJson(`${apiBase}/deliveries/${deliveryId}/rail-details`, payload, {
     headers: shipmentHeaders(),
   })
+}
+
+export async function getDeliveryVesselDetail(
+  apiBase: string,
+  deliveryId: string,
+): Promise<DeliveryVesselDetailRecord> {
+  return fetchJson(`${apiBase}/deliveries/${deliveryId}/vessel-detail`, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function getDeliveryVesselTrackingHealth(
+  apiBase: string,
+  deliveryId: string,
+): Promise<DeliveryVesselTrackingHealthRecord> {
+  return fetchJson(`${apiBase}/deliveries/${deliveryId}/vessel-tracking-health`, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function listDeliveryVesselTrackingSignals(
+  apiBase: string,
+  deliveryId: string,
+): Promise<DeliveryTrackingSignalRecord[]> {
+  return fetchJson(`${apiBase}/deliveries/${deliveryId}/vessel-tracking-signals`, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function recordDeliveryVesselTrackingSignal(
+  apiBase: string,
+  args: {
+    deliveryId: string
+    payload: DeliveryTrackingSignalCreateInput
+  },
+): Promise<DeliveryVesselTrackingSignalIngestResultRecord> {
+  const { deliveryId, payload } = args
+
+  return postJson(`${apiBase}/deliveries/${deliveryId}/vessel-tracking-signals`, payload, {
+    headers: shipmentHeaders(),
+  })
+}
+
+export async function refreshDeliveryVesselTrackingFromAisstream(
+  apiBase: string,
+  args: {
+    deliveryId: string
+    timeoutSeconds?: number
+  },
+): Promise<DeliveryVesselAisstreamRefreshRecord> {
+  const { deliveryId, timeoutSeconds } = args
+  const params = new URLSearchParams()
+  if (timeoutSeconds !== undefined) {
+    params.set('timeout_seconds', String(timeoutSeconds))
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : ''
+
+  return postJson(
+    `${apiBase}/deliveries/${deliveryId}/vessel-tracking-signals/aisstream-refresh${suffix}`,
+    {},
+    {
+      headers: shipmentHeaders(),
+    },
+  )
 }
 
 export async function createDeliveryEvent(

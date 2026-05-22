@@ -33,8 +33,11 @@ from apps.api.app.routes.external_data import (
     trigger_cftc_sync,
     trigger_eia_fundamentals_sync,
     trigger_eia_sync,
+    trigger_eia_wholesale_power_sync,
     trigger_ercot_sync,
     trigger_fred_sync,
+    trigger_miso_sync,
+    trigger_nyiso_sync,
     update_external_series_definition,
 )
 from apps.api.app.schemas.external_data import (
@@ -708,8 +711,8 @@ class ExternalDataApiTests(unittest.TestCase):
                         provider="CAISO",
                         job_name="sync_caiso_power_series",
                         status="SUCCEEDED",
-                        started_at=now - timedelta(minutes=10),
-                        finished_at=now - timedelta(minutes=9),
+                        started_at=now - timedelta(minutes=4),
+                        finished_at=now - timedelta(minutes=3),
                         requested_by="scheduler",
                         series_count=1,
                         observation_count=1,
@@ -792,11 +795,11 @@ class ExternalDataApiTests(unittest.TestCase):
                         source_frequency="5MIN",
                         source_published_at=None,
                         source_revision="rev-3",
-                        downloaded_at=now - timedelta(minutes=10),
+                        downloaded_at=now - timedelta(minutes=3),
                         run_id=14,
                         raw_payload={},
-                        created_at=now - timedelta(minutes=10),
-                        updated_at=now - timedelta(minutes=10),
+                        created_at=now - timedelta(minutes=3),
+                        updated_at=now - timedelta(minutes=3),
                     ),
                     ExternalSeriesObservation(
                         id=13,
@@ -821,13 +824,16 @@ class ExternalDataApiTests(unittest.TestCase):
             payload = get_external_data_sync_status(db=session)
 
         providers = {row.provider: row for row in payload.providers}
-        self.assertEqual(payload.provider_count, 7)
+        self.assertEqual(payload.provider_count, 10)
         self.assertEqual(providers["EIA"].health_status, "healthy")
         self.assertEqual(providers["EIA_FUNDAMENTALS"].health_status, "healthy")
         self.assertEqual(providers["FRED"].health_status, "healthy")
+        self.assertEqual(providers["EIA_WHOLESALE_POWER"].health_status, "unknown")
         self.assertEqual(providers["CFTC"].health_status, "failed")
         self.assertEqual(providers["CAISO"].health_status, "healthy")
         self.assertEqual(providers["ERCOT"].health_status, "unknown")
+        self.assertEqual(providers["MISO"].health_status, "unknown")
+        self.assertEqual(providers["NYISO"].health_status, "unknown")
         self.assertEqual(providers["KALSHI"].health_status, "healthy")
         self.assertFalse(providers["CAISO"].due_for_sync)
         self.assertFalse(providers["KALSHI"].due_for_sync)
@@ -871,6 +877,28 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(payload.id, 2)
         self.assertEqual(payload.status, "SUCCEEDED")
         sync_mock.assert_called_once()
+
+    def test_trigger_eia_wholesale_power_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch(
+                "apps.api.app.routes.external_data.sync_eia_wholesale_power_series",
+                return_value=expected_run,
+            ) as sync_mock:
+                payload = trigger_eia_wholesale_power_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="PJM_WEST_ONPEAK_DA",
+                        lookback_days=30,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+        self.assertEqual(sync_mock.call_args.kwargs["price_index_code"], "PJM_WEST_ONPEAK_DA")
 
     def test_trigger_fred_sync_returns_run_payload(self) -> None:
         self._seed_rows()
@@ -934,6 +962,42 @@ class ExternalDataApiTests(unittest.TestCase):
                 payload = trigger_ercot_sync(
                     ExternalSeriesSyncRequest(
                         series_code="ERCOT_HB_HOUSTON_RT15M",
+                        lookback_days=1,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+
+    def test_trigger_miso_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch("apps.api.app.routes.external_data.sync_miso_series", return_value=expected_run) as sync_mock:
+                payload = trigger_miso_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="MISO_INDIANA_HUB_RT5M",
+                        lookback_days=1,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+
+    def test_trigger_nyiso_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch("apps.api.app.routes.external_data.sync_nyiso_series", return_value=expected_run) as sync_mock:
+                payload = trigger_nyiso_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="NYISO_NYC_RT5M",
                         lookback_days=1,
                         requested_by="anthony",
                     ),

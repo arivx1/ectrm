@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -12,12 +12,15 @@ from apps.api.app.schemas._validation import normalize_optional_text, normalize_
 DocumentIngestionStatus = Literal["UPLOADED", "PROCESSING", "ANALYZED", "FAILED"]
 DocumentAnalysisStatus = Literal["PENDING", "ANALYZED", "FAILED"]
 DocumentReviewStatus = Literal["UNREVIEWED", "IN_REVIEW", "VERIFIED"]
+DocumentVerificationMode = Literal["STRICT", "STATUS_ONLY"]
 DocumentPageReviewStatus = Literal["UNREVIEWED", "REVIEWED"]
 DocumentPageTextSource = Literal["none", "pdf_text", "ocr"]
 DocumentProcessorProvider = Literal["openai", "anthropic", "google"]
 DocumentProcessorSelection = Literal["builtin", "openai", "anthropic", "google"]
 DocumentFieldValueType = Literal["text", "date", "number", "currency", "quantity", "identifier"]
 DocumentFacetValueType = Literal["single_select", "multi_select", "boolean", "text", "date", "identifier"]
+DocumentFacetSource = Literal["EXTRACTED", "LINKED_RECORD", "MANUAL", "AI_SUGGESTED", "SYSTEM_DERIVED"]
+DocumentFacetReviewStatus = Literal["SUGGESTED", "CONFIRMED", "REJECTED"]
 DocumentExtractionCardinality = Literal["one", "many"]
 DocumentKind = Literal[
     "UNKNOWN",
@@ -27,6 +30,7 @@ DocumentKind = Literal[
     "TRADE_CONTRACT",
     "BROKER_CONFIRMATION",
     "BROKER_STATEMENT",
+    "PRICE_PUBLICATION",
     "LETTER_OF_CREDIT",
     "NOMINATION",
     "CURTAILMENT_NOTICE",
@@ -62,6 +66,7 @@ DocumentFamily = Literal[
     "QUALITY",
     "COMPLIANCE",
     "SETTLEMENT",
+    "MARKET_DATA",
     "GENERAL",
 ]
 DocumentTargetRole = Literal["PRIMARY", "SECONDARY", "REFERENCE"]
@@ -69,6 +74,7 @@ DocumentRoutingStrategy = Literal[
     "TRADE_FIRST",
     "DELIVERY_FIRST",
     "SETTLEMENT_FIRST",
+    "MARKET_DATA_FIRST",
     "ATTACHMENT_FIRST",
     "MANUAL_REVIEW",
 ]
@@ -79,6 +85,8 @@ DocumentActionPlanStatus = Literal["READY", "REVIEW", "BLOCKED"]
 DocumentActionType = Literal["ATTACH_EXISTING_RECORD", "CREATE_RECORD_FROM_DOCUMENT", "MANUAL_REVIEW"]
 DocumentGmailInboxProvider = Literal["gmail_api"]
 DocumentGmailInboxAuthStatus = Literal["none", "partial", "configured"]
+DocumentWorkflowExecutionStatus = Literal["EXECUTED"]
+DocumentWorkflowObservationAction = Literal["CREATED", "UPDATED", "UNCHANGED"]
 
 FIELD_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 TEMPLATE_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
@@ -141,6 +149,63 @@ class DocumentFacetSchemaOut(BaseModel):
     allowed_values: list[DocumentFacetValueOut] = Field(default_factory=list)
 
 
+class DocumentFacetAssignmentInput(BaseModel):
+    facet_key: str = Field(..., min_length=2, max_length=64)
+    value_code: str = Field(..., min_length=1, max_length=100)
+    value_label: Optional[str] = Field(default=None, max_length=160)
+    source: DocumentFacetSource = "MANUAL"
+    confidence: Optional[float] = Field(default=None, ge=0, le=1)
+    review_status: DocumentFacetReviewStatus = "CONFIRMED"
+    evidence: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("facet_key")
+    @classmethod
+    def normalize_facet_key(cls, value: str) -> str:
+        return _normalize_field_key(value, field_name="facet_key")
+
+    @field_validator("value_code")
+    @classmethod
+    def normalize_value_code(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="value_code", uppercase=True)
+
+    @field_validator("value_label")
+    @classmethod
+    def normalize_value_label(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="value_label")
+
+    @field_validator("evidence")
+    @classmethod
+    def normalize_evidence(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            text = normalize_optional_text(item, field_name="evidence")
+            if text is None or text in seen:
+                continue
+            seen.add(text)
+            normalized.append(text)
+        return normalized
+
+
+class DocumentFacetAssignmentOut(BaseModel):
+    facet_value_id: int
+    document_id: str
+    page_id: Optional[int] = None
+    facet_key: str
+    facet_label: str
+    value_code: str
+    value_label: str
+    source: DocumentFacetSource | str = "MANUAL"
+    confidence: Optional[float] = Field(default=None, ge=0, le=1)
+    review_status: DocumentFacetReviewStatus | str = "CONFIRMED"
+    evidence: list[str] = Field(default_factory=list)
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
 class DocumentExtractionObjectSchemaOut(BaseModel):
     object_key: str
     label: str
@@ -175,6 +240,7 @@ class DocumentKindSchemaOut(BaseModel):
 class DocumentSchemaRegistryOut(BaseModel):
     version: str
     document_kinds: list[DocumentKindSchemaOut] = Field(default_factory=list)
+    document_facets: list[DocumentFacetSchemaOut] = Field(default_factory=list)
 
 
 class DocumentRoutingCandidateOut(BaseModel):
@@ -254,6 +320,49 @@ class DocumentRecordLinkOut(BaseModel):
     summary: str
     linked_at: datetime
     linked_by: str
+
+
+class DocumentWorkflowOut(BaseModel):
+    workflow_id: str
+    label: str
+    document_kind: str
+    document_type_label: str
+    description: str
+
+
+class DocumentWorkflowListOut(BaseModel):
+    document_id: str
+    document_kind: Optional[str] = None
+    document_type_label: Optional[str] = None
+    workflows: list[DocumentWorkflowOut] = Field(default_factory=list)
+    empty_message: str = "No workflows assigned to this document type."
+
+
+class DocumentWorkflowPriceObservationOut(BaseModel):
+    price_index_code: str
+    observation_date: date
+    value: float
+    unit_code: str
+    currency_code: Optional[str] = None
+    source_provider: str
+    source_series_id: str
+    action: DocumentWorkflowObservationAction
+    observation_id: Optional[int] = None
+
+
+class DocumentWorkflowExecutionOut(BaseModel):
+    document_id: str
+    workflow_id: str
+    label: str
+    status: DocumentWorkflowExecutionStatus = "EXECUTED"
+    message: str
+    run_id: int
+    observation_count: int
+    created_count: int = 0
+    updated_count: int = 0
+    unchanged_count: int = 0
+    price_index_codes: list[str] = Field(default_factory=list)
+    observations: list[DocumentWorkflowPriceObservationOut] = Field(default_factory=list)
 
 
 class DocumentProcessorProviderStatusOut(BaseModel):
@@ -478,6 +587,7 @@ class DocumentIngestionPageOut(BaseModel):
     reviewed_at: Optional[datetime] = None
     reviewed_by: Optional[str] = None
     processed_at: Optional[datetime] = None
+    facet_values: list[DocumentFacetAssignmentOut] = Field(default_factory=list)
     processor_trace: Optional[DocumentProcessorPageTraceOut] = None
     routing_assessment: Optional[DocumentRoutingAssessmentOut] = None
     understanding: DocumentIngestionPageUnderstandingOut = Field(default_factory=DocumentIngestionPageUnderstandingOut)
@@ -514,6 +624,7 @@ class DocumentIngestionOut(BaseModel):
     linkage_assessment: Optional[DocumentLinkageAssessmentOut] = None
     action_plan: Optional[DocumentActionPlanOut] = None
     record_links: list[DocumentRecordLinkOut] = Field(default_factory=list)
+    facet_values: list[DocumentFacetAssignmentOut] = Field(default_factory=list)
     pages: list[DocumentIngestionPageOut] = Field(default_factory=list)
     understanding: DocumentIngestionUnderstandingOut = Field(default_factory=DocumentIngestionUnderstandingOut)
 
@@ -606,6 +717,7 @@ class DocumentIngestionPageUpdate(BaseModel):
     document_subtype: Optional[str] = Field(default=None, max_length=128)
     header_fields: Optional[list[DocumentExtractedFieldInput]] = None
     table_blocks: Optional[list[DocumentTableBlockInput]] = None
+    facet_values: Optional[list[DocumentFacetAssignmentInput]] = None
     review_status: Optional[DocumentPageReviewStatus] = None
     review_notes: Optional[str] = Field(default=None, max_length=4_000)
 
@@ -703,7 +815,9 @@ class DocumentGmailInboxImportResultOut(BaseModel):
 class DocumentIngestionUpdate(BaseModel):
     display_name: Optional[str] = Field(default=None, max_length=255)
     document_kind: Optional[str] = Field(default=None, max_length=64)
+    facet_values: Optional[list[DocumentFacetAssignmentInput]] = None
     review_status: Optional[DocumentReviewStatus] = None
+    verification_mode: Optional[DocumentVerificationMode] = None
     review_notes: Optional[str] = Field(default=None, max_length=4_000)
 
     @field_validator("display_name")

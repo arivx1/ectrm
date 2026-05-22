@@ -553,6 +553,7 @@ class AuthHttpTests(unittest.TestCase):
         self.assertEqual(payload["show_start_here"], True)
         self.assertEqual(payload["user"]["user_id"], "admin")
         self.assertEqual(payload["user"]["role"], "OPS_ADMIN")
+        self.assertEqual(payload["user"]["default_assistant_persona"], "admin")
 
         admin_response = self.client.get(
             "/admin/external-data/runs",
@@ -566,6 +567,7 @@ class AuthHttpTests(unittest.TestCase):
             assert created is not None
             self.assertTrue(created.is_active)
             self.assertEqual(created.role, "OPS_ADMIN")
+            self.assertEqual(created.default_assistant_persona, "admin")
             self.assertTrue(created.email.endswith("@local.invalid"))
             self.assertIsNotNone(created.password_hash)
 
@@ -619,6 +621,7 @@ class AuthHttpTests(unittest.TestCase):
         self.assertEqual(payload["user"]["email"], "solo@example.com")
         self.assertEqual(payload["user"]["display_name"], "Solo Admin")
         self.assertEqual(payload["user"]["role"], "OPS_ADMIN")
+        self.assertEqual(payload["user"]["default_assistant_persona"], "admin")
 
         with self.SessionLocal() as session:
             created = session.get(UserAccount, "solo_admin")
@@ -626,6 +629,7 @@ class AuthHttpTests(unittest.TestCase):
             assert created is not None
             self.assertTrue(created.is_active)
             self.assertEqual(created.role, "OPS_ADMIN")
+            self.assertEqual(created.default_assistant_persona, "admin")
             self.assertIsNone(created.password_hash)
 
     def test_single_user_session_reuses_existing_account(self) -> None:
@@ -725,6 +729,7 @@ class AuthHttpTests(unittest.TestCase):
         self.assertEqual(payload["user"]["user_id"], "ops_admin")
         self.assertEqual(payload["user"]["email"], "ops@example.com")
         self.assertEqual(payload["user"]["role"], "OPS_ADMIN")
+        self.assertEqual(payload["user"]["default_assistant_persona"], "operator")
 
         with self.SessionLocal() as session:
             user = session.get(UserAccount, "ops_admin")
@@ -756,6 +761,7 @@ class AuthHttpTests(unittest.TestCase):
         self.assertEqual(payload["user"]["email"], "new.user@example.com")
         self.assertEqual(payload["user"]["display_name"], "New User")
         self.assertEqual(payload["user"]["role"], "TRADER")
+        self.assertEqual(payload["user"]["default_assistant_persona"], "trader")
 
         with self.SessionLocal() as session:
             user = session.get(UserAccount, "google_1234567890")
@@ -764,6 +770,7 @@ class AuthHttpTests(unittest.TestCase):
             self.assertEqual(user.google_subject, "1234567890")
             self.assertIsNone(user.password_hash)
             self.assertTrue(user.is_active)
+            self.assertEqual(user.default_assistant_persona, "trader")
 
     def test_google_session_requires_linked_user_when_auto_create_disabled(self) -> None:
         settings.GOOGLE_AUTH_ENABLED = True

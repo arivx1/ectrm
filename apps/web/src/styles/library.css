@@ -901,12 +901,18 @@
 .library-document-page-button strong,
 .library-document-page-detail-head strong,
 .library-document-page-detail-grid strong,
+.library-document-classification-head strong,
+.library-document-classification-grid strong,
 .library-document-page-excerpt p {
   color: var(--terminal-text);
 }
 
 .library-document-page-button span,
 .library-document-page-detail-grid span,
+.library-document-classification-explanation p,
+.library-document-classification-grid span,
+.library-document-classification-grid small,
+.library-document-classification-evidence li,
 .library-document-page-excerpt p,
 .library-document-page-notes p,
 .library-muted-copy {
@@ -992,6 +998,72 @@
   align-content: center;
 }
 
+.library-document-classification-explanation {
+  display: grid;
+  gap: 0.8rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid rgba(126, 154, 184, 0.12);
+  border-radius: 0.65rem;
+  background: rgba(8, 15, 24, 0.58);
+}
+
+.library-document-classification-head,
+.library-document-classification-processor {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.library-document-classification-head > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.library-document-classification-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.library-document-classification-grid div {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid rgba(126, 154, 184, 0.1);
+  border-radius: 0.55rem;
+  background: rgba(5, 10, 18, 0.44);
+}
+
+.library-document-classification-grid strong,
+.library-document-classification-grid small {
+  overflow-wrap: anywhere;
+}
+
+.library-document-classification-evidence {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.library-document-classification-evidence ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.library-document-classification-conflicts li {
+  color: var(--terminal-amber);
+}
+
+.library-document-classification-processor {
+  justify-content: flex-start;
+}
+
 .library-document-page-excerpt p,
 .library-document-page-notes p {
   overflow-wrap: anywhere;
@@ -1068,7 +1140,7 @@
   gap: 0.75rem;
   grid-template-columns: var(
     --library-file-table-columns,
-    320px 180px 160px 160px 140px 104px
+    320px 180px 260px 160px 160px 140px 104px 380px
   );
   align-items: center;
   width: max-content;
@@ -1176,6 +1248,170 @@
 .library-document-card.is-dragging {
   opacity: 0.72;
   cursor: grabbing;
+}
+
+.library-file-actions-cell {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.library-file-action-button {
+  min-width: 7.8rem;
+  justify-content: center;
+}
+
+.library-file-tags-cell {
+  min-width: 0;
+}
+
+.library-tag-chip-row {
+  display: flex;
+  min-width: 0;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.library-tag-chip-row-compact {
+  max-height: 4.75rem;
+  overflow: hidden;
+}
+
+.library-tag-chip {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-tag-chip-row-compact .library-tag-chip:not(.library-tag-overflow) {
+  max-width: 8.8rem;
+}
+
+.library-tag-overflow {
+  flex: 0 0 auto;
+  color: var(--terminal-text);
+}
+
+.library-tag-empty {
+  color: var(--color-copy-muted);
+  font-size: 0.82rem;
+}
+
+.library-document-tags-section .library-tag-chip-row {
+  gap: 0.5rem;
+}
+
+.library-workflow-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 32;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.library-workflow-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(7, 18, 28, 0.58);
+  backdrop-filter: blur(10px);
+}
+
+.library-workflow-dialog {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 1rem;
+  width: min(42rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+}
+
+.library-workflow-dialog-head,
+.library-workflow-card,
+.library-workflow-result {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.library-workflow-dialog-head {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.library-workflow-dialog-head > div {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.library-workflow-dialog-head h3,
+.library-workflow-dialog-head p,
+.library-workflow-card-copy span,
+.library-workflow-result p,
+.library-workflow-result span {
+  margin: 0;
+}
+
+.library-workflow-dialog-head h3,
+.library-workflow-card-copy strong,
+.library-workflow-result strong {
+  color: var(--terminal-text);
+}
+
+.library-workflow-dialog-head h3 {
+  overflow-wrap: anywhere;
+}
+
+.library-workflow-dialog-head p,
+.library-workflow-card-copy span,
+.library-workflow-result p,
+.library-workflow-result span {
+  color: var(--color-copy-muted);
+}
+
+.library-workflow-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.library-workflow-card,
+.library-workflow-result {
+  padding: 0.9rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(126, 154, 184, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.library-workflow-card {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.library-workflow-result {
+  display: grid;
+  justify-content: stretch;
+}
+
+.library-workflow-card-copy,
+.library-workflow-result {
+  min-width: 0;
+}
+
+.library-workflow-card-copy {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.library-workflow-card-copy span {
+  overflow-wrap: anywhere;
 }
 
 .library-file-name {
@@ -1433,6 +1669,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .library-document-classification-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .library-upload-inline-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1493,6 +1733,11 @@
 
   .library-document-page-detail-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .library-document-classification-head {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .library-document-page-preview-frame {

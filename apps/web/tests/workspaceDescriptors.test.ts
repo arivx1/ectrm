@@ -19,7 +19,7 @@ describe('workspace descriptor system', () => {
     expect(WORKSPACE_DESCRIPTORS.pretrade.buildWindowNotices).toBeUndefined()
     expect(WORKSPACE_DESCRIPTORS.map.dataGroups).toEqual([
       'reference',
-      'weather',
+      'deliveries',
     ])
     expect(WORKSPACE_DESCRIPTORS.map.buildWindowNotices).toBeUndefined()
     expect(WORKSPACE_DESCRIPTORS.messages.dataGroups).toEqual([])

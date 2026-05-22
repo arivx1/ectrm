@@ -12,6 +12,8 @@ from apps.api.app.models.delivery_logistics_detail import DeliveryLogisticsDetai
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
+from apps.api.app.models.price_index_observation import PriceIndexObservation
+from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade import trade_recency_order
 from apps.api.app.models.trade_confirmation import TradeConfirmation
@@ -36,6 +38,8 @@ PRIMARY_IDENTIFIER_KEYS_BY_RECORD_TYPE: dict[str, set[str]] = {
     "TRADE_INVOICE": {"invoice_number"},
     "TRADE_PAYMENT": {"payment_reference", "invoice_number"},
     "DELIVERY": {"delivery_id", "nomination_reference", "carrier_reference", "contract_number"},
+    "PRICE_INDEX": {"price_index_code"},
+    "PRICE_INDEX_OBSERVATION": {"price_index_code", "observation_date", "source_series_id"},
 }
 
 
@@ -378,6 +382,8 @@ def _lookup_builders() -> dict[str, Callable[[Session, dict[str, str], int], lis
         "TRADE_INVOICE": _lookup_trade_invoices,
         "TRADE_PAYMENT": _lookup_trade_payments,
         "DELIVERY": _lookup_deliveries,
+        "PRICE_INDEX": _lookup_price_indices,
+        "PRICE_INDEX_OBSERVATION": _lookup_price_index_observations,
     }
 
 
@@ -707,6 +713,166 @@ def _lookup_deliveries(db: Session, field_map: dict[str, str], limit: int) -> li
                 summary=" • ".join(part for part in summary_parts if part),
                 matched_keys=matched_keys,
                 exact_identifier_match=bool(PRIMARY_IDENTIFIER_KEYS_BY_RECORD_TYPE["DELIVERY"] & set(matched_keys)),
+            )
+        )
+    return matches
+
+
+def _lookup_price_indices(db: Session, field_map: dict[str, str], limit: int) -> list[_LookupMatch]:
+    price_index_code = _normalized_token(field_map.get("price_index_code"))
+    source_provider = _normalized_token(field_map.get("source_provider"))
+    commodity = _normalized_token(field_map.get("commodity"))
+    market = _normalized_text(field_map.get("market"))
+    location = _normalized_token(field_map.get("location"))
+    currency = _normalized_token(field_map.get("currency"))
+    unit = _normalized_token(field_map.get("unit"))
+
+    conditions = []
+    if price_index_code:
+        conditions.append(func.upper(ReferencePriceIndex.code) == price_index_code)
+    if source_provider and commodity:
+        conditions.append(
+            and_(
+                func.upper(ReferencePriceIndex.provider) == source_provider,
+                func.upper(ReferencePriceIndex.commodity_code) == commodity,
+            )
+        )
+    if source_provider and location:
+        conditions.append(
+            and_(
+                func.upper(ReferencePriceIndex.provider) == source_provider,
+                func.upper(func.coalesce(ReferencePriceIndex.location_code, "")) == location,
+            )
+        )
+    if market and commodity:
+        conditions.append(
+            and_(
+                _lower_equals(ReferencePriceIndex.market, market),
+                func.upper(ReferencePriceIndex.commodity_code) == commodity,
+            )
+        )
+    if not conditions:
+        return []
+
+    rows = db.execute(
+        select(ReferencePriceIndex)
+        .where(or_(*conditions))
+        .order_by(ReferencePriceIndex.provider.asc(), ReferencePriceIndex.code.asc())
+        .limit(limit)
+    ).scalars().all()
+
+    matches: list[_LookupMatch] = []
+    for price_index in rows:
+        matched_keys: list[str] = []
+        if price_index_code and _normalized_token(price_index.code) == price_index_code:
+            matched_keys.append("price_index_code")
+        if source_provider and _normalized_token(price_index.provider) == source_provider:
+            matched_keys.append("source_provider")
+        if commodity and _normalized_token(price_index.commodity_code) == commodity:
+            matched_keys.append("commodity")
+        if market and _normalized_text(price_index.market) == market:
+            matched_keys.append("market")
+        if location and _normalized_token(price_index.location_code) == location:
+            matched_keys.append("location")
+        if currency and _normalized_token(price_index.currency_code) == currency:
+            matched_keys.append("currency")
+        if unit and _normalized_token(price_index.unit_code) == unit:
+            matched_keys.append("unit")
+        if not matched_keys:
+            continue
+
+        summary_parts = [
+            price_index.provider,
+            price_index.commodity_code,
+            price_index.market,
+            price_index.location_code,
+        ]
+        matches.append(
+            _LookupMatch(
+                record_id=price_index.code,
+                record_label=f"Price Index {price_index.code}",
+                summary=" • ".join(part for part in summary_parts if part),
+                matched_keys=matched_keys,
+                exact_identifier_match="price_index_code" in matched_keys,
+            )
+        )
+    return matches
+
+
+def _lookup_price_index_observations(db: Session, field_map: dict[str, str], limit: int) -> list[_LookupMatch]:
+    price_index_code = _normalized_token(field_map.get("price_index_code"))
+    source_provider = _normalized_token(field_map.get("source_provider"))
+    source_series_id = _normalized_token(field_map.get("source_series_id"))
+    observation_date = _parse_date(field_map.get("observation_date") or field_map.get("publication_date"))
+    publication_date = _parse_date(field_map.get("publication_date"))
+    price = _parse_decimal(field_map.get("price"))
+    currency = _normalized_token(field_map.get("currency"))
+    unit = _normalized_token(field_map.get("unit"))
+
+    conditions = []
+    if price_index_code and observation_date:
+        conditions.append(
+            and_(
+                func.upper(PriceIndexObservation.price_index_code) == price_index_code,
+                PriceIndexObservation.observation_date == observation_date,
+            )
+        )
+    if price_index_code and source_provider:
+        conditions.append(
+            and_(
+                func.upper(PriceIndexObservation.price_index_code) == price_index_code,
+                func.upper(PriceIndexObservation.source_provider) == source_provider,
+            )
+        )
+    if source_provider and source_series_id:
+        conditions.append(
+            and_(
+                func.upper(PriceIndexObservation.source_provider) == source_provider,
+                func.upper(PriceIndexObservation.source_series_id) == source_series_id,
+            )
+        )
+    if not conditions:
+        return []
+
+    rows = db.execute(
+        select(PriceIndexObservation)
+        .where(or_(*conditions))
+        .order_by(PriceIndexObservation.observation_date.desc(), PriceIndexObservation.id.desc())
+        .limit(limit)
+    ).scalars().all()
+
+    matches: list[_LookupMatch] = []
+    for observation in rows:
+        matched_keys: list[str] = []
+        if price_index_code and _normalized_token(observation.price_index_code) == price_index_code:
+            matched_keys.append("price_index_code")
+        if observation_date and _same_date(observation.observation_date, observation_date):
+            matched_keys.append("observation_date")
+        if publication_date and _same_date(observation.source_published_at, publication_date):
+            matched_keys.append("publication_date")
+        if source_provider and _normalized_token(observation.source_provider) == source_provider:
+            matched_keys.append("source_provider")
+        if source_series_id and _normalized_token(observation.source_series_id) == source_series_id:
+            matched_keys.append("source_series_id")
+        if price is not None and _same_decimal(observation.value, price):
+            matched_keys.append("price")
+        if currency and _normalized_token(observation.currency_code) == currency:
+            matched_keys.append("currency")
+        if unit and _normalized_token(observation.unit_code) == unit:
+            matched_keys.append("unit")
+        if not matched_keys:
+            continue
+
+        matches.append(
+            _LookupMatch(
+                record_id=str(observation.id),
+                record_label=f"Price Observation {observation.price_index_code} {observation.observation_date.isoformat()}",
+                summary=(
+                    f"{observation.source_provider} • {observation.source_series_id} • "
+                    f"{observation.value} {observation.currency_code or ''}/{observation.unit_code}"
+                ),
+                matched_keys=matched_keys,
+                exact_identifier_match=bool({"price_index_code", "observation_date", "source_series_id"} & set(matched_keys)),
             )
         )
     return matches

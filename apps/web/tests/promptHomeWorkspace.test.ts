@@ -5,8 +5,27 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { test } from "vitest";
 
 import { PromptHomeAvailableTokenBadge } from "../src/workspaces/prompt/PromptHomeAvailableTokenBadge";
+import type {
+  DeliveryRecord,
+  PriceIndexObservationRecord,
+  PriceIndexRecord,
+} from "../src/shared/models";
 import { shouldAutoEnsurePromptHomeData } from "../src/workspaces/prompt/promptHomeAutoLoad";
 import { summarizePromptHomeAvailableTokens } from "../src/workspaces/prompt/promptHomeAvailableTokens";
+import {
+  filterPromptHomeDisplayPriceIndices,
+  formatPromptHomePriceDate,
+  formatPromptHomePriceDateTime,
+  formatPromptHomePriceFrequency,
+  formatPromptHomePriceSource,
+  formatPromptHomePriceTime,
+  formatPromptHomePriceUpdatedAt,
+  listPromptHomePriceQuoteTypes,
+  listPromptHomePriceProviders,
+  nextPromptHomePriceSortState,
+  selectPromptHomeDisplayPriceIndices,
+  sortPromptHomeDisplayPriceIndices,
+} from "../src/workspaces/prompt/promptHomePrices";
 import { PromptHomeWorkspace } from "../src/workspaces/prompt/PromptHomeWorkspace";
 
 const defaultCounts = {
@@ -37,6 +56,41 @@ const defaultPriceIndices = [
   },
 ];
 
+function buildPromptHomeVesselDelivery(
+  overrides: Partial<DeliveryRecord> = {},
+): DeliveryRecord {
+  return {
+    delivery_id: "DEL-HOME-VESSEL-1",
+    trade_id: "TRD-HOME-VESSEL-1",
+    status: "IN_PROGRESS",
+    transport_mode: "VESSEL",
+    commodity: "CRUDE",
+    commodity_class: "OIL",
+    vessel_detail: {
+      delivery_id: "DEL-HOME-VESSEL-1",
+      vessel_name: "MT Home Signal",
+      imo_number: "IMO7654321",
+      mmsi_number: "366765432",
+      last_signal_at: "2026-04-11T02:30:00Z",
+      last_position_at: "2026-04-11T02:30:00Z",
+      last_latitude: 29.332,
+      last_longitude: -94.748,
+      last_speed_knots: 10.8,
+      last_course_degrees: 210,
+      last_heading_degrees: 208,
+      last_navigational_status: "UNDER_WAY",
+      current_destination: "HOUSTON",
+      current_eta_at_destination: "2026-04-12T12:00:00Z",
+      tracking_health: {
+        exception_severity: "CLEAR",
+        primary_exception: null,
+      },
+    },
+    vessel_tracking_health: null,
+    ...overrides,
+  } as DeliveryRecord;
+}
+
 test("prompt home renders guided prompts without legacy home actions", () => {
   const markup = renderToStaticMarkup(
     createElement(PromptHomeWorkspace, {
@@ -54,6 +108,7 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   const communicationIndex = markup.indexOf("Communication center");
   const promptCardIndex = markup.indexOf("Ask the desk assistant");
   const operatorPromptIndex = markup.indexOf("Operator prompt");
+  const cardFilterIndex = markup.indexOf("Home cards");
 
   assert.doesNotMatch(markup, /Show live context/);
   assert.doesNotMatch(markup, />Assistant Console</);
@@ -66,30 +121,40 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.doesNotMatch(markup, /Open Trade Capture/);
   assert.doesNotMatch(markup, /Open Work Queue/);
   assert.doesNotMatch(markup, /Open Settlement/);
+  assert.doesNotMatch(markup, /Using openai when you send\./);
+  assert.doesNotMatch(markup, /Use your microphone to dictate the prompt\./);
+  assert.doesNotMatch(markup, /What needs my attention right now\?/);
+  assert.doesNotMatch(markup, /Summarize the open operations queue\./);
+  assert.doesNotMatch(markup, /Where should I look for exposure risk today\?/);
+  assert.doesNotMatch(
+    markup,
+    /Help me decide which workspace to use for a trade issue\./,
+  );
   assert.doesNotMatch(
     markup,
     /The traditional screens are still here when you already know where the work belongs\./,
   );
-  assert.match(markup, /What are you trying to do\?/);
-  assert.match(
+  assert.doesNotMatch(markup, /Guided Prompts/);
+  assert.doesNotMatch(markup, /What are you trying to do\?/);
+  assert.doesNotMatch(
     markup,
-    /Choose one to reveal a few suggested prompts and direct workspace links\./,
+    /Pick a lane, then load a suggested prompt or jump straight to the right workspace\./,
   );
-  assert.match(markup, /Trade/);
-  assert.match(markup, /Schedule/);
-  assert.match(markup, /Manage Shipments/);
-  assert.match(markup, /Manage Risk/);
-  assert.match(markup, /Settle/);
-  assert.match(markup, /Accounting/);
+  assert.doesNotMatch(markup, /Suggested prompts/);
+  assert.doesNotMatch(markup, /Workspace links/);
+  assert.doesNotMatch(markup, /Walk me through building a trade draft\./);
   assert.doesNotMatch(markup, /Tell me updates about the Strait of Hormuz\./);
   assert.doesNotMatch(
     markup,
     /Help me build a simulated trade idea to hedge risk\./,
   );
+  assert.doesNotMatch(markup, /Open Pre-Trade Review/);
   assert.doesNotMatch(markup, /Governed Review/);
   assert.doesNotMatch(markup, /Review queue/);
   assert.doesNotMatch(markup, /Sign in to review PDFs/);
+  assert.ok(cardFilterIndex >= 0);
   assert.ok(deskTimeIndex >= 0);
+  assert.ok(deskTimeIndex > cardFilterIndex);
   assert.ok(pricesIndex > deskTimeIndex);
   assert.ok(mapIndex > pricesIndex);
   assert.ok(documentUploadIndex > mapIndex);
@@ -98,6 +163,24 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.ok(promptCardIndex > communicationIndex);
   assert.ok(operatorPromptIndex > promptCardIndex);
   assert.match(markup, />Voice Unavailable</);
+  assert.match(markup, /<span class="eyebrow">Cards<\/span>/);
+  assert.match(markup, /<strong id="prompt-home-card-filter-heading">Home cards<\/strong>/);
+  assert.match(markup, /6 visible · 0 hidden/);
+  assert.match(
+    markup,
+    /aria-expanded="false" aria-controls="prompt-home-card-filter-panel"/,
+  );
+  assert.match(
+    markup,
+    /id="prompt-home-card-filter-panel" class="prompt-home-card-filter-body" hidden=""/,
+  );
+  assert.match(markup, /Edit cards/);
+  assert.match(markup, /aria-label="Movable Home cards"/);
+  assert.match(markup, /data-home-card-drag-handle="true"/);
+  assert.match(markup, /aria-label="Drag Desk Time card by its header"/);
+  assert.match(markup, /aria-label="Drag Market Prices card by its header"/);
+  assert.doesNotMatch(markup, />Move<\/button>/);
+  assert.doesNotMatch(markup, /Drag Home cards card by its header/);
   assert.match(markup, /Desk Time/);
   assert.match(
     markup,
@@ -111,8 +194,29 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     markup,
     /id="prompt-home-prices-panel" class="prompt-home-prices-card-body"/,
   );
-  assert.match(markup, /HH_NATGAS/);
+  assert.match(markup, /Product/);
+  assert.match(markup, /Location/);
+  assert.match(markup, /Price/);
+  assert.match(markup, /Unit/);
+  assert.match(markup, /Currency/);
+  assert.match(markup, /Date/);
+  assert.match(markup, /Time/);
+  assert.match(markup, /Updated/);
+  assert.match(markup, /Source/);
+  assert.match(markup, /aria-label="Sort prices by Product"/);
+  assert.match(markup, /aria-label="Sort prices by Updated"/);
+  assert.match(markup, /NATGAS/);
+  assert.match(markup, /HENRY_HUB/);
   assert.match(markup, /No mark yet/);
+  assert.match(markup, /MMBTU/);
+  assert.match(markup, /USD/);
+  assert.doesNotMatch(markup, /HH_NATGAS/);
+  assert.match(markup, /Market price marks/);
+  assert.match(markup, /0 latest marks · 1 active index/);
+  assert.match(markup, /Code, market, commodity/);
+  assert.match(markup, /All providers/);
+  assert.match(markup, /Filter by mark status/);
+  assert.match(markup, /Showing all 1 active index/);
   assert.match(markup, /Open Dashboard/);
   assert.doesNotMatch(markup, /Desk clocks and calendars/);
   assert.match(
@@ -188,20 +292,24 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     markup,
     /id="prompt-home-map-filters-card-weather-overlay-panel" class="asset-map-weather-overlay-body"/,
   );
-  assert.match(markup, /aria-label="Check all weather overlays"/);
+  assert.match(markup, /aria-label="Uncheck all weather overlays"/);
   assert.match(markup, /Weather overlay layers/);
   assert.match(markup, /Opacity/);
-  assert.match(markup, /Markers only/);
+  assert.match(markup, /US NOAA radar/);
   assert.match(markup, /Radar/);
-  assert.match(markup, /Precipitation/);
-  assert.match(markup, /Wind/);
-  assert.match(markup, /Temperature/);
-  assert.match(markup, /Humidity/);
-  assert.match(markup, /Pressure/);
+  assert.match(
+    markup,
+    /<input type="checkbox" checked=""\/><span>Radar<\/span>/,
+  );
   assert.match(markup, /Radar overlay opacity/);
-  assert.match(markup, /Humidity overlay opacity/);
   assert.match(markup, /aria-label="Show Radar overlay details"/);
   assert.doesNotMatch(markup, /aria-label="Weather overlay layer"/);
+  assert.doesNotMatch(markup, /Precipitation/);
+  assert.doesNotMatch(markup, /Temperature/);
+  assert.doesNotMatch(markup, /Humidity/);
+  assert.doesNotMatch(markup, /Pressure/);
+  assert.doesNotMatch(markup, /tracked weather/);
+  assert.doesNotMatch(markup, /weather points/);
   assert.match(markup, /Map Records/);
   assert.match(markup, /0 map records/);
   assert.match(markup, /Show up to/);
@@ -310,7 +418,7 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     /id="prompt-home-prompt-card-panel" class="prompt-home-prompt-card-body"/,
   );
   assert.match(markup, />Verbalize</);
-  assert.match(
+  assert.doesNotMatch(
     markup,
     /Automatically read assistant responses aloud\./,
   );
@@ -379,6 +487,425 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.doesNotMatch(markup, /prompt-home-review-panel/);
 });
 
+test("prompt home prices prefer indices with latest synced marks", () => {
+  const indices: PriceIndexRecord[] = [
+    {
+      code: "BRENT_SPOT_D",
+      name: "Brent Spot Daily",
+      description: null,
+      is_active: true,
+      commodity_code: "BRENT",
+      currency_code: "USD",
+      unit_code: "BBL",
+      provider: "EIA",
+      market: "EUROPE",
+      location_code: null,
+    },
+    {
+      code: "CAISO_NP15_RT5M",
+      name: "CAISO NP15 Real-Time 5-Minute Hub LMP",
+      description: null,
+      is_active: true,
+      commodity_code: "POWER",
+      currency_code: "USD",
+      unit_code: "MWH",
+      provider: "CAISO",
+      quote_type: "FUTURE",
+      market: "CAISO",
+      location_code: null,
+    },
+    {
+      code: "CORN_GLOBAL_IMF_M",
+      name: "Global Corn Monthly",
+      description: null,
+      is_active: true,
+      commodity_code: "CORN",
+      currency_code: "USD",
+      unit_code: "MT",
+      provider: "FRED",
+      market: "IMF",
+      location_code: null,
+    },
+  ];
+
+  const latestMarksByCode: Record<string, PriceIndexObservationRecord> = {
+    BRENT_SPOT_D: priceObservation({
+      id: 1,
+      price_index_code: "BRENT_SPOT_D",
+      observation_date: "2026-05-16",
+      downloaded_at: "2026-05-17T10:00:00Z",
+    }),
+    CAISO_NP15_RT5M: priceObservation({
+      id: 2,
+      price_index_code: "CAISO_NP15_RT5M",
+      observation_date: "2026-05-18",
+      downloaded_at: "2026-05-18T19:30:00Z",
+    }),
+  };
+
+  assert.deepEqual(
+    selectPromptHomeDisplayPriceIndices(indices, latestMarksByCode).map(
+      (priceIndex) => priceIndex.code,
+    ),
+    ["CAISO_NP15_RT5M", "BRENT_SPOT_D", "CORN_GLOBAL_IMF_M"],
+  );
+});
+
+test("prompt home price filters narrow by query provider and mark state", () => {
+  const indices: PriceIndexRecord[] = [
+    {
+      code: "BRENT_SPOT_D",
+      name: "Brent Spot Daily",
+      description: "Daily crude oil mark",
+      is_active: true,
+      commodity_code: "BRENT",
+      currency_code: "USD",
+      unit_code: "BBL",
+      provider: "EIA",
+      market: "EUROPE",
+      location_code: null,
+    },
+    {
+      code: "CAISO_NP15_RT5M",
+      name: "CAISO NP15 Real-Time 5-Minute Hub LMP",
+      description: null,
+      is_active: true,
+      commodity_code: "POWER",
+      currency_code: "USD",
+      unit_code: "MWH",
+      provider: "CAISO",
+      quote_type: "FUTURE",
+      market: "CAISO",
+      location_code: null,
+    },
+    {
+      code: "CORN_GLOBAL_IMF_M",
+      name: "Global Corn Monthly",
+      description: null,
+      is_active: true,
+      commodity_code: "CORN",
+      currency_code: "USD",
+      unit_code: "MT",
+      provider: "FRED",
+      market: "IMF",
+      location_code: null,
+    },
+  ];
+  const latestMarksByCode: Record<string, PriceIndexObservationRecord> = {
+    BRENT_SPOT_D: priceObservation({
+      id: 1,
+      price_index_code: "BRENT_SPOT_D",
+    }),
+    CAISO_NP15_RT5M: priceObservation({
+      id: 2,
+      price_index_code: "CAISO_NP15_RT5M",
+    }),
+  };
+
+  assert.deepEqual(listPromptHomePriceProviders(indices), [
+    "CAISO",
+    "EIA",
+    "FRED",
+  ]);
+  assert.deepEqual(listPromptHomePriceQuoteTypes(indices), ["FUTURE", "SPOT"]);
+  assert.deepEqual(
+    filterPromptHomeDisplayPriceIndices(indices, latestMarksByCode, {
+      query: "corn",
+      provider: "ALL",
+      markFilter: "all",
+    }).map((priceIndex) => priceIndex.code),
+    ["CORN_GLOBAL_IMF_M"],
+  );
+  assert.deepEqual(
+    filterPromptHomeDisplayPriceIndices(indices, latestMarksByCode, {
+      query: "",
+      provider: "EIA",
+      markFilter: "with_marks",
+    }).map((priceIndex) => priceIndex.code),
+    ["BRENT_SPOT_D"],
+  );
+  assert.deepEqual(
+    filterPromptHomeDisplayPriceIndices(indices, latestMarksByCode, {
+      query: "",
+      provider: "ALL",
+      markFilter: "all",
+      quoteType: "FUTURE",
+    }).map((priceIndex) => priceIndex.code),
+    ["CAISO_NP15_RT5M"],
+  );
+  assert.deepEqual(
+    filterPromptHomeDisplayPriceIndices(indices, latestMarksByCode, {
+      query: "",
+      provider: "ALL",
+      markFilter: "missing_marks",
+    }).map((priceIndex) => priceIndex.code),
+    ["CORN_GLOBAL_IMF_M"],
+  );
+});
+
+test("prompt home price headers can sort display indices by selected field", () => {
+  const indices: PriceIndexRecord[] = [
+    {
+      code: "BRENT_SPOT_D",
+      name: "Brent Spot Daily",
+      description: null,
+      is_active: true,
+      commodity_code: "BRENT",
+      currency_code: "USD",
+      unit_code: "BBL",
+      provider: "EIA",
+      market: "EUROPE",
+      location_code: "EUROPE",
+    },
+    {
+      code: "CAISO_SP15_RT5M",
+      name: "CAISO SP15 Real-Time 5-Minute Hub LMP",
+      description: null,
+      is_active: true,
+      commodity_code: "POWER",
+      currency_code: "USD",
+      unit_code: "MWH",
+      provider: "CAISO",
+      market: "CAISO",
+      location_code: "SP15",
+    },
+    {
+      code: "CORN_GLOBAL_IMF_M",
+      name: "Global Corn Monthly",
+      description: null,
+      is_active: true,
+      commodity_code: "CORN",
+      currency_code: "USD",
+      unit_code: "MT",
+      provider: "FRED",
+      market: "IMF",
+      location_code: null,
+    },
+  ];
+  const latestMarksByCode: Record<string, PriceIndexObservationRecord> = {
+    BRENT_SPOT_D: priceObservation({
+      price_index_code: "BRENT_SPOT_D",
+      value: 72.25,
+      observation_date: "2026-05-18",
+      downloaded_at: "2026-05-18T10:00:00Z",
+    }),
+    CAISO_SP15_RT5M: priceObservation({
+      price_index_code: "CAISO_SP15_RT5M",
+      value: -6.75,
+      unit_code: "MWH",
+      observation_date: "2026-05-22",
+      source_revision: "2026-05-22T13:05:00:ptid:1",
+      downloaded_at: "2026-05-22T16:40:00Z",
+    }),
+  };
+
+  assert.deepEqual(
+    sortPromptHomeDisplayPriceIndices(indices, latestMarksByCode, {
+      field: "product",
+      direction: "asc",
+    }).map((priceIndex) => priceIndex.code),
+    ["BRENT_SPOT_D", "CORN_GLOBAL_IMF_M", "CAISO_SP15_RT5M"],
+  );
+  assert.deepEqual(
+    sortPromptHomeDisplayPriceIndices(indices, latestMarksByCode, {
+      field: "price",
+      direction: "asc",
+    }).map((priceIndex) => priceIndex.code),
+    ["CAISO_SP15_RT5M", "BRENT_SPOT_D", "CORN_GLOBAL_IMF_M"],
+  );
+  assert.deepEqual(
+    sortPromptHomeDisplayPriceIndices(indices, latestMarksByCode, {
+      field: "updated",
+      direction: "desc",
+    }).map((priceIndex) => priceIndex.code),
+    ["CAISO_SP15_RT5M", "BRENT_SPOT_D", "CORN_GLOBAL_IMF_M"],
+  );
+  assert.deepEqual(
+    sortPromptHomeDisplayPriceIndices(
+      indices,
+      latestMarksByCode,
+      null,
+    ).map((priceIndex) => priceIndex.code),
+    ["BRENT_SPOT_D", "CAISO_SP15_RT5M", "CORN_GLOBAL_IMF_M"],
+  );
+
+  const productSort = nextPromptHomePriceSortState(null, "product");
+  assert.deepEqual(productSort, { field: "product", direction: "asc" });
+  const productReverseSort = nextPromptHomePriceSortState(
+    productSort,
+    "product",
+  );
+  assert.deepEqual(productReverseSort, {
+    field: "product",
+    direction: "desc",
+  });
+  assert.equal(
+    nextPromptHomePriceSortState(productReverseSort, "product"),
+    null,
+  );
+
+  const updatedSort = nextPromptHomePriceSortState(productSort, "updated");
+  assert.deepEqual(updatedSort, {
+    field: "updated",
+    direction: "desc",
+  });
+  const updatedReverseSort = nextPromptHomePriceSortState(
+    updatedSort,
+    "updated",
+  );
+  assert.deepEqual(updatedReverseSort, {
+    field: "updated",
+    direction: "asc",
+  });
+  assert.equal(
+    nextPromptHomePriceSortState(updatedReverseSort, "updated"),
+    null,
+  );
+});
+
+test("prompt home price marks format the price date and time", () => {
+  assert.equal(
+    formatPromptHomePriceDateTime(
+      priceObservation({
+        observation_date: "2026-05-16",
+        source_published_at: "2026-05-16T14:45:00Z",
+        downloaded_at: "2026-05-17T10:00:00Z",
+      }),
+    ),
+    "Daily · source date May 16, 2026 · published May 16, 2026, 2:45 PM UTC",
+  );
+  assert.equal(
+    formatPromptHomePriceDateTime(
+      priceObservation({
+        observation_date: "2026-05-16",
+        source_published_at: null,
+        downloaded_at: "2026-05-17T10:00:00Z",
+      }),
+    ),
+    "Daily · source date May 16, 2026 · synced May 17, 2026, 10:00 AM UTC",
+  );
+  assert.equal(formatPromptHomePriceFrequency("5MIN"), "5-min");
+  assert.equal(formatPromptHomePriceFrequency("15MIN"), "15-min");
+  assert.equal(formatPromptHomePriceFrequency("hourly"), "Hourly");
+  assert.equal(formatPromptHomePriceFrequency("posting"), "Posting");
+  assert.equal(
+    formatPromptHomePriceDate(
+      priceObservation({
+        observation_date: "2026-05-22",
+      }),
+    ),
+    "May 22, 2026",
+  );
+  assert.equal(
+    formatPromptHomePriceTime(
+      priceObservation({
+        source_published_at: null,
+        source_revision: "2026-05-22:HE17:I03",
+      }),
+    ),
+    "HE17 I03",
+  );
+  assert.equal(
+    formatPromptHomePriceTime(
+      priceObservation({
+        source_published_at: null,
+        source_revision: "2026-05-22:IE16:45",
+      }),
+    ),
+    "IE 16:45",
+  );
+  assert.equal(
+    formatPromptHomePriceTime(
+      priceObservation({
+        source_published_at: null,
+        source_revision: "2026-05-22T13:05:00:ptid:1",
+      }),
+    ),
+    "1:05 PM UTC",
+  );
+  assert.equal(
+    formatPromptHomePriceUpdatedAt(
+      priceObservation({
+        downloaded_at: "2026-05-22T23:40:00Z",
+      }),
+    ),
+    "May 22, 2026, 11:40 PM UTC",
+  );
+  assert.equal(
+    formatPromptHomePriceSource(
+      priceObservation({
+        source_provider: "ERCOT",
+        source_series_id: "HB_HOUSTON",
+      }),
+      {
+        code: "ERCOT_HB_HOUSTON_RT15M",
+        name: "ERCOT Houston Real-Time Hub SPP",
+        description: null,
+        is_active: true,
+        commodity_code: "POWER",
+        currency_code: "USD",
+        unit_code: "MWH",
+        provider: "ERCOT",
+      },
+    ),
+    "ERCOT · HB_HOUSTON",
+  );
+});
+
+test("prompt home renders every active price index in the prices card", () => {
+  const priceIndices = Array.from({ length: 8 }, (_, index) => ({
+    code: `PRICE_INDEX_${index + 1}`,
+    name: `Price Index ${index + 1}`,
+    description: null,
+    is_active: true,
+    commodity_code: index % 2 === 0 ? "POWER" : "NATGAS",
+    currency_code: "USD",
+    unit_code: index % 2 === 0 ? "MWH" : "MMBTU",
+    provider: index % 2 === 0 ? "CAISO" : "EIA",
+    market: index % 2 === 0 ? "CAISO" : "US",
+    location_code: `LOC_${index + 1}`,
+  }));
+
+  const markup = renderToStaticMarkup(
+    createElement(PromptHomeWorkspace, {
+      authSession: null,
+      health: "ok",
+      counts: defaultCounts,
+      priceIndices,
+      onOpenView: () => undefined,
+    }),
+  );
+
+  for (const priceIndex of priceIndices) {
+    assert.match(markup, new RegExp(priceIndex.location_code ?? ""));
+    assert.doesNotMatch(markup, new RegExp(priceIndex.code));
+  }
+  assert.match(markup, /Showing all 8 active indices/);
+});
+
+function priceObservation(
+  overrides: Partial<PriceIndexObservationRecord>,
+): PriceIndexObservationRecord {
+  return {
+    id: 1,
+    price_index_code: "BRENT_SPOT_D",
+    observation_date: "2026-05-16",
+    value: 72.25,
+    unit_code: "BBL",
+    currency_code: "USD",
+    source_provider: "EIA",
+    source_series_id: "PET.RBRTE.D",
+    source_frequency: "DAILY",
+    source_published_at: null,
+    source_revision: null,
+    downloaded_at: "2026-05-17T10:00:00Z",
+    run_id: 1,
+    created_at: "2026-05-17T10:00:00Z",
+    updated_at: "2026-05-17T10:00:00Z",
+    ...overrides,
+  };
+}
+
 test("prompt home renders read aloud controls for assistant messages", () => {
   const markup = renderToStaticMarkup(
     createElement(PromptHomeWorkspace, {
@@ -418,6 +945,25 @@ test("prompt home map card uses the shared eyebrow and title structure", () => {
   assert.match(
     markup,
     /<div class="prompt-home-map-card-copy"><span class="eyebrow">Map<\/span><strong>Asset map<\/strong>/,
+  );
+});
+
+test("prompt home map enables the vessels layer when tracked deliveries are available", () => {
+  const markup = renderToStaticMarkup(
+    createElement(PromptHomeWorkspace, {
+      authSession: null,
+      health: "ok",
+      counts: defaultCounts,
+      deliveries: [buildPromptHomeVesselDelivery()],
+      onOpenView: () => undefined,
+    }),
+  );
+
+  assert.match(markup, /Vessels/);
+  assert.match(markup, /1 vessel/);
+  assert.doesNotMatch(
+    markup,
+    /<input type="checkbox" checked="" disabled=""\/><span>Vessels<\/span>/,
   );
 });
 

@@ -365,6 +365,8 @@ function marketDataCategoryLabel(value: string): string {
       return 'Fundamentals'
     case 'macro':
       return 'Macro'
+    case 'market':
+      return 'Market'
     case 'positioning':
       return 'Positioning'
     default:

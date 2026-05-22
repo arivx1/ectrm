@@ -64,6 +64,7 @@ const authSession = {
     email: 'ops_requester@example.com',
     display_name: 'Ops Requester',
     role: 'OPS_USER',
+    default_assistant_persona: 'operator',
   },
 } satisfies StoredAuthSession
 

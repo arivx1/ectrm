@@ -42,6 +42,7 @@ def _build_price_index_create_values(db: Session, payload: PriceIndexCreate) -> 
         "currency_code": ensure_active_currency_exists(db, payload.currency_code),
         "unit_code": ensure_active_unit_exists(db, payload.unit_code),
         "provider": payload.provider.strip(),
+        "quote_type": normalize_code(payload.quote_type),
         "market": clean_optional_text(payload.market),
         "location_code": (
             ensure_active_location_exists(db, payload.location_code)
@@ -65,6 +66,8 @@ def _update_price_index_fields(_db: Session, record, payload, provided_fields: s
         record.unit_code = normalize_code(payload.unit_code)
     if "provider" in provided_fields and payload.provider is not None:
         record.provider = payload.provider.strip()
+    if "quote_type" in provided_fields and payload.quote_type is not None:
+        record.quote_type = normalize_code(payload.quote_type)
     if "market" in provided_fields:
         record.market = clean_optional_text(payload.market)
     if "location_code" in provided_fields:

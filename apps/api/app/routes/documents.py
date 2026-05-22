@@ -20,6 +20,8 @@ from apps.api.app.domains.integrations.services.gmail_inbox import (
     list_gmail_inbox_messages,
 )
 from apps.api.app.domains.documents.services.document_action_execution import execute_document_action_plan
+from apps.api.app.domains.documents.services.document_workflows import execute_document_workflow
+from apps.api.app.domains.documents.services.document_workflows import list_document_workflows
 from apps.api.app.domains.documents.services.ingestion import get_document_ingestion
 from apps.api.app.domains.documents.services.ingestion import get_document_page_preview_path
 from apps.api.app.domains.documents.services.ingestion import get_document_source_file_details
@@ -42,6 +44,8 @@ from apps.api.app.schemas.document import DocumentProcessorSelection
 from apps.api.app.schemas.document import DocumentProcessorRuntimeSettingsOut
 from apps.api.app.schemas.document import DocumentIngestionUpdate
 from apps.api.app.schemas.document import DocumentSchemaRegistryOut
+from apps.api.app.schemas.document import DocumentWorkflowExecutionOut
+from apps.api.app.schemas.document import DocumentWorkflowListOut
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -381,6 +385,53 @@ def post_execute_document_action_plan(
     return execute_http_action(
         db,
         execute_action,
+        commit=True,
+        handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
+
+
+@router.get("/{document_id}/workflows", response_model=DocumentWorkflowListOut)
+def get_document_workflows(
+    document_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DocumentWorkflowListOut:
+    require_authenticated_actor(request)
+
+    def load_workflows() -> DocumentWorkflowListOut:
+        return list_document_workflows(db, document_id=document_id)
+
+    return execute_http_action(
+        db,
+        load_workflows,
+        handled_exceptions=NOT_FOUND_ERROR_STATUS_CODES,
+    )
+
+
+@router.post("/{document_id}/workflows/{workflow_id}/execute", response_model=DocumentWorkflowExecutionOut)
+def post_execute_document_workflow(
+    document_id: str,
+    workflow_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DocumentWorkflowExecutionOut:
+    actor_id = require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can execute document workflows.",
+    )
+
+    def execute_workflow() -> DocumentWorkflowExecutionOut:
+        return execute_document_workflow(
+            db,
+            document_id=document_id,
+            workflow_id=workflow_id,
+            actor_id=actor_id,
+        )
+
+    return execute_http_action(
+        db,
+        execute_workflow,
         commit=True,
         handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
     )

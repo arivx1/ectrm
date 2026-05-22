@@ -127,12 +127,21 @@ def _provider_definitions() -> tuple[dict[str, object], ...]:
         },
         {
             "provider": "FRED",
-            "label": "FRED Macro Sync",
-            "category": "macro",
-            "observation_kind": "series",
-            "series_kind": "series",
+            "label": "FRED Market Sync",
+            "category": "market",
+            "observation_kind": "mixed",
+            "series_kind": "mixed",
             "success_sla_hours": settings.FRED_SYNC_SUCCESS_SLA_HOURS,
             "scheduler_interval_minutes": settings.FRED_SYNC_INTERVAL_MINUTES,
+        },
+        {
+            "provider": "EIA_WHOLESALE_POWER",
+            "label": "EIA Wholesale Power Sync",
+            "category": "power",
+            "observation_kind": "price",
+            "series_kind": "price",
+            "success_sla_hours": settings.EIA_WHOLESALE_POWER_SYNC_SUCCESS_SLA_HOURS,
+            "scheduler_interval_minutes": settings.EIA_WHOLESALE_POWER_SYNC_INTERVAL_MINUTES,
         },
         {
             "provider": "CFTC",
@@ -147,8 +156,8 @@ def _provider_definitions() -> tuple[dict[str, object], ...]:
             "provider": "CAISO",
             "label": "CAISO Power Sync",
             "category": "power",
-            "observation_kind": "series",
-            "series_kind": "series",
+            "observation_kind": "mixed",
+            "series_kind": "mixed",
             "success_sla_hours": settings.CAISO_SYNC_SUCCESS_SLA_HOURS,
             "scheduler_interval_minutes": settings.CAISO_SYNC_INTERVAL_MINUTES,
         },
@@ -156,10 +165,28 @@ def _provider_definitions() -> tuple[dict[str, object], ...]:
             "provider": "ERCOT",
             "label": "ERCOT Power Sync",
             "category": "power",
-            "observation_kind": "series",
-            "series_kind": "series",
+            "observation_kind": "mixed",
+            "series_kind": "mixed",
             "success_sla_hours": settings.ERCOT_SYNC_SUCCESS_SLA_HOURS,
             "scheduler_interval_minutes": settings.ERCOT_SYNC_INTERVAL_MINUTES,
+        },
+        {
+            "provider": "MISO",
+            "label": "MISO Power Sync",
+            "category": "power",
+            "observation_kind": "price",
+            "series_kind": "price",
+            "success_sla_hours": settings.MISO_SYNC_SUCCESS_SLA_HOURS,
+            "scheduler_interval_minutes": settings.MISO_SYNC_INTERVAL_MINUTES,
+        },
+        {
+            "provider": "NYISO",
+            "label": "NYISO Power Sync",
+            "category": "power",
+            "observation_kind": "price",
+            "series_kind": "price",
+            "success_sla_hours": settings.NYISO_SYNC_SUCCESS_SLA_HOURS,
+            "scheduler_interval_minutes": settings.NYISO_SYNC_INTERVAL_MINUTES,
         },
         {
             "provider": "KALSHI",
@@ -204,6 +231,28 @@ def _active_series_count(db: Session, *, provider: str, series_kind: str) -> int
                 )
             ).scalar_one()
         )
+    if series_kind == "mixed":
+        external_series_count = int(
+            db.execute(
+                select(func.count())
+                .select_from(ExternalSeriesDefinition)
+                .where(
+                    ExternalSeriesDefinition.provider == provider,
+                    ExternalSeriesDefinition.is_active.is_(True),
+                )
+            ).scalar_one()
+        )
+        price_series_count = int(
+            db.execute(
+                select(func.count())
+                .select_from(ReferencePriceIndexSource)
+                .where(
+                    ReferencePriceIndexSource.provider == provider,
+                    ReferencePriceIndexSource.is_active.is_(True),
+                )
+            ).scalar_one()
+        )
+        return external_series_count + price_series_count
     return int(
         db.execute(
             select(func.count())
@@ -223,6 +272,25 @@ def _latest_observation_at(db: Session, *, provider: str, observation_kind: str)
                 PriceIndexObservation.source_provider == provider,
             )
         ).scalar_one()
+    elif observation_kind == "mixed":
+        latest_price = db.execute(
+            select(func.max(PriceIndexObservation.downloaded_at)).where(
+                PriceIndexObservation.source_provider == provider,
+            )
+        ).scalar_one()
+        latest_series = db.execute(
+            select(func.max(ExternalSeriesObservation.downloaded_at)).where(
+                ExternalSeriesObservation.source_provider == provider,
+            )
+        ).scalar_one()
+        value = max(
+            (
+                item
+                for item in (_coerce_utc(latest_price), _coerce_utc(latest_series))
+                if item is not None
+            ),
+            default=None,
+        )
     else:
         value = db.execute(
             select(func.max(ExternalSeriesObservation.downloaded_at)).where(

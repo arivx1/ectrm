@@ -8,6 +8,7 @@ from apps.api.app.schemas._validation import (
     normalize_required_text,
     validate_password_not_blank,
 )
+from apps.api.app.schemas.assistant import AssistantPersona
 
 
 class BootstrapAdminRequest(BaseModel):
@@ -72,6 +73,7 @@ class AuthenticatedUserOut(BaseModel):
     email: str
     display_name: str
     role: str
+    default_assistant_persona: AssistantPersona
 
 
 class SessionOut(BaseModel):

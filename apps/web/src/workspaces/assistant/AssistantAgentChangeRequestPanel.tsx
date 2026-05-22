@@ -444,7 +444,7 @@ export function AssistantAgentChangeRequestPanel({
               <div className="assistant-agent-change-option-group">
                 <strong>Workspaces</strong>
                 <div className="assistant-agent-chip-list">
-                  {(['assistant', 'guide', 'dashboard', 'trades', 'events', 'positions', 'reference', 'operations', 'settlement', 'admin', 'settings'] as ViewKey[]).map(
+                  {(['assistant', 'dashboard', 'trades', 'events', 'positions', 'reference', 'operations', 'settlement', 'admin', 'settings'] as ViewKey[]).map(
                     (workspace) => (
                       <button
                         key={workspace}

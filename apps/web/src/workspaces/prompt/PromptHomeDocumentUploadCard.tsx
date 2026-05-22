@@ -6,6 +6,10 @@ import { appConfig } from '../../shared/config'
 import type { DocumentIngestionRecord } from '../../shared/models'
 import { usePersistentCollapsibleCardState } from '../../shared/collapsibleCardState'
 import type { StoredAuthSession } from '../../shared/mutation'
+import {
+  mergePromptHomeClassNames,
+  usePromptHomeCardDragHandle,
+} from './promptHomeCardDrag.ts'
 
 type PromptHomeDocumentUploadCardProps = {
   authSession: StoredAuthSession | null
@@ -290,10 +294,20 @@ export function PromptHomeDocumentUploadCard({
     'prompt-home.document-upload-card',
     false,
   )
+  const {
+    className: dragHandleClassName,
+    ...dragHandleAttributes
+  } = usePromptHomeCardDragHandle<HTMLDivElement>()
 
   return (
     <section className="prompt-home-document-upload-card">
-      <div className="prompt-home-document-upload-card-head">
+      <div
+        {...dragHandleAttributes}
+        className={mergePromptHomeClassNames(
+          'prompt-home-document-upload-card-head',
+          dragHandleClassName,
+        )}
+      >
         <div className="prompt-home-document-upload-card-copy">
           <span className="eyebrow">Documents</span>
           <strong>Upload documents</strong>

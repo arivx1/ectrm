@@ -18,6 +18,7 @@ from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.delivery_power_detail import DeliveryPowerDetail
 from apps.api.app.models.delivery_rail_detail import DeliveryRailDetail
 from apps.api.app.models.delivery_tracking_signal import DeliveryTrackingSignal
+from apps.api.app.models.delivery_vessel_detail import DeliveryVesselDetail
 from apps.api.app.models.delivery_truck_detail import DeliveryTruckDetail
 from apps.api.app.models.delivery_truck_movement import DeliveryTruckMovement
 from apps.api.app.models.delivery_truck_stop import DeliveryTruckStop
@@ -25,6 +26,7 @@ from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.document_action_approval_request import DocumentActionApprovalRequest
 from apps.api.app.models.document_action_decision import DocumentActionDecision
+from apps.api.app.models.document_facet_value import DocumentFacetValue
 from apps.api.app.models.document_record_link import DocumentRecordLink
 from apps.api.app.models.gmail_inbox_import_receipt import GmailInboxImportReceipt
 from apps.api.app.models.event import Base, Event
@@ -113,6 +115,7 @@ __all__ = [
     "DeliveryPowerDetail",
     "DeliveryRailDetail",
     "DeliveryTrackingSignal",
+    "DeliveryVesselDetail",
     "DeliveryTruckDetail",
     "DeliveryTruckMovement",
     "DeliveryTruckStop",
@@ -120,6 +123,7 @@ __all__ = [
     "DocumentIngestionPage",
     "DocumentActionApprovalRequest",
     "DocumentActionDecision",
+    "DocumentFacetValue",
     "DocumentRecordLink",
     "GmailInboxImportReceipt",
     "Event",

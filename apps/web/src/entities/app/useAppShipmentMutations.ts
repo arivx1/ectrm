@@ -15,6 +15,7 @@ import {
   updateDeliveryPipelineDetails,
   updateDeliveryPowerDetails,
   updateDeliveryTruckDetails,
+  updateDeliveryVesselDetails,
   updateDeliveryTruckMovement,
   updateDeliveryTruckStop,
   type CancelDeliveryTruckMovementInput,
@@ -30,6 +31,7 @@ import {
   type UpdateDeliveryPipelineDetailInput,
   type UpdateDeliveryPowerDetailInput,
   type UpdateDeliveryTruckDetailInput,
+  type UpdateDeliveryVesselDetailInput,
   type UpdateDeliveryTruckMovementInput,
   type UpdateDeliveryTruckStopInput,
   type SkipDeliveryTruckStopInput,
@@ -147,6 +149,18 @@ export function useAppShipmentMutations(args: {
       fallbackMessage: 'Failed to update truck delivery details.',
       run: () =>
         updateDeliveryTruckDetails(appConfig.apiBase, {
+          deliveryId,
+          payload,
+        }),
+    })
+  }
+
+  async function handleUpdateDeliveryVesselDetails(deliveryId: string, payload: UpdateDeliveryVesselDetailInput) {
+    await runDeliveryMutation({
+      deliveryId,
+      fallbackMessage: 'Failed to update vessel tracking details.',
+      run: () =>
+        updateDeliveryVesselDetails(appConfig.apiBase, {
           deliveryId,
           payload,
         }),
@@ -343,6 +357,7 @@ export function useAppShipmentMutations(args: {
     handleUpdateDeliveryPipelineDetails,
     handleUpdateDeliveryPowerDetails,
     handleUpdateDeliveryTruckDetails,
+    handleUpdateDeliveryVesselDetails,
     handleCreateDeliveryTruckMovement,
     handleUpdateDeliveryTruckMovement,
     handleCancelDeliveryTruckMovement,

@@ -31,3 +31,11 @@ Recommended implementation order for the current product shape:
    need benchmark-grade marks or normalized operator data
 4. `Kpler` and `Vortexa` once cargo-flow and storage intelligence becomes worth
    the spend
+
+Trading Economics-style market screens should be treated as aggregator views,
+not source provenance. Their public documentation says market quotes are
+aggregated from third-party providers, while commodity pages identify many
+values as OTC/CFD reference prices rather than official settlements. For
+Trading Economics lookalike coverage, add the aggregator as a comparison
+candidate and prefer official exchange, index publisher, benchmark publisher,
+or FRED-hosted daily-close sources only after license review.

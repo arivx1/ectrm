@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 from datetime import date, datetime
+from typing import Literal
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -917,11 +918,15 @@ class CalendarBusinessDayCountOut(BaseModel):
     business_day_count: int
 
 
+PriceIndexQuoteType = Literal["SPOT", "FUTURE", "FORWARD", "INDEX", "OTHER"]
+
+
 class PriceIndexCreate(ReferenceDataCreate):
     commodity_code: str = Field(..., min_length=1, max_length=50)
     currency_code: str = Field(..., min_length=1, max_length=20)
     unit_code: str = Field(..., min_length=1, max_length=20)
     provider: str = Field(..., min_length=1, max_length=120)
+    quote_type: PriceIndexQuoteType = "SPOT"
     market: Optional[str] = Field(None, min_length=1, max_length=120)
     location_code: Optional[str] = Field(None, min_length=1, max_length=50)
     calendar_code: Optional[str] = Field(None, min_length=1, max_length=50)
@@ -932,6 +937,7 @@ class PriceIndexUpdate(ReferenceDataUpdate):
     currency_code: Optional[str] = Field(None, min_length=1, max_length=20)
     unit_code: Optional[str] = Field(None, min_length=1, max_length=20)
     provider: Optional[str] = Field(None, min_length=1, max_length=120)
+    quote_type: Optional[PriceIndexQuoteType] = None
     market: Optional[str] = Field(None, min_length=1, max_length=120)
     location_code: Optional[str] = Field(None, min_length=1, max_length=50)
     calendar_code: Optional[str] = Field(None, min_length=1, max_length=50)
@@ -946,6 +952,7 @@ class PriceIndexOut(ReferenceDataOut):
     currency_code: str
     unit_code: str
     provider: str
+    quote_type: PriceIndexQuoteType
     market: Optional[str]
     location_code: Optional[str]
     calendar_code: Optional[str]

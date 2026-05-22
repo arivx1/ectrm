@@ -11,6 +11,10 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.auth import hash_password, resolve_audit_actor_id
 from apps.api.app.core.query_params import ADMIN_LIST_LIMIT_QUERY, LIST_OFFSET_QUERY
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.assistant.personas import (
+    default_assistant_persona_for_role,
+    normalize_assistant_persona_key,
+)
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.schemas.user_account import (
     UserAccountCreate,
@@ -39,6 +43,7 @@ def list_users(
                 UserAccount.display_name.ilike(pattern),
                 UserAccount.email.ilike(pattern),
                 UserAccount.role.ilike(pattern),
+                UserAccount.default_assistant_persona.ilike(pattern),
             )
         )
     if is_active is not None:
@@ -63,6 +68,10 @@ def create_user(payload: UserAccountCreate, db: Session = Depends(get_db)) -> Us
         email=payload.email,
         display_name=payload.display_name,
         role=payload.role,
+        default_assistant_persona=(
+            payload.default_assistant_persona
+            or default_assistant_persona_for_role(payload.role)
+        ),
         password_hash=hash_password(payload.password),
         is_active=True,
         last_login_at=payload.last_login_at,
@@ -111,6 +120,10 @@ def update_user(user_id: str, payload: UserAccountUpdate, db: Session = Depends(
         record.display_name = payload.display_name
     if payload.role is not None:
         record.role = payload.role
+    if payload.default_assistant_persona is not None:
+        record.default_assistant_persona = payload.default_assistant_persona
+    elif normalize_assistant_persona_key(record.default_assistant_persona) is None:
+        record.default_assistant_persona = default_assistant_persona_for_role(record.role)
     if payload.password is not None:
         record.password_hash = hash_password(payload.password)
     if payload.last_login_at is not None:
@@ -170,6 +183,10 @@ def _to_out(record: UserAccount) -> UserAccountOut:
         email=record.email,
         display_name=record.display_name,
         role=record.role,
+        default_assistant_persona=(
+            normalize_assistant_persona_key(record.default_assistant_persona)
+            or default_assistant_persona_for_role(record.role)
+        ),
         is_active=record.is_active,
         password_set=bool(record.password_hash),
         last_login_at=record.last_login_at,

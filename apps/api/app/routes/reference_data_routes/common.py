@@ -267,6 +267,7 @@ def to_out(record: ModelT, schema_cls):
         payload["currency_code"] = record.currency_code
         payload["unit_code"] = record.unit_code
         payload["provider"] = record.provider
+        payload["quote_type"] = record.quote_type
         payload["market"] = record.market
         payload["location_code"] = record.location_code
         payload["calendar_code"] = record.calendar_code

@@ -17,6 +17,12 @@ class UserAccount(Base):
     google_subject: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True)
     display_name: Mapped[str] = mapped_column(String(160), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False)
+    default_assistant_persona: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="operator",
+        server_default="operator",
+    )
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

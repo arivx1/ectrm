@@ -56,6 +56,7 @@ const smokeSession = {
     email: 'ops@example.com',
     display_name: 'Ops Admin',
     role: 'OPS_ADMIN',
+    default_assistant_persona: 'admin',
   },
 } as const
 
@@ -99,6 +100,7 @@ const publicRuntimeSettings = {
     available_skills: [],
     available_tools: [],
     available_action_types: [],
+    available_personas: [],
   },
   pagination: {
     standard_default: 100,

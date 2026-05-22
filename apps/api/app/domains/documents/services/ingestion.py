@@ -39,6 +39,8 @@ from .document_classification_learning import apply_learned_classification_overr
 from .document_classification_learning import initialize_page_classification_payload
 from .document_classification_learning import record_page_classification_correction
 from .document_classification_learning import update_system_classification_payload
+from .document_facets import refresh_system_suggested_page_facets
+from .document_facets import replace_document_facet_values
 from .document_ingestion_analysis import extract_page_text as _extract_page_text
 from .document_ingestion_common import CLASSIFIER_VERSION
 from .document_ingestion_common import DOCUMENT_PROCESSOR_ACTOR_ID
@@ -319,6 +321,8 @@ def process_document_ingestion(
                 model=document.processor_model,
                 warnings=processor_warnings,
             )
+        for page in pages:
+            refresh_system_suggested_page_facets(db, page=page)
 
         document.status = "FAILED" if page_errors and len(page_errors) == len(pages) else "ANALYZED"
         document.processing_errors = page_errors
@@ -533,6 +537,15 @@ def update_document_ingestion(
     if "review_notes" in changes:
         document.review_notes = _clean_optional_text(changes.get("review_notes"))
 
+    if "facet_values" in changes:
+        replace_document_facet_values(
+            db,
+            document_id=document_id,
+            page_id=None,
+            actor_id=actor_id,
+            raw_values=changes.get("facet_values") or [],
+        )
+
     document_kind_changed = False
     if "document_kind" in changes:
         next_document_kind = str(changes.get("document_kind") or "").upper()
@@ -565,7 +578,9 @@ def update_document_ingestion(
 
     if "review_status" in changes:
         next_review_status = str(changes["review_status"]).upper()
-        validate_document_review_status_transition(next_review_status, pages)
+        verification_mode = str(changes.get("verification_mode") or "STRICT").upper()
+        if verification_mode != "STATUS_ONLY":
+            validate_document_review_status_transition(next_review_status, pages)
         document.review_status = next_review_status
         if next_review_status == "VERIFIED":
             document.reviewed_at = now
@@ -616,6 +631,15 @@ def update_document_ingestion_page(
 
     if "table_blocks" in changes:
         page.table_blocks = normalize_table_blocks(changes.get("table_blocks") or [], document_kind=page.document_kind)
+
+    if "facet_values" in changes:
+        replace_document_facet_values(
+            db,
+            document_id=document_id,
+            page_id=page.page_id,
+            actor_id=actor_id,
+            raw_values=changes.get("facet_values") or [],
+        )
 
     if "review_notes" in changes:
         page.review_notes = _clean_optional_text(changes.get("review_notes"))

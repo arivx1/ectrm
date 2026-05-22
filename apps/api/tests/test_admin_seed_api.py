@@ -40,6 +40,10 @@ from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
+from apps.api.app.domains.admin.services.seed_reference_data import (
+    PRICE_INDEX_ROWS,
+    PRICE_INDEX_SOURCE_ROWS,
+)
 from apps.api.app.routes.admin_data import (
     list_admin_transaction_scenarios,
     seed_admin_assistant_agents,
@@ -264,8 +268,8 @@ class AdminSeedApiTests(unittest.TestCase):
             )
 
             self.assertEqual(payload.total_records, sum(payload.entity_counts.values()))
-            self.assertEqual(payload.entity_counts["commodities"], 14)
-            self.assertEqual(payload.entity_counts["locations"], 528)
+            self.assertEqual(payload.entity_counts["commodities"], 62)
+            self.assertEqual(payload.entity_counts["locations"], 552)
             self.assertEqual(payload.entity_counts["rail_lines"], 5)
             self.assertEqual(payload.entity_counts["rail_routes"], 6)
             self.assertEqual(payload.entity_counts["spatial_features"], 6)
@@ -277,8 +281,80 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(payload.entity_counts["calendars"], 73)
             self.assertGreaterEqual(payload.entity_counts["calendar_overlays"], 20)
             self.assertGreaterEqual(payload.entity_counts["calendar_rules"], 130)
-            self.assertEqual(payload.entity_counts["price_indices"], 7)
-            self.assertEqual(payload.entity_counts["price_index_sources"], 6)
+            self.assertEqual(len(PRICE_INDEX_ROWS), 101)
+            self.assertEqual(len(PRICE_INDEX_SOURCE_ROWS), 101)
+            self.assertEqual(payload.entity_counts["price_indices"], len(PRICE_INDEX_ROWS))
+            self.assertEqual(payload.entity_counts["price_index_sources"], len(PRICE_INDEX_SOURCE_ROWS))
+            price_index_codes = {
+                row.code
+                for row in session.query(ReferencePriceIndex).all()
+            }
+            price_index_source_series = {
+                row.series_id
+                for row in session.query(ReferencePriceIndexSource).all()
+            }
+            self.assertEqual(
+                {
+                    row.quote_type
+                    for row in session.query(ReferencePriceIndex).all()
+                },
+                {"SPOT"},
+            )
+            self.assertTrue(
+                price_index_codes.issuperset(
+                    {
+                        "MT_BELVIEU_PROPANE_D",
+                        "LNG_ASIA_IMF_M",
+                        "CORN_GLOBAL_IMF_M",
+                        "COAL_AUSTRALIA_IMF_M",
+                        "COPPER_GLOBAL_IMF_M",
+                        "CAISO_NP15_RT5M",
+                        "ERCOT_HB_HOUSTON_RT15M",
+                        "COCOA_GLOBAL_IMF_M",
+                        "COFFEE_ARABICA_IMF_M",
+                        "ALL_COMMODITIES_IMF_M",
+                        "APSP_CRUDE_IMF_M",
+                        "MASS_HUB_ONPEAK_DA",
+                        "MISO_INDIANA_HUB_RT5M",
+                        "NYISO_NYC_RT5M",
+                        "NYISO_LONGIL_RT5M",
+                    }
+                )
+            )
+            self.assertTrue(
+                price_index_source_series.issuperset(
+                    {
+                        "PET.EER_EPLLPA_PF4_Y44MB_DPG.D",
+                        "PNGASJPUSDM",
+                        "PMAIZMTUSDM",
+                        "PCOALAUUSDM",
+                        "PCOPPUSDM",
+                        "NP15",
+                        "HB_HOUSTON",
+                        "PJM WH Real Time Peak",
+                        "PALLFNFINDEXM",
+                        "PCOCOUSDM",
+                        "PCOFFOTMUSDM",
+                        "POILAPSPUSDM",
+                        "Nepool MH DA LMP Peak",
+                        "INDIANA.HUB",
+                        "N.Y.C.",
+                        "LONGIL",
+                    }
+                )
+            )
+            self.assertTrue(
+                {
+                    row.code
+                    for row in session.query(ReferenceCurrency).all()
+                }.issuperset({"USC", "XXX"})
+            )
+            self.assertTrue(
+                {
+                    row.code
+                    for row in session.query(ReferenceUnit).all()
+                }.issuperset({"LB", "KG", "M3", "INDEX"})
+            )
             calendar_codes = {
                 row.code
                 for row in session.query(ReferenceCalendar).all()
@@ -431,15 +507,7 @@ class AdminSeedApiTests(unittest.TestCase):
                     row.code
                     for row in session.query(ReferencePriceIndex).all()
                 },
-                {
-                    "BRENT_SPOT_D",
-                    "DIESEL_US_RETAIL_W",
-                    "GASOLINE_US_REG_W",
-                    "HENRY_HUB_GAS_D",
-                    "PJM_WEST_ONPEAK_DA",
-                    "USGC_DIESEL_SPOT_D",
-                    "WTI_CUSHING_PHYS_D",
-                },
+                {row["code"] for row in PRICE_INDEX_ROWS},
             )
             self.assertTrue(
                 {
@@ -452,10 +520,17 @@ class AdminSeedApiTests(unittest.TestCase):
                         "COUNTRY_US",
                         "CUSHING",
                         "ERCOT_NORTH",
+                        "INDIANA_HUB",
                         "KATY",
                         "LEIDY",
+                        "MASS_HUB",
                         "MIDLAND",
+                        "MISO_INDIANA_HUB",
                         "MONT_BELVIEU",
+                        "NP15",
+                        "NYISO_NYC",
+                        "NYISO_LONGIL",
+                        "PALO_VERDE",
                         "SUBDIVISION_US_TX",
                         "SUBDIVISION_ZA_GP",
                         "WAHA",

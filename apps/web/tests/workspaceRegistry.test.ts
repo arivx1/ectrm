@@ -23,7 +23,7 @@ describe('workspace registry', () => {
     expect(VIEW_DATA_GROUPS.messages).toEqual([])
     expect(VIEW_DATA_GROUPS.library).toEqual([])
     expect(VIEW_DATA_GROUPS.dashboard).toEqual(['trades', 'events', 'positions', 'reference'])
-    expect(VIEW_DATA_GROUPS.map).toEqual(['reference', 'weather'])
+    expect(VIEW_DATA_GROUPS.map).toEqual(['reference', 'deliveries'])
     expect(VIEW_DATA_GROUPS.operations).toEqual(['trades', 'deliveries', 'operations', 'admin'])
     expect(VIEW_BLOCKING_GROUPS.settlement).toEqual(['trades', 'operations', 'settlement'])
     expect(VIEW_DATA_GROUPS.reports).toEqual(['trades', 'reports'])

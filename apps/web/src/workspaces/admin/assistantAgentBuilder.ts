@@ -120,7 +120,6 @@ type AgentBuilderHierarchyDefaults = Pick<
 
 export const AGENT_BUILDER_WORKSPACE_OPTIONS: ViewKey[] = [
   'dashboard',
-  'guide',
   'trades',
   'events',
   'risk',

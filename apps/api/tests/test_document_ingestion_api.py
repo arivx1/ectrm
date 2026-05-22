@@ -30,6 +30,7 @@ from apps.api.app.config import settings
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.documents.services.document_classification_scoring import score_document_page_classification
 from apps.api.app.domains.documents.services.document_ingestion_review import build_document_summary
+from apps.api.app.domains.documents.services.document_facets import suggest_document_facets_from_text
 from apps.api.app.domains.documents.services.document_processor import _build_openai_text_format
 from apps.api.app.domains.documents.services.document_processor import _generate_openai_document_analysis
 from apps.api.app.domains.documents.services.document_processor import DocumentProcessorOutcome
@@ -41,6 +42,7 @@ from apps.api.app.domains.documents.services.ingestion import extract_document_h
 from apps.api.app.domains.documents.services.ingestion import extract_document_table_blocks
 from apps.api.app.main import app
 from apps.api.app.models import Base
+from apps.api.app.models.document_facet_value import DocumentFacetValue
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.document_record_link import DocumentRecordLink
@@ -193,6 +195,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
 
         with self.SessionLocal() as session:
             session.query(DocumentRecordLink).delete()
+            session.query(DocumentFacetValue).delete()
             session.query(GmailInboxImportReceipt).delete()
             session.query(DocumentIngestionPage).delete()
             session.query(DocumentIngestion).delete()
@@ -468,6 +471,94 @@ class DocumentIngestionApiTests(unittest.TestCase):
             self.assertEqual(document.review_status, "UNREVIEWED")
             self.assertEqual(pages[0].review_status, "UNREVIEWED")
 
+    def test_document_patch_persists_controlled_facet_values(self) -> None:
+        admin_token = self._bootstrap_admin()
+        uploaded = self._upload_document(admin_token, page_count=1)
+
+        response = self.client.patch(
+            f"/documents/{uploaded['document_id']}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "facet_values": [
+                    {"facet_key": "commodity", "value_code": "Natural Gas"},
+                    {"facet_key": "commercial_side", "value_code": "purchase"},
+                    {"facet_key": "transport_mode", "value_code": "pipeline"},
+                    {"facet_key": "asset", "value_code": "power generation"},
+                ]
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        facets = {(facet["facet_key"], facet["value_code"]): facet for facet in body["facet_values"]}
+        self.assertEqual(facets[("commodity", "NATURAL_GAS")]["value_label"], "Natural Gas")
+        self.assertEqual(facets[("commercial_side", "BUY")]["value_label"], "Purchase")
+        self.assertEqual(facets[("transport_mode", "PIPELINE")]["value_label"], "Pipeline")
+        self.assertEqual(facets[("asset", "POWER_GENERATION")]["value_label"], "Power Generation")
+        self.assertTrue(all(facet["page_id"] is None for facet in body["facet_values"]))
+        self.assertTrue(all(facet["source"] == "MANUAL" for facet in body["facet_values"]))
+        self.assertTrue(all(facet["review_status"] == "CONFIRMED" for facet in body["facet_values"]))
+
+        fetched = self.client.get(
+            f"/documents/{uploaded['document_id']}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(fetched.status_code, 200)
+        self.assertEqual(len(fetched.json()["facet_values"]), 4)
+
+    def test_page_patch_persists_page_level_facet_values(self) -> None:
+        admin_token = self._bootstrap_admin()
+        uploaded = self._upload_document(admin_token, page_count=1)
+        page_id = uploaded["pages"][0]["page_id"]
+
+        response = self.client.patch(
+            f"/documents/{uploaded['document_id']}/pages/{page_id}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "facet_values": [
+                    {
+                        "facet_key": "transport_mode",
+                        "value_code": "truck",
+                        "source": "AI_SUGGESTED",
+                        "review_status": "SUGGESTED",
+                        "confidence": 0.71,
+                        "evidence": ["Matched truck reference."],
+                    }
+                ]
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["facet_values"][0]["page_id"], page_id)
+        self.assertEqual(body["facet_values"][0]["facet_key"], "transport_mode")
+        self.assertEqual(body["facet_values"][0]["value_code"], "TRUCK")
+        self.assertEqual(body["facet_values"][0]["source"], "AI_SUGGESTED")
+        self.assertEqual(body["pages"][0]["facet_values"][0]["value_label"], "Truck")
+        self.assertEqual(body["pages"][0]["facet_values"][0]["evidence"], ["Matched truck reference."])
+
+    def test_document_patch_rejects_invalid_facet_values(self) -> None:
+        admin_token = self._bootstrap_admin()
+        uploaded = self._upload_document(admin_token, page_count=1)
+
+        response = self.client.patch(
+            f"/documents/{uploaded['document_id']}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={"facet_values": [{"facet_key": "transport_mode", "value_code": "hovercraft"}]},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("invalid for transport_mode", response.text)
+
+    def test_document_facet_suggester_extracts_starter_tags_from_text(self) -> None:
+        suggestions = suggest_document_facets_from_text(
+            "Natural gas purchase confirmation for pipeline delivery to a power generation asset."
+        )
+
+        pairs = {(suggestion["facet_key"], suggestion["value_code"]) for suggestion in suggestions}
+        self.assertIn(("commodity", "NATURAL_GAS"), pairs)
+        self.assertIn(("commercial_side", "BUY"), pairs)
+        self.assertIn(("transport_mode", "PIPELINE"), pairs)
+        self.assertIn(("asset", "POWER_GENERATION"), pairs)
+        self.assertTrue(all(suggestion["review_status"] == "SUGGESTED" for suggestion in suggestions))
+
     def test_summary_classifies_homogeneous_upload_at_document_level(self) -> None:
         pages = [
             self._summary_page(page_number=1, document_kind="INVOICE"),
@@ -682,12 +773,24 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertTrue(body["version"])
+        document_facets = {facet["facet_key"]: facet for facet in body["document_facets"]}
+        self.assertIn("commodity", document_facets)
+        self.assertIn("commercial_side", document_facets)
+        self.assertIn("transport_mode", document_facets)
+        self.assertIn("asset", document_facets)
+        self.assertTrue(
+            any(value["code"] == "NATURAL_GAS" for value in document_facets["commodity"]["allowed_values"])
+        )
+        self.assertTrue(
+            any(value["code"] == "BUY" and value["label"] == "Purchase" for value in document_facets["commercial_side"]["allowed_values"])
+        )
         kinds = {entry["document_kind"]: entry for entry in body["document_kinds"]}
         self.assertIn("INVOICE", kinds)
         self.assertIn("DEAL_RECAP", kinds)
         self.assertIn("LETTER_OF_CREDIT", kinds)
         self.assertIn("BILL_OF_LADING", kinds)
         self.assertIn("PIPELINE_STATEMENT", kinds)
+        self.assertIn("PRICE_PUBLICATION", kinds)
         self.assertIn("QUALITY_SPECIFICATION", kinds)
         self.assertEqual(len(kinds), len(body["document_kinds"]))
         self.assertTrue(any(field["field_key"] == "invoice_number" for field in kinds["INVOICE"]["header_fields"]))
@@ -729,9 +832,16 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertIsNone(kinds["UNKNOWN"]["extraction_schema_code"])
         self.assertEqual(kinds["TRADE_CONFIRMATION"]["document_family"], "TRADE_EXECUTION")
         self.assertEqual(kinds["DEAL_RECAP"]["document_family"], "TRADE_EXECUTION")
+        self.assertEqual(kinds["PRICE_PUBLICATION"]["document_family"], "MARKET_DATA")
         self.assertIn("trade_id", kinds["TRADE_CONFIRMATION"]["matching_keys"])
         self.assertIn("letter_of_credit_number", kinds["LETTER_OF_CREDIT"]["matching_keys"])
+        self.assertIn("price_index_code", kinds["PRICE_PUBLICATION"]["matching_keys"])
         self.assertTrue(any(target["record_type"] == "TRADE" for target in kinds["TRADE_CONFIRMATION"]["record_targets"]))
+        self.assertTrue(
+            any(target["record_type"] == "PRICE_INDEX_OBSERVATION" for target in kinds["PRICE_PUBLICATION"]["record_targets"])
+        )
+        self.assertTrue(any(field["field_key"] == "price" for field in kinds["PRICE_PUBLICATION"]["header_fields"]))
+        self.assertTrue(any(template["template_key"] == "price_lines" for template in kinds["PRICE_PUBLICATION"]["table_templates"]))
         self.assertTrue(
             any(target["create_if_missing"] for target in kinds["INVOICE"]["record_targets"] if target["record_type"] == "TRADE_INVOICE")
         )
@@ -925,6 +1035,21 @@ class DocumentIngestionApiTests(unittest.TestCase):
                 Facility: Houston Terminal
                 Product: ULSD
                 Inventory Quantity: 50000 bbl
+                """,
+            ),
+            "price-publication.pdf": (
+                "PRICE_PUBLICATION",
+                """
+                Price Publication
+                Publication Date: 2026-04-15
+                Observation Date: 2026-04-15
+                Price Index Code: WTI_CUSHING_D
+                Publisher: EIA
+                Commodity: WTI
+                Location: Cushing
+                Price: USD 84.25
+                Currency: USD
+                Unit: BBL
                 """,
             ),
         }
@@ -2057,6 +2182,34 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(verify_body["review_status"], "VERIFIED")
         self.assertEqual(verify_body["reviewed_by"], "doc_admin")
         self.assertTrue(verify_body["analysis_summary"]["review_ready"])
+
+    def test_status_only_document_verification_does_not_require_extracted_page_fields(self) -> None:
+        admin_token = self._bootstrap_admin()
+        uploaded = self._upload_document(admin_token, page_count=1)
+        document = self._wait_for_document(admin_token, uploaded["document_id"])
+        page = document["pages"][0]
+
+        classify_response = self.client.patch(
+            f"/documents/{document['document_id']}/pages/{page['page_id']}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={"document_kind": "PRICE_PUBLICATION"},
+        )
+        self.assertEqual(classify_response.status_code, 200)
+
+        verify_response = self.client.patch(
+            f"/documents/{document['document_id']}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "review_status": "VERIFIED",
+                "verification_mode": "STATUS_ONLY",
+            },
+        )
+        self.assertEqual(verify_response.status_code, 200)
+        verify_body = verify_response.json()
+        self.assertEqual(verify_body["review_status"], "VERIFIED")
+        self.assertEqual(verify_body["reviewed_by"], "doc_admin")
+        self.assertEqual(verify_body["pages"][0]["review_status"], "UNREVIEWED")
+        self.assertFalse(verify_body["analysis_summary"]["review_ready"])
 
     def test_saved_classification_correction_is_reused_for_matching_document_content(self) -> None:
         admin_token = self._bootstrap_admin()

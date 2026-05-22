@@ -11,14 +11,25 @@ import {
   type UIEvent as ReactUIEvent,
 } from 'react'
 
-import { fetchDocumentSource } from '../../entities/documents/api'
 import {
+  executeDocumentWorkflow,
+  fetchDocumentSource,
+  listDocumentWorkflows,
+} from '../../entities/documents/api'
+import {
+  documentFacetDisplayValues,
   documentNeedsProcessing,
   documentStatusTone,
   dominantDocumentKind,
   dominantDocumentKindCode,
+  formatDocumentFacetLabel,
   formatDocumentKindLabel,
   formatBytes,
+  pageClassificationCorrected,
+  pageLearningApplied,
+  pageLearningExampleCount,
+  pageProcessorTrace,
+  pageSystemClassification,
   pageTextSourceLabel,
   pageTextSourceTone,
   processorLabel,
@@ -28,10 +39,18 @@ import {
 import { useDocumentIngestionController } from '../../features/documents/useDocumentIngestionController'
 import { usePersistentCollapsibleCardState } from '../../shared/collapsibleCardState'
 import { appConfig } from '../../shared/config'
-import type { DocumentIngestionRecord } from '../../shared/models'
+import type {
+  DocumentFacetAssignmentRecord,
+  DocumentIngestionPageRecord,
+  DocumentIngestionRecord,
+  DocumentWorkflowExecutionRecord,
+  DocumentWorkflowListRecord,
+  DocumentWorkflowRecord,
+} from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import {
   buildDocumentLibraryCollectionCounts,
+  documentCanBeVerified,
   documentHasErrors,
   documentIsLinked,
   DOCUMENT_LIBRARY_COLLECTIONS,
@@ -61,11 +80,14 @@ const LIBRARY_UPLOAD_CARD_PANEL_ID = 'library-upload-card-panel'
 const LIBRARY_FILE_COLUMNS = [
   { key: 'name', label: 'Name', minWidth: 240, defaultWidth: 320 },
   { key: 'type', label: 'Type', minWidth: 150, defaultWidth: 180 },
+  { key: 'tags', label: 'Tags', minWidth: 210, defaultWidth: 260 },
   { key: 'review', label: 'Review', minWidth: 130, defaultWidth: 160 },
   { key: 'owner', label: 'Owner', minWidth: 130, defaultWidth: 160 },
   { key: 'modified', label: 'Modified', minWidth: 120, defaultWidth: 140 },
   { key: 'size', label: 'Size', minWidth: 88, defaultWidth: 104 },
+  { key: 'actions', label: 'Actions', minWidth: 340, defaultWidth: 380 },
 ] as const
+const LIBRARY_TAG_PREVIEW_LIMIT = 5
 
 type LibraryFileColumn = (typeof LIBRARY_FILE_COLUMNS)[number]
 type LibraryFileColumnKey = (typeof LIBRARY_FILE_COLUMNS)[number]['key']
@@ -222,6 +244,104 @@ function fileStatusSummary(document: DocumentIngestionRecord): string {
   return formatDocumentLibraryLabel(document.review_status)
 }
 
+type LibraryTagChipListProps = {
+  values: DocumentFacetAssignmentRecord[]
+  limit?: number
+  emptyLabel?: string
+  showFacetLabel?: boolean
+  compact?: boolean
+}
+
+function LibraryTagChipList({
+  values,
+  limit,
+  emptyLabel = 'No tags',
+  showFacetLabel = false,
+  compact = false,
+}: LibraryTagChipListProps) {
+  const visibleValues = typeof limit === 'number' ? values.slice(0, limit) : values
+  const hiddenCount = Math.max(values.length - visibleValues.length, 0)
+
+  if (values.length === 0) {
+    return <span className="library-tag-empty">{emptyLabel}</span>
+  }
+
+  return (
+    <div className={`library-tag-chip-row${compact ? ' library-tag-chip-row-compact' : ''}`}>
+      {visibleValues.map((value) => (
+        <span
+          key={`${value.page_id ?? 'document'}-${value.facet_key}-${value.value_code}`}
+          className={`entity-chip entity-chip-soft library-tag-chip document-facet-chip-${value.review_status.toLowerCase()}`}
+          title={`${formatDocumentFacetLabel(value)} / ${formatDocumentLibraryLabel(value.review_status)}`}
+        >
+          {showFacetLabel ? formatDocumentFacetLabel(value) : value.value_label}
+        </span>
+      ))}
+      {hiddenCount > 0 ? (
+        <span className="entity-chip entity-chip-soft library-tag-chip library-tag-overflow">
+          +{hiddenCount}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
+function formatClassificationConfidence(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}% confidence` : 'No confidence'
+}
+
+function formatPageClassificationLabel(
+  documentKind: string | null | undefined,
+  documentSubtype: string | null | undefined = null,
+): string {
+  const kindLabel = formatDocumentKindLabel(documentKind || 'UNKNOWN')
+  return documentSubtype?.trim() ? `${kindLabel} / ${documentSubtype.trim()}` : kindLabel
+}
+
+function formatClassificationSourceLabel(value: string | null | undefined): string {
+  const normalized = value?.trim()
+  if (!normalized) {
+    return 'System Evidence'
+  }
+  if (normalized.startsWith('processor:')) {
+    return `${formatDocumentLibraryLabel(normalized.slice('processor:'.length))} Processor`
+  }
+  return formatDocumentLibraryLabel(normalized.replaceAll(':', '_'))
+}
+
+function buildPageClassificationSummary(page: DocumentIngestionPageRecord): string {
+  const deterministicAssessment = page.understanding.deterministic_assessment
+  const deterministicLabel = formatPageClassificationLabel(
+    deterministicAssessment.document_kind,
+    deterministicAssessment.document_subtype,
+  )
+  const finalLabel = formatPageClassificationLabel(page.document_kind, page.document_subtype)
+  const systemClassification = pageSystemClassification(page)
+  const sourceLabel = formatClassificationSourceLabel(systemClassification.source)
+  const confidence = deterministicAssessment.confidence ?? page.classification_confidence
+
+  if (pageClassificationCorrected(page)) {
+    return `A reviewer changed this page from ${formatPageClassificationLabel(
+      systemClassification.documentKind,
+      systemClassification.documentSubtype,
+    )} to ${finalLabel}. The saved correction is now visible as review provenance for this page.`
+  }
+
+  if (pageLearningApplied(page)) {
+    return `The page was classified as ${finalLabel} after matching ${pageLearningExampleCount(page)} reviewed example${
+      pageLearningExampleCount(page) === 1 ? '' : 's'
+    } with similar extracted content.`
+  }
+
+  if (deterministicAssessment.document_kind) {
+    return `Deterministic scoring classified this page as ${deterministicLabel} with ${formatClassificationConfidence(
+      confidence,
+    ).toLowerCase()}.`
+  }
+
+  return `The system classified this page as ${finalLabel} from ${sourceLabel.toLowerCase()}.`
+}
+
 export function LibraryWorkspace({
   authSession,
   formatDate,
@@ -262,7 +382,9 @@ export function LibraryWorkspace({
     handleDropzoneDrop,
     handleSubmit,
     handleImportGmailInbox: importGmailInbox,
+    handleVerifyDocument: verifyDocument,
     handleSetDocumentKind,
+    handleReprocessDocument,
     toggleDocumentExpanded,
     saveErrors,
     savingTarget,
@@ -278,6 +400,12 @@ export function LibraryWorkspace({
   const [kindDraftByDocumentId, setKindDraftByDocumentId] = useState<Record<string, string>>({})
   const [fileColumnWidths, setFileColumnWidths] = useState<LibraryFileColumnWidths>({})
   const [fileTableScrollWidth, setFileTableScrollWidth] = useState(0)
+  const [workflowDialogDocumentId, setWorkflowDialogDocumentId] = useState<string | null>(null)
+  const [workflowList, setWorkflowList] = useState<DocumentWorkflowListRecord | null>(null)
+  const [workflowLoading, setWorkflowLoading] = useState(false)
+  const [workflowError, setWorkflowError] = useState('')
+  const [workflowExecution, setWorkflowExecution] = useState<DocumentWorkflowExecutionRecord | null>(null)
+  const [executingWorkflowId, setExecutingWorkflowId] = useState<string | null>(null)
   const fileTableScrollRef = useRef<HTMLDivElement | null>(null)
   const fileTableScrollbarRef = useRef<HTMLDivElement | null>(null)
   const uploadCardState = usePersistentCollapsibleCardState('library.upload-card', false)
@@ -339,6 +467,10 @@ export function LibraryWorkspace({
   const documentPageActivity = documentPage
     ? buildDocumentActivityLog(documentPage)
     : []
+  const documentPageFacetValues = documentPage ? documentFacetDisplayValues(documentPage) : []
+  const workflowDialogDocument = workflowDialogDocumentId
+    ? documents.find((document) => document.document_id === workflowDialogDocumentId) ?? null
+    : null
   const selectedDetailPage =
     documentPage?.pages.find((page) => page.page_id === selectedDetailPageId) ?? documentPage?.pages[0] ?? null
   const selectedDetailPagePreviewUrl = selectedDetailPage ? pagePreviewUrls[selectedDetailPage.page_id] ?? '' : ''
@@ -346,6 +478,16 @@ export function LibraryWorkspace({
     ? pagePreviewLoading[selectedDetailPage.page_id] === true
     : false
   const selectedDetailPagePreviewError = selectedDetailPage ? pagePreviewErrors[selectedDetailPage.page_id] ?? '' : ''
+  const selectedDetailPageSystemClassification = selectedDetailPage ? pageSystemClassification(selectedDetailPage) : null
+  const selectedDetailPageProcessorTrace = selectedDetailPage ? pageProcessorTrace(selectedDetailPage) : null
+  const selectedDetailPageDeterministicAssessment = selectedDetailPage?.understanding.deterministic_assessment ?? null
+  const selectedDetailPageDeterministicEvidence =
+    selectedDetailPageDeterministicAssessment?.supporting_evidence.filter((value) => value.trim()) ?? []
+  const selectedDetailPageDeterministicConflicts =
+    selectedDetailPageDeterministicAssessment?.conflicts.filter((value) => value.trim()) ?? []
+  const selectedDetailPageClassificationSummary = selectedDetailPage
+    ? buildPageClassificationSummary(selectedDetailPage)
+    : ''
   const fileColumnTemplate = LIBRARY_FILE_COLUMNS.map(
     (column) => `${fileColumnWidths[column.key] ?? column.defaultWidth}px`,
   ).join(' ')
@@ -531,6 +673,75 @@ export function LibraryWorkspace({
     }
   }
 
+  async function handleLibraryDocumentReclassify(document: DocumentIngestionRecord) {
+    setSelectedDocumentId(document.document_id)
+    await handleReprocessDocument(document)
+  }
+
+  async function handleLibraryDocumentVerify(document: DocumentIngestionRecord) {
+    if (!documentCanBeVerified(document)) {
+      return
+    }
+    setSelectedDocumentId(document.document_id)
+    await verifyDocument(document)
+  }
+
+  async function handleOpenWorkflowDialog(document: DocumentIngestionRecord) {
+    setSelectedDocumentId(document.document_id)
+    setWorkflowDialogDocumentId(document.document_id)
+    setWorkflowList(null)
+    setWorkflowExecution(null)
+    setWorkflowError('')
+    if (!authSession) {
+      setWorkflowError('Sign in before opening document workflows.')
+      return
+    }
+
+    setWorkflowLoading(true)
+    try {
+      const nextWorkflows = await listDocumentWorkflows(appConfig.apiBase, authSession, document.document_id)
+      setWorkflowList(nextWorkflows)
+    } catch (error) {
+      setWorkflowError(error instanceof Error ? error.message : 'Unable to load document workflows.')
+    } finally {
+      setWorkflowLoading(false)
+    }
+  }
+
+  function handleCloseWorkflowDialog() {
+    setWorkflowDialogDocumentId(null)
+    setWorkflowList(null)
+    setWorkflowExecution(null)
+    setWorkflowError('')
+    setExecutingWorkflowId(null)
+  }
+
+  async function handleExecuteWorkflow(workflow: DocumentWorkflowRecord) {
+    if (!authSession || !workflowDialogDocumentId) {
+      setWorkflowError('Sign in before executing document workflows.')
+      return
+    }
+
+    setExecutingWorkflowId(workflow.workflow_id)
+    setWorkflowError('')
+    setWorkflowExecution(null)
+    try {
+      const result = await executeDocumentWorkflow(
+        appConfig.apiBase,
+        authSession,
+        workflowDialogDocumentId,
+        workflow.workflow_id,
+      )
+      setWorkflowExecution(result)
+    } catch (error) {
+      setWorkflowError(error instanceof Error ? error.message : 'Unable to execute the document workflow.')
+    } finally {
+      setExecutingWorkflowId((current) =>
+        current === workflow.workflow_id ? null : current,
+      )
+    }
+  }
+
   function handleFileTableScroll(event: ReactUIEvent<HTMLDivElement>) {
     const scrollbar = fileTableScrollbarRef.current
     if (!scrollbar || scrollbar.scrollLeft === event.currentTarget.scrollLeft) {
@@ -663,6 +874,31 @@ export function LibraryWorkspace({
                     <span className={`status-pill status-pill-${documentStatusTone(documentPage.status)}`}>
                       {fileStatusSummary(documentPage)}
                     </span>
+                    {documentPage.review_status !== 'VERIFIED' ? (
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        disabled={
+                          !documentCanBeVerified(documentPage) ||
+                          savingTarget === `document:${documentPage.document_id}`
+                        }
+                        onClick={() => void handleLibraryDocumentVerify(documentPage)}
+                      >
+                        {savingTarget === `document:${documentPage.document_id}` ? 'Verifying...' : 'Verify'}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={
+                        !documentPage.source_available ||
+                        documentNeedsProcessing(documentPage) ||
+                        savingTarget === `reprocess:${documentPage.document_id}`
+                      }
+                      onClick={() => void handleLibraryDocumentReclassify(documentPage)}
+                    >
+                      {savingTarget === `reprocess:${documentPage.document_id}` ? 'Reclassifying...' : 'Reclassify'}
+                    </button>
                     <button
                       type="button"
                       className="button button-primary"
@@ -679,6 +915,12 @@ export function LibraryWorkspace({
                 </header>
 
                 {openDocumentError ? <p className="field-error">{openDocumentError}</p> : null}
+                {saveErrors[`reprocess:${documentPage.document_id}`] ? (
+                  <p className="field-error">{saveErrors[`reprocess:${documentPage.document_id}`]}</p>
+                ) : null}
+                {saveErrors[`document:${documentPage.document_id}`] ? (
+                  <p className="field-error">{saveErrors[`document:${documentPage.document_id}`]}</p>
+                ) : null}
 
                 <div className="library-document-page-grid">
                   <section className="library-document-page-section">
@@ -750,6 +992,20 @@ export function LibraryWorkspace({
                     </dl>
                   </section>
                 </div>
+
+                <section className="library-document-page-section library-document-tags-section">
+                  <div className="library-section-head">
+                    <span className="eyebrow">Tags</span>
+                    <small>
+                      {documentPageFacetValues.length} tag{documentPageFacetValues.length === 1 ? '' : 's'}
+                    </small>
+                  </div>
+                  <LibraryTagChipList
+                    values={documentPageFacetValues}
+                    emptyLabel="No tags assigned yet"
+                    showFacetLabel
+                  />
+                </section>
 
                 <section className="library-document-page-section library-document-pages-section">
                   <div className="library-section-head">
@@ -840,6 +1096,111 @@ export function LibraryWorkspace({
                                 <span>Tables</span>
                                 <strong>{selectedDetailPage.table_blocks.length}</strong>
                               </div>
+                            </div>
+
+                            <div className="library-document-classification-explanation">
+                              <div className="library-document-classification-head">
+                                <div>
+                                  <span className="eyebrow">Classification Explanation</span>
+                                  <strong>
+                                    {formatPageClassificationLabel(
+                                      selectedDetailPage.document_kind,
+                                      selectedDetailPage.document_subtype,
+                                    )}
+                                  </strong>
+                                </div>
+                                <div className="library-document-page-detail-badges">
+                                  <span
+                                    className={`status-pill status-pill-${
+                                      selectedDetailPageDeterministicConflicts.length > 0 ? 'in-progress' : 'active'
+                                    }`}
+                                  >
+                                    {selectedDetailPageDeterministicAssessment?.document_kind
+                                      ? 'DETERMINISTIC'
+                                      : 'SYSTEM'}
+                                  </span>
+                                  <span className="entity-chip entity-chip-soft">
+                                    {formatClassificationConfidence(selectedDetailPage.classification_confidence)}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <p>{selectedDetailPageClassificationSummary}</p>
+
+                              <div className="library-document-classification-grid">
+                                <div>
+                                  <span>System Starting Point</span>
+                                  <strong>
+                                    {formatPageClassificationLabel(
+                                      selectedDetailPageSystemClassification?.documentKind,
+                                      selectedDetailPageSystemClassification?.documentSubtype,
+                                    )}
+                                  </strong>
+                                  <small>
+                                    {formatClassificationSourceLabel(
+                                      selectedDetailPageSystemClassification?.matchedBy ??
+                                        selectedDetailPageSystemClassification?.source,
+                                    )}
+                                  </small>
+                                </div>
+                                <div>
+                                  <span>Deterministic Match</span>
+                                  <strong>
+                                    {formatPageClassificationLabel(
+                                      selectedDetailPageDeterministicAssessment?.document_kind,
+                                      selectedDetailPageDeterministicAssessment?.document_subtype,
+                                    )}
+                                  </strong>
+                                  <small>
+                                    {formatClassificationConfidence(selectedDetailPageDeterministicAssessment?.confidence)}
+                                  </small>
+                                </div>
+                              </div>
+
+                              {selectedDetailPageDeterministicEvidence.length > 0 ? (
+                                <div className="library-document-classification-evidence">
+                                  <span className="eyebrow">Evidence</span>
+                                  <ul>
+                                    {selectedDetailPageDeterministicEvidence.map((evidence) => (
+                                      <li key={evidence}>{evidence}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : (
+                                <p className="library-muted-copy">
+                                  No detailed classification evidence was recorded for this page.
+                                </p>
+                              )}
+
+                              {selectedDetailPageDeterministicConflicts.length > 0 ? (
+                                <div className="library-document-classification-evidence library-document-classification-conflicts">
+                                  <span className="eyebrow">Review Flags</span>
+                                  <ul>
+                                    {selectedDetailPageDeterministicConflicts.map((conflict) => (
+                                      <li key={conflict}>{conflict}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : null}
+
+                              {selectedDetailPageProcessorTrace ? (
+                                <div className="library-document-classification-processor">
+                                  <span className="entity-chip entity-chip-soft">
+                                    {processorLabel(selectedDetailPageProcessorTrace.provider)}
+                                    {selectedDetailPageProcessorTrace.model
+                                      ? ` / ${selectedDetailPageProcessorTrace.model}`
+                                      : ''}
+                                  </span>
+                                  {selectedDetailPageProcessorTrace.overrode_heuristics ? (
+                                    <span className="entity-chip entity-chip-soft">
+                                      Processor Updated Heuristics
+                                    </span>
+                                  ) : null}
+                                  {selectedDetailPageProcessorTrace.partial ? (
+                                    <span className="entity-chip entity-chip-soft">Partial Processor Result</span>
+                                  ) : null}
+                                </div>
+                              ) : null}
                             </div>
 
                             <div className="library-document-page-excerpt">
@@ -1231,70 +1592,128 @@ export function LibraryWorkspace({
                       ))}
                     </div>
                     <div className="library-file-table-body">
-                      {visibleDocuments.map((document) => (
-                        <div
-                          key={document.document_id}
-                          role="listitem"
-                          tabIndex={0}
-                          className={`library-file-row${resolvedSelectedDocumentId === document.document_id ? ' is-selected' : ''}`}
-                          aria-label={`Open ${document.display_name || document.original_filename}`}
-                          onClick={() => handleOpenDocumentPage(document.document_id)}
-                          onKeyDown={(event) => handleDocumentRowKeyDown(event, document.document_id)}
-                        >
-                          <div className="library-file-name">
-                            <span className="library-file-icon" aria-hidden="true">
-                              PDF
+                      {visibleDocuments.map((document) => {
+                        const facetDisplayValues = documentFacetDisplayValues(document)
+
+                        return (
+                          <div
+                            key={document.document_id}
+                            role="listitem"
+                            tabIndex={0}
+                            className={`library-file-row${resolvedSelectedDocumentId === document.document_id ? ' is-selected' : ''}`}
+                            aria-label={`Open ${document.display_name || document.original_filename}`}
+                            onClick={() => handleOpenDocumentPage(document.document_id)}
+                            onKeyDown={(event) => handleDocumentRowKeyDown(event, document.document_id)}
+                          >
+                            <div className="library-file-name">
+                              <span className="library-file-icon" aria-hidden="true">
+                                PDF
+                              </span>
+                              <div className="library-file-name-copy">
+                                <strong>{document.display_name || document.original_filename}</strong>
+                                <span>{document.original_filename}</span>
+                              </div>
+                            </div>
+                            <div
+                              className="library-file-kind-cell"
+                              onClick={(event) => event.stopPropagation()}
+                              onKeyDown={(event) => event.stopPropagation()}
+                            >
+                              {schemaRegistry ? (
+                                <select
+                                  className="control library-file-kind-select"
+                                  aria-label={`Set document type for ${document.display_name || document.original_filename}`}
+                                  value={kindDraftByDocumentId[document.document_id] ?? dominantDocumentKindCode(document)}
+                                  disabled={documentNeedsProcessing(document) || savingTarget === `document-kind:${document.document_id}`}
+                                  title={
+                                    document.page_count > 1
+                                      ? `Changing the type here applies the selected classification to all ${document.page_count} pages in the file.`
+                                      : 'Change the classified document type.'
+                                  }
+                                  onChange={(event) =>
+                                    void handleLibraryDocumentKindChange(document, event.target.value)
+                                  }
+                                >
+                                  {documentKindOptions.map((entry) => (
+                                    <option key={entry.document_kind} value={entry.document_kind}>
+                                      {entry.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span>{dominantDocumentKind(document)}</span>
+                              )}
+                              {savingTarget === `document-kind:${document.document_id}` ? (
+                                <small className="library-file-kind-note">Saving type…</small>
+                              ) : saveErrors[`document-kind:${document.document_id}`] ? (
+                                <small className="field-error">{saveErrors[`document-kind:${document.document_id}`]}</small>
+                              ) : null}
+                            </div>
+                            <div className="library-file-tags-cell">
+                              <LibraryTagChipList
+                                values={facetDisplayValues}
+                                limit={LIBRARY_TAG_PREVIEW_LIMIT}
+                                compact
+                              />
+                            </div>
+                            <span>
+                              <span className={`status-pill status-pill-${documentStatusTone(document.status)}`}>
+                                {fileStatusSummary(document)}
+                              </span>
                             </span>
-                            <div className="library-file-name-copy">
-                              <strong>{document.display_name || document.original_filename}</strong>
-                              <span>{document.original_filename}</span>
+                            <span>{ownerLabel(document)}</span>
+                            <span>{formatDate(document.updated_at)}</span>
+                            <span>{formatBytes(document.size_bytes)}</span>
+                            <div
+                              className="library-file-actions-cell"
+                              onClick={(event) => event.stopPropagation()}
+                              onKeyDown={(event) => event.stopPropagation()}
+                            >
+                              {document.review_status !== 'VERIFIED' ? (
+                                <button
+                                  type="button"
+                                  className="button button-secondary library-file-action-button"
+                                  aria-label={`Verify ${document.display_name || document.original_filename}`}
+                                  disabled={
+                                    !documentCanBeVerified(document) ||
+                                    savingTarget === `document:${document.document_id}`
+                                  }
+                                  onClick={() => void handleLibraryDocumentVerify(document)}
+                                >
+                                  {savingTarget === `document:${document.document_id}` ? 'Verifying...' : 'Verify'}
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                className="button button-secondary library-file-action-button"
+                                aria-label={`Reclassify ${document.display_name || document.original_filename}`}
+                                disabled={
+                                  !document.source_available ||
+                                  documentNeedsProcessing(document) ||
+                                  savingTarget === `reprocess:${document.document_id}`
+                                }
+                                onClick={() => void handleLibraryDocumentReclassify(document)}
+                              >
+                                {savingTarget === `reprocess:${document.document_id}` ? 'Reclassifying...' : 'Reclassify'}
+                              </button>
+                              <button
+                                type="button"
+                                className="button button-secondary library-file-action-button"
+                                aria-label={`Open workflows for ${document.display_name || document.original_filename}`}
+                                onClick={() => void handleOpenWorkflowDialog(document)}
+                              >
+                                Workflows
+                              </button>
+                              {saveErrors[`reprocess:${document.document_id}`] ? (
+                                <small className="field-error">{saveErrors[`reprocess:${document.document_id}`]}</small>
+                              ) : null}
+                              {saveErrors[`document:${document.document_id}`] ? (
+                                <small className="field-error">{saveErrors[`document:${document.document_id}`]}</small>
+                              ) : null}
                             </div>
                           </div>
-                          <div
-                            className="library-file-kind-cell"
-                            onClick={(event) => event.stopPropagation()}
-                            onKeyDown={(event) => event.stopPropagation()}
-                          >
-                            {schemaRegistry ? (
-                              <select
-                                className="control library-file-kind-select"
-                                aria-label={`Set document type for ${document.display_name || document.original_filename}`}
-                                value={kindDraftByDocumentId[document.document_id] ?? dominantDocumentKindCode(document)}
-                                disabled={documentNeedsProcessing(document) || savingTarget === `document-kind:${document.document_id}`}
-                                title={
-                                  document.page_count > 1
-                                    ? `Changing the type here applies the selected classification to all ${document.page_count} pages in the file.`
-                                    : 'Change the classified document type.'
-                                }
-                                onChange={(event) =>
-                                  void handleLibraryDocumentKindChange(document, event.target.value)
-                                }
-                              >
-                                {documentKindOptions.map((entry) => (
-                                  <option key={entry.document_kind} value={entry.document_kind}>
-                                    {entry.label}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              <span>{dominantDocumentKind(document)}</span>
-                            )}
-                            {savingTarget === `document-kind:${document.document_id}` ? (
-                              <small className="library-file-kind-note">Saving type…</small>
-                            ) : saveErrors[`document-kind:${document.document_id}`] ? (
-                              <small className="field-error">{saveErrors[`document-kind:${document.document_id}`]}</small>
-                            ) : null}
-                          </div>
-                          <span>
-                            <span className={`status-pill status-pill-${documentStatusTone(document.status)}`}>
-                              {fileStatusSummary(document)}
-                            </span>
-                          </span>
-                          <span>{ownerLabel(document)}</span>
-                          <span>{formatDate(document.updated_at)}</span>
-                          <span>{formatBytes(document.size_bytes)}</span>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 </div>
@@ -1313,38 +1732,117 @@ export function LibraryWorkspace({
               </>
             ) : (
               <div className="library-document-grid">
-                {visibleDocuments.map((document) => (
-                  <button
-                    key={document.document_id}
-                    type="button"
-                    className={`library-document-card${resolvedSelectedDocumentId === document.document_id ? ' is-selected' : ''}`}
-                    onClick={() => handleOpenDocumentPage(document.document_id)}
-                  >
-                    <div className="library-document-card-visual">
-                      <div className="library-document-sheet">
-                        <span className="library-document-card-badge">PDF</span>
-                        <strong>{dominantDocumentKind(document)}</strong>
-                        <small>{document.page_count} page{document.page_count === 1 ? '' : 's'}</small>
+                {visibleDocuments.map((document) => {
+                  const facetDisplayValues = documentFacetDisplayValues(document)
+
+                  return (
+                    <button
+                      key={document.document_id}
+                      type="button"
+                      className={`library-document-card${resolvedSelectedDocumentId === document.document_id ? ' is-selected' : ''}`}
+                      onClick={() => handleOpenDocumentPage(document.document_id)}
+                    >
+                      <div className="library-document-card-visual">
+                        <div className="library-document-sheet">
+                          <span className="library-document-card-badge">PDF</span>
+                          <strong>{dominantDocumentKind(document)}</strong>
+                          <small>{document.page_count} page{document.page_count === 1 ? '' : 's'}</small>
+                        </div>
                       </div>
-                    </div>
-                    <div className="library-document-card-copy">
-                      <strong>{document.display_name || document.original_filename}</strong>
-                      <span>{document.original_filename}</span>
-                    </div>
-                    <div className="library-document-card-meta">
-                      <span className={`status-pill status-pill-${documentStatusTone(document.status)}`}>
-                        {fileStatusSummary(document)}
-                      </span>
-                      <span className="entity-chip entity-chip-soft">{formatBytes(document.size_bytes)}</span>
-                    </div>
-                  </button>
-                ))}
+                      <div className="library-document-card-copy">
+                        <strong>{document.display_name || document.original_filename}</strong>
+                        <span>{document.original_filename}</span>
+                      </div>
+                      <div className="library-document-card-meta">
+                        <span className={`status-pill status-pill-${documentStatusTone(document.status)}`}>
+                          {fileStatusSummary(document)}
+                        </span>
+                        <span className="entity-chip entity-chip-soft">{formatBytes(document.size_bytes)}</span>
+                      </div>
+                      <LibraryTagChipList
+                        values={facetDisplayValues}
+                        limit={LIBRARY_TAG_PREVIEW_LIMIT}
+                        emptyLabel="No tags"
+                        compact
+                      />
+                    </button>
+                  )
+                })}
               </div>
             )}
         </section>
           </>
         )}
       </div>
+      {workflowDialogDocument ? (
+        <div className="library-workflow-overlay" role="presentation">
+          <button
+            type="button"
+            className="library-workflow-backdrop"
+            aria-label="Cancel workflows"
+            onClick={handleCloseWorkflowDialog}
+          />
+          <section
+            className="library-workflow-dialog surface"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="library-workflow-title"
+          >
+            <header className="library-workflow-dialog-head">
+              <div>
+                <span className="eyebrow">Workflows</span>
+                <h3 id="library-workflow-title">{workflowDialogDocument.display_name || workflowDialogDocument.original_filename}</h3>
+                <p>{workflowList?.document_type_label ?? dominantDocumentKind(workflowDialogDocument)}</p>
+              </div>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={handleCloseWorkflowDialog}
+              >
+                Cancel
+              </button>
+            </header>
+
+            {workflowLoading ? (
+              <p className="library-muted-copy">Loading workflows...</p>
+            ) : workflowList && workflowList.workflows.length === 0 ? (
+              <p className="library-muted-copy">{workflowList.empty_message}</p>
+            ) : workflowList ? (
+              <div className="library-workflow-list">
+                {workflowList.workflows.map((workflow) => (
+                  <article key={workflow.workflow_id} className="library-workflow-card">
+                    <div className="library-workflow-card-copy">
+                      <strong>{workflow.label}</strong>
+                      <span>{workflow.description}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      disabled={executingWorkflowId !== null}
+                      onClick={() => void handleExecuteWorkflow(workflow)}
+                    >
+                      {executingWorkflowId === workflow.workflow_id ? 'Executing...' : 'Execute'}
+                    </button>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+
+            {workflowExecution ? (
+              <div className="library-workflow-result">
+                <strong>{workflowExecution.label}</strong>
+                <p>{workflowExecution.message}</p>
+                <span>
+                  {workflowExecution.created_count} created / {workflowExecution.updated_count} updated /{' '}
+                  {workflowExecution.unchanged_count} unchanged
+                </span>
+              </div>
+            ) : null}
+
+            {workflowError ? <p className="field-error">{workflowError}</p> : null}
+          </section>
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.config import settings
 from apps.api.app.core.logging import get_logger, log_outbound_request
 from apps.api.app.domains.assistant.services.action_catalog import ASSISTANT_ACTION_CATALOG
+from apps.api.app.domains.assistant.personas import list_assistant_persona_definitions
 from apps.api.app.domains.assistant.services.policies import evaluate_tool_policy
 from apps.api.app.domains.assistant.services.prompt_context import AssistantPromptEnvelope
 from apps.api.app.domains.assistant.services.registry import ManagedAssistantAgent
@@ -985,6 +986,7 @@ def build_assistant_runtime_settings() -> AssistantRuntimeSettingsOut:
     effective_default_provider = determine_effective_default_provider(provider_configs)
     available_tools = build_tool_definitions()
     available_skills = list_agent_skill_definitions()
+    available_personas = list_assistant_persona_definitions()
     return AssistantRuntimeSettingsOut(
         enabled=bool(settings.ASSISTANT_ENABLED and effective_default_provider),
         default_provider=normalize_default_provider(settings.ASSISTANT_DEFAULT_PROVIDER),
@@ -1019,6 +1021,7 @@ def build_assistant_runtime_settings() -> AssistantRuntimeSettingsOut:
             }
             for action_type in ASSISTANT_ACTION_DEFINITIONS
         ],
+        available_personas=[definition.to_out() for definition in available_personas],
     )
 
 

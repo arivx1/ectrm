@@ -679,6 +679,7 @@ export function useReferenceDataPriceIndexController({
       currency_code: priceIndexForm.currency_code.trim().toUpperCase(),
       unit_code: priceIndexForm.unit_code.trim().toUpperCase(),
       provider: priceIndexForm.provider.trim(),
+      quote_type: priceIndexForm.quote_type,
       market: priceIndexForm.market.trim() || null,
       location_code: priceIndexForm.location_code.trim().toUpperCase() || null,
       calendar_code: priceIndexForm.calendar_code.trim().toUpperCase() || null,

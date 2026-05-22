@@ -14,6 +14,9 @@ from apps.api.app.models.event import Base
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
 from apps.api.app.models.external_series_observation import ExternalSeriesObservation
+from apps.api.app.models.price_index_observation import PriceIndexObservation
+from apps.api.app.models.reference_price_index import ReferencePriceIndex
+from apps.api.app.models.reference_price_index_source import ReferencePriceIndexSource
 
 
 class FakeCAISOClient:
@@ -47,7 +50,10 @@ class CaisoSyncTests(unittest.TestCase):
 
     def setUp(self) -> None:
         with self.SessionLocal() as session:
+            session.query(PriceIndexObservation).delete()
             session.query(ExternalSeriesObservation).delete()
+            session.query(ReferencePriceIndexSource).delete()
+            session.query(ReferencePriceIndex).delete()
             session.query(ExternalSeriesDefinition).delete()
             session.query(ExternalDataRun).delete()
             session.commit()
@@ -69,6 +75,51 @@ class CaisoSyncTests(unittest.TestCase):
                     description="Power test series",
                     query_params={"hub": "NP15"},
                     transform_rule="field:lmp",
+                    is_active=True,
+                    created_at=now,
+                    created_by="test-user",
+                    updated_at=now,
+                    updated_by="test-user",
+                    version=1,
+                )
+            )
+            session.commit()
+
+    def _seed_price_index_source(self) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                ReferencePriceIndex(
+                    code="CAISO_NP15_RT5M",
+                    name="CAISO NP15 Real-Time 5-Minute Hub LMP",
+                    commodity_code="POWER",
+                    currency_code="USD",
+                    unit_code="MWH",
+                    provider="CAISO",
+                    market="CAISO",
+                    location_code=None,
+                    calendar_code="CAISO",
+                    description="Power price-index test row",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=now,
+                    created_by="test-user",
+                    updated_at=now,
+                    updated_by="test-user",
+                    version=1,
+                )
+            )
+            session.add(
+                ReferencePriceIndexSource(
+                    price_index_code="CAISO_NP15_RT5M",
+                    provider="CAISO",
+                    dataset_code="PRC_HUB_LMP",
+                    series_id="NP15",
+                    frequency="daily",
+                    source_unit="MWH",
+                    source_currency_code="USD",
+                    transform_rule=None,
                     is_active=True,
                     created_at=now,
                     created_by="test-user",
@@ -106,6 +157,36 @@ class CaisoSyncTests(unittest.TestCase):
         self.assertEqual(observations[0].source_revision, "2026-04-05:HE17:I03")
         self.assertEqual(client.call_count, 1)
 
+    def test_sync_creates_price_index_observations_from_source_mapping(self) -> None:
+        self._seed_price_index_source()
+        client = FakeCAISOClient(
+            {
+                "trade_date": "2026-04-05",
+                "hour": 17,
+                "interval": 3,
+                "prices": [
+                    {"hub": "NP15", "lmp": "28.45", "energy": "27.91", "congestion": "0.20", "losses": "0.34"},
+                    {"hub": "SP15", "lmp": "31.11", "energy": "30.01", "congestion": "0.52", "losses": "0.58"},
+                ],
+            }
+        )
+
+        with self.SessionLocal() as session:
+            run = sync_caiso_series(session, client=client, requested_by="spec-test")
+            observations = session.query(PriceIndexObservation).all()
+
+        self.assertEqual(run.status, "SUCCEEDED")
+        self.assertEqual(run.series_count, 1)
+        self.assertEqual(run.observation_count, 1)
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0].price_index_code, "CAISO_NP15_RT5M")
+        self.assertEqual(str(observations[0].value), "28.450000")
+        self.assertEqual(observations[0].unit_code, "MWH")
+        self.assertEqual(observations[0].currency_code, "USD")
+        self.assertEqual(observations[0].source_frequency, "5MIN")
+        self.assertEqual(observations[0].source_revision, "2026-04-05:HE17:I03")
+        self.assertEqual(client.call_count, 1)
+
     def test_sync_is_idempotent_for_unchanged_rows(self) -> None:
         self._seed_definition()
         snapshot = {
@@ -136,10 +217,12 @@ class CaisoSyncTests(unittest.TestCase):
                 client=FakeCAISOClient({}, raises=CAISOClientError("boom")),
             )
             observations = session.query(ExternalSeriesObservation).all()
+            price_observations = session.query(PriceIndexObservation).all()
 
         self.assertEqual(run.status, "FAILED")
         self.assertEqual(run.error_summary, "boom")
         self.assertEqual(len(observations), 0)
+        self.assertEqual(len(price_observations), 0)
 
 
 if __name__ == "__main__":

@@ -87,6 +87,8 @@ Today the platform already has durable anchors for these document families:
 - `TradePayment`
 - `TradeWorkflowItem`
 - `Position`
+- `ReferencePriceIndex`
+- `PriceIndexObservation`
 
 The taxonomy also names a few future-facing targets such as
 `QUALITY_SPECIFICATION_REFERENCE` where a reusable reference record will likely
@@ -101,6 +103,7 @@ trades.
 | Trade reconciliation | Broker statement | `Position` then `Trade` | These documents usually summarize many trades and are better treated as reconciliation evidence before one-to-one linkage. |
 | Logistics | Bill of lading, truck ticket, weigh ticket, delivery confirmation | `DeliveryObligation` or `DeliveryEvent` | These documents prove movement, route, timing, and actual delivered quantities. |
 | Network flow | Pipeline statement | `DeliveryObligation` | Pipeline docs attach most naturally to scheduled or flowed delivery obligations keyed by nomination and path references. |
+| Market data | Price publication | `PriceIndexObservation`, then `ReferencePriceIndex` | These documents preserve the publisher evidence behind loaded commodity price observations and index definitions. |
 | Quality | Quality statement, sampling analysis, certificate of analysis, quality specification | `DeliveryObligation` or `Trade` | These documents govern delivered quality, disputes, and trade-specific quality tolerances. |
 | Compliance | Hazardous cargo documentation | `DeliveryObligation` | These are movement attachments and should behave like compliance evidence, not commercial records. |
 | Settlement | Invoice, settlement statement | `Trade`, `TradeInvoice`, `TradePayment` | These documents close the loop from delivery into money. |
@@ -146,6 +149,7 @@ Two routing rules matter early:
 | `TRADE_CONTRACT` | `Trade` | Match an existing trade when possible; otherwise become a candidate source for manual or assisted trade creation. |
 | `BROKER_CONFIRMATION` | `Trade` | Reconcile exchange or broker-routed executions back to booked financial trades. |
 | `BROKER_STATEMENT` | `Position`, then `Trade` | Support broker cash and position reconciliation before detailed line-level trade attachment. |
+| `PRICE_PUBLICATION` | `PriceIndexObservation`, then `ReferencePriceIndex` | Preserve the publisher, index code, observation date, unit, currency, and assessed price behind loaded market-data observations. |
 | `PIPELINE_STATEMENT` | `DeliveryObligation` | Match by nomination, contract, pipeline, and path, then derive trade linkage through the delivery. |
 | `BILL_OF_LADING` | `DeliveryObligation`, then `DeliveryEvent` | Treat as shipment evidence that can later spawn a movement event. |
 | `TRUCK_TICKET` | `DeliveryObligation`, then `DeliveryEvent` | Use as load or unload evidence and later actualization support. |

@@ -4,6 +4,7 @@
 }
 
 .prompt-home-timeframe-panel-head,
+.prompt-home-card-filter-head,
 .prompt-home-prices-card-head,
 .prompt-home-map-card-head,
 .prompt-home-communication-card-head,
@@ -30,6 +31,171 @@
 
 .prompt-home-heading {
   max-width: none;
+}
+
+.prompt-home-card-filter {
+  display: grid;
+  gap: 0.6rem;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0.72rem 0.85rem;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.16);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.prompt-home-card-filter-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.7rem 1rem;
+  align-items: center;
+}
+
+.prompt-home-card-filter-copy {
+  display: grid;
+  gap: 0.14rem;
+  min-width: 0;
+}
+
+.prompt-home-card-filter-copy strong {
+  font-size: 1rem;
+  line-height: 1.12;
+}
+
+.prompt-home-card-filter-copy small,
+.prompt-home-card-filter-toggle-meta small,
+.prompt-home-card-filter-choice small {
+  color: var(--color-copy-muted, #66717c);
+  line-height: 1.4;
+}
+
+.prompt-home-card-filter-side {
+  display: grid;
+  justify-items: end;
+  align-content: center;
+  min-width: 0;
+}
+
+.prompt-home-card-filter-toggle {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: right;
+  cursor: pointer;
+}
+
+.prompt-home-card-filter-toggle:focus-visible {
+  outline: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.38);
+  outline-offset: 3px;
+}
+
+.prompt-home-card-filter-toggle-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.prompt-home-card-filter-body {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.prompt-home-card-filter-body[hidden] {
+  display: none;
+}
+
+.prompt-home-card-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.45rem;
+}
+
+.prompt-home-card-filter-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.58rem;
+  min-width: 0;
+  min-height: 3rem;
+  padding: 0.6rem 0.68rem;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.14);
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+}
+
+.prompt-home-card-filter-choice.is-hidden {
+  border-style: dashed;
+  opacity: 0.72;
+}
+
+.prompt-home-card-filter-choice input {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: rgb(var(--theme-highlight-rgb, 78 167 255));
+}
+
+.prompt-home-card-filter-choice span {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.prompt-home-card-filter-choice strong {
+  overflow-wrap: anywhere;
+  line-height: 1.22;
+}
+
+.prompt-home-card-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.prompt-home-card-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.prompt-home-card-slot {
+  display: grid;
+  grid-column: span 12;
+  gap: 0.42rem;
+  min-width: 0;
+  transition:
+    box-shadow 180ms ease,
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.prompt-home-card-slot.is-dragging {
+  z-index: 3;
+  opacity: 0.94;
+  filter: drop-shadow(0 24px 60px rgba(0, 0, 0, 0.22));
+}
+
+.prompt-home-card-header-drag-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.prompt-home-card-header-drag-handle:active {
+  cursor: grabbing;
+}
+
+.prompt-home-card-header-drag-handle:focus-visible {
+  outline: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.38);
+  outline-offset: 3px;
+}
+
+.prompt-home-card-slot-inner {
+  min-width: 0;
 }
 
 .prompt-home-heading h3 {
@@ -182,13 +348,14 @@
 }
 
 .prompt-home-prices-card-toggle {
-  display: block;
+  display: flex;
+  justify-content: flex-end;
   width: 100%;
   padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
-  text-align: left;
+  text-align: right;
   cursor: pointer;
 }
 
@@ -217,8 +384,7 @@
 }
 
 .prompt-home-prices-card-copy p,
-.prompt-home-price-row-copy small,
-.prompt-home-price-row-mark small,
+.prompt-home-price-fields dt,
 .prompt-home-prices-card-footer span {
   margin: 0;
   color: var(--color-copy-muted, #66717c);
@@ -254,53 +420,220 @@
   display: none;
 }
 
+.prompt-home-prices-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(14rem, 1.5fr) minmax(9rem, 0.75fr) auto auto;
+  gap: 0.6rem;
+  align-items: end;
+}
+
+.prompt-home-prices-filter-field {
+  display: grid;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.prompt-home-prices-filter-field > span {
+  color: var(--color-copy-muted, #66717c);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.prompt-home-prices-filter-field input,
+.prompt-home-prices-filter-field select {
+  width: 100%;
+  min-height: 2.35rem;
+  min-width: 0;
+  padding: 0.45rem 0.58rem;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.16);
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+}
+
+.prompt-home-prices-filter-field input:focus,
+.prompt-home-prices-filter-field select:focus {
+  outline: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.32);
+  outline-offset: 2px;
+}
+
+.prompt-home-prices-filter-segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.22rem;
+  align-items: center;
+  min-height: 2.35rem;
+  padding: 0.18rem;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.14);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.prompt-home-prices-filter-segments button {
+  min-height: 1.85rem;
+  padding: 0.28rem 0.5rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--color-copy-muted, #66717c);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.prompt-home-prices-filter-segments button:focus-visible {
+  outline: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.34);
+  outline-offset: 2px;
+}
+
+.prompt-home-prices-filter-segments button.is-active {
+  background: rgb(61 214 160 / 0.16);
+  color: var(--terminal-accent-strong, #0f7b63);
+}
+
+.prompt-home-prices-filter-clear {
+  align-self: end;
+  min-height: 2.35rem;
+}
+
 .prompt-home-prices-grid,
 .prompt-home-prices-skeleton-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
-  gap: 0.6rem;
+  grid-template-columns: 1fr;
+  gap: 0.22rem;
+}
+
+.prompt-home-prices-grid {
+  --prompt-home-price-grid-template:
+    minmax(0, 0.72fr)
+    minmax(0, 0.82fr)
+    minmax(0, 0.52fr)
+    minmax(0, 0.42fr)
+    minmax(0, 0.45fr)
+    minmax(0, 0.75fr)
+    minmax(0, 0.62fr)
+    minmax(0, 1fr)
+    minmax(0, 1.05fr);
+}
+
+.prompt-home-price-header {
+  display: grid;
+  grid-template-columns: var(--prompt-home-price-grid-template);
+  gap: 0.36rem;
+  align-items: center;
+  padding: 0 0.46rem 0.12rem;
+  color: var(--color-copy-muted, #66717c);
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.prompt-home-price-header > span {
+  min-width: 0;
+}
+
+.prompt-home-price-sort-button {
+  all: unset;
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.2rem;
+  color: inherit;
+  cursor: pointer;
+}
+
+.prompt-home-price-sort-button span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.prompt-home-price-sort-button:focus-visible {
+  outline: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.7);
+  outline-offset: 2px;
+}
+
+.prompt-home-price-sort-button.is-active {
+  color: var(--theme-accent, #4ef0bd);
+}
+
+.prompt-home-price-sort-indicator {
+  display: inline-grid;
+  width: 0.44rem;
+  height: 0.44rem;
+  flex: 0 0 auto;
+  place-items: center;
+  opacity: 0.28;
+}
+
+.prompt-home-price-sort-indicator::before {
+  display: block;
+  width: 0;
+  height: 0;
+  border-right: 0.18rem solid transparent;
+  border-bottom: 0.28rem solid currentColor;
+  border-left: 0.18rem solid transparent;
+  content: "";
+}
+
+.prompt-home-price-sort-button.is-active .prompt-home-price-sort-indicator {
+  opacity: 1;
+}
+
+.prompt-home-price-sort-indicator.is-descending::before {
+  transform: rotate(180deg);
 }
 
 .prompt-home-price-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(8rem, auto);
-  gap: 0.75rem;
-  align-items: center;
   min-width: 0;
-  padding: 0.75rem;
+  padding: 0.32rem 0.46rem;
   border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.12);
-  border-radius: 0.7rem;
+  border-radius: 0.42rem;
   background: rgba(255, 255, 255, 0.05);
 }
 
-.prompt-home-price-row-copy,
-.prompt-home-price-row-mark {
+.prompt-home-price-fields {
   display: grid;
-  gap: 0.16rem;
+  grid-template-columns: var(--prompt-home-price-grid-template);
+  gap: 0.36rem;
+  align-items: center;
+  margin: 0;
+}
+
+.prompt-home-price-fields div {
+  display: grid;
   min-width: 0;
 }
 
-.prompt-home-price-row-copy span {
-  width: fit-content;
-  max-width: 100%;
-  padding: 0.16rem 0.45rem;
-  border-radius: 999px;
-  background: rgb(61 214 160 / 0.1);
-  color: var(--terminal-accent-strong, #0f7b63);
-  font-size: 0.72rem;
+.prompt-home-price-fields dt {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  font-size: 0.68rem;
   font-weight: 700;
-  line-height: 1.4;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.prompt-home-price-row-copy strong,
-.prompt-home-price-row-mark strong {
+.prompt-home-price-fields dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--terminal-text, #e5edf5);
+  font-size: 0.84rem;
+  font-weight: 800;
+  line-height: 1.18;
+  overflow: visible;
   overflow-wrap: anywhere;
-  line-height: 1.25;
-}
-
-.prompt-home-price-row-mark {
-  justify-items: end;
-  text-align: right;
+  white-space: normal;
 }
 
 .prompt-home-prices-card-footer {
@@ -326,13 +659,14 @@
 }
 
 .prompt-home-map-card-toggle {
-  display: block;
+  display: flex;
+  justify-content: flex-end;
   width: 100%;
   padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
-  text-align: left;
+  text-align: right;
   cursor: pointer;
 }
 
@@ -978,6 +1312,13 @@
   }
 }
 
+@media (min-width: 1120px) {
+  .prompt-home-card-slot-documents,
+  .prompt-home-card-slot-communication {
+    grid-column: span 6;
+  }
+}
+
 .prompt-home-prompt-card {
   display: grid;
   gap: 0.6rem;
@@ -1457,6 +1798,7 @@
 }
 
 .prompt-home-calendar-agenda-item {
+  position: relative;
   display: flex;
   justify-content: space-between;
   gap: 0.75rem;
@@ -1465,6 +1807,98 @@
   border-radius: 0.95rem;
   border: 1px solid rgba(18, 42, 56, 0.08);
   background: rgba(255, 255, 255, 0.04);
+}
+
+.prompt-home-calendar-agenda-item.has-tooltip {
+  cursor: help;
+}
+
+.prompt-home-calendar-agenda-item.has-tooltip:focus-visible {
+  outline: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.34);
+  outline-offset: 3px;
+}
+
+.prompt-home-calendar-event-tooltip {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.55rem);
+  z-index: 35;
+  display: grid;
+  gap: 0.24rem;
+  width: max-content;
+  max-width: min(24rem, calc(100vw - 2rem));
+  padding: 0.66rem 0.76rem;
+  border: 1px solid rgba(19, 41, 61, 0.2);
+  border-radius: 0.7rem;
+  background: rgba(19, 41, 61, 0.97);
+  box-shadow: 0 18px 38px rgba(17, 30, 41, 0.24);
+  color: #f5f1e9;
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.42;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  text-transform: none;
+  visibility: hidden;
+  white-space: normal;
+}
+
+.prompt-home-calendar-event-tooltip::after {
+  content: "";
+  position: absolute;
+  left: 1rem;
+  bottom: -0.4rem;
+  width: 0.74rem;
+  height: 0.74rem;
+  border-right: 1px solid rgba(19, 41, 61, 0.2);
+  border-bottom: 1px solid rgba(19, 41, 61, 0.2);
+  background: rgba(19, 41, 61, 0.97);
+  transform: rotate(45deg);
+}
+
+.prompt-home-calendar-event-tooltip strong {
+  color: #ffffff;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.prompt-home-calendar-event-tooltip span {
+  color: #d8e2ec;
+}
+
+.prompt-home-calendar-agenda-item:hover .prompt-home-calendar-event-tooltip,
+.prompt-home-calendar-agenda-item:focus-visible .prompt-home-calendar-event-tooltip,
+.prompt-home-calendar-agenda-item:focus-within .prompt-home-calendar-event-tooltip,
+.prompt-home-time-meter-marker.has-detail:hover .prompt-home-calendar-event-tooltip,
+.prompt-home-time-meter-boundary-hit-area.has-detail:hover .prompt-home-calendar-event-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+.prompt-home-time-meter-marker .prompt-home-calendar-event-tooltip {
+  bottom: calc(100% + 0.42rem);
+}
+
+.prompt-home-time-meter-marker.is-end .prompt-home-calendar-event-tooltip {
+  right: 0;
+  left: auto;
+}
+
+.prompt-home-time-meter-marker.is-end .prompt-home-calendar-event-tooltip::after {
+  right: 1rem;
+  left: auto;
+}
+
+.prompt-home-time-meter-boundary-hit-area .prompt-home-calendar-event-tooltip {
+  left: 50%;
+  bottom: calc(100% + 0.42rem);
+  transform: translateX(-50%);
+}
+
+.prompt-home-time-meter-boundary-hit-area .prompt-home-calendar-event-tooltip::after {
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
 }
 
 .prompt-home-calendar-agenda-copy,
@@ -1630,6 +2064,10 @@
 
 .prompt-home-composer-preferences small {
   color: rgba(226, 232, 240, 0.78);
+}
+
+.prompt-home-persona-field {
+  min-width: min(100%, 14rem);
 }
 
 .prompt-home-verbalize-toggle {
@@ -2095,6 +2533,10 @@
     grid-template-columns: 1fr;
   }
 
+  .prompt-home-prices-filter-bar {
+    grid-template-columns: 1fr;
+  }
+
   .prompt-home-document-upload-card-head {
     grid-template-columns: 1fr;
   }
@@ -2106,6 +2548,12 @@
   .prompt-home-prices-card-toggle-side,
   .prompt-home-map-card-toggle-side {
     justify-items: start;
+  }
+
+  .prompt-home-prices-card-toggle,
+  .prompt-home-map-card-toggle {
+    justify-content: flex-start;
+    text-align: left;
   }
 
   .prompt-home-document-upload-card-side {
@@ -2145,13 +2593,32 @@
     text-align: left;
   }
 
-  .prompt-home-price-row {
-    grid-template-columns: 1fr;
+  .prompt-home-price-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
   }
 
-  .prompt-home-price-row-mark {
-    justify-items: start;
-    text-align: left;
+  .prompt-home-price-header {
+    display: none;
+  }
+
+  .prompt-home-price-fields div {
+    gap: 0.18rem;
+  }
+
+  .prompt-home-price-fields dt {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+  }
+
+  .prompt-home-price-fields dd {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
   }
 
   .prompt-home-time-meter-card-toggle {
@@ -2177,6 +2644,21 @@
 
   .prompt-home-heading-actions .button,
   .prompt-home-actions .button {
+    width: 100%;
+  }
+
+  .prompt-home-card-filter-head {
+    grid-template-columns: 1fr;
+  }
+
+  .prompt-home-card-filter-side,
+  .prompt-home-card-filter-toggle {
+    justify-items: start;
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .prompt-home-card-filter-actions .button {
     width: 100%;
   }
 

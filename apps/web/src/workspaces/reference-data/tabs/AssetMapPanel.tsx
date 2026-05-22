@@ -16,42 +16,24 @@ import type { StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import {
-  loadWeatherForecastPeriods,
-  loadWeatherObservations,
-} from "../../../entities/weather/api";
-import {
-  buildWeatherOverlayPointFeatureCollection,
-  buildWeatherOverlayPointRecord,
-  buildWeatherOverlayWindVectorFeatureCollection,
   createDefaultWeatherOverlayOpacityState,
   createDefaultWeatherOverlayVisibilityState,
   describeWeatherOverlayMode,
-  getWeatherOverlayColorExpression,
-  getWeatherOverlayLegendConfig,
+  loadRainViewerRadarTileProvider,
+  NOAA_CONUS_RADAR_TILE_PROVIDER,
   type SelectableWeatherOverlayMode,
+  type WeatherRadarTileProvider,
   type WeatherOverlayOpacityState,
-  type WeatherOverlayPointRecord,
   type WeatherOverlayVisibilityState,
   WEATHER_OVERLAY_OPTIONS,
 } from "../../../entities/weather/mapOverlay";
 import {
-  formatWeatherAgeHours,
-  formatWeatherPeriodWindow,
-  summarizeWeatherForecast,
-  summarizeWeatherObservation,
-  weatherHealthLabel,
-  weatherHealthTone,
-} from "../../../entities/weather/presentation";
-import {
   assetMapActivityLabelsForAsset,
   assetMapCountryCodeForRecord,
-  assetMapCountryCodeForWeatherLocation,
-  assetMapGeographyLabelForPoint,
   assetMapGeographyLabelForRecord,
   ASSET_MAP_ACTIVITY_LABELS,
   ASSET_MAP_GEOGRAPHY_LABELS,
   assetMapSubdivisionCodeForRecord,
-  assetMapSubdivisionCodeForWeatherLocation,
   assetMapSubtypeLabelForAsset,
   ASSET_MAP_SUBTYPE_LABELS,
   buildAssetMapCountryOptions,
@@ -68,7 +50,6 @@ import {
   type AssetMapRecord,
   type AssetMapSubdivisionOption,
 } from "../../../features/reference-data/assetMap";
-import { appConfig } from "../../../shared/config";
 import {
   getAssetMapFilterPresets,
   saveAssetMapFilterPreset,
@@ -80,10 +61,6 @@ import type {
   LocationRecord,
   RailRouteRecord,
   SpatialFeatureRecord,
-  WeatherForecastPeriodRecord,
-  WeatherLocationRecord,
-  WeatherObservationRecord,
-  WeatherSyncStatusRecord,
 } from "../../../shared/models";
 
 type AssetMapPanelProps = {
@@ -91,24 +68,52 @@ type AssetMapPanelProps = {
   locations: LocationRecord[];
   railRoutes: RailRouteRecord[];
   spatialFeatures: SpatialFeatureRecord[];
-  weatherLocations: WeatherLocationRecord[];
-  weatherSyncStatus: WeatherSyncStatusRecord | null;
-  weatherDataLoaded?: boolean;
-  weatherDataLoading?: boolean;
-  weatherLoadError?: string;
+  vesselPositions?: AssetMapVesselRecord[];
   selectedAssetCode: string | null;
   selectedRailRouteCode?: string | null;
+  selectedVesselDeliveryId?: string | null;
   onSelectAsset: (code: string) => void;
   onSelectRailRoute?: (code: string) => void;
+  onSelectVessel?: (deliveryId: string) => void;
+  onOpenVesselDelivery?: (deliveryId: string) => void;
   onOpenRailRouteDeliveries?: (code: string) => void;
   onOpenRailRouteScheduling?: (code: string) => void;
   onOpenReferenceRailRoute?: (code: string) => void;
   onClearRailRouteSelection?: () => void;
+  onClearVesselSelection?: () => void;
   filterControls?: ReactNode;
+};
+
+export type AssetMapVesselRecord = {
+  deliveryId: string;
+  tradeId: string;
+  label: string;
+  vesselName: string | null;
+  imoNumber: string | null;
+  mmsiNumber: string | null;
+  commodity: string;
+  status: string;
+  latitude: number;
+  longitude: number;
+  lastPositionAt: string | null;
+  lastSignalAt: string | null;
+  speedKnots: number | null;
+  courseDegrees: number | null;
+  headingDegrees: number | null;
+  navigationalStatus: string | null;
+  destination: string | null;
+  etaAtDestination: string | null;
+  healthSeverity: string;
+  primaryException: string | null;
 };
 
 type MapLibreModule = typeof import("maplibre-gl");
 type AssetMapLibreMap = InstanceType<MapLibreModule["Map"]>;
+type AssetMapCoordinate = [number, number];
+type AssetMapUserLocation = {
+  latitude: number;
+  longitude: number;
+};
 
 const ASSET_GEOMETRY_SOURCE_ID = "asset-geometry-source";
 const ASSET_GEOMETRY_FILL_LAYER_ID = "asset-geometry-fill-layer";
@@ -118,14 +123,8 @@ const SPATIAL_FEATURE_SOURCE_ID = "spatial-feature-source";
 const SPATIAL_FEATURE_FILL_LAYER_ID = "spatial-feature-fill-layer";
 const SPATIAL_FEATURE_LINE_LAYER_ID = "spatial-feature-line-layer";
 const SPATIAL_FEATURE_POINT_LAYER_ID = "spatial-feature-point-layer";
-const WEATHER_WIND_VECTOR_SOURCE_ID = "weather-wind-vector-source";
-const WEATHER_WIND_VECTOR_LAYER_ID = "weather-wind-vector-layer";
 const WEATHER_RADAR_SOURCE_ID = "weather-radar-source";
 const WEATHER_RADAR_LAYER_ID = "weather-radar-layer";
-const NOAA_RADAR_TILE_URL =
-  "https://opengeo.ncep.noaa.gov/geoserver/conus/conus_bref_qcd/ows?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=conus_bref_qcd&STYLES=radar_reflectivity&FORMAT=image/png&TRANSPARENT=true&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256";
-type DataBackedWeatherOverlayMode = Exclude<SelectableWeatherOverlayMode, "radar">;
-type ScalarWeatherOverlayMode = Exclude<DataBackedWeatherOverlayMode, "wind">;
 
 const WEATHER_OVERLAY_TOGGLE_OPTIONS: Array<{
   value: SelectableWeatherOverlayMode;
@@ -136,14 +135,8 @@ const WEATHER_OVERLAY_TOGGLE_OPTIONS: Array<{
   ): option is {
     value: SelectableWeatherOverlayMode;
     label: string;
-  } => option.value !== "none",
+  } => option.value === "radar",
 );
-const WEATHER_SCALAR_OVERLAY_MODES: ScalarWeatherOverlayMode[] = [
-  "precipitation",
-  "temperature",
-  "humidity",
-  "pressure",
-];
 
 function createDefaultWeatherOverlayExpansionState(): Record<
   SelectableWeatherOverlayMode,
@@ -204,18 +197,6 @@ const FALLBACK_MAP_STYLE: StyleSpecification = {
   ],
 };
 
-function weatherOverlayPointSourceId(mode: DataBackedWeatherOverlayMode): string {
-  return `weather-overlay-${mode}-point-source`;
-}
-
-function weatherOverlayGlowLayerId(mode: ScalarWeatherOverlayMode): string {
-  return `weather-overlay-${mode}-glow-layer`;
-}
-
-function weatherOverlayPointLayerId(mode: DataBackedWeatherOverlayMode): string {
-  return `weather-overlay-${mode}-point-layer`;
-}
-
 function buildRecordSignature(records: AssetMapRecord[]): string {
   return records
     .map((record) =>
@@ -228,6 +209,44 @@ function buildRecordSignature(records: AssetMapRecord[]): string {
       ].join(":"),
     )
     .join("|");
+}
+
+function buildVesselPositionSignature(records: AssetMapVesselRecord[]): string {
+  return records
+    .map((record) =>
+      [
+        record.deliveryId,
+        record.latitude,
+        record.longitude,
+        record.lastPositionAt ?? "na",
+        record.lastSignalAt ?? "na",
+        record.healthSeverity,
+      ].join(":"),
+    )
+    .join("|");
+}
+
+export function buildAssetMapViewportCoordinates({
+  recordCoordinates,
+  spatialFeatureCoordinates,
+  vesselCoordinates,
+  userLocation,
+}: {
+  recordCoordinates: AssetMapCoordinate[];
+  spatialFeatureCoordinates: AssetMapCoordinate[];
+  vesselCoordinates: AssetMapCoordinate[];
+  userLocation: AssetMapUserLocation | null;
+}): AssetMapCoordinate[] {
+  const userLocationCoordinates: AssetMapCoordinate[] = userLocation
+    ? [[userLocation.longitude, userLocation.latitude]]
+    : [];
+
+  return [
+    ...recordCoordinates,
+    ...spatialFeatureCoordinates,
+    ...vesselCoordinates,
+    ...userLocationCoordinates,
+  ];
 }
 
 function buildSpatialFeatureSignature(
@@ -251,37 +270,6 @@ function isRailRouteSpatialFeature(
   feature: Pick<SpatialFeatureRecord, "entity_type">,
 ): boolean {
   return feature.entity_type === "RAIL_ROUTE";
-}
-
-function buildWeatherLocationSignature(
-  weatherLocations: WeatherLocationRecord[],
-): string {
-  return weatherLocations
-    .map((location) =>
-      [
-        location.code,
-        location.latitude,
-        location.longitude,
-        location.is_active,
-        location.updated_at,
-      ].join(":"),
-    )
-    .join("|");
-}
-
-function buildWeatherStatusSignature(
-  weatherSyncStatus: WeatherSyncStatusRecord | null,
-): string {
-  return (weatherSyncStatus?.locations ?? [])
-    .map((location) =>
-      [
-        location.code,
-        location.health_status,
-        location.forecast_age_hours ?? "na",
-        location.observation_age_hours ?? "na",
-      ].join(":"),
-    )
-    .join("|");
 }
 
 export function sortedUniqueAssetSubtypes(records: AssetMapRecord[]): string[] {
@@ -419,19 +407,6 @@ function assetRecordMatchesVisibleGeography(
   );
 }
 
-function weatherLocationMatchesVisibleGeography(
-  assetGeographyVisibility: Record<string, boolean>,
-  location: WeatherLocationRecord,
-): boolean {
-  return isAssetGeographyVisible(
-    assetGeographyVisibility,
-    assetMapGeographyLabelForPoint({
-      latitude: location.latitude,
-      longitude: location.longitude,
-    }),
-  );
-}
-
 function assetRecordMatchesSelectedCountry(
   selectedCountryCode: string,
   record: AssetMapRecord,
@@ -442,18 +417,6 @@ function assetRecordMatchesSelectedCountry(
   );
 }
 
-function weatherLocationMatchesSelectedCountry(
-  selectedCountryCode: string,
-  location: WeatherLocationRecord,
-  locationByCode: ReadonlyMap<string, LocationRecord>,
-): boolean {
-  return (
-    !selectedCountryCode ||
-    assetMapCountryCodeForWeatherLocation(location, locationByCode) ===
-      selectedCountryCode
-  );
-}
-
 function assetRecordMatchesSelectedSubdivision(
   selectedSubdivisionCode: string,
   record: AssetMapRecord,
@@ -461,18 +424,6 @@ function assetRecordMatchesSelectedSubdivision(
   return (
     !selectedSubdivisionCode ||
     assetMapSubdivisionCodeForRecord(record) === selectedSubdivisionCode
-  );
-}
-
-function weatherLocationMatchesSelectedSubdivision(
-  selectedSubdivisionCode: string,
-  location: WeatherLocationRecord,
-  locationByCode: ReadonlyMap<string, LocationRecord>,
-): boolean {
-  return (
-    !selectedSubdivisionCode ||
-    assetMapSubdivisionCodeForWeatherLocation(location, locationByCode) ===
-      selectedSubdivisionCode
   );
 }
 
@@ -803,32 +754,12 @@ function formatGeolocationError(error: GeolocationPositionError): string {
   }
 }
 
-function formatWeatherLayerStatus(params: {
-  activeLocationCount: number;
-  weatherDataLoaded: boolean;
-  weatherDataLoading: boolean;
-  weatherLoadError: string;
-}): string {
-  const {
-    activeLocationCount,
-    weatherDataLoaded,
-    weatherDataLoading,
-    weatherLoadError,
-  } = params;
-
-  if (weatherLoadError) {
-    return "Weather Error";
+function formatVesselLayerStatus(vesselCount: number): string {
+  if (vesselCount === 0) {
+    return "No vessel positions loaded";
   }
 
-  if (weatherDataLoading || !weatherDataLoaded) {
-    return "Loading tracked weather points...";
-  }
-
-  if (activeLocationCount > 0) {
-    return `${activeLocationCount} tracked weather point${activeLocationCount === 1 ? "" : "s"} visible`;
-  }
-
-  return "No tracked weather points loaded";
+  return `${vesselCount.toLocaleString()} vessel position${vesselCount === 1 ? "" : "s"} visible`;
 }
 
 function formatWeatherOverlayModeLabel(
@@ -842,56 +773,27 @@ function formatWeatherOverlayModeLabel(
 
 function formatWeatherOverlayStateLabel(params: {
   activeWeatherOverlayModes: SelectableWeatherOverlayMode[];
-  overlayLoading: boolean;
-  overlayError: string;
-  overlayPointCounts: Partial<Record<DataBackedWeatherOverlayMode, number>>;
+  radarProviderStatusLabel: string;
+  radarProviderLoading: boolean;
 }): string {
   const {
     activeWeatherOverlayModes,
-    overlayLoading,
-    overlayError,
-    overlayPointCounts,
+    radarProviderStatusLabel,
+    radarProviderLoading,
   } = params;
 
   if (activeWeatherOverlayModes.length === 0) {
-    return "Markers only";
+    return "No overlays selected";
   }
 
   if (
     activeWeatherOverlayModes.length === 1 &&
     activeWeatherOverlayModes[0] === "radar"
   ) {
-    return "Live NOAA radar";
+    return radarProviderLoading ? "Loading global radar..." : radarProviderStatusLabel;
   }
 
-  if (overlayError) {
-    return "Overlay Error";
-  }
-
-  if (overlayLoading) {
-    return activeWeatherOverlayModes.length === 1
-      ? `Loading ${formatWeatherOverlayModeLabel(activeWeatherOverlayModes[0])} overlay...`
-      : `Loading ${activeWeatherOverlayModes.length} overlays...`;
-  }
-
-  const overlayPointCount = activeWeatherOverlayModes.reduce((count, mode) => {
-    if (mode === "radar") {
-      return count;
-    }
-    return count + (overlayPointCounts[mode] ?? 0);
-  }, 0);
-
-  if (activeWeatherOverlayModes.length === 1) {
-    return overlayPointCount > 0
-      ? `${overlayPointCount} overlay point${overlayPointCount === 1 ? "" : "s"}`
-      : "No overlay data";
-  }
-
-  if (overlayPointCount > 0) {
-    return `${activeWeatherOverlayModes.length} overlays active · ${overlayPointCount} points`;
-  }
-
-  return `${activeWeatherOverlayModes.length} overlays active`;
+  return "Radar overlay";
 }
 
 function setMapLayerVisibility(
@@ -915,6 +817,38 @@ function hasMapLayer(map: AssetMapLibreMap, layerId: string): boolean {
     return Boolean(map.getLayer(layerId));
   } catch {
     return false;
+  }
+}
+
+function hasMapSource(map: AssetMapLibreMap, sourceId: string): boolean {
+  try {
+    return Boolean(map.getSource(sourceId));
+  } catch {
+    return false;
+  }
+}
+
+function removeMapLayerIfPresent(map: AssetMapLibreMap, layerId: string): void {
+  if (!hasMapLayer(map, layerId)) {
+    return;
+  }
+
+  try {
+    map.removeLayer(layerId);
+  } catch {
+    // MapLibre can clear its style object during React route unmount cleanup.
+  }
+}
+
+function removeMapSourceIfPresent(map: AssetMapLibreMap, sourceId: string): void {
+  if (!hasMapSource(map, sourceId)) {
+    return;
+  }
+
+  try {
+    map.removeSource(sourceId);
+  } catch {
+    // Sources may still be held by layers while effects are being torn down.
   }
 }
 
@@ -1043,14 +977,80 @@ function formatRailRouteFreeTime(route: RailRouteRecord): string {
   return parts.join(' · ') || 'No free-time defaults set';
 }
 
+function formatVesselMapTimestamp(value: string | null): string {
+  if (!value) {
+    return "No timestamp";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function formatVesselMapNumber(value: number | null, digits = 1): string | null {
+  return value === null ? null : value.toFixed(digits);
+}
+
+function formatVesselMapSeverity(value: string | null | undefined): string {
+  return (value ?? "UNKNOWN").replaceAll("_", " ");
+}
+
+function vesselMapHealthTone(value: string | null | undefined): string {
+  switch (value) {
+    case "CLEAR":
+      return "active";
+    case "WATCH":
+      return "planned";
+    case "ACTION_REQUIRED":
+      return "blocked";
+    default:
+      return "in-progress";
+  }
+}
+
+function vesselMarkerTone(value: string | null | undefined): string {
+  switch (value) {
+    case "CLEAR":
+      return "clear";
+    case "WATCH":
+      return "watch";
+    case "ACTION_REQUIRED":
+      return "action-required";
+    default:
+      return "unknown";
+  }
+}
+
+function formatVesselPositionDetail(vessel: AssetMapVesselRecord): string {
+  const parts = [
+    vessel.speedKnots !== null
+      ? `${formatVesselMapNumber(vessel.speedKnots)} kn`
+      : null,
+    vessel.courseDegrees !== null
+      ? `Course ${formatVesselMapNumber(vessel.courseDegrees, 0)}°`
+      : null,
+    vessel.destination ? `Dest ${vessel.destination}` : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return parts.join(" · ") || formatVesselMapSeverity(vessel.healthSeverity);
+}
+
 export function AssetMapCanvas({
   records,
   spatialFeatures,
   railRouteSpatialFeatures,
-  weatherLocations,
-  weatherSyncStatus,
+  vesselPositions = [],
   showAssets: controlledShowAssets,
   showRailRoutes: controlledShowRailRoutes,
+  showVessels: controlledShowVessels,
   filterCardStateKey = "asset-map.filters-card",
   assetActivityVisibility = {},
   assetGeographyVisibility = {},
@@ -1060,11 +1060,10 @@ export function AssetMapCanvas({
   selectedSubdivisionCode = "",
   assetSubtypeOptions = [],
   assetSubtypeVisibility = {},
-  weatherDataLoaded = false,
-  weatherDataLoading = false,
-  weatherLoadError = "",
+  initialWeatherOverlayVisibility,
   onShowAssetsChange,
   onShowRailRoutesChange,
+  onShowVesselsChange,
   onToggleAssetActivity = () => undefined,
   onToggleAssetGeography = () => undefined,
   onSelectCountry = () => undefined,
@@ -1074,18 +1073,20 @@ export function AssetMapCanvas({
   onSetAllAssetSubtypesVisible = () => undefined,
   selectedAssetCode,
   selectedRailRouteCode = null,
+  selectedVesselDeliveryId = null,
   onSelectAsset,
   onSelectRailRoute = () => undefined,
+  onSelectVessel = () => undefined,
   statusTitle,
   statusDetail,
 }: {
   records: AssetMapRecord[];
   spatialFeatures: SpatialFeatureRecord[];
   railRouteSpatialFeatures: SpatialFeatureRecord[];
-  weatherLocations: WeatherLocationRecord[];
-  weatherSyncStatus: WeatherSyncStatusRecord | null;
+  vesselPositions?: AssetMapVesselRecord[];
   showAssets?: boolean;
   showRailRoutes?: boolean;
+  showVessels?: boolean;
   filterCardStateKey?: string;
   assetActivityVisibility?: Record<string, boolean>;
   assetGeographyVisibility?: Record<string, boolean>;
@@ -1095,11 +1096,10 @@ export function AssetMapCanvas({
   selectedSubdivisionCode?: string;
   assetSubtypeOptions: string[];
   assetSubtypeVisibility: Record<string, boolean>;
-  weatherDataLoaded?: boolean;
-  weatherDataLoading?: boolean;
-  weatherLoadError?: string;
+  initialWeatherOverlayVisibility?: WeatherOverlayVisibilityState;
   onShowAssetsChange?: (visible: boolean) => void;
   onShowRailRoutesChange?: (visible: boolean) => void;
+  onShowVesselsChange?: (visible: boolean) => void;
   onToggleAssetActivity?: (activityLabel: string) => void;
   onToggleAssetGeography?: (geographyLabel: string) => void;
   onSelectCountry?: (countryCode: string) => void;
@@ -1109,8 +1109,10 @@ export function AssetMapCanvas({
   onSetAllAssetSubtypesVisible?: (visible: boolean) => void;
   selectedAssetCode: string | null;
   selectedRailRouteCode?: string | null;
+  selectedVesselDeliveryId?: string | null;
   onSelectAsset: (code: string) => void;
   onSelectRailRoute?: (code: string) => void;
+  onSelectVessel?: (deliveryId: string) => void;
   statusTitle?: string | null;
   statusDetail?: string | null;
 }) {
@@ -1125,12 +1127,13 @@ export function AssetMapCanvas({
     maxHeight: number;
   } | null>(null);
   const markersRef = useRef<Array<InstanceType<MapLibreModule["Marker"]>>>([]);
-  const weatherMarkersRef = useRef<
+  const vesselMarkersRef = useRef<
     Array<InstanceType<MapLibreModule["Marker"]>>
   >([]);
   const userMarkerRef = useRef<InstanceType<MapLibreModule["Marker"]> | null>(
     null,
   );
+  const weatherRadarSourceSignatureRef = useRef("");
   const requestedUserLocationRef = useRef(false);
   const hasCenteredOnUserRef = useRef(false);
   const [ready, setReady] = useState(false);
@@ -1146,6 +1149,7 @@ export function AssetMapCanvas({
   const [uncontrolledShowAssets, setUncontrolledShowAssets] = useState(true);
   const [uncontrolledShowRailRoutes, setUncontrolledShowRailRoutes] =
     useState(true);
+  const [uncontrolledShowVessels, setUncontrolledShowVessels] = useState(true);
   const [showWeather, setShowWeather] = useState(true);
   const [showTooltips, setShowTooltips] = useState(true);
   const [savedFilterPresets, setSavedFilterPresets] = useState<
@@ -1154,19 +1158,9 @@ export function AssetMapCanvas({
   const [selectedFilterPresetName, setSelectedFilterPresetName] = useState("");
   const [presetNameInput, setPresetNameInput] = useState("");
   const [presetSaveFeedback, setPresetSaveFeedback] = useState("");
-  const [selectedWeatherLocationCode, setSelectedWeatherLocationCode] =
-    useState<string | null>(null);
-  const [weatherPreviewLoading, setWeatherPreviewLoading] = useState(false);
-  const [weatherPreviewError, setWeatherPreviewError] = useState("");
-  const [weatherForecasts, setWeatherForecasts] = useState<
-    WeatherForecastPeriodRecord[]
-  >([]);
-  const [weatherObservations, setWeatherObservations] = useState<
-    WeatherObservationRecord[]
-  >([]);
   const [weatherOverlayVisibility, setWeatherOverlayVisibility] =
     useState<WeatherOverlayVisibilityState>(() =>
-      createDefaultWeatherOverlayVisibilityState(),
+      initialWeatherOverlayVisibility ?? createDefaultWeatherOverlayVisibilityState(),
     );
   const [weatherOverlayExpansion, setWeatherOverlayExpansion] = useState<
     Record<SelectableWeatherOverlayMode, boolean>
@@ -1175,19 +1169,12 @@ export function AssetMapCanvas({
     useState<WeatherOverlayOpacityState>(() =>
       createDefaultWeatherOverlayOpacityState(),
     );
-  const [weatherOverlayLoading, setWeatherOverlayLoading] = useState(false);
-  const [weatherOverlayError, setWeatherOverlayError] = useState("");
-  const [weatherOverlayPoints, setWeatherOverlayPoints] = useState<
-    WeatherOverlayPointRecord[]
-  >([]);
-  const loggedWeatherLoadErrorRef = useRef("");
+  const [weatherRadarTileProvider, setWeatherRadarTileProvider] =
+    useState<WeatherRadarTileProvider>(NOAA_CONUS_RADAR_TILE_PROVIDER);
+  const [weatherRadarLoading, setWeatherRadarLoading] = useState(false);
+  const [weatherRadarError, setWeatherRadarError] = useState("");
   const loggedMapLoadErrorRef = useRef("");
   const loggedGeolocationErrorRef = useRef("");
-  const loggedWeatherPreviewErrorRef = useRef("");
-  const loggedWeatherOverlayErrorRef = useRef("");
-  const weatherOverlayPointCacheRef = useRef<
-    Map<string, WeatherOverlayPointRecord | null>
-  >(new Map());
   const countrySuggestionListId = useId();
   const subdivisionSuggestionListId = useId();
   const weatherOverlayPanelIdPrefix = useId();
@@ -1202,32 +1189,18 @@ export function AssetMapCanvas({
   const mapCanvasStyle =
     mapCanvasHeight === null ? undefined : { height: `${mapCanvasHeight}px` };
   const handleSelectAsset = useEffectEvent((code: string) => {
-    setSelectedWeatherLocationCode(null);
     onSelectAsset(code);
   });
   const handleSelectRailRoute = useEffectEvent((code: string) => {
-    setSelectedWeatherLocationCode(null);
     onSelectRailRoute(code);
   });
-  const handleSelectWeatherLocation = useEffectEvent((code: string) => {
-    setSelectedWeatherLocationCode(code);
-
-    const location =
-      activeWeatherLocations.find((candidate) => candidate.code === code) ?? null;
-    const map = mapRef.current;
-    if (!location || !map) {
-      return;
-    }
-
-    map.easeTo({
-      center: [location.longitude, location.latitude],
-      zoom: Math.max(map.getZoom(), 6.5),
-      duration: 500,
-    });
+  const handleSelectVessel = useEffectEvent((deliveryId: string) => {
+    onSelectVessel(deliveryId);
   });
   const showAssets = controlledShowAssets ?? uncontrolledShowAssets;
   const showRailRoutes =
     controlledShowRailRoutes ?? uncontrolledShowRailRoutes;
+  const showVessels = controlledShowVessels ?? uncontrolledShowVessels;
   const setShowAssets = useCallback(
     (visible: boolean) => {
       if (controlledShowAssets === undefined) {
@@ -1245,6 +1218,15 @@ export function AssetMapCanvas({
       onShowRailRoutesChange?.(visible);
     },
     [controlledShowRailRoutes, onShowRailRoutesChange],
+  );
+  const setShowVessels = useCallback(
+    (visible: boolean) => {
+      if (controlledShowVessels === undefined) {
+        setUncontrolledShowVessels(visible);
+      }
+      onShowVesselsChange?.(visible);
+    },
+    [controlledShowVessels, onShowVesselsChange],
   );
   const handleMapResizeHandlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1320,10 +1302,6 @@ export function AssetMapCanvas({
     },
     [mapCanvasHeight],
   );
-  const activeWeatherLocations = useMemo(
-    () => weatherLocations.filter((location) => location.is_active),
-    [weatherLocations],
-  );
   const activeWeatherOverlayModes = useMemo(
     () =>
       WEATHER_OVERLAY_TOGGLE_OPTIONS.filter(
@@ -1338,15 +1316,9 @@ export function AssetMapCanvas({
       ),
     [weatherOverlayVisibility],
   );
-  const trackedWeatherOverlayModes = useMemo(
-    () =>
-      activeWeatherOverlayModes.filter(
-        (mode): mode is DataBackedWeatherOverlayMode => mode !== "radar",
-      ),
-    [activeWeatherOverlayModes],
-  );
   const railRouteOverlayCount = railRouteSpatialFeatures.length;
   const sharedSpatialFeatureCount = spatialFeatures.length;
+  const visibleVesselPositionCount = showVessels ? vesselPositions.length : 0;
   const visibleActivityCount = useMemo(
     () =>
       ASSET_MAP_ACTIVITY_LABELS.filter((activityLabel) =>
@@ -1368,6 +1340,7 @@ export function AssetMapCanvas({
       showUserLocation,
       showAssets,
       showRailRoutes,
+      showVessels,
       showWeather,
     ].filter(Boolean).length;
     const visibleGeographyCount = ASSET_MAP_GEOGRAPHY_LABELS.filter(
@@ -1387,13 +1360,13 @@ export function AssetMapCanvas({
       );
     }
 
-    if (showAssets || showWeather) {
+    if (showAssets) {
       parts.push(
         `${visibleGeographyCount} geograph${visibleGeographyCount === 1 ? "y" : "ies"}`,
       );
     }
 
-    if (showAssets || showWeather) {
+    if (showAssets) {
       parts.push(
         selectedCountryCode
           ? formatAssetMapCountryLabel(selectedCountryCode)
@@ -1401,7 +1374,7 @@ export function AssetMapCanvas({
       );
     }
 
-    if (showAssets || showWeather) {
+    if (showAssets) {
       parts.push(selectedSubdivisionCode || "All states or territories");
     }
 
@@ -1427,6 +1400,14 @@ export function AssetMapCanvas({
       );
     }
 
+    if (showVessels) {
+      parts.push(
+        vesselPositions.length === 1
+          ? "1 vessel"
+          : `${vesselPositions.length} vessels`,
+      );
+    }
+
     if (showWeather && activeWeatherOverlayModes.length > 0) {
       parts.push(
         activeWeatherOverlayModes.length === 1
@@ -1445,25 +1426,14 @@ export function AssetMapCanvas({
     selectedSubdivisionCode,
     showAssets,
     showRailRoutes,
+    showVessels,
     showUserLocation,
     showWeather,
     railRouteOverlayCount,
     sharedSpatialFeatureCount,
+    vesselPositions.length,
     visibleActivityCount,
   ]);
-  const weatherStatusByCode = useMemo(
-    () =>
-      new Map(
-        (weatherSyncStatus?.locations ?? []).map(
-          (location) => [location.code, location] as const,
-        ),
-      ),
-    [weatherSyncStatus],
-  );
-  const weatherLocationSignature = useMemo(
-    () => buildWeatherLocationSignature(activeWeatherLocations),
-    [activeWeatherLocations],
-  );
   const handleWeatherOverlayToggle = useCallback(
     (mode: SelectableWeatherOverlayMode, checked: boolean) => {
       setWeatherOverlayVisibility((currentState) => ({
@@ -1500,88 +1470,11 @@ export function AssetMapCanvas({
     },
     [],
   );
-  const weatherStatusSignature = useMemo(
-    () => buildWeatherStatusSignature(weatherSyncStatus),
-    [weatherSyncStatus],
-  );
-  const selectedWeatherLocation = useMemo(
-    () =>
-      activeWeatherLocations.find(
-        (location) => location.code === selectedWeatherLocationCode,
-      ) ?? null,
-    [activeWeatherLocations, selectedWeatherLocationCode],
-  );
-  const selectedWeatherStatus = selectedWeatherLocation
-    ? (weatherStatusByCode.get(selectedWeatherLocation.code) ?? null)
-    : null;
-  const weatherLayerStatus = formatWeatherLayerStatus({
-    activeLocationCount: activeWeatherLocations.length,
-    weatherDataLoaded,
-    weatherDataLoading,
-    weatherLoadError,
-  });
-  const weatherOverlayPointCollections = useMemo(
-    () => ({
-      precipitation: buildWeatherOverlayPointFeatureCollection(
-        weatherOverlayPoints,
-        "precipitation",
-      ),
-      wind: buildWeatherOverlayPointFeatureCollection(weatherOverlayPoints, "wind"),
-      temperature: buildWeatherOverlayPointFeatureCollection(
-        weatherOverlayPoints,
-        "temperature",
-      ),
-      humidity: buildWeatherOverlayPointFeatureCollection(
-        weatherOverlayPoints,
-        "humidity",
-      ),
-      pressure: buildWeatherOverlayPointFeatureCollection(
-        weatherOverlayPoints,
-        "pressure",
-      ),
-    }),
-    [weatherOverlayPoints],
-  );
-  const weatherWindVectorCollection = useMemo(
-    () => buildWeatherOverlayWindVectorFeatureCollection(weatherOverlayPoints),
-    [weatherOverlayPoints],
-  );
-  const weatherOverlayPointCounts = useMemo(
-    () => ({
-      precipitation: weatherOverlayPointCollections.precipitation.features.length,
-      wind: weatherOverlayPointCollections.wind.features.length,
-      temperature: weatherOverlayPointCollections.temperature.features.length,
-      humidity: weatherOverlayPointCollections.humidity.features.length,
-      pressure: weatherOverlayPointCollections.pressure.features.length,
-    }),
-    [weatherOverlayPointCollections],
-  );
   const weatherOverlayStateLabel = formatWeatherOverlayStateLabel({
     activeWeatherOverlayModes,
-    overlayLoading: weatherOverlayLoading,
-    overlayError: weatherOverlayError,
-    overlayPointCounts: weatherOverlayPointCounts,
+    radarProviderStatusLabel: weatherRadarTileProvider.statusLabel,
+    radarProviderLoading: weatherRadarLoading,
   });
-  const hasVisibleDataBackedWeatherOverlay = useMemo(
-    () =>
-      trackedWeatherOverlayModes.some(
-        (mode) => (weatherOverlayPointCounts[mode] ?? 0) > 0,
-      ),
-    [trackedWeatherOverlayModes, weatherOverlayPointCounts],
-  );
-  const showWeatherMarkers = showWeather && !hasVisibleDataBackedWeatherOverlay;
-
-  useEffect(() => {
-    if (
-      !weatherLoadError ||
-      loggedWeatherLoadErrorRef.current === weatherLoadError
-    ) {
-      return;
-    }
-
-    logAssetMapError("Weather layer error", weatherLoadError);
-    loggedWeatherLoadErrorRef.current = weatherLoadError;
-  }, [weatherLoadError]);
 
   useEffect(() => {
     if (!loadError || loggedMapLoadErrorRef.current === loadError) {
@@ -1605,148 +1498,57 @@ export function AssetMapCanvas({
   }, [geolocationError]);
 
   useEffect(() => {
-    if (
-      !weatherPreviewError ||
-      loggedWeatherPreviewErrorRef.current === weatherPreviewError
-    ) {
+    if (!showWeather || !weatherOverlayVisibility.radar) {
+      setWeatherRadarLoading(false);
+      setWeatherRadarError("");
       return;
     }
 
-    logAssetMapError("Weather preview error", weatherPreviewError);
-    loggedWeatherPreviewErrorRef.current = weatherPreviewError;
-  }, [weatherPreviewError]);
-
-  useEffect(() => {
-    weatherOverlayPointCacheRef.current.clear();
-  }, [weatherStatusSignature]);
-
-  useEffect(() => {
-    if (
-      !weatherOverlayError ||
-      loggedWeatherOverlayErrorRef.current === weatherOverlayError
-    ) {
-      return;
-    }
-
-    logAssetMapError("Weather overlay error", weatherOverlayError);
-    loggedWeatherOverlayErrorRef.current = weatherOverlayError;
-  }, [weatherOverlayError]);
-
-  useEffect(() => {
-    if (!showWeather || trackedWeatherOverlayModes.length === 0) {
-      setWeatherOverlayLoading(false);
-      setWeatherOverlayError("");
-      setWeatherOverlayPoints([]);
-      return;
-    }
-
-    const cachedOverlayPoints = activeWeatherLocations
-      .map((location) => weatherOverlayPointCacheRef.current.get(location.code))
-      .filter(
-        (point): point is WeatherOverlayPointRecord =>
-          point !== undefined && point !== null,
-      );
-    const uncachedLocations = activeWeatherLocations.filter(
-      (location) => !weatherOverlayPointCacheRef.current.has(location.code),
-    );
-
-    if (uncachedLocations.length === 0) {
-      setWeatherOverlayLoading(false);
-      setWeatherOverlayError("");
-      setWeatherOverlayPoints(cachedOverlayPoints);
+    if (weatherRadarTileProvider.id === "rainviewer-global") {
+      setWeatherRadarLoading(false);
+      setWeatherRadarError("");
       return;
     }
 
     let cancelled = false;
+    const abortController = new AbortController();
 
-    async function loadWeatherOverlayPoints() {
-      setWeatherOverlayLoading(true);
-      setWeatherOverlayError("");
+    async function loadGlobalRadarTileProvider() {
+      setWeatherRadarLoading(true);
+      setWeatherRadarError("");
 
-      const loadResults = await Promise.allSettled(
-        uncachedLocations.map(async (location) => {
-          const [forecastResult, observationResult] = await Promise.allSettled([
-            loadWeatherForecastPeriods(appConfig.apiBase, location.code, 1),
-            loadWeatherObservations(appConfig.apiBase, location.code, 1),
-          ]);
-
-          const forecast =
-            forecastResult.status === "fulfilled"
-              ? forecastResult.value[0] ?? null
-              : null;
-          const observation =
-            observationResult.status === "fulfilled"
-              ? observationResult.value[0] ?? null
-              : null;
-
-          return {
-            locationCode: location.code,
-            point: buildWeatherOverlayPointRecord(location, {
-              observation,
-              forecast,
-            }),
-            failed:
-              forecastResult.status === "rejected" &&
-              observationResult.status === "rejected",
-          };
-        }),
-      );
-
-      if (cancelled) {
-        return;
-      }
-
-      let failedLocationCount = 0;
-
-      loadResults.forEach((result, index) => {
-        const locationCode = uncachedLocations[index]?.code;
-        if (!locationCode) {
+      try {
+        const provider = await loadRainViewerRadarTileProvider({
+          signal: abortController.signal,
+        });
+        if (cancelled) {
+          return;
+        }
+        setWeatherRadarTileProvider(provider);
+        setWeatherRadarError("");
+      } catch {
+        if (cancelled || abortController.signal.aborted) {
           return;
         }
 
-        if (result.status === "fulfilled") {
-          weatherOverlayPointCacheRef.current.set(
-            locationCode,
-            result.value.point,
-          );
-          if (result.value.failed) {
-            failedLocationCount += 1;
-          }
-          return;
-        }
-
-        failedLocationCount += 1;
-        weatherOverlayPointCacheRef.current.set(locationCode, null);
-      });
-
-      const nextOverlayPoints = activeWeatherLocations
-        .map((location) => weatherOverlayPointCacheRef.current.get(location.code))
-        .filter(
-          (point): point is WeatherOverlayPointRecord =>
-            point !== undefined && point !== null,
+        setWeatherRadarTileProvider(NOAA_CONUS_RADAR_TILE_PROVIDER);
+        setWeatherRadarError(
+          "Global radar source could not be loaded. Showing NOAA CONUS radar until it recovers.",
         );
-      setWeatherOverlayPoints(nextOverlayPoints);
-      setWeatherOverlayLoading(false);
-      setWeatherOverlayError(
-        failedLocationCount > 0 && nextOverlayPoints.length === 0
-          ? "Unable to load tracked weather overlay data."
-          : failedLocationCount > 0
-            ? `${failedLocationCount} tracked weather point${failedLocationCount === 1 ? "" : "s"} could not be loaded for this overlay.`
-            : "",
-      );
+      } finally {
+        if (!cancelled) {
+          setWeatherRadarLoading(false);
+        }
+      }
     }
 
-    void loadWeatherOverlayPoints();
+    void loadGlobalRadarTileProvider();
 
     return () => {
       cancelled = true;
+      abortController.abort();
     };
-  }, [
-    activeWeatherLocations,
-    showWeather,
-    trackedWeatherOverlayModes,
-    weatherLocationSignature,
-  ]);
+  }, [showWeather, weatherOverlayVisibility.radar, weatherRadarTileProvider.id]);
 
   useEffect(() => {
     if (!mapCanvasResizing || typeof window === "undefined") {
@@ -1868,8 +1670,8 @@ export function AssetMapCanvas({
       setReady(false);
       markersRef.current.forEach((marker) => marker.remove());
       markersRef.current = [];
-      weatherMarkersRef.current.forEach((marker) => marker.remove());
-      weatherMarkersRef.current = [];
+      vesselMarkersRef.current.forEach((marker) => marker.remove());
+      vesselMarkersRef.current = [];
       userMarkerRef.current?.remove();
       userMarkerRef.current = null;
       requestedUserLocationRef.current = false;
@@ -1903,83 +1705,14 @@ export function AssetMapCanvas({
     () => buildRecordSignature(records),
     [records],
   );
+  const vesselPositionSignature = useMemo(
+    () => buildVesselPositionSignature(vesselPositions),
+    [vesselPositions],
+  );
   const spatialFeatureSignature = useMemo(
     () => buildSpatialFeatureSignature(spatialFeatures),
     [spatialFeatures],
   );
-
-  useEffect(() => {
-    if (showWeather) {
-      return;
-    }
-
-    setSelectedWeatherLocationCode(null);
-  }, [showWeather]);
-
-  useEffect(() => {
-    if (!selectedWeatherLocationCode) {
-      return;
-    }
-
-    if (
-      !showWeather ||
-      !activeWeatherLocations.some(
-        (location) => location.code === selectedWeatherLocationCode,
-      )
-    ) {
-      setSelectedWeatherLocationCode(null);
-    }
-  }, [activeWeatherLocations, selectedWeatherLocationCode, showWeather]);
-
-  useEffect(() => {
-    if (!showWeather || !selectedWeatherLocation) {
-      setWeatherPreviewLoading(false);
-      setWeatherPreviewError("");
-      setWeatherForecasts([]);
-      setWeatherObservations([]);
-      return;
-    }
-
-    let cancelled = false;
-    const weatherLocationCode = selectedWeatherLocation.code;
-
-    async function loadWeatherPreview() {
-      setWeatherPreviewLoading(true);
-      setWeatherPreviewError("");
-      setWeatherForecasts([]);
-      setWeatherObservations([]);
-
-      try {
-        const [forecastResult, observationResult] = await Promise.all([
-          loadWeatherForecastPeriods(appConfig.apiBase, weatherLocationCode, 2),
-          loadWeatherObservations(appConfig.apiBase, weatherLocationCode, 2),
-        ]);
-
-        if (!cancelled) {
-          setWeatherForecasts(forecastResult);
-          setWeatherObservations(observationResult);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setWeatherPreviewError(
-            error instanceof Error
-              ? error.message
-              : "Unable to load weather location preview.",
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setWeatherPreviewLoading(false);
-        }
-      }
-    }
-
-    void loadWeatherPreview();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedWeatherLocation, showWeather]);
 
   function handleSaveFilterPreset() {
     const presetName = presetNameInput.trim();
@@ -1995,6 +1728,7 @@ export function AssetMapCanvas({
         showUserLocation,
         showAssets,
         showRailRoutes,
+        showVessels,
         showWeather,
         showTooltips,
         weatherOverlayVisibility,
@@ -2027,6 +1761,7 @@ export function AssetMapCanvas({
     setShowUserLocation(selectedPreset.filters.showUserLocation);
     setShowAssets(selectedPreset.filters.showAssets);
     setShowRailRoutes(selectedPreset.filters.showRailRoutes);
+    setShowVessels(selectedPreset.filters.showVessels);
     setShowWeather(selectedPreset.filters.showWeather);
     setShowTooltips(selectedPreset.filters.showTooltips);
     setWeatherOverlayVisibility(selectedPreset.filters.weatherOverlayVisibility);
@@ -2092,8 +1827,7 @@ export function AssetMapCanvas({
     const hasVisibleRailRouteData =
       showRailRoutes &&
       buildSpatialFeatureExtentCoordinates(railRouteSpatialFeatures).length > 0;
-    const hasVisibleWeatherData =
-      showWeather && activeWeatherLocations.length > 0;
+    const hasVisibleVesselData = showVessels && vesselPositions.length > 0;
 
     if (!showUserLocation || !userLocation) {
       userMarkerRef.current?.remove();
@@ -2126,7 +1860,7 @@ export function AssetMapCanvas({
       !hasCenteredOnUserRef.current &&
       !hasVisibleAssetData &&
       !hasVisibleRailRouteData &&
-      !hasVisibleWeatherData
+      !hasVisibleVesselData
     ) {
       map.easeTo({
         center: [userLocation.longitude, userLocation.latitude],
@@ -2136,16 +1870,17 @@ export function AssetMapCanvas({
       hasCenteredOnUserRef.current = true;
     }
   }, [
-    activeWeatherLocations,
     railRouteSpatialFeatures,
     ready,
     records,
     showAssets,
     showRailRoutes,
+    showVessels,
     showUserLocation,
-    showWeather,
     showTooltips,
     userLocation,
+    vesselPositionSignature,
+    vesselPositions,
   ]);
 
   useEffect(() => {
@@ -2188,15 +1923,11 @@ export function AssetMapCanvas({
     const map = mapRef.current;
     const runtime = runtimeRef.current;
     const visibleRecords = showAssets ? records : [];
+    const visibleVesselPositions = showVessels ? vesselPositions : [];
     const visibleSpatialFeatures = [
       ...(showAssets ? spatialFeatures : []),
       ...(showRailRoutes ? railRouteSpatialFeatures : []),
     ];
-    const selectedWeatherLocationForFit = showWeather
-      ? (activeWeatherLocations.find(
-          (location) => location.code === selectedWeatherLocationCode,
-        ) ?? null)
-      : null;
 
     const featureCollection = buildAssetMapFeatureCollection(visibleRecords);
     const sourceData = {
@@ -2419,8 +2150,8 @@ export function AssetMapCanvas({
 
     markersRef.current.forEach((marker) => marker.remove());
     markersRef.current = [];
-    weatherMarkersRef.current.forEach((marker) => marker.remove());
-    weatherMarkersRef.current = [];
+    vesselMarkersRef.current.forEach((marker) => marker.remove());
+    vesselMarkersRef.current = [];
 
     visibleRecords.forEach((record) => {
       if (record.latitude === null || record.longitude === null) {
@@ -2462,68 +2193,63 @@ export function AssetMapCanvas({
       markersRef.current.push(marker);
     });
 
-    if (showWeatherMarkers) {
-      activeWeatherLocations.forEach((location) => {
-        const weatherStatus = weatherStatusByCode.get(location.code);
-        const markerElement = document.createElement("button");
-        const markerLabel = document.createElement("span");
-        markerLabel.className = "asset-map-weather-marker-label";
-        markerLabel.textContent = "Wx";
-        markerElement.type = "button";
-        markerElement.className = [
-          "asset-map-weather-marker",
-          `is-${weatherStatus?.health_status ?? "unknown"}`,
-          selectedWeatherLocationCode === location.code ? "is-selected" : "",
-        ]
-          .filter(Boolean)
-          .join(" ");
-        markerElement.setAttribute(
-          "aria-label",
-          `Open weather location ${location.code}: ${location.name}`,
+    visibleVesselPositions.forEach((vessel) => {
+      const markerElement = document.createElement("button");
+      const markerLabel = document.createElement("span");
+      markerLabel.className = "asset-map-vessel-marker-label";
+      markerLabel.textContent = "V";
+      markerElement.type = "button";
+      markerElement.className = [
+        "asset-map-vessel-marker",
+        `is-${vesselMarkerTone(vessel.healthSeverity)}`,
+        vessel.deliveryId === selectedVesselDeliveryId ? "is-selected" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      markerElement.setAttribute(
+        "aria-label",
+        `Open vessel ${vessel.label} for delivery ${vessel.deliveryId}`,
+      );
+      markerElement.append(markerLabel);
+      if (showTooltips) {
+        markerElement.append(
+          createMapMarkerTooltip(
+            vessel.label,
+            `${vessel.deliveryId} · ${formatVesselPositionDetail(vessel)}`,
+          ),
         );
-        markerElement.append(markerLabel);
-        if (showTooltips) {
-          markerElement.append(
-            createMapMarkerTooltip(
-              `${location.code} · ${location.name}`,
-              `Weather ${weatherHealthLabel(weatherStatus?.health_status ?? "unknown")}`,
-            ),
-          );
-        }
-        markerElement.addEventListener("click", () => {
-          handleSelectWeatherLocation(location.code);
-        });
-
-        const marker = new runtime.Marker({
-          element: markerElement,
-          anchor: "center",
-        })
-          .setLngLat([location.longitude, location.latitude])
-          .addTo(map);
-
-        weatherMarkersRef.current.push(marker);
+      }
+      markerElement.addEventListener("click", () => {
+        handleSelectVessel(vessel.deliveryId);
       });
-    }
+
+      const marker = new runtime.Marker({
+        element: markerElement,
+        anchor: "center",
+      })
+        .setLngLat([vessel.longitude, vessel.latitude])
+        .addTo(map);
+
+      vesselMarkersRef.current.push(marker);
+    });
 
     map.resize();
 
     const spatialFeatureCoordinates = buildSpatialFeatureExtentCoordinates(
       visibleSpatialFeatures,
     );
-    const weatherCoordinates = showWeather
-      ? activeWeatherLocations.map(
-          (location) =>
-            [location.longitude, location.latitude] as [number, number],
-        )
-      : [];
+    const vesselCoordinates = visibleVesselPositions.map(
+      (vessel) => [vessel.longitude, vessel.latitude] as [number, number],
+    );
 
-    if (selectedWeatherLocationForFit) {
+    const selectedVessel = visibleVesselPositions.find(
+      (vessel) => vessel.deliveryId === selectedVesselDeliveryId,
+    );
+
+    if (selectedVessel) {
       map.easeTo({
-        center: [
-          selectedWeatherLocationForFit.longitude,
-          selectedWeatherLocationForFit.latitude,
-        ],
-        zoom: Math.max(map.getZoom(), 6.5),
+        center: [selectedVessel.longitude, selectedVessel.latitude],
+        zoom: Math.max(map.getZoom(), 6),
         duration: 600,
       });
       return;
@@ -2598,11 +2324,14 @@ export function AssetMapCanvas({
       return;
     }
 
-    const combinedCoordinates = [
-      ...visibleRecords.flatMap((record) => record.extentCoordinates),
-      ...spatialFeatureCoordinates,
-      ...weatherCoordinates,
-    ];
+    const combinedCoordinates = buildAssetMapViewportCoordinates({
+      recordCoordinates: visibleRecords.flatMap(
+        (record) => record.extentCoordinates,
+      ),
+      spatialFeatureCoordinates,
+      vesselCoordinates,
+      userLocation: showUserLocation ? userLocation : null,
+    });
 
     if (combinedCoordinates.length === 1) {
       const [longitude, latitude] = combinedCoordinates[0];
@@ -2629,24 +2358,23 @@ export function AssetMapCanvas({
       });
     }
   }, [
-    activeWeatherLocations,
     ready,
     recordSignature,
     records,
     selectedAssetCode,
-    selectedWeatherLocationCode,
+    selectedVesselDeliveryId,
     showAssets,
     showRailRoutes,
-    showWeather,
-    showWeatherMarkers,
+    showVessels,
+    showUserLocation,
     showTooltips,
     spatialFeatureSignature,
     spatialFeatures,
     railRouteSpatialFeatures,
-    weatherLocationSignature,
     selectedRailRouteCode,
-    weatherStatusByCode,
-    weatherStatusSignature,
+    vesselPositionSignature,
+    vesselPositions,
+    userLocation,
   ]);
 
   useEffect(() => {
@@ -2718,12 +2446,33 @@ export function AssetMapCanvas({
 
     const map = mapRef.current;
     const shouldShowRadar = showWeather && weatherOverlayVisibility.radar;
+    const radarSourceSignature = `${weatherRadarTileProvider.id}:${weatherRadarTileProvider.tileUrl}`;
+
+    if (weatherRadarSourceSignatureRef.current !== radarSourceSignature) {
+      removeMapLayerIfPresent(map, WEATHER_RADAR_LAYER_ID);
+      removeMapSourceIfPresent(map, WEATHER_RADAR_SOURCE_ID);
+      weatherRadarSourceSignatureRef.current = radarSourceSignature;
+    }
 
     if (!map.getSource(WEATHER_RADAR_SOURCE_ID)) {
-      map.addSource(WEATHER_RADAR_SOURCE_ID, {
+      const radarSource: {
+        type: "raster";
+        tiles: string[];
+        tileSize: number;
+        maxzoom?: number;
+        attribution?: string;
+      } = {
         type: "raster",
-        tiles: [NOAA_RADAR_TILE_URL],
-        tileSize: 256,
+        tiles: [weatherRadarTileProvider.tileUrl],
+        tileSize: weatherRadarTileProvider.tileSize,
+        attribution: weatherRadarTileProvider.attributionHtml,
+      };
+      if (weatherRadarTileProvider.maxZoom !== undefined) {
+        radarSource.maxzoom = weatherRadarTileProvider.maxZoom;
+      }
+
+      map.addSource(WEATHER_RADAR_SOURCE_ID, {
+        ...radarSource,
       });
     }
 
@@ -2749,305 +2498,13 @@ export function AssetMapCanvas({
       weatherOverlayOpacities.radar,
     );
     setMapLayerVisibility(map, WEATHER_RADAR_LAYER_ID, shouldShowRadar);
-  }, [ready, showWeather, weatherOverlayOpacities, weatherOverlayVisibility]);
-
-  useEffect(() => {
-    if (!ready || !mapRef.current) {
-      return;
-    }
-
-    const map = mapRef.current;
-    const beforeLayerId = hasMapLayer(map, ASSET_GEOMETRY_FILL_LAYER_ID)
-      ? ASSET_GEOMETRY_FILL_LAYER_ID
-      : undefined;
-
-    WEATHER_SCALAR_OVERLAY_MODES.forEach((mode) => {
-      const collection = weatherOverlayPointCollections[mode];
-      const sourceId = weatherOverlayPointSourceId(mode);
-      const glowLayerId = weatherOverlayGlowLayerId(mode);
-      const pointLayerId = weatherOverlayPointLayerId(mode);
-      const colorExpression = getWeatherOverlayColorExpression(mode);
-      const opacity = weatherOverlayOpacities[mode];
-      const overlayActive =
-        showWeather &&
-        weatherOverlayVisibility[mode] &&
-        collection.features.length > 0;
-
-      const pointSource = map.getSource(sourceId) as
-        | {
-            setData: (data: unknown) => void;
-          }
-        | undefined;
-      if (pointSource) {
-        pointSource.setData(collection);
-      } else {
-        map.addSource(sourceId, {
-          type: "geojson",
-          data: collection,
-        });
-      }
-
-      if (!hasMapLayer(map, glowLayerId)) {
-        map.addLayer(
-          {
-            id: glowLayerId,
-            type: "circle",
-            source: sourceId,
-            paint: {
-              "circle-color": colorExpression.glowColor,
-              "circle-opacity": opacity * 0.2,
-              "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["zoom"],
-                2,
-                26,
-                4,
-                42,
-                6,
-                58,
-              ],
-              "circle-blur": 0.75,
-            },
-          },
-          beforeLayerId,
-        );
-      }
-
-      if (!hasMapLayer(map, pointLayerId)) {
-        map.addLayer(
-          {
-            id: pointLayerId,
-            type: "circle",
-            source: sourceId,
-            paint: {
-              "circle-color": colorExpression.circleColor,
-              "circle-opacity": Math.min(opacity + 0.08, 0.92),
-              "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["zoom"],
-                2,
-                5,
-                4,
-                7,
-                6,
-                10,
-              ],
-              "circle-stroke-color": "#ffffff",
-              "circle-stroke-width": 1.1,
-            },
-          },
-          beforeLayerId,
-        );
-      }
-
-      map.setPaintProperty(glowLayerId, "circle-color", colorExpression.glowColor);
-      map.setPaintProperty(glowLayerId, "circle-opacity", opacity * 0.2);
-      map.setPaintProperty(pointLayerId, "circle-color", colorExpression.circleColor);
-      map.setPaintProperty(
-        pointLayerId,
-        "circle-opacity",
-        Math.min(opacity + 0.08, 0.92),
-      );
-
-      setMapLayerVisibility(map, glowLayerId, overlayActive);
-      setMapLayerVisibility(map, pointLayerId, overlayActive);
-    });
-
-    const windPointSourceId = weatherOverlayPointSourceId("wind");
-    const windPointLayerId = weatherOverlayPointLayerId("wind");
-    const windPointCollection = weatherOverlayPointCollections.wind;
-    const windColorExpression = getWeatherOverlayColorExpression("wind");
-    const windOpacity = weatherOverlayOpacities.wind;
-    const windOverlayActive =
-      showWeather &&
-      weatherOverlayVisibility.wind &&
-      windPointCollection.features.length > 0;
-
-    const windPointSource = map.getSource(windPointSourceId) as
-      | {
-          setData: (data: unknown) => void;
-        }
-      | undefined;
-    if (windPointSource) {
-      windPointSource.setData(windPointCollection);
-    } else {
-      map.addSource(windPointSourceId, {
-        type: "geojson",
-        data: windPointCollection,
-      });
-    }
-
-    const windVectorSource = map.getSource(WEATHER_WIND_VECTOR_SOURCE_ID) as
-      | {
-          setData: (data: unknown) => void;
-        }
-      | undefined;
-    if (windVectorSource) {
-      windVectorSource.setData(weatherWindVectorCollection);
-    } else {
-      map.addSource(WEATHER_WIND_VECTOR_SOURCE_ID, {
-        type: "geojson",
-        data: weatherWindVectorCollection,
-      });
-    }
-
-    if (!hasMapLayer(map, windPointLayerId)) {
-      map.addLayer(
-        {
-          id: windPointLayerId,
-          type: "circle",
-          source: windPointSourceId,
-          paint: {
-            "circle-color": windColorExpression.circleColor,
-            "circle-opacity": Math.min(windOpacity + 0.08, 0.92),
-            "circle-radius": [
-              "interpolate",
-              ["linear"],
-              ["zoom"],
-              2,
-              5,
-              4,
-              7,
-              6,
-              10,
-            ],
-            "circle-stroke-color": "#ffffff",
-            "circle-stroke-width": 1.1,
-          },
-        },
-        beforeLayerId,
-      );
-    }
-
-    if (!hasMapLayer(map, WEATHER_WIND_VECTOR_LAYER_ID)) {
-      map.addLayer(
-        {
-          id: WEATHER_WIND_VECTOR_LAYER_ID,
-          type: "line",
-          source: WEATHER_WIND_VECTOR_SOURCE_ID,
-          paint: {
-            "line-color": windColorExpression.circleColor,
-            "line-opacity": Math.min(windOpacity + 0.06, 0.88),
-            "line-width": [
-              "interpolate",
-              ["linear"],
-              ["zoom"],
-              2,
-              1.4,
-              4,
-              2.1,
-              6,
-              3,
-            ],
-          },
-        },
-        beforeLayerId,
-      );
-    }
-
-    map.setPaintProperty(
-      windPointLayerId,
-      "circle-color",
-      windColorExpression.circleColor,
-    );
-    map.setPaintProperty(
-      windPointLayerId,
-      "circle-opacity",
-      Math.min(windOpacity + 0.08, 0.92),
-    );
-    map.setPaintProperty(
-      WEATHER_WIND_VECTOR_LAYER_ID,
-      "line-color",
-      windColorExpression.circleColor,
-    );
-    map.setPaintProperty(
-      WEATHER_WIND_VECTOR_LAYER_ID,
-      "line-opacity",
-      Math.min(windOpacity + 0.06, 0.88),
-    );
-
-    setMapLayerVisibility(map, windPointLayerId, windOverlayActive);
-    setMapLayerVisibility(
-      map,
-      WEATHER_WIND_VECTOR_LAYER_ID,
-      windOverlayActive && weatherWindVectorCollection.features.length > 0,
-    );
   }, [
     ready,
     showWeather,
     weatherOverlayOpacities,
-    weatherOverlayPointCollections,
     weatherOverlayVisibility,
-    weatherWindVectorCollection,
+    weatherRadarTileProvider,
   ]);
-
-  useEffect(() => {
-    if (!ready || !mapRef.current) {
-      return;
-    }
-
-    const map = mapRef.current;
-    const layerIds = [
-      ...WEATHER_SCALAR_OVERLAY_MODES.flatMap((mode) => [
-        weatherOverlayPointLayerId(mode),
-      ]),
-      weatherOverlayPointLayerId("wind"),
-      WEATHER_WIND_VECTOR_LAYER_ID,
-    ];
-
-    const handleWeatherOverlayClick = (event: {
-      features?: Array<{
-        properties?: {
-          code?: unknown;
-        };
-      }>;
-    }) => {
-      const selectedFeature = event.features?.find(
-        (feature) => typeof feature.properties?.code === "string",
-      );
-      const weatherLocationCode =
-        typeof selectedFeature?.properties?.code === "string"
-          ? selectedFeature.properties.code
-          : null;
-      if (!weatherLocationCode) {
-        return;
-      }
-
-      handleSelectWeatherLocation(weatherLocationCode);
-    };
-
-    const handleMouseEnter = () => {
-      map.getCanvas().style.cursor = "pointer";
-    };
-    const handleMouseLeave = () => {
-      map.getCanvas().style.cursor = "";
-    };
-
-    layerIds.forEach((layerId) => {
-      if (!hasMapLayer(map, layerId)) {
-        return;
-      }
-
-      map.on("click", layerId, handleWeatherOverlayClick as never);
-      map.on("mouseenter", layerId, handleMouseEnter);
-      map.on("mouseleave", layerId, handleMouseLeave);
-    });
-
-    return () => {
-      layerIds.forEach((layerId) => {
-        if (!hasMapLayer(map, layerId)) {
-          return;
-        }
-
-        map.off("click", layerId, handleWeatherOverlayClick as never);
-        map.off("mouseenter", layerId, handleMouseEnter);
-        map.off("mouseleave", layerId, handleMouseLeave);
-      });
-      resetMapCursor(map);
-    };
-  }, [ready]);
 
   return (
     <div className="asset-map-canvas-shell">
@@ -3088,41 +2545,41 @@ export function AssetMapCanvas({
           <label className="asset-map-layer-toggle">
             <input
               type="checkbox"
+              checked={showVessels}
+              onChange={(event) => setShowVessels(event.target.checked)}
+              disabled={vesselPositions.length === 0}
+            />
+            <span>Vessels</span>
+          </label>
+          <label className="asset-map-layer-toggle">
+            <input
+              type="checkbox"
               checked={showWeather}
               onChange={(event) => setShowWeather(event.target.checked)}
             />
             <span>Weather</span>
           </label>
-          {showWeather ? (
-            <div className="asset-map-layer-status" aria-live="polite">
-              <span
-                className="asset-map-weather-legend-marker"
-                aria-hidden="true"
-              >
-                <span className="asset-map-weather-marker-label">Wx</span>
-              </span>
-              <span>{weatherLayerStatus}</span>
-              <label className="asset-map-layer-inline-toggle">
-                <input
-                  type="checkbox"
-                  checked={showTooltips}
-                  onChange={(event) => setShowTooltips(event.target.checked)}
-                />
-                <span>Tooltips</span>
-              </label>
-            </div>
-          ) : (
-            <div className="asset-map-layer-status">
-              <label className="asset-map-layer-inline-toggle">
-                <input
-                  type="checkbox"
-                  checked={showTooltips}
-                  onChange={(event) => setShowTooltips(event.target.checked)}
-                />
-                <span>Tooltips</span>
-              </label>
-            </div>
-          )}
+          <div className="asset-map-layer-status">
+            {showVessels ? (
+              <>
+                <span
+                  className="asset-map-vessel-legend-marker"
+                  aria-hidden="true"
+                >
+                  <span className="asset-map-vessel-marker-label">V</span>
+                </span>
+                <span>{formatVesselLayerStatus(visibleVesselPositionCount)}</span>
+              </>
+            ) : null}
+            <label className="asset-map-layer-inline-toggle">
+              <input
+                type="checkbox"
+                checked={showTooltips}
+                onChange={(event) => setShowTooltips(event.target.checked)}
+              />
+              <span>Tooltips</span>
+            </label>
+          </div>
         </div>
 
         {showWeather ? (
@@ -3191,7 +2648,6 @@ export function AssetMapCanvas({
                   const isSelected = weatherOverlayVisibility[option.value];
                   const isExpanded = weatherOverlayExpansion[option.value];
                   const overlayOpacity = weatherOverlayOpacities[option.value];
-                  const overlayLegend = getWeatherOverlayLegendConfig(option.value);
                   const overlayPanelId = `${weatherOverlayPanelIdPrefix}-${option.value}-details`;
                   return (
                     <div
@@ -3260,53 +2716,49 @@ export function AssetMapCanvas({
 
                         <p className="asset-map-weather-overlay-description">
                           {describeWeatherOverlayMode(option.value)}
-                          {option.value !== "radar"
-                            ? " Built from the active tracked weather locations visible on the map."
-                            : ""}
                         </p>
 
-                        {overlayLegend ? (
-                          <div className="asset-map-weather-overlay-legend">
-                            <div className="asset-map-weather-overlay-legend-copy">
-                              <strong>{overlayLegend.summaryLabel}</strong>
-                              <span>
-                                {option.value === "wind"
-                                  ? "Vector direction follows the latest observed or forecast flow."
-                                  : "Colors summarize the most recent tracked values available for each visible weather location."}
-                              </span>
-                            </div>
-                            <div
-                              className="asset-map-weather-overlay-legend-bar"
-                              aria-hidden="true"
-                              style={{
-                                background: overlayLegend.gradient,
-                              }}
-                            />
-                            <div className="asset-map-weather-overlay-legend-range">
-                              <span>{overlayLegend.minLabel}</span>
-                              <span>{overlayLegend.maxLabel}</span>
-                            </div>
-                          </div>
+                        {option.value === "radar" ? (
+                          <>
+                            <p className="asset-map-weather-overlay-description">
+                              Source:{" "}
+                              <a
+                                href={weatherRadarTileProvider.attributionUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {weatherRadarTileProvider.attributionLabel}
+                              </a>
+                              {` · ${weatherRadarTileProvider.coverageLabel}`}
+                              {weatherRadarTileProvider.generatedAt
+                                ? ` · Frame ${weatherRadarTileProvider.generatedAt}`
+                                : ""}
+                            </p>
+                            {weatherRadarLoading ? (
+                              <p
+                                className="asset-map-weather-overlay-feedback"
+                                aria-live="polite"
+                              >
+                                Loading latest global radar frame...
+                              </p>
+                            ) : null}
+                            {weatherRadarError ? (
+                              <p
+                                className="asset-map-weather-overlay-feedback"
+                                aria-live="polite"
+                              >
+                                {weatherRadarError}
+                              </p>
+                            ) : null}
+                          </>
                         ) : null}
+
                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              {weatherOverlayError ? (
-                <p
-                  className="asset-map-weather-overlay-feedback"
-                  aria-live="polite"
-                >
-                  {weatherOverlayError}
-                </p>
-              ) : hasVisibleDataBackedWeatherOverlay ? (
-                <p className="asset-map-weather-overlay-description">
-                  Tracked Wx markers hide while point overlays are active. Click
-                  the weather graphic on the map to open the location preview.
-                </p>
-              ) : null}
             </div>
           </div>
         ) : null}
@@ -3333,7 +2785,7 @@ export function AssetMapCanvas({
           </div>
         ) : null}
 
-        {showAssets || showWeather ? (
+        {showAssets ? (
           <div
             className="asset-map-subtype-controls"
             aria-label="Geography visibility controls"
@@ -3492,72 +2944,6 @@ export function AssetMapCanvas({
           className="asset-map-canvas"
           style={mapCanvasStyle}
         />
-
-        {showWeather && selectedWeatherLocation ? (
-          <div className="asset-map-weather-preview">
-            <div className="asset-map-weather-preview-head">
-              <div>
-                <strong>{selectedWeatherLocation.code}</strong>
-                <p>{selectedWeatherLocation.name}</p>
-              </div>
-              <button
-                type="button"
-                className="asset-map-weather-preview-close"
-                aria-label={`Close weather preview for ${selectedWeatherLocation.code}`}
-                onClick={() => setSelectedWeatherLocationCode(null)}
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="asset-map-weather-preview-meta">
-              <span
-                className={`status-pill status-pill-${weatherHealthTone(selectedWeatherStatus?.health_status ?? "unknown")}`}
-              >
-                {weatherHealthLabel(
-                  selectedWeatherStatus?.health_status ?? "unknown",
-                )}
-              </span>
-              {selectedWeatherStatus ? (
-                <>
-                  <span className="entity-chip entity-chip-soft">
-                    Forecast{" "}
-                    {formatWeatherAgeHours(
-                      selectedWeatherStatus.forecast_age_hours,
-                    )}
-                  </span>
-                  <span className="entity-chip entity-chip-soft">
-                    Observation{" "}
-                    {formatWeatherAgeHours(
-                      selectedWeatherStatus.observation_age_hours,
-                    )}
-                  </span>
-                </>
-              ) : null}
-            </div>
-
-            {weatherPreviewError ? <p>Weather Error</p> : null}
-            {!weatherPreviewError && weatherPreviewLoading ? (
-              <p>Loading weather preview...</p>
-            ) : null}
-            {!weatherPreviewError && !weatherPreviewLoading ? (
-              <>
-                <p>
-                  <strong>Latest obs:</strong>{" "}
-                  {weatherObservations[0]
-                    ? summarizeWeatherObservation(weatherObservations[0])
-                    : "No recent observations are stored for this location yet."}
-                </p>
-                <p>
-                  <strong>Next forecast:</strong>{" "}
-                  {weatherForecasts[0]
-                    ? `${formatWeatherPeriodWindow(weatherForecasts[0].start_at, weatherForecasts[0].end_at)} · ${summarizeWeatherForecast(weatherForecasts[0])}`
-                    : "No current forecast periods are stored for this location yet."}
-                </p>
-              </>
-            ) : null}
-          </div>
-        ) : null}
         {showUserLocation && geolocationError ? (
           <div className="asset-map-control-feedback">My Location Error</div>
         ) : null}
@@ -3592,19 +2978,19 @@ export function AssetMapPanel({
   locations,
   railRoutes,
   spatialFeatures,
-  weatherLocations,
-  weatherSyncStatus,
-  weatherDataLoaded = false,
-  weatherDataLoading = false,
-  weatherLoadError = "",
+  vesselPositions = [],
   selectedAssetCode,
   selectedRailRouteCode = null,
+  selectedVesselDeliveryId = null,
   onSelectAsset,
   onSelectRailRoute = () => undefined,
+  onSelectVessel = () => undefined,
+  onOpenVesselDelivery = () => undefined,
   onOpenRailRouteDeliveries = () => undefined,
   onOpenRailRouteScheduling = () => undefined,
   onOpenReferenceRailRoute = () => undefined,
   onClearRailRouteSelection = () => undefined,
+  onClearVesselSelection = () => undefined,
   filterControls,
 }: AssetMapPanelProps) {
   const mapSummary = useMemo(
@@ -3629,6 +3015,7 @@ export function AssetMapPanel({
   >({});
   const [showAssetLayer, setShowAssetLayer] = useState(true);
   const [showRailRouteLayer, setShowRailRouteLayer] = useState(true);
+  const [showVesselLayer, setShowVesselLayer] = useState(true);
   const assetSubtypeOptions = useMemo(
     () => sortedUniqueAssetSubtypes(mapSummary.records),
     [mapSummary.records],
@@ -3669,28 +3056,14 @@ export function AssetMapPanel({
       ),
     [mapSummary.mappedRecords, normalizedAssetGeographyVisibility],
   );
-  const geographyVisibleWeatherLocations = useMemo(
-    () =>
-      weatherLocations.filter((location) =>
-        weatherLocationMatchesVisibleGeography(
-          normalizedAssetGeographyVisibility,
-          location,
-        ),
-      ),
-    [normalizedAssetGeographyVisibility, weatherLocations],
-  );
   const countryOptions = useMemo(
     () =>
       buildAssetMapCountryOptions({
         records: geographyVisibleRecordCandidates,
-        weatherLocations: geographyVisibleWeatherLocations,
+        weatherLocations: [],
         locationByCode,
       }),
-    [
-      geographyVisibleRecordCandidates,
-      geographyVisibleWeatherLocations,
-      locationByCode,
-    ],
+    [geographyVisibleRecordCandidates, locationByCode],
   );
   const effectiveSelectedCountryCode = useMemo(
     () =>
@@ -3715,33 +3088,14 @@ export function AssetMapPanel({
       ),
     [effectiveSelectedCountryCode, geographyVisibleMappedRecords],
   );
-  const countryVisibleWeatherLocations = useMemo(
-    () =>
-      geographyVisibleWeatherLocations.filter((location) =>
-        weatherLocationMatchesSelectedCountry(
-          effectiveSelectedCountryCode,
-          location,
-          locationByCode,
-        ),
-      ),
-    [
-      effectiveSelectedCountryCode,
-      geographyVisibleWeatherLocations,
-      locationByCode,
-    ],
-  );
   const subdivisionOptions = useMemo(
     () =>
       buildAssetMapSubdivisionOptions({
         records: countryVisibleRecordCandidates,
-        weatherLocations: countryVisibleWeatherLocations,
+        weatherLocations: [],
         locationByCode,
       }),
-    [
-      countryVisibleRecordCandidates,
-      countryVisibleWeatherLocations,
-      locationByCode,
-    ],
+    [countryVisibleRecordCandidates, locationByCode],
   );
   const effectiveSelectedSubdivisionCode = useMemo(
     () =>
@@ -3817,10 +3171,21 @@ export function AssetMapPanel({
     () => (showAssetLayer ? visibleMappedRecords : []),
     [showAssetLayer, visibleMappedRecords],
   );
+  const displayedVesselPositions = useMemo(
+    () => (showVesselLayer ? vesselPositions : []),
+    [showVesselLayer, vesselPositions],
+  );
   const selectedRecord =
     displayedMappedRecords.find(
       (record) => record.asset.code === selectedAssetCode,
     ) ?? null;
+  const selectedVessel = useMemo(
+    () =>
+      vesselPositions.find(
+        (vessel) => vessel.deliveryId === selectedVesselDeliveryId,
+      ) ?? null,
+    [selectedVesselDeliveryId, vesselPositions],
+  );
   const selectedAssetRecord = useMemo(
     () =>
       mapSummary.records.find(
@@ -3896,25 +3261,6 @@ export function AssetMapPanel({
       ),
     [activeSpatialFeatures],
   );
-  const visibleWeatherLocations = useMemo(
-    () =>
-      countryVisibleWeatherLocations.filter((location) =>
-        weatherLocationMatchesSelectedSubdivision(
-          effectiveSelectedSubdivisionCode,
-          location,
-          locationByCode,
-        ),
-      ),
-    [
-      countryVisibleWeatherLocations,
-      effectiveSelectedSubdivisionCode,
-      locationByCode,
-    ],
-  );
-  const activeWeatherLocations = useMemo(
-    () => visibleWeatherLocations.filter((location) => location.is_active),
-    [visibleWeatherLocations],
-  );
   const visiblePlacementCounts = useMemo(
     () => buildVisiblePlacementCounts(displayedMappedRecords),
     [displayedMappedRecords],
@@ -3955,8 +3301,10 @@ export function AssetMapPanel({
   const hiddenAssetCount = selectionHiddenCount + unmappedVisibleCount;
   const selectedRailRouteOverlayHiddenByLayer =
     selectedRailRouteCode !== null && !showRailRouteLayer;
+  const selectedVesselHiddenByLayer =
+    selectedVesselDeliveryId !== null && !showVesselLayer;
   const mapStatusTitle =
-    visibleMappedRecords.length === 0
+    visibleMappedRecords.length === 0 && displayedVesselPositions.length === 0
       ? geographyVisibleRecordCandidates.length === 0
         ? "No selected geographies are visible right now."
         : countryVisibleRecordCandidates.length === 0 &&
@@ -3973,7 +3321,7 @@ export function AssetMapPanel({
                 : "No filtered assets are map-ready yet."
       : null;
   const mapStatusDetail =
-    visibleMappedRecords.length === 0
+    visibleMappedRecords.length === 0 && displayedVesselPositions.length === 0
       ? geographyVisibleRecordCandidates.length === 0
         ? "Turn at least one geography back on to restore plotted assets."
         : countryVisibleRecordCandidates.length === 0 &&
@@ -4046,7 +3394,8 @@ export function AssetMapPanel({
             The map prefers asset GeoJSON, then direct asset coordinates, then
             the linked location coordinates, and now overlays governed spatial
             features like routes, regions, and rail corridors for shared
-            context. Only map-ready assets are included here.
+            context. Only map-ready assets are included here. Saved vessel
+            positions plot as a separate tracking layer.
           </p>
         </div>
         <div className="asset-map-stats" aria-label="Asset map coverage">
@@ -4068,11 +3417,9 @@ export function AssetMapPanel({
           <span className="entity-chip entity-chip-soft">
             {activeRailRouteSpatialFeatures.length} rail overlays
           </span>
-          {activeWeatherLocations.length > 0 ? (
-            <span className="entity-chip entity-chip-soft">
-              {activeWeatherLocations.length} weather points
-            </span>
-          ) : null}
+          <span className="entity-chip entity-chip-soft">
+            {displayedVesselPositions.length} vessels
+          </span>
           <span className="entity-chip entity-chip-soft">
             {hiddenAssetCount} hidden
           </span>
@@ -4087,10 +3434,10 @@ export function AssetMapPanel({
         records={visibleMappedRecords}
         spatialFeatures={activeSharedSpatialFeatures}
         railRouteSpatialFeatures={activeRailRouteSpatialFeatures}
-        weatherLocations={visibleWeatherLocations}
-        weatherSyncStatus={weatherSyncStatus}
+        vesselPositions={vesselPositions}
         showAssets={showAssetLayer}
         showRailRoutes={showRailRouteLayer}
+        showVessels={showVesselLayer}
         filterCardStateKey="map-workspace.map-filters-card"
         assetActivityVisibility={normalizedAssetActivityVisibility}
         assetGeographyVisibility={normalizedAssetGeographyVisibility}
@@ -4100,11 +3447,9 @@ export function AssetMapPanel({
         selectedSubdivisionCode={effectiveSelectedSubdivisionCode}
         assetSubtypeOptions={assetSubtypeOptions}
         assetSubtypeVisibility={normalizedAssetSubtypeVisibility}
-        weatherDataLoaded={weatherDataLoaded}
-        weatherDataLoading={weatherDataLoading}
-        weatherLoadError={weatherLoadError}
         onShowAssetsChange={setShowAssetLayer}
         onShowRailRoutesChange={setShowRailRouteLayer}
+        onShowVesselsChange={setShowVesselLayer}
         onToggleAssetActivity={handleToggleAssetActivity}
         onToggleAssetGeography={handleToggleAssetGeography}
         onSelectCountry={handleSelectCountry}
@@ -4114,8 +3459,10 @@ export function AssetMapPanel({
         onSetAllAssetSubtypesVisible={handleSetAllAssetSubtypesVisible}
         selectedAssetCode={selectedAssetCode}
         selectedRailRouteCode={selectedRailRouteCode}
+        selectedVesselDeliveryId={selectedVesselDeliveryId}
         onSelectAsset={onSelectAsset}
         onSelectRailRoute={onSelectRailRoute}
+        onSelectVessel={onSelectVessel}
         statusTitle={mapStatusTitle}
         statusDetail={mapStatusDetail}
       />
@@ -4246,6 +3593,74 @@ export function AssetMapPanel({
               Select a plotted rail corridor from the map to inspect its lane
               context, then jump into deliveries, scheduling, or route
               maintenance from the same focus point.
+            </p>
+          )}
+        </div>
+
+        <div className="reference-usage-card asset-map-card">
+          <div className="reference-usage-head">
+            <strong>Selected Vessel</strong>
+            <span className="entity-chip entity-chip-soft">
+              {selectedVessel?.deliveryId ?? "No selection"}
+            </span>
+          </div>
+          {selectedVessel ? (
+            <>
+              <p>
+                {selectedVessel.label} · {selectedVessel.commodity} ·{" "}
+                {selectedVessel.status.replaceAll("_", " ")}
+              </p>
+              <p>
+                {selectedVessel.latitude.toFixed(4)},{" "}
+                {selectedVessel.longitude.toFixed(4)} ·{" "}
+                {formatVesselMapTimestamp(
+                  selectedVessel.lastPositionAt ?? selectedVessel.lastSignalAt,
+                )}
+              </p>
+              <p>
+                {formatVesselPositionDetail(selectedVessel)} ·{" "}
+                {formatVesselMapSeverity(
+                  selectedVessel.primaryException ??
+                    selectedVessel.healthSeverity,
+                )}
+              </p>
+              <div className="toolbar">
+                <span
+                  className={`status-pill status-pill-${vesselMapHealthTone(selectedVessel.healthSeverity)}`}
+                >
+                  {formatVesselMapSeverity(selectedVessel.healthSeverity)}
+                </span>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => onOpenVesselDelivery(selectedVessel.deliveryId)}
+                >
+                  Open Delivery
+                </button>
+                <button
+                  type="button"
+                  className="button button-ghost"
+                  onClick={onClearVesselSelection}
+                >
+                  Clear Vessel Focus
+                </button>
+              </div>
+              {selectedVesselHiddenByLayer ? (
+                <p>
+                  The Vessels layer is currently hidden. Turn that layer back on
+                  to re-plot this position on the map.
+                </p>
+              ) : null}
+            </>
+          ) : vesselPositions.length > 0 ? (
+            <p>
+              Select a plotted vessel from the map to inspect its AIS position,
+              tracking health, and delivery handoff.
+            </p>
+          ) : (
+            <p>
+              Vessel deliveries appear here after they have saved latitude and
+              longitude from AISStream or a manual signal.
             </p>
           )}
         </div>

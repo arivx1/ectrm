@@ -21,6 +21,7 @@ import {
   routingStatusTone,
   routingStrategyLabel,
 } from './documentIngestionUtils'
+import { DocumentFacetEditor } from './DocumentFacetEditor'
 import { DocumentIngestionHeaderFieldsEditor } from './DocumentIngestionHeaderFieldsEditor'
 import { DocumentIngestionTableBlocksEditor } from './DocumentIngestionTableBlocksEditor'
 import type { DocumentIngestionController } from './useDocumentIngestionController'
@@ -276,6 +277,20 @@ export function DocumentIngestionPageEditor({
           ) : null}
         </div>
       </div>
+
+      <DocumentFacetEditor
+        documentId={document.document_id}
+        pageId={page.page_id}
+        title={`Page ${page.page_number} Tags`}
+        values={page.facet_values ?? []}
+        facetSchemas={schemaRegistry?.document_facets}
+        onChange={(nextValues) =>
+          controller.updatePageDraft(document.document_id, page.page_id, (current) => ({
+            ...current,
+            facet_values: nextValues,
+          }))
+        }
+      />
 
       <DocumentIngestionHeaderFieldsEditor
         controller={controller}

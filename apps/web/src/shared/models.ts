@@ -342,6 +342,46 @@ export type DeliveryTruckTrackingExceptionRecord = {
   tracking_health: DeliveryTruckMovementTrackingHealthRecord
 }
 
+export type DeliveryVesselTrackingHealthRecord = {
+  last_evaluated_at: string
+  tracking_freshness_status: string
+  tracking_freshness_reason: string
+  eta_status: string
+  eta_status_reason: string
+  exception_severity: string
+  primary_exception: string | null
+  stale_after_minutes: number
+  minutes_since_last_signal: number | null
+  eta_late_minutes: number | null
+}
+
+export type DeliveryVesselDetailRecord = {
+  delivery_id: string
+  vessel_name: string | null
+  imo_number: string | null
+  mmsi_number: string | null
+  call_sign: string | null
+  voyage_number: string | null
+  tracking_provider: string | null
+  tracking_policy: string | null
+  last_signal_at: string | null
+  last_position_at: string | null
+  last_latitude: number | null
+  last_longitude: number | null
+  last_speed_knots: number | null
+  last_course_degrees: number | null
+  last_heading_degrees: number | null
+  last_navigational_status: string | null
+  current_destination: string | null
+  current_eta_at_destination: string | null
+  tracking_health: DeliveryVesselTrackingHealthRecord
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
 export type DeliveryTrackingSignalRecord = {
   signal_id: number
   delivery_id: string | null
@@ -354,7 +394,13 @@ export type DeliveryTrackingSignalRecord = {
   received_at: string
   latitude: number | null
   longitude: number | null
+  speed_knots: number | null
+  course_degrees: number | null
+  heading_degrees: number | null
+  draught_meters: number | null
   location_code: string | null
+  destination: string | null
+  eta_at_destination: string | null
   external_status: string | null
   normalized_status: string | null
   match_confidence: number | null
@@ -369,6 +415,20 @@ export type DeliveryTrackingSignalIngestResultRecord = {
   duplicate: boolean
   signal: DeliveryTrackingSignalRecord
   movement: DeliveryTruckMovementSummaryRecord
+}
+
+export type DeliveryVesselTrackingSignalIngestResultRecord = {
+  ingest_status: string
+  duplicate: boolean
+  signal: DeliveryTrackingSignalRecord
+  vessel_detail: DeliveryVesselDetailRecord
+  tracking_health: DeliveryVesselTrackingHealthRecord
+}
+
+export type DeliveryVesselAisstreamRefreshRecord = DeliveryVesselTrackingSignalIngestResultRecord & {
+  provider: string
+  matched_mmsi: string
+  listened_seconds: number
 }
 
 export type DeliveryRecord = {
@@ -429,6 +489,8 @@ export type DeliveryRecord = {
   truck_detail?: DeliveryTruckDetailRecord | null
   truck_movement_count?: number
   active_truck_movement_count?: number
+  vessel_detail?: DeliveryVesselDetailRecord | null
+  vessel_tracking_health?: DeliveryVesselTrackingHealthRecord | null
   rail_route_code: string | null
   rail_route_code_source: DeliveryFieldSource | null
   rail_line_code: string | null
@@ -980,6 +1042,49 @@ export type DocumentActionPlanRecord = {
   payload: Record<string, unknown>
 }
 
+export type DocumentWorkflowRecord = {
+  workflow_id: string
+  label: string
+  document_kind: string
+  document_type_label: string
+  description: string
+}
+
+export type DocumentWorkflowListRecord = {
+  document_id: string
+  document_kind: string | null
+  document_type_label: string | null
+  workflows: DocumentWorkflowRecord[]
+  empty_message: string
+}
+
+export type DocumentWorkflowPriceObservationRecord = {
+  price_index_code: string
+  observation_date: string
+  value: number
+  unit_code: string
+  currency_code: string | null
+  source_provider: string
+  source_series_id: string
+  action: 'CREATED' | 'UPDATED' | 'UNCHANGED'
+  observation_id: number | null
+}
+
+export type DocumentWorkflowExecutionRecord = {
+  document_id: string
+  workflow_id: string
+  label: string
+  status: string
+  message: string
+  run_id: number
+  observation_count: number
+  created_count: number
+  updated_count: number
+  unchanged_count: number
+  price_index_codes: string[]
+  observations: DocumentWorkflowPriceObservationRecord[]
+}
+
 export type DocumentRecordLinkRecord = {
   record_type: string
   record_id: string
@@ -1012,6 +1117,25 @@ export type DocumentProcessorDocumentTraceRecord = DocumentProcessorTraceRecord 
   partial_page_count: number
 }
 
+export type DocumentFacetAssignmentRecord = {
+  facet_value_id: number
+  document_id: string
+  page_id: number | null
+  facet_key: string
+  facet_label: string
+  value_code: string
+  value_label: string
+  source: string
+  confidence: number | null
+  review_status: string
+  evidence: string[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
 export type DocumentIngestionPageRecord = {
   page_id: number
   page_number: number
@@ -1033,6 +1157,7 @@ export type DocumentIngestionPageRecord = {
   reviewed_at: string | null
   reviewed_by: string | null
   processed_at: string | null
+  facet_values?: DocumentFacetAssignmentRecord[]
   processor_trace: DocumentProcessorPageTraceRecord | null
   routing_assessment: DocumentRoutingAssessmentRecord | null
   understanding: DocumentIngestionPageUnderstandingRecord
@@ -1069,6 +1194,7 @@ export type DocumentIngestionRecord = {
   linkage_assessment: DocumentLinkageAssessmentRecord | null
   action_plan: DocumentActionPlanRecord | null
   record_links: DocumentRecordLinkRecord[]
+  facet_values?: DocumentFacetAssignmentRecord[]
   pages: DocumentIngestionPageRecord[]
   understanding: DocumentIngestionUnderstandingRecord
 }
@@ -1156,6 +1282,7 @@ export type DocumentKindSchemaRecord = {
 export type DocumentSchemaRegistryRecord = {
   version: string
   document_kinds: DocumentKindSchemaRecord[]
+  document_facets?: DocumentFacetSchemaRecord[]
 }
 
 export type DocumentProcessorProviderStatusRecord = {
@@ -1299,10 +1426,13 @@ export type PriceIndexRecord = ReferenceRecord & {
   currency_code: string
   unit_code: string
   provider: string
+  quote_type?: PriceIndexQuoteType | null
   market?: string | null
   location_code?: string | null
   calendar_code?: string | null
 }
+
+export type PriceIndexQuoteType = 'SPOT' | 'FUTURE' | 'FORWARD' | 'INDEX' | 'OTHER'
 
 export type CurrencyRecord = ReferenceRecord & {
   symbol?: string | null
@@ -3001,6 +3131,7 @@ export type AssistantRuntimeSettings = {
   available_skills: AssistantAgentSkillDefinition[]
   available_tools: AssistantToolDefinition[]
   available_action_types: AssistantActionDefinition[]
+  available_personas?: AssistantPersonaDefinition[]
 }
 
 export type AssistantVoiceTranscriptionSettings = {
@@ -3298,6 +3429,7 @@ export type AssistantPromptRequest = {
   agent_id?: string
   provider?: AssistantProvider
   workspace?: ViewKey
+  persona?: AssistantPersona
   context?: string
   summary_targets?: AssistantWorkspaceSummaryTarget[]
   use_live_tools?: boolean
@@ -3931,9 +4063,27 @@ export type AssistantPromptContextRequest = {
   agent_id?: string
   provider?: AssistantProvider
   workspace?: ViewKey
+  persona?: AssistantPersona
   context?: string
   summary_targets?: AssistantWorkspaceSummaryTarget[]
   use_live_tools?: boolean
+}
+
+export type AssistantPersona =
+  | 'operator'
+  | 'trader'
+  | 'risk'
+  | 'admin'
+  | 'operations'
+  | 'settlement'
+  | 'reference_data'
+
+export type AssistantPersonaDefinition = {
+  key: AssistantPersona
+  label: string
+  description: string
+  default_for_roles: string[]
+  guidance: string[]
 }
 
 export type AssistantWorkspaceSummaryTarget =
@@ -4111,7 +4261,6 @@ export type AssistantConversation = AssistantConversationSummary & {
 export type ViewKey =
   | 'prompt'
   | 'dashboard'
-  | 'guide'
   | 'pretrade'
   | 'trades'
   | 'events'
@@ -4165,6 +4314,7 @@ export type PriceIndexForm = {
   currency_code: string
   unit_code: string
   provider: string
+  quote_type: PriceIndexQuoteType
   market: string
   location_code: string
   calendar_code: string

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,13 @@ from apps.api.app.core.auth import (
     touch_user_session,
 )
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.assistant.personas import (
+    default_assistant_persona_for_role,
+    normalize_assistant_persona_key,
+)
+from apps.api.app.domains.reference_data.services.external_data.provider_sync import (
+    run_login_triggered_market_data_syncs,
+)
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.schemas.auth import (
     AuthenticatedUserOut,
@@ -34,6 +41,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/bootstrap-admin", response_model=SessionOut, status_code=status.HTTP_201_CREATED)
 def bootstrap_admin_account(
     payload: BootstrapAdminRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> SessionOut:
     configured_token = bootstrap_admin_token()
@@ -55,6 +64,7 @@ def bootstrap_admin_account(
         email=payload.email,
         display_name=payload.display_name,
         role="OPS_ADMIN",
+        default_assistant_persona=default_assistant_persona_for_role("OPS_ADMIN"),
         password_hash=hash_password(payload.password),
         is_active=True,
         last_login_at=now,
@@ -69,6 +79,7 @@ def bootstrap_admin_account(
     db.refresh(user)
 
     session_record, access_token = create_user_session(db, user)
+    _queue_login_market_data_sync(request, background_tasks, requested_by=user.user_id)
     return SessionOut(
         session_id=session_record.session_id,
         access_token=access_token,
@@ -81,6 +92,8 @@ def bootstrap_admin_account(
 @router.post("/session", response_model=SessionOut)
 def create_session(
     payload: SessionLoginRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> SessionOut:
     user = authenticate_user(
@@ -97,6 +110,7 @@ def create_session(
     db.refresh(user)
 
     session_record, access_token = create_user_session(db, user)
+    _queue_login_market_data_sync(request, background_tasks, requested_by=user.user_id)
     return SessionOut(
         session_id=session_record.session_id,
         access_token=access_token,
@@ -107,9 +121,14 @@ def create_session(
 
 
 @router.post("/single-user-session", response_model=SessionOut)
-def create_single_user_session(db: Session = Depends(get_db)) -> SessionOut:
+def create_single_user_session(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> SessionOut:
     user, show_start_here = provision_single_user_auth_user(db)
     session_record, access_token = create_user_session(db, user)
+    _queue_login_market_data_sync(request, background_tasks, requested_by=user.user_id)
     return SessionOut(
         session_id=session_record.session_id,
         access_token=access_token,
@@ -122,6 +141,8 @@ def create_single_user_session(db: Session = Depends(get_db)) -> SessionOut:
 @router.post("/google-session", response_model=SessionOut)
 def create_google_session(
     payload: GoogleSessionRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> SessionOut:
     user, show_start_here = authenticate_google_user(
@@ -129,6 +150,7 @@ def create_google_session(
         id_token=payload.id_token,
     )
     session_record, access_token = create_user_session(db, user)
+    _queue_login_market_data_sync(request, background_tasks, requested_by=user.user_id)
     return SessionOut(
         session_id=session_record.session_id,
         access_token=access_token,
@@ -139,7 +161,11 @@ def create_google_session(
 
 
 @router.get("/me", response_model=CurrentSessionOut)
-def get_current_session(request: Request, db: Session = Depends(get_db)) -> CurrentSessionOut:
+def get_current_session(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> CurrentSessionOut:
     principal = resolve_session_principal(db, request.headers.get("authorization"))
     if principal is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication is required")
@@ -149,6 +175,7 @@ def get_current_session(request: Request, db: Session = Depends(get_db)) -> Curr
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication is required")
 
     touch_user_session(db, principal.session_id)
+    _queue_login_market_data_sync(request, background_tasks, requested_by=user.user_id)
     return CurrentSessionOut(
         session_id=principal.session_id,
         expires_at=principal.expires_at,
@@ -183,4 +210,16 @@ def _to_authenticated_user(user: UserAccount) -> AuthenticatedUserOut:
         email=user.email,
         display_name=user.display_name,
         role=user.role,
+        default_assistant_persona=(
+            normalize_assistant_persona_key(user.default_assistant_persona)
+            or default_assistant_persona_for_role(user.role)
+        ),
     )
+
+
+def _queue_login_market_data_sync(request: Request, background_tasks: BackgroundTasks, *, requested_by: str) -> None:
+    session_factory = getattr(request.app.state, "session_factory", None)
+    task_kwargs = {"requested_by": requested_by}
+    if session_factory is not None:
+        task_kwargs["session_factory"] = session_factory
+    background_tasks.add_task(run_login_triggered_market_data_syncs, **task_kwargs)

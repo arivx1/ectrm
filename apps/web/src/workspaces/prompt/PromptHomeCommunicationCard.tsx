@@ -2,6 +2,10 @@ import { usePersistentCollapsibleCardState } from "../../shared/collapsibleCardS
 import type { StoredAuthSession } from "../../shared/mutation";
 import { MessagingInboxPanel } from "../messages/MessagingInboxPanel";
 import { buildMessagingInboxMessages } from "../messages/messagingInboxData";
+import {
+  mergePromptHomeClassNames,
+  usePromptHomeCardDragHandle,
+} from "./promptHomeCardDrag.ts";
 import type { PromptHomeCounts } from "./promptHomeStarters";
 
 type PromptHomeCommunicationCardProps = {
@@ -36,6 +40,10 @@ export function PromptHomeCommunicationCard({
   );
   const messages = buildMessagingInboxMessages(counts);
   const signedIn = Boolean(authSession);
+  const {
+    className: dragHandleClassName,
+    ...dragHandleAttributes
+  } = usePromptHomeCardDragHandle<HTMLDivElement>();
   const collapsedSummary = [
     `${messages.length.toLocaleString()} inbox items`,
     formatCountLabel(counts.openWorkItems, "open work item"),
@@ -46,7 +54,13 @@ export function PromptHomeCommunicationCard({
     <section
       className={`prompt-home-communication-card ${communicationExpandedState.expanded ? "is-expanded" : "is-collapsed"}`}
     >
-      <div className="prompt-home-communication-card-head">
+      <div
+        {...dragHandleAttributes}
+        className={mergePromptHomeClassNames(
+          "prompt-home-communication-card-head",
+          dragHandleClassName,
+        )}
+      >
         <div className="prompt-home-communication-card-copy">
           <span className="eyebrow">Communication</span>
           <strong>Communication center</strong>

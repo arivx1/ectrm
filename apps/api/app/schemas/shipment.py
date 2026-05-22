@@ -213,6 +213,46 @@ class DeliveryTruckTrackingExceptionOut(BaseModel):
     tracking_health: DeliveryTruckMovementTrackingHealthOut
 
 
+class DeliveryVesselTrackingHealthOut(BaseModel):
+    last_evaluated_at: datetime
+    tracking_freshness_status: str
+    tracking_freshness_reason: str
+    eta_status: str
+    eta_status_reason: str
+    exception_severity: str
+    primary_exception: Optional[str]
+    stale_after_minutes: int
+    minutes_since_last_signal: Optional[int]
+    eta_late_minutes: Optional[int]
+
+
+class DeliveryVesselDetailOut(BaseModel):
+    delivery_id: str
+    vessel_name: Optional[str]
+    imo_number: Optional[str]
+    mmsi_number: Optional[str]
+    call_sign: Optional[str]
+    voyage_number: Optional[str]
+    tracking_provider: Optional[str]
+    tracking_policy: Optional[str]
+    last_signal_at: Optional[datetime]
+    last_position_at: Optional[datetime]
+    last_latitude: Optional[float]
+    last_longitude: Optional[float]
+    last_speed_knots: Optional[float]
+    last_course_degrees: Optional[float]
+    last_heading_degrees: Optional[float]
+    last_navigational_status: Optional[str]
+    current_destination: Optional[str]
+    current_eta_at_destination: Optional[datetime]
+    tracking_health: DeliveryVesselTrackingHealthOut
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
 class DeliveryTrackingSignalOut(BaseModel):
     signal_id: int
     delivery_id: Optional[str]
@@ -225,7 +265,13 @@ class DeliveryTrackingSignalOut(BaseModel):
     received_at: datetime
     latitude: Optional[float]
     longitude: Optional[float]
+    speed_knots: Optional[float]
+    course_degrees: Optional[float]
+    heading_degrees: Optional[float]
+    draught_meters: Optional[float]
     location_code: Optional[str]
+    destination: Optional[str]
+    eta_at_destination: Optional[datetime]
     external_status: Optional[str]
     normalized_status: Optional[str]
     match_confidence: Optional[float]
@@ -240,6 +286,20 @@ class DeliveryTrackingSignalIngestResultOut(BaseModel):
     duplicate: bool
     signal: DeliveryTrackingSignalOut
     movement: DeliveryTruckMovementSummaryOut
+
+
+class DeliveryVesselTrackingSignalIngestResultOut(BaseModel):
+    ingest_status: str
+    duplicate: bool
+    signal: DeliveryTrackingSignalOut
+    vessel_detail: DeliveryVesselDetailOut
+    tracking_health: DeliveryVesselTrackingHealthOut
+
+
+class DeliveryVesselAisstreamRefreshOut(DeliveryVesselTrackingSignalIngestResultOut):
+    provider: str
+    matched_mmsi: str
+    listened_seconds: int
 
 
 class DeliveryObligationOut(BaseModel):
@@ -291,6 +351,8 @@ class DeliveryObligationOut(BaseModel):
     truck_detail: Optional[DeliveryTruckDetailOut] = None
     truck_movement_count: int = 0
     active_truck_movement_count: int = 0
+    vessel_detail: Optional[DeliveryVesselDetailOut] = None
+    vessel_tracking_health: Optional[DeliveryVesselTrackingHealthOut] = None
     rail_route_code: Optional[str] = None
     rail_route_code_source: Optional[str] = None
     rail_line_code: Optional[str] = None
@@ -432,6 +494,16 @@ class DeliveryTruckDetailUpdate(BaseModel):
     equipment_type: Optional[str] = None
     origin_geofence_code: Optional[str] = None
     destination_geofence_code: Optional[str] = None
+
+
+class DeliveryVesselDetailUpdate(BaseModel):
+    vessel_name: Optional[str] = None
+    imo_number: Optional[str] = None
+    mmsi_number: Optional[str] = None
+    call_sign: Optional[str] = None
+    voyage_number: Optional[str] = None
+    tracking_provider: Optional[str] = None
+    tracking_policy: Optional[str] = None
 
 
 class DeliveryPipelineDetailUpdate(BaseModel):
@@ -584,7 +656,12 @@ class DeliveryTrackingSignalWrite(BaseModel):
     stop_id: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    speed_knots: Optional[float] = None
+    course_degrees: Optional[float] = None
+    heading_degrees: Optional[float] = None
+    draught_meters: Optional[float] = None
     location_code: Optional[str] = None
+    destination: Optional[str] = None
     external_status: Optional[str] = None
     normalized_status: Optional[str] = None
     match_confidence: Optional[float] = None

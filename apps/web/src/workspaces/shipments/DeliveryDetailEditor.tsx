@@ -14,6 +14,7 @@ import type {
   UpdateDeliveryPipelineDetailInput,
   UpdateDeliveryPowerDetailInput,
   UpdateDeliveryTruckDetailInput,
+  UpdateDeliveryVesselDetailInput,
   UpdateDeliveryTruckMovementInput,
   UpdateDeliveryTruckStopInput,
 } from '../../entities/shipments/api'
@@ -32,6 +33,7 @@ import {
 import { DeliveryEventTimelineEditor } from './DeliveryEventTimelineEditor'
 import { DeliveryModeDetailEditor } from './DeliveryModeDetailEditor'
 import { DeliveryTruckWorkflowEditor } from './DeliveryTruckWorkflowEditor'
+import { DeliveryVesselTrackingEditor } from './DeliveryVesselTrackingEditor'
 import {
   buildSharedDeliveryResetOptions,
   normalizedNullableText,
@@ -57,6 +59,7 @@ type DeliveryDetailEditorProps = {
   ) => Promise<void>
   onSavePowerDetails: (deliveryId: string, payload: UpdateDeliveryPowerDetailInput) => Promise<void>
   onSaveTruckDetails: (deliveryId: string, payload: UpdateDeliveryTruckDetailInput) => Promise<void>
+  onSaveVesselDetails: (deliveryId: string, payload: UpdateDeliveryVesselDetailInput) => Promise<void>
   onCreateTruckMovement: (
     deliveryId: string,
     payload: DeliveryTruckMovementCreateInput,
@@ -272,6 +275,7 @@ export function DeliveryDetailEditor({
   onSavePipelineDetails,
   onSavePowerDetails,
   onSaveTruckDetails,
+  onSaveVesselDetails,
   onCreateTruckMovement,
   onSaveTruckMovement,
   onCancelTruckMovement,
@@ -624,6 +628,16 @@ export function DeliveryDetailEditor({
           onCancelTruckStop={onCancelTruckStop}
           onRecordTruckStopCheckpoint={onRecordTruckStopCheckpoint}
           onReverseTruckStopCheckpoint={onReverseTruckStopCheckpoint}
+        />
+      ) : null}
+
+      {delivery.transport_mode === 'VESSEL' ? (
+        <DeliveryVesselTrackingEditor
+          authSession={authSession}
+          delivery={delivery}
+          savingDeliveryId={savingDeliveryId}
+          formatDate={formatDate}
+          onSaveVesselDetails={onSaveVesselDetails}
         />
       ) : null}
 

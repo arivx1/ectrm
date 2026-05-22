@@ -839,14 +839,12 @@ function AuthenticatedWorkspaceShell({
             }
           >
             <AppWorkspaceContent
-              activeDocumentationDocumentKey={route.activeDocumentationDocumentKey}
               activeNavigationSectionKey={route.activeNavigationSectionKey}
               captureForm={captureForm}
               amendForm={amendForm}
               appearance={appearance}
               tradeCapturePreferences={tradeCapturePreferences}
               currentView={route.currentView}
-              handleDocumentationDocumentChange={route.handleDocumentationDocumentChange}
               handleRoadmapPublished={shell.handleRoadmapPublished}
               hrefForView={route.hrefForView}
               navigateToTrade={navigateToTrade}
@@ -890,14 +888,12 @@ function AuthenticatedWorkspaceShell({
             }
           >
             <AppWorkspaceContent
-              activeDocumentationDocumentKey={route.activeDocumentationDocumentKey}
               activeNavigationSectionKey={route.activeNavigationSectionKey}
               captureForm={captureForm}
               amendForm={amendForm}
               appearance={appearance}
               tradeCapturePreferences={tradeCapturePreferences}
               currentView={route.currentView}
-              handleDocumentationDocumentChange={route.handleDocumentationDocumentChange}
               handleRoadmapPublished={shell.handleRoadmapPublished}
               hrefForView={route.hrefForView}
               navigateToTrade={navigateToTrade}

@@ -33,6 +33,20 @@ export type WeatherOverlayLegendConfig = {
   summaryLabel: string;
 };
 
+export type WeatherRadarTileProvider = {
+  id: "rainviewer-global" | "noaa-conus";
+  label: string;
+  statusLabel: string;
+  coverageLabel: string;
+  attributionLabel: string;
+  attributionUrl: string;
+  attributionHtml: string;
+  tileUrl: string;
+  tileSize: number;
+  maxZoom?: number;
+  generatedAt: string | null;
+};
+
 export type WeatherOverlayPointRecord = {
   code: string;
   name: string;
@@ -83,7 +97,37 @@ type OverlayDataFetchResult = {
   forecast: WeatherForecastPeriodRecord | null;
 };
 
+type RainViewerFrame = {
+  time: number;
+  path: string;
+};
+
+type RainViewerWeatherMapsManifest = {
+  generated?: unknown;
+  host?: unknown;
+  radar?: {
+    past?: unknown;
+    nowcast?: unknown;
+  };
+};
+
 export const DEFAULT_WEATHER_OVERLAY_OPACITY = 0.72;
+export const RAINVIEWER_WEATHER_MAPS_API_URL =
+  "https://api.rainviewer.com/public/weather-maps.json";
+export const NOAA_CONUS_RADAR_TILE_PROVIDER: WeatherRadarTileProvider = {
+  id: "noaa-conus",
+  label: "NOAA CONUS radar",
+  statusLabel: "US NOAA radar",
+  coverageLabel: "United States CONUS",
+  attributionLabel: "NOAA/NCEP",
+  attributionUrl: "https://opengeo.ncep.noaa.gov/",
+  attributionHtml:
+    '<a href="https://opengeo.ncep.noaa.gov/" target="_blank" rel="noopener noreferrer">NOAA/NCEP</a>',
+  tileUrl:
+    "https://opengeo.ncep.noaa.gov/geoserver/conus/conus_bref_qcd/ows?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=conus_bref_qcd&STYLES=radar_reflectivity&FORMAT=image/png&TRANSPARENT=true&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256",
+  tileSize: 256,
+  generatedAt: null,
+};
 
 export const SELECTABLE_WEATHER_OVERLAY_MODES: SelectableWeatherOverlayMode[] =
   [
@@ -538,7 +582,7 @@ export function describeWeatherOverlayMode(mode: WeatherOverlayMode): string {
     case "none":
       return "Weather markers only";
     case "radar":
-      return "Live NOAA radar reflectivity";
+      return "Latest global composite radar where provider coverage is available";
     case "precipitation":
       return "Forecast precipitation probability";
     case "wind":
@@ -552,6 +596,113 @@ export function describeWeatherOverlayMode(mode: WeatherOverlayMode): string {
     default:
       return "Weather overlay";
   }
+}
+
+export function buildRainViewerRadarTileProvider(
+  manifest: RainViewerWeatherMapsManifest,
+): WeatherRadarTileProvider {
+  const host = normalizeRainViewerHost(manifest.host);
+  const latestFrame = latestRainViewerRadarFrame(manifest);
+  if (!host || latestFrame === null) {
+    throw new Error("RainViewer radar manifest did not include an available radar frame.");
+  }
+
+  const tileUrl = [
+    host,
+    latestFrame.path.replace(/^\/+/, ""),
+    "256",
+    "{z}",
+    "{x}",
+    "{y}",
+    "2",
+    "1_1.png",
+  ].join("/");
+
+  return {
+    id: "rainviewer-global",
+    label: "RainViewer global radar",
+    statusLabel: "Global radar",
+    coverageLabel: "Global provider coverage",
+    attributionLabel: "Rain Viewer",
+    attributionUrl: "https://www.rainviewer.com/",
+    attributionHtml:
+      '<a href="https://www.rainviewer.com/" target="_blank" rel="noopener noreferrer">Rain Viewer</a>',
+    tileUrl,
+    tileSize: 256,
+    maxZoom: 7,
+    generatedAt: isoTimestampFromUnixSeconds(latestFrame.time),
+  };
+}
+
+export async function loadRainViewerRadarTileProvider(
+  options: { signal?: AbortSignal } = {},
+): Promise<WeatherRadarTileProvider> {
+  const response = await fetch(RAINVIEWER_WEATHER_MAPS_API_URL, {
+    cache: "no-store",
+    signal: options.signal,
+  });
+  if (!response.ok) {
+    throw new Error(`RainViewer radar manifest failed: ${response.status}`);
+  }
+
+  return buildRainViewerRadarTileProvider(
+    (await response.json()) as RainViewerWeatherMapsManifest,
+  );
+}
+
+function normalizeRainViewerHost(value: unknown): string {
+  return typeof value === "string" ? value.trim().replace(/\/+$/, "") : "";
+}
+
+function latestRainViewerRadarFrame(
+  manifest: RainViewerWeatherMapsManifest,
+): RainViewerFrame | null {
+  const pastFrames = normalizeRainViewerFrames(manifest.radar?.past);
+  const nowcastFrames = normalizeRainViewerFrames(manifest.radar?.nowcast);
+  const candidateFrames = pastFrames.length > 0 ? pastFrames : nowcastFrames;
+  return (
+    candidateFrames
+      .slice()
+      .sort((left, right) => left.time - right.time)
+      .at(-1) ?? null
+  );
+}
+
+function normalizeRainViewerFrames(value: unknown): RainViewerFrame[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+
+      const candidate = item as { time?: unknown; path?: unknown };
+      if (
+        typeof candidate.time !== "number" ||
+        !Number.isFinite(candidate.time) ||
+        typeof candidate.path !== "string" ||
+        !candidate.path.trim()
+      ) {
+        return null;
+      }
+
+      return {
+        time: candidate.time,
+        path: candidate.path.trim(),
+      };
+    })
+    .filter((frame): frame is RainViewerFrame => frame !== null);
+}
+
+function isoTimestampFromUnixSeconds(value: number): string | null {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  return new Date(value * 1000).toISOString();
 }
 
 export function overlayValueForMode(

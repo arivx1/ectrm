@@ -154,7 +154,6 @@ const WATCHLIST_ALERT_DELIVERY_CHANNEL_SET = new Set<string>(DASHBOARD_WATCHLIST
 const WATCHLIST_ALERT_ROUTE_VIEW_SET = new Set<string>([
   'prompt',
   'dashboard',
-  'guide',
   'pretrade',
   'trades',
   'events',

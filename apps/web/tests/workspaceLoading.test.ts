@@ -26,17 +26,6 @@ test('buildRequestedGroups starts with core plus the current workspace dependenc
   assert.deepEqual(requestedGroups, ['core', 'trades', 'reference', 'operations'])
 })
 
-test('buildRequestedGroups keeps the guide workspace light by only requesting core data', () => {
-  const requestedGroups = buildRequestedGroups({
-    currentView: 'guide',
-    force: false,
-    groupLoaded: { ...EMPTY_GROUP_FLAGS },
-    groupLoading: { ...EMPTY_GROUP_FLAGS },
-  })
-
-  assert.deepEqual(requestedGroups, ['core'])
-})
-
 test('buildRequestedGroups skips groups that are already loaded or in flight when not forced', () => {
   const requestedGroups = buildRequestedGroups({
     currentView: 'operations',
@@ -279,14 +268,6 @@ test('shouldPresentSettingsSignInState treats auth redirects into Settings as a 
 })
 
 test('shouldPresentSignedOutAuthGate locks every signed-out route behind the auth gate', () => {
-  assert.equal(
-    shouldPresentSignedOutAuthGate({
-      currentView: 'guide',
-      hasAuthSession: false,
-    }),
-    true,
-  )
-
   assert.equal(
     shouldPresentSignedOutAuthGate({
       currentView: 'prompt',

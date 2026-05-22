@@ -6,6 +6,8 @@ import type {
   DocumentIngestionRecord,
   DocumentProcessorRuntimeSettingsRecord,
   DocumentSchemaRegistryRecord,
+  DocumentWorkflowExecutionRecord,
+  DocumentWorkflowListRecord,
 } from '../../shared/models'
 
 export type DocumentExtractedFieldInput = {
@@ -25,10 +27,22 @@ export type DocumentTableBlockInput = {
   source?: string | null
 }
 
+export type DocumentFacetAssignmentInput = {
+  facet_key: string
+  value_code: string
+  value_label?: string | null
+  source?: string
+  confidence?: number | null
+  review_status?: string
+  evidence?: string[]
+}
+
 export type UpdateDocumentIngestionInput = {
   display_name?: string | null
   document_kind?: string | null
+  facet_values?: DocumentFacetAssignmentInput[]
   review_status?: string | null
+  verification_mode?: 'STRICT' | 'STATUS_ONLY' | null
   review_notes?: string | null
 }
 
@@ -37,6 +51,7 @@ export type UpdateDocumentPageInput = {
   document_subtype?: string | null
   header_fields?: DocumentExtractedFieldInput[]
   table_blocks?: DocumentTableBlockInput[]
+  facet_values?: DocumentFacetAssignmentInput[]
   review_status?: string | null
   review_notes?: string | null
 }
@@ -241,6 +256,32 @@ export async function executeDocumentActionPlan(
 ): Promise<DocumentIngestionRecord> {
   return postJson<DocumentIngestionRecord>(
     `${apiBase}/documents/${documentId}/execute-action-plan`,
+    {},
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function listDocumentWorkflows(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+): Promise<DocumentWorkflowListRecord> {
+  return fetchJson<DocumentWorkflowListRecord>(`${apiBase}/documents/${documentId}/workflows`, {
+    headers: documentHeaders(session),
+    cache: 'no-store',
+  })
+}
+
+export async function executeDocumentWorkflow(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  workflowId: string,
+): Promise<DocumentWorkflowExecutionRecord> {
+  return postJson<DocumentWorkflowExecutionRecord>(
+    `${apiBase}/documents/${documentId}/workflows/${workflowId}/execute`,
     {},
     {
       headers: documentHeaders(session),

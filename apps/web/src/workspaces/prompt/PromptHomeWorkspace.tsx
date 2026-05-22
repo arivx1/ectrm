@@ -1,4 +1,21 @@
 import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DraggableAttributes,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  rectSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
   useCallback,
   useEffect,
   useEffectEvent,
@@ -6,6 +23,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
   type FormEvent,
   type ReactNode,
 } from "react";
@@ -61,22 +79,23 @@ import { appConfig } from "../../shared/config";
 import { usePersistentCollapsibleCardState } from "../../shared/collapsibleCardState";
 import { usePersistentPromptHomeCalendarCardState } from "../../shared/promptHomeCalendarSettings";
 import type { AppRouteHandoff } from "../../shared/appRouteHandoff";
-import { formatDateOnly, formatNumber } from "../../shared/format";
+import { formatNumber } from "../../shared/format";
 import type {
   AssistantActionRequest,
+  AssistantPersona,
+  AssistantPersonaDefinition,
   AssistantPromptNavigationFocusType,
   AssistantProvider,
   AssistantPromptRouteRecommendation,
   AssistantRuntimeSettings,
   AssistantWorkspaceSummaryTarget,
   AssetRecord,
+  DeliveryRecord,
   LocationRecord,
   PriceIndexObservationRecord,
   PriceIndexRecord,
   SpatialFeatureRecord,
   ViewKey,
-  WeatherLocationRecord,
-  WeatherSyncStatusRecord,
 } from "../../shared/models";
 import type { StoredAuthSession } from "../../shared/mutation";
 import {
@@ -103,13 +122,10 @@ import { useVoiceComposer } from "../../shared/voiceComposer";
 import {
   assetMapActivityLabelsForAsset,
   assetMapCountryCodeForRecord,
-  assetMapCountryCodeForWeatherLocation,
-  assetMapGeographyLabelForPoint,
   assetMapGeographyLabelForRecord,
   ASSET_MAP_ACTIVITY_LABELS,
   ASSET_MAP_GEOGRAPHY_LABELS,
   assetMapSubdivisionCodeForRecord,
-  assetMapSubdivisionCodeForWeatherLocation,
   assetMapSubtypeLabelForAsset,
   buildAssetMapCountryOptions,
   buildAssetMapSubdivisionOptions,
@@ -118,20 +134,51 @@ import {
   formatAssetMapPlacement,
   formatAssetMapSource,
 } from "../../features/reference-data/assetMap";
+import {
+  createDefaultWeatherOverlayVisibilityState,
+  type WeatherOverlayVisibilityState,
+} from "../../entities/weather/mapOverlay";
 import { type PromptHomeCounts } from "./promptHomeStarters";
 import { shouldAutoEnsurePromptHomeData } from "./promptHomeAutoLoad";
-import {
-  PROMPT_HOME_PROMPT_KITS,
-  type PromptHomePromptKit,
-} from "./promptHomePromptKits";
 import { PromptHomeCommunicationCard } from "./PromptHomeCommunicationCard";
 import { PromptHomeDocumentUploadCard } from "./PromptHomeDocumentUploadCard";
 import { getPromptHomeNextClockTickDelay } from "./promptHomeClock";
+import {
+  PROMPT_HOME_CARD_VISIBILITY_OPTIONS,
+  type PromptHomeCardKey,
+  usePersistentPromptHomeCardVisibility,
+} from "./promptHomeCardVisibility";
+import {
+  mergePromptHomeClassNames,
+  PromptHomeCardDragHandleProvider,
+  usePromptHomeCardDragHandle,
+  type PromptHomeCardDragHandleProps,
+} from "./promptHomeCardDrag.ts";
+import {
+  countPromptHomeLatestMarks,
+  filterPromptHomeDisplayPriceIndices,
+  formatPromptHomePriceDate,
+  formatPromptHomePriceQuoteTypeCode,
+  formatPromptHomePriceSource,
+  formatPromptHomePriceTime,
+  formatPromptHomePriceUpdatedAt,
+  listPromptHomePriceQuoteTypes,
+  listPromptHomePriceProviders,
+  nextPromptHomePriceSortState,
+  PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE,
+  selectPromptHomeDisplayPriceIndices,
+  selectPromptHomePriceIndices,
+  sortPromptHomeDisplayPriceIndices,
+  type PromptHomePriceMarkFilter,
+  type PromptHomePriceSortField,
+  type PromptHomePriceSortState,
+} from "./promptHomePrices";
 import {
   getPromptHomeMapRecordLimit,
   PROMPT_HOME_MAP_RECORD_LIMIT_OPTIONS,
   savePromptHomeMapRecordLimit,
 } from "./promptHomeMapRecordLimit";
+import { buildVesselMapRecords } from "../map/vesselMapRecords";
 import { buildPromptHomePromotedRoutes } from "./promptPromotedRoutes";
 import {
   AssetMapCanvas,
@@ -151,17 +198,16 @@ type PromptHomeWorkspaceProps = {
   counts: PromptHomeCounts;
   priceIndices?: PriceIndexRecord[];
   assets?: AssetRecord[];
+  deliveries?: DeliveryRecord[];
   locations?: LocationRecord[];
   spatialFeatures?: SpatialFeatureRecord[];
-  weatherLocations?: WeatherLocationRecord[];
-  weatherSyncStatus?: WeatherSyncStatusRecord | null;
   referenceDataLoaded?: boolean;
   referenceDataLoading?: boolean;
   onEnsureReferenceData?: () => Promise<void>;
-  weatherDataLoaded?: boolean;
-  weatherDataLoading?: boolean;
-  weatherDataError?: string;
-  onEnsureWeatherData?: () => Promise<void>;
+  deliveriesDataLoaded?: boolean;
+  deliveriesDataLoading?: boolean;
+  deliveriesDataError?: string;
+  onEnsureDeliveriesData?: () => Promise<void>;
   onOpenView: (view: ViewKey, handoff?: AppRouteHandoff | null) => void;
   customEventsHref?: string;
   onOpenCustomEvents?: () => void;
@@ -184,20 +230,26 @@ type PromptHomeMessage = {
   navigationIntents?: PromptNavigationIntent[];
 };
 
-const QUICK_PROMPTS = [
-  "What needs my attention right now?",
-  "Summarize the open operations queue.",
-  "Where should I look for exposure risk today?",
-  "Help me decide which workspace to use for a trade issue.",
-];
+type PromptHomeSortableListeners = ReturnType<typeof useSortable>["listeners"];
 
 const PROMPT_HOME_PROMPT_CARD_PANEL_ID = "prompt-home-prompt-card-panel";
+const PROMPT_HOME_CARD_FILTER_PANEL_ID = "prompt-home-card-filter-panel";
 const PROMPT_HOME_TIMEFRAME_PANEL_ID = "prompt-home-timeframe-panel";
 const PROMPT_HOME_DAY_PANEL_ID = "prompt-home-day-panel";
 const PROMPT_HOME_WEEK_PANEL_ID = "prompt-home-week-panel";
 const PROMPT_HOME_MONTH_PANEL_ID = "prompt-home-month-panel";
 const PROMPT_HOME_PRICES_PANEL_ID = "prompt-home-prices-panel";
 const PROMPT_HOME_MAP_PANEL_ID = "prompt-home-map-panel";
+const PROMPT_HOME_INITIAL_WEATHER_OVERLAY_VISIBILITY: WeatherOverlayVisibilityState = {
+  ...createDefaultWeatherOverlayVisibilityState(),
+  radar: true,
+};
+const PROMPT_HOME_CARD_LABELS = new Map<PromptHomeCardKey, string>(
+  PROMPT_HOME_CARD_VISIBILITY_OPTIONS.map((option) => [
+    option.key,
+    option.label,
+  ]),
+);
 const PROMPT_HOME_TRADING_HOURS_PANEL_ID = "prompt-home-trading-hours-panel";
 const PROMPT_HOME_DAY_CALENDAR_MARKER_LIMIT = 3;
 const PROMPT_HOME_WEEK_CALENDAR_MARKER_LIMIT = 7;
@@ -207,12 +259,27 @@ const PROMPT_HOME_CALENDAR_MARKER_DETAIL_ITEM_LIMIT = 3;
 const PROMPT_HOME_DAY_HOURS = 24;
 const PROMPT_HOME_DAY_MINUTES = PROMPT_HOME_DAY_HOURS * 60;
 const PROMPT_HOME_WEEK_DAYS = 7;
-const PROMPT_HOME_PRICE_INDEX_LIMIT = 6;
 const PROMPT_HOME_WEEK_MINUTES =
   PROMPT_HOME_WEEK_DAYS * PROMPT_HOME_DAY_MINUTES;
 const PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING = 7;
 const PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING = 22;
 const PROMPT_HOME_DAY_METER_TICKS = [0, 6, 12, 18, 24];
+const PROMPT_HOME_PRICE_PROVIDER_ALL = "ALL";
+const PROMPT_HOME_PRICE_REFRESH_INTERVAL_MS = 60_000;
+const PROMPT_HOME_PRICE_SORT_HEADERS: {
+  field: PromptHomePriceSortField;
+  label: string;
+}[] = [
+  { field: "product", label: "Product" },
+  { field: "location", label: "Location" },
+  { field: "price", label: "Price" },
+  { field: "unit", label: "Unit" },
+  { field: "currency", label: "Currency" },
+  { field: "date", label: "Date" },
+  { field: "time", label: "Time" },
+  { field: "updated", label: "Updated" },
+  { field: "source", label: "Source" },
+];
 const PROMPT_HOME_WEEKDAY_SHORT_LABELS = [
   "Sun",
   "Mon",
@@ -232,6 +299,169 @@ const PROMPT_HOME_WEEKDAY_FULL_LABELS = [
   "Saturday",
 ] as const;
 const PROMPT_HOME_VERBALIZE_STORAGE_KEY = "ectrm.prompt-home.verbalize";
+
+function usePromptHomeCardHeaderDragProps<T extends HTMLElement>() {
+  const { className, ...dragHandleAttributes } =
+    usePromptHomeCardDragHandle<T>();
+
+  return {
+    dragHandleAttributes,
+    dragHandleClassName: className,
+  };
+}
+
+function buildPromptHomeCardDragHandleProps({
+  attributes,
+  cardLabel,
+  listeners,
+  setActivatorNodeRef,
+}: {
+  attributes: DraggableAttributes;
+  cardLabel: string;
+  listeners: PromptHomeSortableListeners;
+  setActivatorNodeRef: (element: HTMLElement | null) => void;
+}): PromptHomeCardDragHandleProps {
+  return {
+    ...attributes,
+    ...listeners,
+    ref: setActivatorNodeRef,
+    className: "prompt-home-card-header-drag-handle",
+    "data-home-card-drag-handle": "true",
+    "aria-label": `Drag ${cardLabel} card by its header`,
+  };
+}
+
+function promptHomeCardLabel(cardKey: PromptHomeCardKey): string {
+  return PROMPT_HOME_CARD_LABELS.get(cardKey) ?? cardKey;
+}
+
+function PromptHomeCardSlot({
+  cardKey,
+  orderIndex,
+  children,
+}: {
+  cardKey: PromptHomeCardKey;
+  orderIndex: number;
+  children: ReactNode;
+}) {
+  const style: CSSProperties = {
+    order: orderIndex,
+  };
+
+  return (
+    <div
+      style={style}
+      className={`prompt-home-card-slot prompt-home-card-slot-${cardKey}`}
+      data-home-card-key={cardKey}
+    >
+      <div className="prompt-home-card-slot-inner">{children}</div>
+    </div>
+  );
+}
+
+function SortablePromptHomeCardSlot({
+  cardKey,
+  orderIndex,
+  children,
+}: {
+  cardKey: PromptHomeCardKey;
+  orderIndex: number;
+  children: ReactNode;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: cardKey });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    order: orderIndex,
+  };
+  const dragHandleProps = buildPromptHomeCardDragHandleProps({
+    attributes,
+    cardLabel: promptHomeCardLabel(cardKey),
+    listeners,
+    setActivatorNodeRef,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`prompt-home-card-slot prompt-home-card-slot-${cardKey} ${isDragging ? "is-dragging" : ""}`}
+      data-home-card-key={cardKey}
+    >
+      <PromptHomeCardDragHandleProvider value={dragHandleProps}>
+        <div className="prompt-home-card-slot-inner">{children}</div>
+      </PromptHomeCardDragHandleProvider>
+    </div>
+  );
+}
+
+function PromptHomePromptCardChrome({
+  expanded,
+  children,
+  onToggle,
+}: {
+  expanded: boolean;
+  children: ReactNode;
+  onToggle: () => void;
+}) {
+  const { dragHandleAttributes, dragHandleClassName } =
+    usePromptHomeCardHeaderDragProps<HTMLDivElement>();
+
+  return (
+    <section
+      className={`prompt-home-prompt-card ${expanded ? "is-expanded" : "is-collapsed"}`}
+    >
+      <div
+        {...dragHandleAttributes}
+        className={mergePromptHomeClassNames(
+          "prompt-home-prompt-card-head",
+          dragHandleClassName,
+        )}
+      >
+        <div className="prompt-home-prompt-card-copy">
+          <span className="eyebrow">Prompt</span>
+          <strong>Ask the desk assistant</strong>
+        </div>
+
+        <div className="prompt-home-prompt-card-side">
+          <button
+            type="button"
+            className="prompt-home-prompt-card-toggle"
+            aria-expanded={expanded}
+            aria-controls={PROMPT_HOME_PROMPT_CARD_PANEL_ID}
+            onClick={onToggle}
+          >
+            <div className="prompt-home-prompt-card-toggle-meta">
+              <small>{expanded ? "Hide card" : "Show card"}</small>
+              <span
+                className="prompt-home-support-toggle-indicator"
+                aria-hidden="true"
+              >
+                {expanded ? "−" : "+"}
+              </span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <div
+        id={PROMPT_HOME_PROMPT_CARD_PANEL_ID}
+        className="prompt-home-prompt-card-body"
+        hidden={!expanded}
+      >
+        {expanded ? children : null}
+      </div>
+    </section>
+  );
+}
 
 type PromptHomeMeterTick = {
   key: string;
@@ -264,6 +494,7 @@ type PromptHomeCalendarAgendaItem = {
   day: number;
   weekdayIndex: number;
   minuteOfDay: number | null;
+  hasEnded: boolean;
 };
 
 type PromptHomeZonedDateParts = {
@@ -633,8 +864,52 @@ function promptHomeCalendarDayKey(
   return Date.UTC(year, month - 1, day) / 86_400_000;
 }
 
+function promptHomeCalendarLocalDateDayKey(value: Date): number {
+  return promptHomeCalendarDayKey(
+    value.getFullYear(),
+    value.getMonth() + 1,
+    value.getDate(),
+  );
+}
+
 function formatCalendarEventCountLabel(count: number): string {
   return `${count} ${count === 1 ? "event" : "events"}`;
+}
+
+function googleCalendarEventHasEnded(args: {
+  event: GoogleCalendarEvent;
+  currentTime: Date;
+  timeZone: string;
+}): boolean {
+  const { event, currentTime, timeZone } = args;
+
+  if (event.end.dateTime) {
+    const end = new Date(event.end.dateTime);
+    if (!Number.isNaN(end.getTime())) {
+      return end.getTime() < currentTime.getTime();
+    }
+  }
+
+  if (event.start.dateTime) {
+    const start = new Date(event.start.dateTime);
+    if (!Number.isNaN(start.getTime())) {
+      return start.getTime() < currentTime.getTime();
+    }
+  }
+
+  const currentParts = getPromptHomeZonedDateParts(currentTime, timeZone);
+  const currentDayKey = promptHomeCalendarDayKey(
+    currentParts.year,
+    currentParts.month,
+    currentParts.day,
+  );
+  const exclusiveEnd = parseGoogleCalendarDateOnly(event.end.date);
+  if (exclusiveEnd) {
+    return promptHomeCalendarLocalDateDayKey(exclusiveEnd) <= currentDayKey;
+  }
+
+  const start = parseGoogleCalendarDateOnly(event.start.date);
+  return start ? promptHomeCalendarLocalDateDayKey(start) < currentDayKey : false;
 }
 
 function normalizePromptHomeCalendarDetailText(
@@ -692,11 +967,35 @@ function buildPromptHomeCalendarAgendaItemHoverDetail(
   return buildPromptHomeCalendarAgendaItemHoverLines(item).join("\n");
 }
 
+function promptHomeTooltipIdPart(value: string): string {
+  const normalizedValue = value
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  return normalizedValue || "event";
+}
+
+function renderPromptHomeCalendarTooltipLines(detail: string): ReactNode {
+  const lines = detail
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  return lines.map((line, index) =>
+    index === 0 ? (
+      <strong key={`${index}-${line}`}>{line}</strong>
+    ) : (
+      <span key={`${index}-${line}`}>{line}</span>
+    ),
+  );
+}
+
 function buildPromptHomeCalendarMarkerHoverDetail(args: {
   summary: string;
   items: PromptHomeCalendarAgendaItem[];
 }): string {
-  const visibleItems = args.items.slice(
+  const detailItems = args.items.filter((item) => !item.hasEnded);
+  const visibleItems = detailItems.slice(
     0,
     PROMPT_HOME_CALENDAR_MARKER_DETAIL_ITEM_LIMIT,
   );
@@ -706,7 +1005,7 @@ function buildPromptHomeCalendarMarkerHoverDetail(args: {
     lines.push(...buildPromptHomeCalendarAgendaItemHoverLines(item));
   }
 
-  const hiddenCount = Math.max(0, args.items.length - visibleItems.length);
+  const hiddenCount = Math.max(0, detailItems.length - visibleItems.length);
   if (hiddenCount > 0) {
     lines.push(
       `+${hiddenCount} more ${hiddenCount === 1 ? "event" : "events"}`,
@@ -743,6 +1042,11 @@ function buildPromptHomeCalendarAgendaItems(args: {
       now: args.currentTime,
       timeZone: args.timeZone,
     });
+    const hasEnded = googleCalendarEventHasEnded({
+      event,
+      currentTime: args.currentTime,
+      timeZone: args.timeZone,
+    });
 
     if (event.start.dateTime) {
       const start = new Date(event.start.dateTime);
@@ -765,6 +1069,7 @@ function buildPromptHomeCalendarAgendaItems(args: {
         day: parts.day,
         weekdayIndex: parts.weekdayIndex,
         minuteOfDay: parts.hour * 60 + parts.minute,
+        hasEnded,
       });
       continue;
     }
@@ -788,6 +1093,7 @@ function buildPromptHomeCalendarAgendaItems(args: {
       day: start.getDate(),
       weekdayIndex: start.getDay(),
       minuteOfDay: null,
+      hasEnded,
     });
   }
 
@@ -1219,6 +1525,22 @@ function resolveDefaultProvider(
   );
 }
 
+function resolveAssistantPersonaFromRole(
+  personas: AssistantPersonaDefinition[],
+  role: string | undefined,
+): AssistantPersona | null {
+  const normalizedRole = role?.trim().toUpperCase();
+  if (!normalizedRole) {
+    return null;
+  }
+
+  return (
+    personas.find((persona) =>
+      persona.default_for_roles.includes(normalizedRole),
+    )?.key ?? null
+  );
+}
+
 function buildPromptHomeContext(args: {
   health: string;
   counts: PromptHomeCounts;
@@ -1294,11 +1616,13 @@ function removePromptNavigationIntent(
 }
 
 function PromptHomeCalendarAgendaSection({
+  sectionKey,
   title,
   summary,
   items,
   emptyMessage,
 }: {
+  sectionKey: string;
   title: string;
   summary: string;
   items: PromptHomeCalendarAgendaItem[];
@@ -1322,27 +1646,44 @@ function PromptHomeCalendarAgendaSection({
       {visibleItems.length > 0 ? (
         <>
           <div className="prompt-home-calendar-agenda-list">
-            {visibleItems.map((item) => (
-              <article
-                key={item.key}
-                className="prompt-home-calendar-agenda-item"
-              >
-                <div className="prompt-home-calendar-agenda-copy">
-                  <strong>{item.title}</strong>
-                  <p>
-                    {item.primary} · {item.secondary}
-                  </p>
-                  {item.supportingText ? <span>{item.supportingText}</span> : null}
-                </div>
-                <div className="prompt-home-calendar-agenda-meta">
-                  {item.htmlLink ? (
-                    <a href={item.htmlLink} target="_blank" rel="noreferrer">
-                      Open
-                    </a>
-                  ) : null}
-                </div>
-              </article>
-            ))}
+            {visibleItems.map((item, index) => {
+              const tooltipId = `prompt-home-calendar-event-tooltip-${sectionKey}-${index}-${promptHomeTooltipIdPart(item.key)}`;
+              const tooltipDetail =
+                buildPromptHomeCalendarAgendaItemHoverDetail(item);
+
+              return (
+                <article
+                  key={item.key}
+                  className="prompt-home-calendar-agenda-item has-tooltip"
+                  tabIndex={0}
+                  aria-describedby={tooltipId}
+                >
+                  <div className="prompt-home-calendar-agenda-copy">
+                    <strong>{item.title}</strong>
+                    <p>
+                      {item.primary} · {item.secondary}
+                    </p>
+                    {item.supportingText ? (
+                      <span>{item.supportingText}</span>
+                    ) : null}
+                  </div>
+                  <div className="prompt-home-calendar-agenda-meta">
+                    {item.htmlLink ? (
+                      <a href={item.htmlLink} target="_blank" rel="noreferrer">
+                        Open
+                      </a>
+                    ) : null}
+                  </div>
+                  <span
+                    id={tooltipId}
+                    role="tooltip"
+                    className="prompt-home-calendar-event-tooltip"
+                  >
+                    {renderPromptHomeCalendarTooltipLines(tooltipDetail)}
+                  </span>
+                </article>
+              );
+            })}
           </div>
           {hiddenCount > 0 ? (
             <p className="prompt-home-calendar-agenda-note">
@@ -1458,10 +1799,17 @@ function PromptHomeTimeMeterCard({
                 key={marker.key}
                 className={`prompt-home-time-meter-marker ${marker.align === "end" ? "is-end" : "is-start"} ${marker.tone === "calendar" ? "is-calendar" : "is-trading"} ${marker.hoverDetail ? "has-detail" : ""}`.trim()}
                 style={{ left: `${marker.percent}%` }}
-                title={marker.hoverDetail ?? undefined}
               >
                 <span>{marker.label}</span>
                 <strong>{marker.detail}</strong>
+                {marker.hoverDetail ? (
+                  <span
+                    role="tooltip"
+                    className="prompt-home-calendar-event-tooltip prompt-home-time-meter-marker-tooltip"
+                  >
+                    {renderPromptHomeCalendarTooltipLines(marker.hoverDetail)}
+                  </span>
+                ) : null}
               </div>
             ))}
           </div>
@@ -1483,11 +1831,18 @@ function PromptHomeTimeMeterCard({
               key={`${marker.key}-boundary`}
               className={`prompt-home-time-meter-boundary-hit-area ${marker.hoverDetail ? "has-detail" : ""}`.trim()}
               style={{ left: `${marker.percent}%` }}
-              title={marker.hoverDetail ?? undefined}
             >
               <span
                 className={`prompt-home-time-meter-boundary ${marker.tone === "calendar" ? "is-calendar" : "is-trading"}`}
               />
+              {marker.hoverDetail ? (
+                <span
+                  role="tooltip"
+                  className="prompt-home-calendar-event-tooltip prompt-home-time-meter-boundary-tooltip"
+                >
+                  {renderPromptHomeCalendarTooltipLines(marker.hoverDetail)}
+                </span>
+              ) : null}
             </span>
           ))}
           <span
@@ -1520,22 +1875,6 @@ function PromptHomeTimeMeterCard({
   );
 }
 
-function selectPromptHomePriceIndices(
-  priceIndices: PriceIndexRecord[],
-): PriceIndexRecord[] {
-  return priceIndices
-    .filter((priceIndex) => priceIndex.is_active)
-    .sort((left, right) => {
-      const providerCompare = left.provider.localeCompare(right.provider);
-      if (providerCompare !== 0) {
-        return providerCompare;
-      }
-
-      const nameCompare = left.name.localeCompare(right.name);
-      return nameCompare !== 0 ? nameCompare : left.code.localeCompare(right.code);
-    });
-}
-
 function priceObservationDigits(
   observation: PriceIndexObservationRecord | null,
   priceIndex: PriceIndexRecord,
@@ -1544,7 +1883,7 @@ function priceObservationDigits(
   return unitCode === "GAL" ? 3 : 2;
 }
 
-function formatPromptHomePriceValue(
+function formatPromptHomePriceNumber(
   observation: PriceIndexObservationRecord | null,
   priceIndex: PriceIndexRecord,
 ): string {
@@ -1552,24 +1891,60 @@ function formatPromptHomePriceValue(
     return "No mark yet";
   }
 
-  const currencyCode = observation.currency_code ?? priceIndex.currency_code;
-  const currencyPrefix = currencyCode ? `${currencyCode} ` : "";
-  return `${currencyPrefix}${formatNumber(
+  return formatNumber(
     observation.value,
     priceObservationDigits(observation, priceIndex),
-  )} / ${observation.unit_code}`;
+  );
 }
 
-function formatPromptHomePriceMeta(
+function formatPromptHomePriceUnit(
   observation: PriceIndexObservationRecord | null,
   priceIndex: PriceIndexRecord,
 ): string {
-  const provider = observation?.source_provider ?? priceIndex.provider;
-  if (!observation) {
-    return `${provider} · awaiting observation`;
+  return observation?.unit_code || priceIndex.unit_code || "—";
+}
+
+function formatPromptHomePriceCurrency(
+  observation: PriceIndexObservationRecord | null,
+  priceIndex: PriceIndexRecord,
+): string {
+  return observation?.currency_code || priceIndex.currency_code || "—";
+}
+
+function formatPromptHomePriceProduct(priceIndex: PriceIndexRecord): string {
+  return priceIndex.commodity_code || "—";
+}
+
+function formatPromptHomePriceLocation(
+  observation: PriceIndexObservationRecord | null,
+  priceIndex: PriceIndexRecord,
+): string {
+  const locationCode = priceIndex.location_code?.trim();
+  if (locationCode) {
+    return locationCode;
   }
 
-  return `${provider} · ${formatDateOnly(observation.observation_date)}`;
+  const provider = priceIndex.provider.trim().toUpperCase();
+  const sourceSeriesId = observation?.source_series_id.trim();
+  if (
+    sourceSeriesId &&
+    ["CAISO", "ERCOT", "EIA_WHOLESALE_POWER"].includes(provider)
+  ) {
+    return sourceSeriesId;
+  }
+
+  return priceIndex.market?.trim() || "—";
+}
+
+function formatPromptHomePriceSortDirection(
+  sortState: PromptHomePriceSortState | null,
+  field: PromptHomePriceSortField,
+): "ascending" | "descending" | "none" {
+  if (sortState?.field !== field) {
+    return "none";
+  }
+
+  return sortState.direction === "asc" ? "ascending" : "descending";
 }
 
 function PromptHomePricesCard({
@@ -1585,42 +1960,126 @@ function PromptHomePricesCard({
     "prompt-home.prices-card",
     true,
   );
+  const [priceSearchQuery, setPriceSearchQuery] = useState("");
+  const [priceProviderFilter, setPriceProviderFilter] = useState(
+    PROMPT_HOME_PRICE_PROVIDER_ALL,
+  );
+  const [priceQuoteTypeFilter, setPriceQuoteTypeFilter] = useState(
+    PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE,
+  );
+  const [priceMarkFilter, setPriceMarkFilter] =
+    useState<PromptHomePriceMarkFilter>("all");
+  const [priceSortState, setPriceSortState] =
+    useState<PromptHomePriceSortState | null>(null);
   const activePriceIndices = useMemo(
     () => selectPromptHomePriceIndices(priceIndices),
     [priceIndices],
   );
-  const displayedPriceIndices = useMemo(
-    () => activePriceIndices.slice(0, PROMPT_HOME_PRICE_INDEX_LIMIT),
+  const providerOptions = useMemo(
+    () => listPromptHomePriceProviders(activePriceIndices),
     [activePriceIndices],
   );
-  const displayedPriceIndexCodes = useMemo(
-    () => displayedPriceIndices.map((priceIndex) => priceIndex.code),
-    [displayedPriceIndices],
+  const quoteTypeOptions = useMemo(
+    () => listPromptHomePriceQuoteTypes(activePriceIndices),
+    [activePriceIndices],
   );
-  const { latestMarksByCode, error } = useLatestPriceIndexMarks(
-    displayedPriceIndexCodes,
+  const effectivePriceProviderFilter =
+    priceProviderFilter === PROMPT_HOME_PRICE_PROVIDER_ALL ||
+    providerOptions.includes(priceProviderFilter)
+      ? priceProviderFilter
+      : PROMPT_HOME_PRICE_PROVIDER_ALL;
+  const effectivePriceQuoteTypeFilter =
+    priceQuoteTypeFilter === PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE ||
+    quoteTypeOptions.includes(priceQuoteTypeFilter as (typeof quoteTypeOptions)[number])
+      ? priceQuoteTypeFilter
+      : PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE;
+  const activePriceIndexCodes = useMemo(
+    () => activePriceIndices.map((priceIndex) => priceIndex.code),
+    [activePriceIndices],
   );
+  const { latestMarksByCode, loading: latestMarksLoading, error } =
+    useLatestPriceIndexMarks(activePriceIndexCodes, {
+      refreshIntervalMs: PROMPT_HOME_PRICE_REFRESH_INTERVAL_MS,
+    });
+  const sortedPriceIndices = useMemo(
+    () => selectPromptHomeDisplayPriceIndices(activePriceIndices, latestMarksByCode),
+    [activePriceIndices, latestMarksByCode],
+  );
+  const displayedPriceIndices = useMemo(
+    () => {
+      const filteredPriceIndices = filterPromptHomeDisplayPriceIndices(
+        sortedPriceIndices,
+        latestMarksByCode,
+        {
+          query: priceSearchQuery,
+          provider: effectivePriceProviderFilter,
+          markFilter: priceMarkFilter,
+          quoteType: effectivePriceQuoteTypeFilter,
+        },
+      );
+      return sortPromptHomeDisplayPriceIndices(
+        filteredPriceIndices,
+        latestMarksByCode,
+        priceSortState,
+      );
+    },
+    [
+      effectivePriceProviderFilter,
+      effectivePriceQuoteTypeFilter,
+      latestMarksByCode,
+      priceMarkFilter,
+      priceSearchQuery,
+      priceSortState,
+      sortedPriceIndices,
+    ],
+  );
+  const latestMarkCount = useMemo(
+    () => countPromptHomeLatestMarks(activePriceIndices, latestMarksByCode),
+    [activePriceIndices, latestMarksByCode],
+  );
+  const hasActivePriceFilters =
+    priceSearchQuery.trim().length > 0 ||
+    effectivePriceProviderFilter !== PROMPT_HOME_PRICE_PROVIDER_ALL ||
+    effectivePriceQuoteTypeFilter !== PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE ||
+    priceMarkFilter !== "all";
+  const { dragHandleAttributes, dragHandleClassName } =
+    usePromptHomeCardHeaderDragProps<HTMLDivElement>();
 
   return (
     <article className="prompt-home-prices-card">
-      <button
-        type="button"
-        className="prompt-home-prices-card-toggle"
-        aria-expanded={pricesExpandedState.expanded}
-        aria-controls={PROMPT_HOME_PRICES_PANEL_ID}
-        onClick={() =>
-          pricesExpandedState.setExpanded((current) => !current)
-        }
+      <div
+        {...dragHandleAttributes}
+        className={mergePromptHomeClassNames(
+          "prompt-home-prices-card-head",
+          dragHandleClassName,
+        )}
       >
-        <div className="prompt-home-prices-card-head">
-          <div className="prompt-home-prices-card-copy">
-            <span className="eyebrow">Prices</span>
-            <strong>Market Prices</strong>
-          </div>
-          <div className="prompt-home-prices-card-toggle-side">
+        <div className="prompt-home-prices-card-copy">
+          <span className="eyebrow">Prices</span>
+          <strong>Market Prices</strong>
+          <p>Market price marks</p>
+        </div>
+        <div className="prompt-home-prices-card-toggle-side">
+          <button
+            type="button"
+            className="prompt-home-prices-card-toggle"
+            aria-expanded={pricesExpandedState.expanded}
+            aria-controls={PROMPT_HOME_PRICES_PANEL_ID}
+            onClick={() =>
+              pricesExpandedState.setExpanded((current) => !current)
+            }
+          >
             <div className="prompt-home-prices-card-toggle-meta">
               <small>
-                {pricesExpandedState.expanded ? "Hide card" : "Show card"}
+                {latestMarksLoading && latestMarkCount === 0
+                  ? `Loading marks · ${activePriceIndices.length} active ${
+                      activePriceIndices.length === 1 ? "index" : "indices"
+                    }`
+                  : `${latestMarkCount} latest ${
+                      latestMarkCount === 1 ? "mark" : "marks"
+                    } · ${activePriceIndices.length} active ${
+                      activePriceIndices.length === 1 ? "index" : "indices"
+                    }`}
               </small>
               <span
                 className="prompt-home-support-toggle-indicator"
@@ -1629,52 +2088,230 @@ function PromptHomePricesCard({
                 {pricesExpandedState.expanded ? "−" : "+"}
               </span>
             </div>
-          </div>
+          </button>
         </div>
-      </button>
+      </div>
 
       <div
         id={PROMPT_HOME_PRICES_PANEL_ID}
         className="prompt-home-prices-card-body"
         hidden={!pricesExpandedState.expanded}
       >
-        {referenceDataLoading && displayedPriceIndices.length === 0 ? (
+        {referenceDataLoading && activePriceIndices.length === 0 ? (
           <div className="prompt-home-prices-skeleton-grid">
             <div className="skeleton-block" />
             <div className="skeleton-block" />
             <div className="skeleton-block" />
           </div>
-        ) : displayedPriceIndices.length > 0 ? (
+        ) : activePriceIndices.length > 0 ? (
           <>
             {error ? <p className="form-note form-note-error">{error}</p> : null}
-            <div className="prompt-home-prices-grid">
-              {displayedPriceIndices.map((priceIndex) => {
-                const latestMark = latestMarksByCode[priceIndex.code] ?? null;
-
-                return (
-                  <article
-                    key={priceIndex.code}
-                    className="prompt-home-price-row"
-                  >
-                    <div className="prompt-home-price-row-copy">
-                      <span>{priceIndex.code}</span>
-                      <strong>{priceIndex.name}</strong>
-                      <small>{formatPromptHomePriceMeta(latestMark, priceIndex)}</small>
-                    </div>
-                    <div className="prompt-home-price-row-mark">
-                      <strong>
-                        {formatPromptHomePriceValue(latestMark, priceIndex)}
-                      </strong>
-                      <small>
-                        {priceIndex.market ||
-                          priceIndex.location_code ||
-                          priceIndex.commodity_code}
-                      </small>
-                    </div>
-                  </article>
-                );
-              })}
+            <div className="prompt-home-prices-filter-bar" aria-label="Price filters">
+              <label className="prompt-home-prices-filter-field">
+                <span>Search</span>
+                <input
+                  type="search"
+                  value={priceSearchQuery}
+                  placeholder="Code, market, commodity, type"
+                  onChange={(event) => setPriceSearchQuery(event.target.value)}
+                />
+              </label>
+              <label className="prompt-home-prices-filter-field">
+                <span>Provider</span>
+                <select
+                  value={effectivePriceProviderFilter}
+                  onChange={(event) => setPriceProviderFilter(event.target.value)}
+                >
+                  <option value={PROMPT_HOME_PRICE_PROVIDER_ALL}>All providers</option>
+                  {providerOptions.map((provider) => (
+                    <option key={provider} value={provider}>
+                      {provider}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="prompt-home-prices-filter-field">
+                <span>Type</span>
+                <select
+                  value={effectivePriceQuoteTypeFilter}
+                  onChange={(event) => setPriceQuoteTypeFilter(event.target.value)}
+                >
+                  <option value={PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE}>All types</option>
+                  {quoteTypeOptions.map((quoteType) => (
+                    <option key={quoteType} value={quoteType}>
+                      {formatPromptHomePriceQuoteTypeCode(quoteType)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="prompt-home-prices-filter-field">
+                <span>Marks</span>
+                <div
+                  className="prompt-home-prices-filter-segments"
+                  role="group"
+                  aria-label="Filter by mark status"
+                >
+                  {[
+                    ["all", "All"],
+                    ["with_marks", "Marked"],
+                    ["missing_marks", "Missing"],
+                  ].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={
+                        priceMarkFilter === value
+                          ? "is-active"
+                          : undefined
+                      }
+                      aria-pressed={priceMarkFilter === value}
+                      onClick={() =>
+                        setPriceMarkFilter(value as PromptHomePriceMarkFilter)
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {hasActivePriceFilters ? (
+                <button
+                  type="button"
+                  className="button button-secondary prompt-home-prices-filter-clear"
+                  onClick={() => {
+                    setPriceSearchQuery("");
+                    setPriceProviderFilter(PROMPT_HOME_PRICE_PROVIDER_ALL);
+                    setPriceQuoteTypeFilter(PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE);
+                    setPriceMarkFilter("all");
+                  }}
+                >
+                  Clear filters
+                </button>
+              ) : null}
             </div>
+            {displayedPriceIndices.length > 0 ? (
+              <div className="prompt-home-prices-grid">
+                <div className="prompt-home-price-header" role="row">
+                  {PROMPT_HOME_PRICE_SORT_HEADERS.map(({ field, label }) => {
+                    const isActiveSort = priceSortState?.field === field;
+                    return (
+                      <span
+                        key={field}
+                        role="columnheader"
+                        aria-sort={formatPromptHomePriceSortDirection(
+                          priceSortState,
+                          field,
+                        )}
+                      >
+                        <button
+                          type="button"
+                          className={mergePromptHomeClassNames(
+                            "prompt-home-price-sort-button",
+                            isActiveSort ? "is-active" : undefined,
+                          )}
+                          aria-label={`Sort prices by ${label}`}
+                          onClick={() =>
+                            setPriceSortState((currentSort) =>
+                              nextPromptHomePriceSortState(currentSort, field),
+                            )
+                          }
+                        >
+                          <span>{label}</span>
+                          <span
+                            className={mergePromptHomeClassNames(
+                              "prompt-home-price-sort-indicator",
+                              isActiveSort && priceSortState?.direction === "asc"
+                                ? "is-ascending"
+                                : undefined,
+                              isActiveSort && priceSortState?.direction === "desc"
+                                ? "is-descending"
+                                : undefined,
+                            )}
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+                {displayedPriceIndices.map((priceIndex) => {
+                  const latestMark = latestMarksByCode[priceIndex.code] ?? null;
+
+                  return (
+                    <article
+                      key={priceIndex.code}
+                      className="prompt-home-price-row"
+                    >
+                      <dl className="prompt-home-price-fields">
+                        <div>
+                          <dt>Product</dt>
+                          <dd>{formatPromptHomePriceProduct(priceIndex)}</dd>
+                        </div>
+                        <div>
+                          <dt>Location</dt>
+                          <dd>
+                            {formatPromptHomePriceLocation(
+                              latestMark,
+                              priceIndex,
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Price</dt>
+                          <dd>
+                            {formatPromptHomePriceNumber(
+                              latestMark,
+                              priceIndex,
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Unit</dt>
+                          <dd>
+                            {formatPromptHomePriceUnit(latestMark, priceIndex)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Currency</dt>
+                          <dd>
+                            {formatPromptHomePriceCurrency(
+                              latestMark,
+                              priceIndex,
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Date</dt>
+                          <dd>{formatPromptHomePriceDate(latestMark)}</dd>
+                        </div>
+                        <div>
+                          <dt>Time</dt>
+                          <dd>{formatPromptHomePriceTime(latestMark)}</dd>
+                        </div>
+                        <div>
+                          <dt>Updated</dt>
+                          <dd>{formatPromptHomePriceUpdatedAt(latestMark)}</dd>
+                        </div>
+                        <div>
+                          <dt>Source</dt>
+                          <dd>
+                            {formatPromptHomePriceSource(
+                              latestMark,
+                              priceIndex,
+                            )}
+                          </dd>
+                        </div>
+                      </dl>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="empty-state">
+                <strong>No prices match the current filters</strong>
+                <p>Clear filters to show all active price indices.</p>
+              </div>
+            )}
           </>
         ) : (
           <div className="empty-state">
@@ -1684,17 +2321,15 @@ function PromptHomePricesCard({
         )}
 
         <div className="prompt-home-prices-card-footer">
-          {activePriceIndices.length > displayedPriceIndices.length ? (
-            <span>
-              Showing {displayedPriceIndices.length} of{" "}
-              {activePriceIndices.length} active indices
-            </span>
-          ) : (
-            <span>
-              {displayedPriceIndices.length} active{" "}
-              {displayedPriceIndices.length === 1 ? "index" : "indices"} shown
-            </span>
-          )}
+          <span>
+            {hasActivePriceFilters
+              ? `Showing ${displayedPriceIndices.length} of ${activePriceIndices.length} active ${
+                  activePriceIndices.length === 1 ? "index" : "indices"
+                }`
+              : `Showing all ${displayedPriceIndices.length} active ${
+                  displayedPriceIndices.length === 1 ? "index" : "indices"
+                }`}
+          </span>
           <button
             type="button"
             className="button button-secondary"
@@ -1711,27 +2346,19 @@ function PromptHomePricesCard({
 function PromptHomeMapTile({
   authSession,
   assets,
+  deliveries,
   locations,
   spatialFeatures,
-  weatherLocations,
-  weatherSyncStatus,
   referenceDataLoaded,
-  weatherDataLoaded,
-  weatherDataLoading,
-  weatherDataError,
   onOpenMapWorkspace,
   initialMapAssetLayerVisible = true,
 }: {
   authSession: StoredAuthSession | null;
   assets: AssetRecord[];
+  deliveries: DeliveryRecord[];
   locations: LocationRecord[];
   spatialFeatures: SpatialFeatureRecord[];
-  weatherLocations: WeatherLocationRecord[];
-  weatherSyncStatus: WeatherSyncStatusRecord | null;
   referenceDataLoaded?: boolean;
-  weatherDataLoaded?: boolean;
-  weatherDataLoading?: boolean;
-  weatherDataError?: string;
   onOpenMapWorkspace: () => void;
   initialMapAssetLayerVisible?: boolean;
 }) {
@@ -1742,6 +2369,9 @@ function PromptHomeMapTile({
   const [selectedAssetCode, setSelectedAssetCode] = useState<string | null>(
     null,
   );
+  const [selectedVesselDeliveryId, setSelectedVesselDeliveryId] = useState<
+    string | null
+  >(null);
   const [assetActivityVisibility, setAssetActivityVisibility] = useState<
     Record<string, boolean>
   >({});
@@ -1759,6 +2389,7 @@ function PromptHomeMapTile({
   const [showAssetLayer, setShowAssetLayer] = useState(
     initialMapAssetLayerVisible,
   );
+  const [showVesselLayer, setShowVesselLayer] = useState(true);
   const [serverMapScopeSummary, setServerMapScopeSummary] =
     useState<AssetMapScopeSummary | null>(null);
   const mapSummary = useMemo(
@@ -1825,31 +2456,14 @@ function PromptHomeMapTile({
       ),
     [mapSummary.records, normalizedAssetGeographyVisibility],
   );
-  const geographyVisibleWeatherLocations = useMemo(
-    () =>
-      weatherLocations.filter(
-        (location) =>
-          normalizedAssetGeographyVisibility[
-            assetMapGeographyLabelForPoint({
-              latitude: location.latitude,
-              longitude: location.longitude,
-            }) ?? ""
-          ] !== false,
-      ),
-    [normalizedAssetGeographyVisibility, weatherLocations],
-  );
   const countryOptions = useMemo(
     () =>
       buildAssetMapCountryOptions({
         records: geographyVisibleRecordCandidates,
-        weatherLocations: geographyVisibleWeatherLocations,
+        weatherLocations: [],
         locationByCode,
       }),
-    [
-      geographyVisibleRecordCandidates,
-      geographyVisibleWeatherLocations,
-      locationByCode,
-    ],
+    [geographyVisibleRecordCandidates, locationByCode],
   );
   const activeSelectedCountryCode = useMemo(
     () =>
@@ -1870,32 +2484,14 @@ function PromptHomeMapTile({
       ),
     [activeSelectedCountryCode, geographyVisibleRecordCandidates],
   );
-  const countryVisibleWeatherLocations = useMemo(
-    () =>
-      geographyVisibleWeatherLocations.filter(
-        (location) =>
-          !activeSelectedCountryCode ||
-          assetMapCountryCodeForWeatherLocation(location, locationByCode) ===
-            activeSelectedCountryCode,
-      ),
-    [
-      activeSelectedCountryCode,
-      geographyVisibleWeatherLocations,
-      locationByCode,
-    ],
-  );
   const subdivisionOptions = useMemo(
     () =>
       buildAssetMapSubdivisionOptions({
         records: countryVisibleRecordCandidates,
-        weatherLocations: countryVisibleWeatherLocations,
+        weatherLocations: [],
         locationByCode,
       }),
-    [
-      countryVisibleRecordCandidates,
-      countryVisibleWeatherLocations,
-      locationByCode,
-    ],
+    [countryVisibleRecordCandidates, locationByCode],
   );
   const activeSelectedSubdivisionCode = useMemo(
     () =>
@@ -1937,22 +2533,6 @@ function PromptHomeMapTile({
           ] !== false,
       ),
     [activityVisibleRecordCandidates, normalizedAssetSubtypeVisibility],
-  );
-  const visibleWeatherLocations = useMemo(
-    () =>
-      countryVisibleWeatherLocations.filter(
-        (location) =>
-          !activeSelectedSubdivisionCode ||
-          assetMapSubdivisionCodeForWeatherLocation(
-            location,
-            locationByCode,
-          ) === activeSelectedSubdivisionCode,
-      ),
-    [
-      activeSelectedSubdivisionCode,
-      countryVisibleWeatherLocations,
-      locationByCode,
-    ],
   );
   const geographyVisibleMappedRecords = useMemo(
     () =>
@@ -2011,6 +2591,20 @@ function PromptHomeMapTile({
   const displayedAssetMapRecords = useMemo(
     () => (showAssetLayer ? displayedMappedRecords : []),
     [displayedMappedRecords, showAssetLayer],
+  );
+  const vesselPositions = useMemo(
+    () => buildVesselMapRecords(deliveries),
+    [deliveries],
+  );
+  const activeSelectedVesselDeliveryId = useMemo(
+    () =>
+      selectedVesselDeliveryId &&
+      vesselPositions.some(
+        (vessel) => vessel.deliveryId === selectedVesselDeliveryId,
+      )
+        ? selectedVesselDeliveryId
+        : null,
+    [selectedVesselDeliveryId, vesselPositions],
   );
   const activeSpatialFeatures = useMemo(
     () => spatialFeatures.filter((feature) => feature.is_active),
@@ -2208,23 +2802,31 @@ function PromptHomeMapTile({
   function handleMapRecordLimitChange(nextValue: string) {
     setMapRecordLimit(savePromptHomeMapRecordLimit(nextValue));
   }
+  const { dragHandleAttributes, dragHandleClassName } =
+    usePromptHomeCardHeaderDragProps<HTMLDivElement>();
 
   return (
     <article className="prompt-home-map-card">
-      <button
-        type="button"
-        className="prompt-home-map-card-toggle"
-        aria-expanded={mapExpandedState.expanded}
-        aria-controls={PROMPT_HOME_MAP_PANEL_ID}
-        onClick={() => mapExpandedState.setExpanded((current) => !current)}
+      <div
+        {...dragHandleAttributes}
+        className={mergePromptHomeClassNames(
+          "prompt-home-map-card-head",
+          dragHandleClassName,
+        )}
       >
-        <div className="prompt-home-map-card-head">
-          <div className="prompt-home-map-card-copy">
-            <span className="eyebrow">Map</span>
-            <strong>Asset map</strong>
-            <p>{mapSummaryLabel}</p>
-          </div>
-          <div className="prompt-home-map-card-toggle-side">
+        <div className="prompt-home-map-card-copy">
+          <span className="eyebrow">Map</span>
+          <strong>Asset map</strong>
+          <p>{mapSummaryLabel}</p>
+        </div>
+        <div className="prompt-home-map-card-toggle-side">
+          <button
+            type="button"
+            className="prompt-home-map-card-toggle"
+            aria-expanded={mapExpandedState.expanded}
+            aria-controls={PROMPT_HOME_MAP_PANEL_ID}
+            onClick={() => mapExpandedState.setExpanded((current) => !current)}
+          >
             <div className="prompt-home-map-card-toggle-meta">
               <small>
                 {mapExpandedState.expanded ? "Hide card" : "Show card"}
@@ -2236,9 +2838,9 @@ function PromptHomeMapTile({
                 {mapExpandedState.expanded ? "−" : "+"}
               </span>
             </div>
-          </div>
+          </button>
         </div>
-      </button>
+      </div>
 
       <div
         id={PROMPT_HOME_MAP_PANEL_ID}
@@ -2249,9 +2851,9 @@ function PromptHomeMapTile({
           records={displayedMappedRecords}
           spatialFeatures={activeSharedSpatialFeatures}
           railRouteSpatialFeatures={activeRailRouteSpatialFeatures}
-          weatherLocations={visibleWeatherLocations}
-          weatherSyncStatus={weatherSyncStatus}
+          vesselPositions={vesselPositions}
           showAssets={showAssetLayer}
+          showVessels={showVesselLayer}
           filterCardStateKey="prompt-home.map-filters-card"
           assetActivityVisibility={normalizedAssetActivityVisibility}
           assetGeographyVisibility={normalizedAssetGeographyVisibility}
@@ -2261,10 +2863,11 @@ function PromptHomeMapTile({
           selectedSubdivisionCode={activeSelectedSubdivisionCode}
           assetSubtypeOptions={assetSubtypeOptions}
           assetSubtypeVisibility={normalizedAssetSubtypeVisibility}
-          weatherDataLoaded={weatherDataLoaded}
-          weatherDataLoading={weatherDataLoading}
-          weatherLoadError={weatherDataError}
+          initialWeatherOverlayVisibility={
+            PROMPT_HOME_INITIAL_WEATHER_OVERLAY_VISIBILITY
+          }
           onShowAssetsChange={setShowAssetLayer}
+          onShowVesselsChange={setShowVesselLayer}
           onToggleAssetActivity={handleToggleAssetActivity}
           onToggleAssetGeography={handleToggleAssetGeography}
           onSelectCountry={handleSelectCountry}
@@ -2274,6 +2877,8 @@ function PromptHomeMapTile({
           onSetAllAssetSubtypesVisible={handleSetAllAssetSubtypesVisible}
           selectedAssetCode={activeSelectedAssetCode}
           onSelectAsset={setSelectedAssetCode}
+          selectedVesselDeliveryId={activeSelectedVesselDeliveryId}
+          onSelectVessel={setSelectedVesselDeliveryId}
           statusTitle={statusTitle}
           statusDetail={statusDetail}
         />
@@ -2618,6 +3223,15 @@ function PromptHomeTimeframePanel({
   const monthCalendarItemsVisible = monthCalendarToggleState.enabled
     ? monthCalendarItems
     : [];
+  const dayCalendarAgendaItemsVisible = dayCalendarItemsVisible.filter(
+    (item) => !item.hasEnded,
+  );
+  const weekCalendarAgendaItemsVisible = weekCalendarItemsVisible.filter(
+    (item) => !item.hasEnded,
+  );
+  const monthCalendarAgendaItemsVisible = monthCalendarItemsVisible.filter(
+    (item) => !item.hasEnded,
+  );
   const calendarAgendaSummary = formatPromptHomeCalendarAgendaSummary({
     calendarSession: googleCalendarSession,
     loading: calendarLoading && googleCalendarSession.cachedEvents.length === 0,
@@ -2660,9 +3274,18 @@ function PromptHomeTimeframePanel({
         monthDayTotal,
       })
     : [];
+  const { dragHandleAttributes, dragHandleClassName } =
+    usePromptHomeCardHeaderDragProps<HTMLDivElement>();
+
   return (
     <section className="prompt-home-timeframe-panel">
-      <div className="prompt-home-timeframe-panel-head">
+      <div
+        {...dragHandleAttributes}
+        className={mergePromptHomeClassNames(
+          "prompt-home-timeframe-panel-head",
+          dragHandleClassName,
+        )}
+      >
         <div className="prompt-home-timeframe-panel-toggle">
           <div className="prompt-home-timeframe-panel-copy">
             <span className="eyebrow">Desk Time</span>
@@ -2832,13 +3455,16 @@ function PromptHomeTimeframePanel({
 
               {dayCalendarToggleState.enabled ? (
                 <PromptHomeCalendarAgendaSection
+                  sectionKey="day"
                   title="Calendar agenda"
                   summary={dayCalendarSummary}
-                  items={dayCalendarItemsVisible}
+                  items={dayCalendarAgendaItemsVisible}
                   emptyMessage={
                     googleCalendarSession.cachedEvents.length > 0 ||
                     googleCalendarSession.scopeGranted
-                      ? "No calendar events are scheduled on today's timeline."
+                      ? dayCalendarItemsVisible.length > 0
+                        ? "Past calendar events remain on today's timeline, but no upcoming event details are shown."
+                        : "No calendar events are scheduled on today's timeline."
                       : calendarConnectionMessage
                   }
                 />
@@ -2864,13 +3490,16 @@ function PromptHomeTimeframePanel({
           >
             {weekCalendarToggleState.enabled ? (
               <PromptHomeCalendarAgendaSection
+                sectionKey="week"
                 title="This week"
                 summary={weekCalendarSummary}
-                items={weekCalendarItemsVisible}
+                items={weekCalendarAgendaItemsVisible}
                 emptyMessage={
                   googleCalendarSession.cachedEvents.length > 0 ||
                   googleCalendarSession.scopeGranted
-                    ? "No calendar events are scheduled in this week view."
+                    ? weekCalendarItemsVisible.length > 0
+                      ? "Past calendar events remain on this week's timeline, but no upcoming event details are shown."
+                      : "No calendar events are scheduled in this week view."
                     : calendarConnectionMessage
                 }
               />
@@ -2895,13 +3524,16 @@ function PromptHomeTimeframePanel({
           >
             {monthCalendarToggleState.enabled ? (
               <PromptHomeCalendarAgendaSection
+                sectionKey="month"
                 title="This month"
                 summary={monthCalendarSummary}
-                items={monthCalendarItemsVisible}
+                items={monthCalendarAgendaItemsVisible}
                 emptyMessage={
                   googleCalendarSession.cachedEvents.length > 0 ||
                   googleCalendarSession.scopeGranted
-                    ? "No calendar events are scheduled in this month view."
+                    ? monthCalendarItemsVisible.length > 0
+                      ? "Past calendar events remain on this month's timeline, but no upcoming event details are shown."
+                      : "No calendar events are scheduled in this month view."
                     : calendarConnectionMessage
                 }
               />
@@ -2919,17 +3551,16 @@ export function PromptHomeWorkspace({
   counts,
   priceIndices = [],
   assets = [],
+  deliveries = [],
   locations = [],
   spatialFeatures = [],
-  weatherLocations = [],
-  weatherSyncStatus = null,
   referenceDataLoaded = false,
   referenceDataLoading = false,
   onEnsureReferenceData,
-  weatherDataLoaded = false,
-  weatherDataLoading = false,
-  weatherDataError = "",
-  onEnsureWeatherData,
+  deliveriesDataLoaded = false,
+  deliveriesDataLoading = false,
+  deliveriesDataError = "",
+  onEnsureDeliveriesData,
   onOpenView,
   customEventsHref = `/?view=settings#${SETTINGS_CUSTOM_EVENTS_CARD_ANCHOR_ID}`,
   onOpenCustomEvents,
@@ -2946,6 +3577,7 @@ export function PromptHomeWorkspace({
   const [draft, setDraft] = useState("");
   const [verbalizeResponses, setVerbalizeResponses] = useState(false);
   const [draftApplicationContext, setDraftApplicationContext] = useState("");
+  const [selectedPersona, setSelectedPersona] = useState<AssistantPersona | "">("");
   const [draftSummaryTargets, setDraftSummaryTargets] = useState<
     AssistantWorkspaceSummaryTarget[]
   >([]);
@@ -2978,9 +3610,21 @@ export function PromptHomeWorkspace({
   const [invoiceIssueCandidates, setInvoiceIssueCandidates] = useState<
     InvoiceIssueCandidateRecord[]
   >([]);
-  const [selectedPromptKitKey, setSelectedPromptKitKey] = useState<
-    PromptHomePromptKit["key"] | null
-  >(null);
+  const cardVisibilityState = usePersistentPromptHomeCardVisibility();
+  const homeCardSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 6,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+  const cardFilterExpandedState = usePersistentCollapsibleCardState(
+    "prompt-home.card-filter",
+    false,
+  );
   const promptCardExpandedState = usePersistentCollapsibleCardState(
     "prompt-home.prompt-card",
     true,
@@ -3023,26 +3667,26 @@ export function PromptHomeWorkspace({
     if (
       !shouldAutoEnsurePromptHomeData({
         hasSession: Boolean(authSession),
-        dataLoaded: weatherDataLoaded,
-        dataLoading: weatherDataLoading,
-        dataError: weatherDataError,
-        hasEnsureHandler: Boolean(onEnsureWeatherData),
+        dataLoaded: deliveriesDataLoaded,
+        dataLoading: deliveriesDataLoading,
+        dataError: deliveriesDataError,
+        hasEnsureHandler: Boolean(onEnsureDeliveriesData),
       })
     ) {
       return;
     }
 
-    if (!onEnsureWeatherData) {
+    if (!onEnsureDeliveriesData) {
       return;
     }
 
-    void onEnsureWeatherData().catch(() => undefined);
+    void onEnsureDeliveriesData().catch(() => undefined);
   }, [
     authSession,
-    onEnsureWeatherData,
-    weatherDataError,
-    weatherDataLoaded,
-    weatherDataLoading,
+    deliveriesDataError,
+    deliveriesDataLoaded,
+    deliveriesDataLoading,
+    onEnsureDeliveriesData,
   ]);
 
   useEffect(() => {
@@ -3094,15 +3738,6 @@ export function PromptHomeWorkspace({
         displayName: authSession?.user.display_name ?? "Signed-out user",
       }),
     [authSession?.user.display_name, counts, health],
-  );
-  const selectedPromptKit = useMemo(
-    () =>
-      selectedPromptKitKey
-        ? (PROMPT_HOME_PROMPT_KITS.find(
-            (promptKit) => promptKit.key === selectedPromptKitKey,
-          ) ?? null)
-        : null,
-    [selectedPromptKitKey],
   );
   const promotedRoutes = useMemo(
     () =>
@@ -3423,6 +4058,7 @@ export function PromptHomeWorkspace({
           conversation_id: conversationId ?? undefined,
           provider,
           workspace: "assistant",
+          persona: selectedPersona || undefined,
           context: mergePromptContexts(operatorContext, applicationContext),
           summary_targets: summaryTargets,
           use_live_tools: true,
@@ -3565,26 +4201,6 @@ export function PromptHomeWorkspace({
     onOpenView("settings");
   }
 
-  function loadPromptDraft(nextDraft: string) {
-    voicePlayback.stopPlayback();
-    voiceComposer.cancelListening();
-    setPromptCardExpanded(true);
-    setDraft(nextDraft);
-    setDraftApplicationContext("");
-    setDraftSummaryTargets([]);
-    setSubmitError("");
-
-    if (typeof window !== "undefined") {
-      window.requestAnimationFrame(() => {
-        composerTextareaRef.current?.focus();
-        composerTextareaRef.current?.setSelectionRange(
-          nextDraft.length,
-          nextDraft.length,
-        );
-      });
-    }
-  }
-
   function openNavigationIntent(
     intent: PromptNavigationIntent,
     options: {
@@ -3699,11 +4315,18 @@ export function PromptHomeWorkspace({
     [onRefreshData],
   );
 
-  const runtimeNote = runtimeError
-    ? runtimeError
-    : runtimeSettings
-      ? `Using ${runtimeSettings.effective_default_provider ?? "the first enabled provider"} when you send.`
-      : "Assistant runtime will be checked when you send the first prompt.";
+  const composerNote =
+    submitError ||
+    (!authSession
+      ? "You can draft the prompt here. We will only send it after you sign in."
+      : runtimeError);
+  const availablePersonas = runtimeSettings?.available_personas ?? [];
+  const defaultPersonaKey =
+    authSession?.user.default_assistant_persona ??
+    resolveAssistantPersonaFromRole(availablePersonas, authSession?.user.role);
+  const defaultPersonaDetails =
+    availablePersonas.find((persona) => persona.key === defaultPersonaKey) ??
+    null;
   const promptRouteRecommendationNote = !authSession
     ? "Sign in to load promoted routes from accepted Home handoffs."
     : promptRouteRecommendationsLoading
@@ -3711,6 +4334,90 @@ export function PromptHomeWorkspace({
       : promptRouteRecommendationsError
         ? promptRouteRecommendationsError
         : formatPromotedRouteSummary(promotedRoutes);
+  const hiddenHomeCardCount = cardVisibilityState.hiddenCardKeys.length;
+  const visibleHomeCardCount = cardVisibilityState.visibleCardKeys.length;
+  const homeCardVisibilitySummary = `${visibleHomeCardCount.toLocaleString()} visible · ${hiddenHomeCardCount.toLocaleString()} hidden`;
+  const visibleHomeCardKeys = cardVisibilityState.visibleCardKeys;
+  const homeCardsMovable = visibleHomeCardKeys.length > 1;
+  const homeCardOrderIndexByKey = useMemo(
+    () =>
+      new Map<PromptHomeCardKey, number>(
+        visibleHomeCardKeys.map((cardKey, index) => [cardKey, index]),
+      ),
+    [visibleHomeCardKeys],
+  );
+  const handleHomeCardDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const activeCardKey = String(event.active.id);
+      const overCardKey = event.over ? String(event.over.id) : null;
+      if (!overCardKey || activeCardKey === overCardKey) {
+        return;
+      }
+
+      cardVisibilityState.moveCard(activeCardKey, overCardKey);
+    },
+    [cardVisibilityState],
+  );
+
+  function renderHomeCardSlot(
+    cardKey: PromptHomeCardKey,
+    children: ReactNode,
+  ) {
+    if (!cardVisibilityState.isCardVisible(cardKey)) {
+      return null;
+    }
+
+    const orderIndex = homeCardOrderIndexByKey.get(cardKey) ?? 0;
+
+    if (homeCardsMovable) {
+      return (
+        <SortablePromptHomeCardSlot
+          key={cardKey}
+          cardKey={cardKey}
+          orderIndex={orderIndex}
+        >
+          {children}
+        </SortablePromptHomeCardSlot>
+      );
+    }
+
+    return (
+      <PromptHomeCardSlot
+        key={cardKey}
+        cardKey={cardKey}
+        orderIndex={orderIndex}
+      >
+        {children}
+      </PromptHomeCardSlot>
+    );
+  }
+
+  function renderHomeCardGrid(children: ReactNode) {
+    if (!homeCardsMovable) {
+      return (
+        <div className="prompt-home-card-grid" aria-label="Home cards">
+          {children}
+        </div>
+      );
+    }
+
+    return (
+      <DndContext
+        sensors={homeCardSensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleHomeCardDragEnd}
+      >
+        <SortableContext
+          items={visibleHomeCardKeys}
+          strategy={rectSortingStrategy}
+        >
+          <div className="prompt-home-card-grid" aria-label="Movable Home cards">
+            {children}
+          </div>
+        </SortableContext>
+      </DndContext>
+    );
+  }
 
   return (
     <div className="prompt-home">
@@ -3732,80 +4439,34 @@ export function PromptHomeWorkspace({
           ) : null}
         </div>
 
-        <PromptHomeTimeframePanel
-          currentTime={currentTime}
-          timeDisplaySettings={timeDisplaySettings}
-          timeZoneOptions={timeZoneOptions}
-          customEventsHref={customEventsHref}
-          onOpenCustomEvents={onOpenCustomEvents}
-          onTimeZoneChange={(nextTimeZone) => {
-            const savedSettings = saveTimeDisplaySettingsSnapshot({
-              ...timeDisplaySettings,
-              timeZone: nextTimeZone,
-            });
-            setTimeDisplaySettings(savedSettings);
-          }}
-        />
-        <PromptHomePricesCard
-          priceIndices={priceIndices}
-          referenceDataLoading={referenceDataLoading}
-          onOpenPricesWorkspace={() => onOpenView("dashboard")}
-        />
-        <PromptHomeMapTile
-          authSession={authSession}
-          assets={assets}
-          locations={locations}
-          spatialFeatures={spatialFeatures}
-          weatherLocations={weatherLocations}
-          weatherSyncStatus={weatherSyncStatus}
-          referenceDataLoaded={referenceDataLoaded}
-          weatherDataLoaded={weatherDataLoaded}
-          weatherDataLoading={weatherDataLoading}
-          weatherDataError={weatherDataError}
-          onOpenMapWorkspace={() => onOpenView("map")}
-          initialMapAssetLayerVisible={initialMapAssetLayerVisible}
-        />
-        <PromptHomeDocumentUploadCard
-          authSession={authSession}
-          onOpenLibraryWorkspace={() => onOpenView("library")}
-          onSignIn={handleSignIn}
-        />
-        <PromptHomeCommunicationCard
-          authSession={authSession}
-          counts={counts}
-          onOpenMessagesWorkspace={() => onOpenView("messages")}
-        />
-
-        <section
-          className={`prompt-home-prompt-card ${promptCardExpandedState.expanded ? "is-expanded" : "is-collapsed"}`}
-        >
-          <div className="prompt-home-prompt-card-head">
-            <div className="prompt-home-prompt-card-copy">
-              <span className="eyebrow">Prompt</span>
-              <strong>Ask the desk assistant</strong>
+        <section className="prompt-home-card-filter">
+          <div className="prompt-home-card-filter-head">
+            <div className="prompt-home-card-filter-copy">
+              <span className="eyebrow">Cards</span>
+              <strong id="prompt-home-card-filter-heading">Home cards</strong>
+              <small>{homeCardVisibilitySummary}</small>
             </div>
-
-            <div className="prompt-home-prompt-card-side">
+            <div className="prompt-home-card-filter-side">
               <button
                 type="button"
-                className="prompt-home-prompt-card-toggle"
-                aria-expanded={promptCardExpandedState.expanded}
-                aria-controls={PROMPT_HOME_PROMPT_CARD_PANEL_ID}
+                className="prompt-home-card-filter-toggle"
+                aria-expanded={cardFilterExpandedState.expanded}
+                aria-controls={PROMPT_HOME_CARD_FILTER_PANEL_ID}
                 onClick={() =>
-                  promptCardExpandedState.setExpanded((current) => !current)
+                  cardFilterExpandedState.setExpanded((current) => !current)
                 }
               >
-                <div className="prompt-home-prompt-card-toggle-meta">
+                <div className="prompt-home-card-filter-toggle-meta">
                   <small>
-                    {promptCardExpandedState.expanded
-                      ? "Hide card"
-                      : "Show card"}
+                    {cardFilterExpandedState.expanded
+                      ? "Hide filters"
+                      : "Edit cards"}
                   </small>
                   <span
                     className="prompt-home-support-toggle-indicator"
                     aria-hidden="true"
                   >
-                    {promptCardExpandedState.expanded ? "−" : "+"}
+                    {cardFilterExpandedState.expanded ? "−" : "+"}
                   </span>
                 </div>
               </button>
@@ -3813,11 +4474,120 @@ export function PromptHomeWorkspace({
           </div>
 
           <div
-            id={PROMPT_HOME_PROMPT_CARD_PANEL_ID}
-            className="prompt-home-prompt-card-body"
-            hidden={!promptCardExpandedState.expanded}
+            id={PROMPT_HOME_CARD_FILTER_PANEL_ID}
+            className="prompt-home-card-filter-body"
+            hidden={!cardFilterExpandedState.expanded}
           >
-            {promptCardExpandedState.expanded ? (
+            {cardFilterExpandedState.expanded ? (
+              <>
+                <div
+                  className="prompt-home-card-filter-grid"
+                  role="group"
+                  aria-labelledby="prompt-home-card-filter-heading"
+                >
+                  {PROMPT_HOME_CARD_VISIBILITY_OPTIONS.map((cardOption) => {
+                    const cardVisible = cardVisibilityState.isCardVisible(
+                      cardOption.key,
+                    );
+
+                    return (
+                      <label
+                        key={cardOption.key}
+                        className={`prompt-home-card-filter-choice ${cardVisible ? "is-visible" : "is-hidden"}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={cardVisible}
+                          onChange={(event) =>
+                            cardVisibilityState.setCardVisible(
+                              cardOption.key,
+                              event.target.checked,
+                            )
+                          }
+                        />
+                        <span>
+                          <strong>{cardOption.label}</strong>
+                          <small>{cardVisible ? "Visible" : "Hidden"}</small>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="prompt-home-card-filter-actions">
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={cardVisibilityState.showAllCards}
+                    disabled={hiddenHomeCardCount === 0}
+                  >
+                    Show All
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </section>
+
+        {visibleHomeCardKeys.length > 0
+          ? renderHomeCardGrid(
+              <>
+                {renderHomeCardSlot("timeframe", (
+                  <PromptHomeTimeframePanel
+                    currentTime={currentTime}
+                    timeDisplaySettings={timeDisplaySettings}
+                    timeZoneOptions={timeZoneOptions}
+                    customEventsHref={customEventsHref}
+                    onOpenCustomEvents={onOpenCustomEvents}
+                    onTimeZoneChange={(nextTimeZone) => {
+                      const savedSettings = saveTimeDisplaySettingsSnapshot({
+                        ...timeDisplaySettings,
+                        timeZone: nextTimeZone,
+                      });
+                      setTimeDisplaySettings(savedSettings);
+                    }}
+                  />
+                ))}
+                {renderHomeCardSlot("prices", (
+                  <PromptHomePricesCard
+                    priceIndices={priceIndices}
+                    referenceDataLoading={referenceDataLoading}
+                    onOpenPricesWorkspace={() => onOpenView("dashboard")}
+                  />
+                ))}
+                {renderHomeCardSlot("map", (
+                  <PromptHomeMapTile
+                    authSession={authSession}
+                    assets={assets}
+                    deliveries={deliveries}
+                    locations={locations}
+                    spatialFeatures={spatialFeatures}
+                    referenceDataLoaded={referenceDataLoaded}
+                    onOpenMapWorkspace={() => onOpenView("map")}
+                    initialMapAssetLayerVisible={initialMapAssetLayerVisible}
+                  />
+                ))}
+                {renderHomeCardSlot("documents", (
+                  <PromptHomeDocumentUploadCard
+                    authSession={authSession}
+                    onOpenLibraryWorkspace={() => onOpenView("library")}
+                    onSignIn={handleSignIn}
+                  />
+                ))}
+                {renderHomeCardSlot("communication", (
+                  <PromptHomeCommunicationCard
+                    authSession={authSession}
+                    counts={counts}
+                    onOpenMessagesWorkspace={() => onOpenView("messages")}
+                  />
+                ))}
+
+                {renderHomeCardSlot("prompt", (
+                  <PromptHomePromptCardChrome
+                    expanded={promptCardExpandedState.expanded}
+                    onToggle={() =>
+                      promptCardExpandedState.setExpanded((current) => !current)
+                    }
+                  >
               <>
                 <form className="prompt-home-composer" onSubmit={handleSubmit}>
                   <label className="field prompt-home-composer-field">
@@ -3874,137 +4644,39 @@ export function PromptHomeWorkspace({
                       />
                       <span>Verbalize</span>
                     </label>
-                    <small>Automatically read assistant responses aloud.</small>
-                  </div>
-
-                  <p
-                    className={`form-note ${submitError ? "form-note-error" : ""}`}
-                  >
-                    {submitError ||
-                      (!authSession
-                        ? "You can draft the prompt here. We will only send it after you sign in."
-                        : runtimeNote)}
-                  </p>
-                  <p
-                    className={`form-note ${
-                      voiceComposer.statusTone === "error"
-                        ? "form-note-error"
-                        : ""
-                    }`}
-                  >
-                    {voiceComposer.statusMessage}
-                  </p>
-                </form>
-
-                <div
-                  className="prompt-home-quick-prompts"
-                  aria-label="Quick prompts"
-                >
-                  {QUICK_PROMPTS.map((prompt) => (
-                    <button
-                      key={prompt}
-                      type="button"
-                      className="entity-chip entity-chip-soft"
-                      onClick={() => loadPromptDraft(prompt)}
-                    >
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
-
-                <section
-                  className="prompt-home-prompt-kits"
-                  aria-label="Prompt kits"
-                >
-                  <div className="section-head">
-                    <div>
-                      <span className="eyebrow">Guided Prompts</span>
-                      <h3>What are you trying to do?</h3>
-                    </div>
-                    <p>
-                      Pick a lane, then load a suggested prompt or jump
-                      straight to the right workspace.
-                    </p>
-                  </div>
-
-                  <div
-                    className="prompt-home-prompt-kit-picker"
-                    aria-label="Prompt kit categories"
-                  >
-                    {PROMPT_HOME_PROMPT_KITS.map((promptKit) => {
-                      const isSelected = promptKit.key === selectedPromptKitKey;
-
-                      return (
-                        <button
-                          key={promptKit.key}
-                          type="button"
-                          className={`prompt-home-prompt-kit-choice ${isSelected ? "is-active" : ""}`}
-                          aria-pressed={isSelected}
-                          onClick={() =>
-                            setSelectedPromptKitKey((current) =>
-                              current === promptKit.key ? null : promptKit.key,
-                            )
+                    {availablePersonas.length > 0 ? (
+                      <label className="field prompt-home-persona-field">
+                        <span>Persona</span>
+                        <select
+                          className="control"
+                          value={selectedPersona}
+                          onChange={(event) =>
+                            setSelectedPersona(event.target.value as AssistantPersona | "")
                           }
                         >
-                          {promptKit.label}
-                        </button>
-                      );
-                    })}
+                          <option value="">
+                            {defaultPersonaDetails
+                              ? `User default (${defaultPersonaDetails.label})`
+                              : "User default"}
+                          </option>
+                          {availablePersonas.map((persona) => (
+                            <option key={persona.key} value={persona.key}>
+                              {persona.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
                   </div>
 
-                  {selectedPromptKit ? (
-                    <article className="prompt-home-starter prompt-home-prompt-kit-panel">
-                      <div className="prompt-home-prompt-kit-panel-head">
-                        <h4>{selectedPromptKit.label}</h4>
-                        <p>{selectedPromptKit.detail}</p>
-                      </div>
-
-                      <div className="prompt-home-prompt-kit-section">
-                        <span className="eyebrow">Suggested prompts</span>
-                        <div
-                          className="prompt-home-kit-examples"
-                          aria-label={`${selectedPromptKit.label} suggested prompts`}
-                        >
-                          {selectedPromptKit.suggestedPrompts.map(
-                            (suggestion) => (
-                              <button
-                                key={`${selectedPromptKit.key}-${suggestion.prompt}`}
-                                type="button"
-                                className="prompt-home-kit-example"
-                                onClick={() =>
-                                  loadPromptDraft(suggestion.prompt)
-                                }
-                              >
-                                {suggestion.label}
-                              </button>
-                            ),
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="prompt-home-prompt-kit-section">
-                        <span className="eyebrow">Workspace links</span>
-                        <div className="prompt-home-starter-actions">
-                          {selectedPromptKit.workspaceLinks.map((link) => (
-                            <button
-                              key={`${selectedPromptKit.key}-${link.view}`}
-                              type="button"
-                              className="button button-secondary"
-                              onClick={() => onOpenView(link.view)}
-                            >
-                              {link.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </article>
-                  ) : (
-                    <p className="form-note prompt-home-prompt-kits-empty">
-                      Choose one to reveal a few suggested prompts and direct
-                      workspace links.
+                  {composerNote ? (
+                    <p
+                      className={`form-note ${submitError || runtimeError ? "form-note-error" : ""}`}
+                    >
+                      {composerNote}
                     </p>
-                  )}
-                </section>
+                  ) : null}
+                </form>
 
                 <section
                   className="prompt-home-promoted-routes"
@@ -4341,9 +5013,11 @@ export function PromptHomeWorkspace({
                   </div>
                 </section>
               </>
-            ) : null}
-          </div>
-        </section>
+                  </PromptHomePromptCardChrome>
+                ))}
+              </>,
+            )
+          : null}
       </section>
     </div>
   );

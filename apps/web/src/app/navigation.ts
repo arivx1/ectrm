@@ -8,32 +8,12 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
     key: 'overview',
     label: 'Start',
     kicker: 'Start here',
-    heroTitle: 'Start, learn, and orient quickly',
-    heroBody:
-      'Use Home, the live desk, and the product guide as your first stop before diving into a specific workflow.',
-    landingBody:
-      'This section answers the first question new or returning operators have: where should I start for the job in front of me?',
-    viewKeys: ['prompt', 'dashboard', 'guide'],
-    startPaths: [
-      {
-        title: 'Ask the operator prompt',
-        detail: 'Start from the job in front of you and let the assistant answer, clarify, or route you to the right workspace.',
-        viewKey: 'prompt',
-        actionLabel: 'Open Home',
-      },
-      {
-        title: 'Get oriented',
-        detail: 'Read the in-product handbook before you touch live workflows or need to explain the platform to someone new.',
-        viewKey: 'guide',
-        actionLabel: 'Open How It Works',
-      },
-      {
-        title: 'Watch the live desk',
-        detail: 'See desk health, recent activity, exposure, and open attention points on one screen.',
-        viewKey: 'dashboard',
-        actionLabel: 'Open Live Desk',
-      },
-    ],
+    heroTitle: 'Home',
+    heroBody: '',
+    landingBody: '',
+    landingViewKey: 'prompt',
+    viewKeys: ['prompt', 'dashboard'],
+    startPaths: [],
   },
   {
     key: 'trading',
@@ -190,6 +170,7 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
   heroTitle: string
   heroBody: string
   landingBody: string
+  landingViewKey?: ViewKey
   viewKeys: ViewKey[]
   startPaths: Array<{
     title: string
@@ -208,6 +189,7 @@ export type PrimaryNavigationSection = {
   heroTitle: string
   heroBody: string
   landingBody: string
+  landingViewKey: ViewKey | null
   views: typeof APP_VIEWS
   startPaths: Array<{
     title: string
@@ -230,6 +212,7 @@ export const PRIMARY_NAV_SECTIONS: PrimaryNavigationSection[] = PRIMARY_NAV_SECT
   heroTitle: section.heroTitle,
   heroBody: section.heroBody,
   landingBody: section.landingBody,
+  landingViewKey: section.landingViewKey ?? null,
   views: section.viewKeys.map((viewKey) => {
     const view = APP_VIEW_BY_KEY.get(viewKey)
     if (!view) {
@@ -281,6 +264,10 @@ export function isPrimaryNavigationSectionKey(value: string | null): value is Pr
 
 export function primaryNavigationSectionByKey(sectionKey: PrimaryNavigationSectionKey): PrimaryNavigationSection {
   return PRIMARY_NAV_SECTION_BY_KEY.get(sectionKey) ?? PRIMARY_NAV_SECTIONS[0]
+}
+
+export function primaryNavigationSectionLandingView(sectionKey: PrimaryNavigationSectionKey): ViewKey | null {
+  return primaryNavigationSectionByKey(sectionKey).landingViewKey
 }
 
 export function primaryNavigationSectionForView(view: ViewKey): PrimaryNavigationSection {
