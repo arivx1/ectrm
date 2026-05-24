@@ -254,7 +254,27 @@ export function buildPromptHomeSystemTemplate(): PromptHomeSystemTemplate {
   };
 }
 
-export const PROMPT_HOME_SYSTEM_TEMPLATE = buildPromptHomeSystemTemplate();
+function freezeTemplateCard(
+  card: PromptHomeTemplateCard,
+): PromptHomeTemplateCard {
+  Object.freeze(card.placement);
+  Object.freeze(card.parameters);
+  Object.freeze(card.filters);
+  Object.freeze(card.dataBindings);
+  return Object.freeze(card);
+}
+
+function freezeSystemTemplate(
+  template: PromptHomeSystemTemplate,
+): PromptHomeSystemTemplate {
+  template.cards.forEach(freezeTemplateCard);
+  Object.freeze(template.cards);
+  return Object.freeze(template);
+}
+
+export const PROMPT_HOME_SYSTEM_TEMPLATE = freezeSystemTemplate(
+  buildPromptHomeSystemTemplate(),
+);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

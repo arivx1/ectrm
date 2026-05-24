@@ -62,6 +62,13 @@ test("prompt home system template is built from the registry", () => {
     [true, true, true, true, true, true],
   );
   assert.deepEqual(PROMPT_HOME_SYSTEM_TEMPLATE, template);
+  assert.equal(Object.isFrozen(PROMPT_HOME_SYSTEM_TEMPLATE), true);
+  assert.equal(Object.isFrozen(PROMPT_HOME_SYSTEM_TEMPLATE.cards), true);
+  assert.equal(Object.isFrozen(PROMPT_HOME_SYSTEM_TEMPLATE.cards[0]), true);
+  assert.equal(
+    Object.isFrozen(PROMPT_HOME_SYSTEM_TEMPLATE.cards[0]?.placement),
+    true,
+  );
 });
 
 test("prompt home template normalization drops unknown cards and appends new defaults", () => {
