@@ -19,6 +19,7 @@ from apps.api.app.routes.documents import router as documents_router
 from apps.api.app.routes.events import router as events_router
 from apps.api.app.routes.external_data import admin_router as external_data_admin_router
 from apps.api.app.routes.external_data import router as external_data_router
+from apps.api.app.routes.home_view_definitions import router as home_view_definitions_router
 from apps.api.app.routes.layout_definitions import router as layout_definitions_router
 from apps.api.app.routes.messages import router as messages_router
 from apps.api.app.routes.option_exposures import router as option_exposures_router
@@ -47,6 +48,7 @@ HTTP_ROUTE_REGISTRATIONS: tuple[HttpRouteRegistration, ...] = (
     HttpRouteRegistration(domain="auth", name="auth", router=auth_router),
     HttpRouteRegistration(domain="operations", name="operations", router=operations_router),
     HttpRouteRegistration(domain="events", name="events", router=events_router),
+    HttpRouteRegistration(domain="home", name="home-view-definitions", router=home_view_definitions_router),
     HttpRouteRegistration(domain="layout", name="layout-definitions", router=layout_definitions_router),
     HttpRouteRegistration(domain="messages", name="messages", router=messages_router),
     HttpRouteRegistration(domain="accruals", name="accruals", router=accruals_router),

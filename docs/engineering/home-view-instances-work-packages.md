@@ -311,6 +311,13 @@ experience.
 - docs identify whether this service is a dedicated Home slice or the first
   implementation of generalized layout/view definitions
 
+### Implementation Note
+
+HVI-02 is implemented as a dedicated `home_view_definitions` backend slice under
+`apps/api/app/domains/home_views`. The service persists Home-specific
+definition metadata now, while keeping the schema compatible with the broader
+layout/view-definition direction described in the User Extensibility Initiative.
+
 ## HVI-03: Prompt Home Migration From Local Preferences To Personal Instances
 
 ### Priority
