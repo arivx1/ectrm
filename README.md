@@ -18,6 +18,8 @@ This project is a good fit for:
 - Backend guide: [apps/api/README.md](apps/api/README.md)
 - Frontend guide: [apps/web/README.md](apps/web/README.md)
 - Coding-agent guide: [AGENTS.md](AGENTS.md)
+- Codex top-down solution map:
+  [docs/engineering/codex-solution-map.md](docs/engineering/codex-solution-map.md)
 - Engineering blueprint:
   [docs/engineering/platform-blueprint.md](docs/engineering/platform-blueprint.md)
 - Governed core platform roadmap:

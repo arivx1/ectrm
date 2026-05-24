@@ -456,11 +456,11 @@ describe('LibraryWorkspace', () => {
     expect(markup).toContain('+1')
     expect(markup).toContain('Actions')
     expect(markup).toContain('Verify 225186 VESSEL NOMINATION')
-    expect(markup).toContain('Reclassify 225186 VESSEL NOMINATION')
+    expect(markup).toContain('Reprocess 225186 VESSEL NOMINATION')
     expect(markup).toContain('Open workflows for 225186 VESSEL NOMINATION')
     expect(markup).toContain('Workflows')
     expect(markup).toContain('Verify')
-    expect(markup).toContain('Reclassify')
+    expect(markup).toContain('Reprocess')
     expect(markup).toContain('Delivery Confirmation')
     expect(markup).toContain('<option value="UNKNOWN" selected="">Unknown</option>')
     expect(markup).toContain('Resize Name column')
@@ -540,6 +540,18 @@ describe('LibraryWorkspace', () => {
           value_code: 'PIPELINE',
           value_label: 'Pipeline',
         }),
+        buildFacetValue({
+          facet_value_id: 3,
+          page_id: 1,
+          facet_key: 'transport_mode',
+          facet_label: 'Mode of Transportation',
+          value_code: 'VESSEL',
+          value_label: 'Vessel',
+          source: 'SYSTEM_DERIVED',
+          confidence: 0.76,
+          review_status: 'SUGGESTED',
+          evidence: ['Matched text pattern: vessel'],
+        }),
       ],
     })
     const firstPage = baseDocument.pages[0]
@@ -561,6 +573,20 @@ describe('LibraryWorkspace', () => {
                 raw_text_excerpt: 'Vessel nomination details for review.',
                 text_source: 'pdf_text',
                 preview_available: true,
+                facet_values: [
+                  buildFacetValue({
+                    facet_value_id: 3,
+                    page_id: 1,
+                    facet_key: 'transport_mode',
+                    facet_label: 'Mode of Transportation',
+                    value_code: 'VESSEL',
+                    value_label: 'Vessel',
+                    source: 'SYSTEM_DERIVED',
+                    confidence: 0.76,
+                    review_status: 'SUGGESTED',
+                    evidence: ['Matched text pattern: vessel'],
+                  }),
+                ],
               },
               {
                 ...firstPage,
@@ -625,10 +651,13 @@ describe('LibraryWorkspace', () => {
     expect(markup).toContain('Authenticated PDF upload')
     expect(markup).toContain('Uploaded By')
     expect(markup).toContain('ops_admin')
-    expect(markup).toContain('Reclassify')
+    expect(markup).toContain('Reprocess')
     expect(markup).toContain('Open Source PDF')
     expect(markup).toContain('Commodity: Natural Gas')
     expect(markup).toContain('Asset: Pipeline')
+    expect(markup).toContain('Mode of Transportation: Vessel')
+    expect(markup).toContain('Edit Document Tags')
+    expect(markup).toContain('Edit Page Tags')
     expect(markup).toContain('Pages')
     expect(markup).toContain('Page 1')
     expect(markup).toContain('Page 2')

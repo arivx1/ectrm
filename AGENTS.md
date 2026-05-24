@@ -7,7 +7,19 @@ Read it before making code or documentation changes.
 
 ## Required Context
 
-For general engineering work, start with:
+For every Codex run, start with:
+
+- [docs/engineering/codex-solution-map.md](./docs/engineering/codex-solution-map.md)
+
+Use that helper to decide which narrower docs and code paths to load next. At
+the end of the run, review whether what you learned or changed should update
+the helper. Update it when the map became misleading, when ownership or routing
+changed, or when the change affects the helper's listed invariants, flows,
+stop signs, or verification lanes. Do not edit it just to acknowledge that it
+was reviewed.
+
+For broad general engineering work, or when you are unfamiliar with the
+affected area, also read:
 
 - [README.md](./README.md)
 - [docs/engineering/platform-blueprint.md](./docs/engineering/platform-blueprint.md)

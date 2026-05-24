@@ -148,6 +148,7 @@ import {
   type PromptHomeCardKey,
   usePersistentPromptHomeCardVisibility,
 } from "./promptHomeCardVisibility";
+import { getPromptHomeCardLabel } from "./promptHomeCards";
 import {
   mergePromptHomeClassNames,
   PromptHomeCardDragHandleProvider,
@@ -244,12 +245,6 @@ const PROMPT_HOME_INITIAL_WEATHER_OVERLAY_VISIBILITY: WeatherOverlayVisibilitySt
   ...createDefaultWeatherOverlayVisibilityState(),
   radar: true,
 };
-const PROMPT_HOME_CARD_LABELS = new Map<PromptHomeCardKey, string>(
-  PROMPT_HOME_CARD_VISIBILITY_OPTIONS.map((option) => [
-    option.key,
-    option.label,
-  ]),
-);
 const PROMPT_HOME_TRADING_HOURS_PANEL_ID = "prompt-home-trading-hours-panel";
 const PROMPT_HOME_DAY_CALENDAR_MARKER_LIMIT = 3;
 const PROMPT_HOME_WEEK_CALENDAR_MARKER_LIMIT = 7;
@@ -332,7 +327,7 @@ function buildPromptHomeCardDragHandleProps({
 }
 
 function promptHomeCardLabel(cardKey: PromptHomeCardKey): string {
-  return PROMPT_HOME_CARD_LABELS.get(cardKey) ?? cardKey;
+  return getPromptHomeCardLabel(cardKey);
 }
 
 function PromptHomeCardSlot({

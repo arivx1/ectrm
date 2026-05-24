@@ -14,7 +14,9 @@ from apps.api.app.models import Base
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.document_record_link import DocumentRecordLink
+from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
+from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 
@@ -37,6 +39,8 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
 
     def setUp(self) -> None:
         with self.SessionLocal() as session:
+            session.query(MutationProvenanceRecord).delete()
+            session.query(Event).delete()
             session.query(DocumentRecordLink).delete()
             session.query(PriceIndexObservation).delete()
             session.query(ExternalDataRun).delete()
@@ -231,6 +235,18 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
                 .scalars()
                 .all()
             )
+            activity_events = (
+                session.execute(
+                    select(Event)
+                    .where(
+                        Event.aggregate_type == "document",
+                        Event.aggregate_id == document.document_id,
+                        Event.event_type == "DocumentWorkflowExecuted",
+                    )
+                )
+                .scalars()
+                .all()
+            )
 
         self.assertEqual(result.created_count, 1)
         self.assertEqual(result.updated_count, 0)
@@ -245,6 +261,10 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
         self.assertEqual(observations[0].source_provider, "EIA")
         self.assertEqual(observations[0].source_series_id, "PET.RWTC.D")
         self.assertEqual({link.record_type for link in links}, {"PRICE_INDEX", "PRICE_INDEX_OBSERVATION"})
+        self.assertEqual({link.source for link in links}, {"DOCUMENT_WORKFLOW"})
+        self.assertEqual(len(activity_events), 1)
+        self.assertEqual(activity_events[0].payload["workflow_id"], "process_prices")
+        self.assertEqual(activity_events[0].payload["observation_count"], 1)
 
     def test_execute_process_prices_is_idempotent_for_matching_document_rows(self) -> None:
         with self.SessionLocal() as session:

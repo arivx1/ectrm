@@ -17,10 +17,13 @@ const FALLBACK_DOCUMENT_FACETS: DocumentFacetSchemaRecord[] = [
       { code: 'NATURAL_GAS', label: 'Natural Gas', description: null },
       { code: 'CRUDE_OIL', label: 'Crude Oil', description: null },
       { code: 'REFINED_PRODUCTS', label: 'Refined Products', description: null },
+      { code: 'DIESEL', label: 'Diesel', description: null },
       { code: 'LNG', label: 'LNG', description: null },
       { code: 'NGL', label: 'NGL', description: null },
       { code: 'POWER', label: 'Power', description: null },
       { code: 'COAL', label: 'Coal', description: null },
+      { code: 'SOYBEANS', label: 'Soybeans', description: null },
+      { code: 'SOYBEAN_MEAL', label: 'Soybean Meal', description: null },
     ],
   },
   {
@@ -93,6 +96,11 @@ export function DocumentFacetEditor({
 
   function toggleValue(schema: DocumentFacetSchemaRecord, option: DocumentFacetValueRecord) {
     const selectedCodes = selectedCodesFor(schema.facet_key)
+    const existingValuesByCode = new Map(
+      values
+        .filter((value) => value.facet_key === schema.facet_key)
+        .map((value) => [value.value_code, value] as const),
+    )
     if (selectedCodes.has(option.code)) {
       selectedCodes.delete(option.code)
     } else if (schema.value_type === 'single_select') {
@@ -105,6 +113,13 @@ export function DocumentFacetEditor({
     const preservedValues = values.filter((value) => value.facet_key !== schema.facet_key)
     const nextFacetValues = Array.from(selectedCodes).map((code) => {
       const selectedOption = schema.allowed_values.find((candidate) => candidate.code === code) ?? option
+      const existingValue = existingValuesByCode.get(code)
+      if (existingValue) {
+        return {
+          ...existingValue,
+          review_status: existingValue.review_status === 'REJECTED' ? 'CONFIRMED' : existingValue.review_status,
+        }
+      }
       return buildManualFacetValue({
         documentId,
         pageId,
@@ -129,7 +144,11 @@ export function DocumentFacetEditor({
                 className={`entity-chip entity-chip-soft document-facet-chip document-facet-chip-${value.review_status.toLowerCase()}`}
               >
                 {formatDocumentFacetLabel(value)}
-                {value.review_status === 'SUGGESTED' ? ' • Suggested' : ''}
+                <span className="document-facet-chip-meta">
+                  {' '}
+                  • {formatDocumentFacetOriginLabel(value)}
+                  {value.review_status === 'SUGGESTED' ? ' suggestion' : ''}
+                </span>
               </span>
             ))
           ) : (
@@ -166,6 +185,23 @@ export function DocumentFacetEditor({
       </div>
     </div>
   )
+}
+
+function formatDocumentFacetOriginLabel(value: DocumentFacetAssignmentRecord): string {
+  switch (value.source) {
+    case 'MANUAL':
+      return 'Human added'
+    case 'SYSTEM_DERIVED':
+      return 'System added'
+    case 'AI_SUGGESTED':
+      return 'AI suggested'
+    case 'EXTRACTED':
+      return 'Extracted'
+    case 'LINKED_RECORD':
+      return 'Linked record'
+    default:
+      return value.source.replaceAll('_', ' ').toLowerCase()
+  }
 }
 
 function buildManualFacetValue({

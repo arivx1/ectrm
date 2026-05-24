@@ -338,12 +338,7 @@ export function SettingsWorkspace({
   useEffect(() => {
     setProfileForm(buildUserProfileForm(authSession?.user))
     setProfileFlash(null)
-  }, [
-    authSession?.user.user_id,
-    authSession?.user.display_name,
-    authSession?.user.default_assistant_persona,
-    authSession?.user.assistant_context_blurb,
-  ])
+  }, [authSession?.user])
 
   useEffect(() => {
     if (typeof window === 'undefined') {

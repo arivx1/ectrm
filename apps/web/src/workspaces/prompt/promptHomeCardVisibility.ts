@@ -1,5 +1,13 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 
+import {
+  isPromptHomeCardKey,
+  PROMPT_HOME_CARD_KEYS,
+  type PromptHomeCardKey,
+} from "./promptHomeCards";
+
+export { PROMPT_HOME_CARD_VISIBILITY_OPTIONS, type PromptHomeCardKey } from "./promptHomeCards";
+
 export const PROMPT_HOME_CARD_VISIBILITY_STORAGE_KEY =
   "ectrm.prompt-home.card-visibility";
 export const PROMPT_HOME_CARD_ORDER_STORAGE_KEY =
@@ -10,47 +18,6 @@ const PROMPT_HOME_CARD_VISIBILITY_STORAGE_EVENT =
 const PROMPT_HOME_CARD_ORDER_STORAGE_EVENT =
   "ectrm:prompt-home-card-order-change";
 const PROMPT_HOME_CARD_KEY_SEPARATOR = "\u001f";
-
-export const PROMPT_HOME_CARD_VISIBILITY_OPTIONS = [
-  {
-    key: "timeframe",
-    label: "Desk Time",
-  },
-  {
-    key: "prices",
-    label: "Market Prices",
-  },
-  {
-    key: "map",
-    label: "Asset map",
-  },
-  {
-    key: "documents",
-    label: "Upload documents",
-  },
-  {
-    key: "communication",
-    label: "Communication center",
-  },
-  {
-    key: "prompt",
-    label: "Ask the desk assistant",
-  },
-] as const;
-
-export type PromptHomeCardKey =
-  (typeof PROMPT_HOME_CARD_VISIBILITY_OPTIONS)[number]["key"];
-
-const PROMPT_HOME_CARD_KEYS = PROMPT_HOME_CARD_VISIBILITY_OPTIONS.map(
-  (option) => option.key,
-);
-const PROMPT_HOME_CARD_KEY_SET: ReadonlySet<string> = new Set(
-  PROMPT_HOME_CARD_KEYS,
-);
-
-function isPromptHomeCardKey(value: string): value is PromptHomeCardKey {
-  return PROMPT_HOME_CARD_KEY_SET.has(value);
-}
 
 function uniquePromptHomeCardKeys(candidate: unknown): PromptHomeCardKey[] {
   const orderedKeys: PromptHomeCardKey[] = [];

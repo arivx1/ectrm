@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.documents.services.document_activity import append_document_activity_event
 from apps.api.app.domains.documents.services.document_ingestion_common import clean_optional_text
 from apps.api.app.domains.documents.services.document_record_links import create_document_record_link
 from apps.api.app.domains.documents.services.document_ingestion_serialization import load_document_and_pages
@@ -221,6 +222,23 @@ def _execute_process_prices(
     document.updated_at = now
     document.updated_by = actor_id
     document.version += 1
+    append_document_activity_event(
+        db,
+        document_id=document.document_id,
+        actor_id=actor_id,
+        event_type="DocumentWorkflowExecuted",
+        occurred_at=now,
+        payload={
+            "workflow_id": definition.workflow_id,
+            "label": definition.label,
+            "run_id": run.id,
+            "observation_count": len(prepared_observations),
+            "created_count": created_count,
+            "updated_count": updated_count,
+            "unchanged_count": unchanged_count,
+            "price_index_codes": sorted(linked_price_index_codes),
+        },
+    )
     db.flush()
 
     written_count = created_count + updated_count

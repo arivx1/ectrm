@@ -16,7 +16,9 @@ import {
   fetchDocumentSource,
   listDocumentWorkflows,
 } from '../../entities/documents/api'
+import { DocumentFacetEditor } from '../../features/documents/DocumentFacetEditor'
 import {
+  activeDocumentFacetValues,
   documentFacetDisplayValues,
   documentNeedsProcessing,
   documentStatusTone,
@@ -52,6 +54,7 @@ import {
   buildDocumentLibraryCollectionCounts,
   documentCanBeVerified,
   documentHasErrors,
+  documentHasExecutedWorkflows,
   documentIsLinked,
   DOCUMENT_LIBRARY_COLLECTIONS,
   filterDocumentLibraryDocuments,
@@ -446,6 +449,10 @@ export function LibraryWorkspace({
     handleDropzoneDrop,
     handleSubmit,
     handleImportGmailInbox: importGmailInbox,
+    updateDocumentDraft,
+    updatePageDraft,
+    handleSaveDocument,
+    handleSavePage,
     handleVerifyDocument: verifyDocument,
     handleSetDocumentKind,
     handleReprocessDocument,
@@ -470,6 +477,9 @@ export function LibraryWorkspace({
   const [workflowError, setWorkflowError] = useState('')
   const [workflowExecution, setWorkflowExecution] = useState<DocumentWorkflowExecutionRecord | null>(null)
   const [executingWorkflowId, setExecutingWorkflowId] = useState<string | null>(null)
+  const [executedWorkflowDocumentIds, setExecutedWorkflowDocumentIds] = useState<Record<string, boolean>>({})
+  const [pendingReprocessDocumentId, setPendingReprocessDocumentId] = useState<string | null>(null)
+  const [editingTagScope, setEditingTagScope] = useState<'document' | 'page' | null>(null)
   const fileTableScrollRef = useRef<HTMLDivElement | null>(null)
   const fileTableScrollbarRef = useRef<HTMLDivElement | null>(null)
   const uploadCardState = usePersistentCollapsibleCardState('library.upload-card', false)
@@ -531,9 +541,18 @@ export function LibraryWorkspace({
   const documentPageActivity = documentPage
     ? buildDocumentActivityLog(documentPage)
     : []
-  const documentPageFacetValues = documentPage ? documentFacetDisplayValues(documentPage) : []
+  const documentPageDisplayFacetValues = documentPage ? documentFacetDisplayValues(documentPage) : []
+  const documentPageLevelFacetValues = documentPage
+    ? (documentPage.facet_values ?? []).filter((value) => value.page_id === null)
+    : []
+  const documentPageFacetCount = documentPageDisplayFacetValues.filter(
+    (value) => value.review_status !== 'REJECTED',
+  ).length
   const workflowDialogDocument = workflowDialogDocumentId
     ? documents.find((document) => document.document_id === workflowDialogDocumentId) ?? null
+    : null
+  const pendingReprocessDocument = pendingReprocessDocumentId
+    ? documents.find((document) => document.document_id === pendingReprocessDocumentId) ?? null
     : null
   const selectedDetailPage =
     documentPage?.pages.find((page) => page.page_id === selectedDetailPageId) ?? documentPage?.pages[0] ?? null
@@ -552,6 +571,9 @@ export function LibraryWorkspace({
   const selectedDetailPageClassificationSummary = selectedDetailPage
     ? buildPageClassificationSummary(selectedDetailPage)
     : ''
+  const selectedDetailPageFacetValues = selectedDetailPage
+    ? activeDocumentFacetValues(selectedDetailPage.facet_values)
+    : []
   const fileColumnTemplate = LIBRARY_FILE_COLUMNS.map(
     (column) => `${fileColumnWidths[column.key] ?? column.defaultWidth}px`,
   ).join(' ')
@@ -583,6 +605,10 @@ export function LibraryWorkspace({
       setSelectedDocumentId(documentPageId)
     }
   }, [documentPageId])
+
+  useEffect(() => {
+    setEditingTagScope(null)
+  }, [documentPageId, selectedDetailPage?.page_id])
 
   useEffect(() => {
     if (!documentPageId || expandedDocumentIds[documentPageId]) {
@@ -737,9 +763,38 @@ export function LibraryWorkspace({
     }
   }
 
-  async function handleLibraryDocumentReclassify(document: DocumentIngestionRecord) {
+  function shouldWarnBeforeDocumentReprocess(document: DocumentIngestionRecord): boolean {
+    return documentHasExecutedWorkflows(document) || executedWorkflowDocumentIds[document.document_id] === true
+  }
+
+  async function reprocessLibraryDocument(document: DocumentIngestionRecord) {
     setSelectedDocumentId(document.document_id)
     await handleReprocessDocument(document)
+  }
+
+  function handleLibraryDocumentReprocess(document: DocumentIngestionRecord) {
+    setSelectedDocumentId(document.document_id)
+    if (shouldWarnBeforeDocumentReprocess(document)) {
+      setPendingReprocessDocumentId(document.document_id)
+      return
+    }
+
+    void reprocessLibraryDocument(document)
+  }
+
+  function handleCancelDocumentReprocess() {
+    setPendingReprocessDocumentId(null)
+  }
+
+  async function handleConfirmDocumentReprocess() {
+    if (!pendingReprocessDocument) {
+      setPendingReprocessDocumentId(null)
+      return
+    }
+
+    const document = pendingReprocessDocument
+    setPendingReprocessDocumentId(null)
+    await reprocessLibraryDocument(document)
   }
 
   async function handleLibraryDocumentVerify(document: DocumentIngestionRecord) {
@@ -797,6 +852,10 @@ export function LibraryWorkspace({
         workflow.workflow_id,
       )
       setWorkflowExecution(result)
+      setExecutedWorkflowDocumentIds((current) => ({
+        ...current,
+        [result.document_id]: true,
+      }))
     } catch (error) {
       setWorkflowError(error instanceof Error ? error.message : 'Unable to execute the document workflow.')
     } finally {
@@ -959,9 +1018,9 @@ export function LibraryWorkspace({
                         documentNeedsProcessing(documentPage) ||
                         savingTarget === `reprocess:${documentPage.document_id}`
                       }
-                      onClick={() => void handleLibraryDocumentReclassify(documentPage)}
+                      onClick={() => handleLibraryDocumentReprocess(documentPage)}
                     >
-                      {savingTarget === `reprocess:${documentPage.document_id}` ? 'Reclassifying...' : 'Reclassify'}
+                      {savingTarget === `reprocess:${documentPage.document_id}` ? 'Reprocessing...' : 'Reprocess'}
                     </button>
                     <button
                       type="button"
@@ -1061,14 +1120,55 @@ export function LibraryWorkspace({
                   <div className="library-section-head">
                     <span className="eyebrow">Tags</span>
                     <small>
-                      {documentPageFacetValues.length} tag{documentPageFacetValues.length === 1 ? '' : 's'}
+                      {documentPageFacetCount} tag{documentPageFacetCount === 1 ? '' : 's'}
                     </small>
                   </div>
-                  <LibraryTagChipList
-                    values={documentPageFacetValues}
-                    emptyLabel="No tags assigned yet"
-                    showFacetLabel
-                  />
+                  <div className="library-document-tags-summary">
+                    <LibraryTagChipList
+                      values={documentPageDisplayFacetValues}
+                      emptyLabel="No tags assigned yet"
+                      showFacetLabel
+                    />
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() =>
+                        setEditingTagScope((current) => current === 'document' ? null : 'document')
+                      }
+                    >
+                      {editingTagScope === 'document' ? 'Close Tag Editor' : 'Edit Document Tags'}
+                    </button>
+                  </div>
+                  {editingTagScope === 'document' ? (
+                    <div className="library-document-tag-editor">
+                      <DocumentFacetEditor
+                        documentId={documentPage.document_id}
+                        pageId={null}
+                        title="Document Tags"
+                        values={documentPageLevelFacetValues}
+                        facetSchemas={schemaRegistry?.document_facets}
+                        onChange={(nextValues) =>
+                          updateDocumentDraft(documentPage.document_id, (current) => ({
+                            ...current,
+                            facet_values: [
+                              ...(current.facet_values ?? []).filter((value) => value.page_id !== null),
+                              ...nextValues,
+                            ],
+                          }))
+                        }
+                      />
+                      <div className="library-document-tags-actions">
+                        <button
+                          type="button"
+                          className="button button-primary"
+                          disabled={savingTarget === `document:${documentPage.document_id}`}
+                          onClick={() => void handleSaveDocument(documentPage)}
+                        >
+                          {savingTarget === `document:${documentPage.document_id}` ? 'Saving Tags...' : 'Save Tags'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </section>
 
                 <section className="library-document-page-section library-document-pages-section">
@@ -1123,6 +1223,56 @@ export function LibraryWorkspace({
                                 </span>
                               </div>
                             </div>
+
+                            <div className="library-page-tags-summary">
+                              <LibraryTagChipList
+                                values={selectedDetailPageFacetValues}
+                                emptyLabel="No page tags"
+                                showFacetLabel
+                                compact
+                              />
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                onClick={() =>
+                                  setEditingTagScope((current) => current === 'page' ? null : 'page')
+                                }
+                              >
+                                {editingTagScope === 'page' ? 'Close Page Tags' : 'Edit Page Tags'}
+                              </button>
+                            </div>
+
+                            {editingTagScope === 'page' ? (
+                              <div className="library-document-tag-editor">
+                                <DocumentFacetEditor
+                                  documentId={documentPage.document_id}
+                                  pageId={selectedDetailPage.page_id}
+                                  title={`Page ${selectedDetailPage.page_number} Tags`}
+                                  values={selectedDetailPage.facet_values ?? []}
+                                  facetSchemas={schemaRegistry?.document_facets}
+                                  onChange={(nextValues) =>
+                                    updatePageDraft(
+                                      documentPage.document_id,
+                                      selectedDetailPage.page_id,
+                                      (current) => ({
+                                        ...current,
+                                        facet_values: nextValues,
+                                      }),
+                                    )
+                                  }
+                                />
+                                <div className="library-document-tags-actions">
+                                  <button
+                                    type="button"
+                                    className="button button-primary"
+                                    disabled={savingTarget === `page:${selectedDetailPage.page_id}`}
+                                    onClick={() => void handleSavePage(documentPage, selectedDetailPage)}
+                                  >
+                                    {savingTarget === `page:${selectedDetailPage.page_id}` ? 'Saving Page Tags...' : 'Save Page Tags'}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
 
                             <div className="library-document-page-preview-frame">
                               {selectedDetailPage.preview_available ? (
@@ -1759,15 +1909,15 @@ export function LibraryWorkspace({
                               <button
                                 type="button"
                                 className="button button-secondary library-file-action-button"
-                                aria-label={`Reclassify ${document.display_name || document.original_filename}`}
+                                aria-label={`Reprocess ${document.display_name || document.original_filename}`}
                                 disabled={
                                   !document.source_available ||
                                   documentNeedsProcessing(document) ||
                                   savingTarget === `reprocess:${document.document_id}`
                                 }
-                                onClick={() => void handleLibraryDocumentReclassify(document)}
+                                onClick={() => handleLibraryDocumentReprocess(document)}
                               >
-                                {savingTarget === `reprocess:${document.document_id}` ? 'Reclassifying...' : 'Reclassify'}
+                                {savingTarget === `reprocess:${document.document_id}` ? 'Reprocessing...' : 'Reprocess'}
                               </button>
                               <button
                                 type="button"
@@ -1847,6 +1997,57 @@ export function LibraryWorkspace({
           </>
         )}
       </div>
+      {pendingReprocessDocument ? (
+        <div className="library-workflow-overlay" role="presentation">
+          <button
+            type="button"
+            className="library-workflow-backdrop"
+            aria-label="Cancel reprocess"
+            onClick={handleCancelDocumentReprocess}
+          />
+          <section
+            className="library-workflow-dialog library-reprocess-warning-dialog surface"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="library-reprocess-warning-title"
+          >
+            <header className="library-workflow-dialog-head">
+              <div>
+                <span className="eyebrow">Reprocess Warning</span>
+                <h3 id="library-reprocess-warning-title">Workflow outputs already exist</h3>
+                <p>{pendingReprocessDocument.display_name || pendingReprocessDocument.original_filename}</p>
+              </div>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={handleCancelDocumentReprocess}
+              >
+                Cancel
+              </button>
+            </header>
+            <p className="library-reprocess-warning-copy">
+              Reprocessing will reset the document analysis and review state. Workflows have already been executed
+              for this document, so downstream records created from the earlier extraction may need follow-up.
+            </p>
+            <div className="library-reprocess-warning-actions">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={handleCancelDocumentReprocess}
+              >
+                Don't Reprocess
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => void handleConfirmDocumentReprocess()}
+              >
+                Reprocess Document
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       {workflowDialogDocument ? (
         <div className="library-workflow-overlay" role="presentation">
           <button

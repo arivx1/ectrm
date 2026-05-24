@@ -510,6 +510,82 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(fetched.status_code, 200)
         self.assertEqual(len(fetched.json()["facet_values"]), 4)
 
+    def test_document_patch_tracks_human_added_and_system_added_tag_changes(self) -> None:
+        admin_token = self._bootstrap_admin()
+        uploaded = self._upload_document(admin_token, page_count=1)
+        document_id = str(uploaded["document_id"])
+        now = datetime(2026, 5, 23, 12, 0, tzinfo=timezone.utc)
+
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    DocumentFacetValue(
+                        document_id=document_id,
+                        page_id=None,
+                        facet_key="commodity",
+                        value_code="NATURAL_GAS",
+                        value_label_snapshot="Natural Gas",
+                        source="SYSTEM_DERIVED",
+                        confidence=0.76,
+                        review_status="SUGGESTED",
+                        evidence=["Matched text pattern: natural gas"],
+                        created_at=now,
+                        created_by="document_facet_suggester",
+                        updated_at=now,
+                        updated_by="document_facet_suggester",
+                        version=1,
+                    ),
+                    DocumentFacetValue(
+                        document_id=document_id,
+                        page_id=None,
+                        facet_key="transport_mode",
+                        value_code="PIPELINE",
+                        value_label_snapshot="Pipeline",
+                        source="MANUAL",
+                        confidence=None,
+                        review_status="CONFIRMED",
+                        evidence=[],
+                        created_at=now,
+                        created_by="doc_admin",
+                        updated_at=now,
+                        updated_by="doc_admin",
+                        version=1,
+                    ),
+                ]
+            )
+            session.commit()
+
+        response = self.client.patch(
+            f"/documents/{document_id}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "facet_values": [
+                    {
+                        "facet_key": "commodity",
+                        "value_code": "natural gas",
+                        "source": "MANUAL",
+                        "review_status": "CONFIRMED",
+                    },
+                    {
+                        "facet_key": "asset",
+                        "value_code": "upstream",
+                    },
+                ]
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        facets = {(facet["facet_key"], facet["value_code"]): facet for facet in response.json()["facet_values"]}
+        self.assertEqual(facets[("commodity", "NATURAL_GAS")]["source"], "SYSTEM_DERIVED")
+        self.assertEqual(facets[("commodity", "NATURAL_GAS")]["review_status"], "CONFIRMED")
+        self.assertEqual(facets[("commodity", "NATURAL_GAS")]["updated_by"], "doc_admin")
+        self.assertEqual(facets[("asset", "UPSTREAM")]["source"], "MANUAL")
+        self.assertEqual(facets[("asset", "UPSTREAM")]["created_by"], "doc_admin")
+        self.assertEqual(facets[("transport_mode", "PIPELINE")]["source"], "MANUAL")
+        self.assertEqual(facets[("transport_mode", "PIPELINE")]["review_status"], "REJECTED")
+        self.assertEqual(facets[("transport_mode", "PIPELINE")]["updated_by"], "doc_admin")
+        self.assertIn("Removed by doc_admin.", facets[("transport_mode", "PIPELINE")]["evidence"])
+
     def test_page_patch_persists_page_level_facet_values(self) -> None:
         admin_token = self._bootstrap_admin()
         uploaded = self._upload_document(admin_token, page_count=1)
@@ -611,6 +687,30 @@ class DocumentIngestionApiTests(unittest.TestCase):
             for suggestion in suggest_document_facets_from_text(None, document_kind="PURCHASE_ORDER")
         }
         self.assertEqual(empty_text_pairs, {("commercial_side", "BUY")})
+
+    def test_document_facet_suggester_abstains_from_price_publication_side_and_tags_products(self) -> None:
+        suggestions = suggest_document_facets_from_text(
+            """
+            PRICE PUBLICATION REPORT
+            Global Commodity Price Index
+            U.S. Market Assessments - FOB U.S. Gulf
+
+            Product                 Contract / Period    Pricing Basis    Low     High    Midpoint
+            Brent Crude             Prompt               FOB U.S. Gulf     81.75   82.50   82.13
+            ULSD 10 ppm Sulfur      February 2026        FOB U.S. Gulf     87.05   87.85   87.45
+            Soybean Meal 48%        Jan 2026             FOB U.S. Gulf     415.00  420.00  417.50
+
+            This publication is not a purchase order or a sales order.
+            """,
+            document_kind="PRICE_PUBLICATION",
+        )
+
+        pairs = {(suggestion["facet_key"], suggestion["value_code"]) for suggestion in suggestions}
+        self.assertIn(("commodity", "CRUDE_OIL"), pairs)
+        self.assertIn(("commodity", "DIESEL"), pairs)
+        self.assertIn(("commodity", "SOYBEAN_MEAL"), pairs)
+        self.assertNotIn(("commercial_side", "BUY"), pairs)
+        self.assertNotIn(("commercial_side", "SELL"), pairs)
 
     def test_document_kind_correction_refreshes_system_order_side_facets(self) -> None:
         admin_token = self._bootstrap_admin()
@@ -836,6 +936,15 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertTrue(page["preview_available"])
         self.assertTrue(any(field["field_key"] == "invoice_number" for field in page["header_fields"]))
         self.assertTrue(any(table["source"].startswith("ocr:") for table in page["table_blocks"]))
+        self.assertTrue(
+            any(
+                facet["facet_key"] == "commodity"
+                and facet["value_code"] == "CRUDE_OIL"
+                and facet["source"] == "SYSTEM_DERIVED"
+                and facet["review_status"] == "SUGGESTED"
+                for facet in page["facet_values"]
+            )
+        )
 
     def test_heuristics_extract_fields_and_multiple_table_blocks(self) -> None:
         text = """

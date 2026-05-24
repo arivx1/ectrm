@@ -1313,6 +1313,47 @@
   gap: 0.5rem;
 }
 
+.library-document-tags-summary,
+.library-page-tags-summary {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.library-document-tags-summary .library-tag-chip-row,
+.library-page-tags-summary .library-tag-chip-row {
+  flex: 1 1 18rem;
+}
+
+.library-document-tag-editor {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(126, 154, 184, 0.12);
+  border-radius: 0.65rem;
+  background: rgba(8, 15, 24, 0.52);
+}
+
+.library-document-tag-editor .document-schema-note {
+  gap: 0.7rem;
+}
+
+.library-document-tag-editor .document-facet-grid {
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+}
+
+.library-document-tag-editor .document-facet-option {
+  min-height: 1.85rem;
+  padding-block: 0.3rem;
+}
+
+.library-document-tags-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .library-workflow-overlay {
   position: fixed;
   inset: 0;
@@ -1420,6 +1461,23 @@
 
 .library-workflow-card-copy span {
   overflow-wrap: anywhere;
+}
+
+.library-reprocess-warning-dialog {
+  width: min(38rem, calc(100vw - 2rem));
+}
+
+.library-reprocess-warning-copy {
+  margin: 0;
+  color: var(--color-copy-muted);
+  line-height: 1.55;
+}
+
+.library-reprocess-warning-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .library-file-name {

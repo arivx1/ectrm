@@ -344,6 +344,11 @@
   border-style: dashed;
 }
 
+.document-facet-chip-meta {
+  color: var(--color-copy-muted);
+  font-size: 0.78rem;
+}
+
 .document-page-preview-panel {
   padding: 1rem;
   border: 1px solid var(--terminal-line);

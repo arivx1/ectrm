@@ -83,6 +83,86 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-24 - Codex Solution Map Is A Routing Helper
+
+- Type: lesson
+- Domain: engineering context management, coding-agent navigation, and
+  repository documentation
+- Applies to: Codex repository tasks, top-down architecture reviews,
+  context-efficient doc loading, and future agent onboarding
+- Status: implemented
+- Source: [Codex Top-Down Solution Map](./codex-solution-map.md) and
+  [AGENTS.md](../../AGENTS.md)
+- Lesson: Codex needs a compact routing surface for ECTRM because the repo has
+  grown beyond what agents should bulk-load by default. Codex should review the
+  solution map on every run, use it to choose narrower docs and code paths, and
+  update it when the work changes ownership, routing, invariants, flows, stop
+  signs, verification lanes, or exposes drift in the map.
+- Deterministic opportunity: if repeated Codex tasks expose stable routing
+  mistakes, update the helper or promote the pattern into repo tooling,
+  templates, or generated inventories instead of relying on freeform memory.
+- Agent autonomy impact: the helper does not widen agent authority or replace
+  the autonomy rubric, action contract, source code, or focused tests. Agents
+  still need to read the governed source docs before changing assistant,
+  action-request, policy, automation, or deterministic algorithm behavior.
+- Tests or evidence: docs-only link and reference inspection.
+- Follow-up: keep the helper short, avoid review-only churn, and refresh it
+  when major route, workspace, domain ownership, MCP, Codex dispatch, or
+  assistant-governance seams move.
+
+### 2026-05-24 - Price Publications Abstain From Commercial Side Tags
+
+- Type: algorithm-added
+- Domain: document ingestion, deterministic facet suggestion, and market-data
+  document review
+- Applies to: `PRICE_PUBLICATION` documents, commercial-side facet
+  suggestions, commodity facet suggestions, and Library tag review
+- Status: implemented
+- Source: `apps/api/app/domains/documents/services/document_facets.py` and
+  `apps/api/tests/test_document_ingestion_api.py`
+- Lesson: price publication reports are market-data evidence, not the
+  company's purchase or sale intent. Even when their text mentions purchase or
+  sales language, the deterministic facet suggester should abstain from
+  `Purchase/Sale` tags and only suggest product/commodity tags supported by
+  visible report content.
+- Deterministic opportunity: expand product-term coverage through controlled
+  commodity/reference-data mappings as reviewed price-report examples reveal
+  recurring rows such as diesel, soybean meal, or other agriculture products.
+- Agent autonomy impact: agents may explain why a price report has no
+  commercial side, but should not route market-data publications as buy/sell
+  workflow evidence without a separate governed action.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_facet_suggester_abstains_from_price_publication_side_and_tags_products`
+- Follow-up: consider replacing static document commodity facet options with
+  active reference commodity records once facet review needs full commodity
+  master coverage.
+
+### 2026-05-24 - OCR Text Still Feeds Controlled Tag Suggestions
+
+- Type: algorithm-added
+- Domain: document ingestion, OCR fallback, deterministic facet suggestion, and
+  Library tag review
+- Applies to: OCR-backed document pages, `SYSTEM_DERIVED` page-level facet
+  suggestions, commodity aliases, and Library review flags
+- Status: implemented
+- Source: `apps/api/app/domains/documents/services/document_facets.py` and
+  `apps/api/tests/test_document_ingestion_api.py`
+- Lesson: OCR fallback should lower trust and preserve the review flag, but it
+  should not suppress controlled tag suggestions. If OCR text contains a
+  recognized controlled facet signal such as WTI, Brent, diesel, ULSD, soybean
+  meal, pipeline, or purchase/sale terms, persist the tag as a reviewable
+  `SYSTEM_DERIVED` suggestion with source and review provenance.
+- Deterministic opportunity: keep expanding OCR-tolerant commodity aliases from
+  reviewed examples, then migrate the static alias list toward governed
+  reference-data mappings once the controlled commodity catalog is authoritative
+  for document review.
+- Agent autonomy impact: agents may explain that OCR-backed tags need human
+  confirmation; they must not treat OCR-backed suggested tags as authority to
+  mutate trade, settlement, logistics, risk, or compliance records without a
+  separate governed action.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_ocr_fallback_is_used_when_native_text_is_missing apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_facet_suggester_extracts_starter_tags_from_text apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_facet_suggester_abstains_from_price_publication_side_and_tags_products`
+
 ### 2026-05-23 - User AI Context Is Preference Context Only
 
 - Type: lesson
@@ -4895,7 +4975,10 @@ independently"`.
   commodity, purchase/sale side, transport mode, and asset context. Each value
   stores normalized codes, display snapshots, page/document scope, source,
   confidence, review status, evidence, and audit fields so suggested tags can
-  remain reviewable until an operator confirms them.
+  remain reviewable until an operator confirms them. Human-added tags use
+  `MANUAL` source; system-added tags keep their original system source even
+  after a human confirms them. Removing a persisted tag should mark it
+  `REJECTED` with human update provenance instead of deleting the origin row.
 - Deterministic opportunity: expand extraction and matching against these
   facets through typed services. Owner is Document Operations. Inputs are page
   text, reviewed page fields, linked records, reference data, and operator
@@ -4908,7 +4991,7 @@ independently"`.
   but durable tags must be saved through the typed document facet service. Do
   not let prompt-only labels drive routing, matching, policy, or record writes.
 - Tests or evidence:
-  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_patch_persists_controlled_facet_values apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_page_patch_persists_page_level_facet_values apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_patch_rejects_invalid_facet_values apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_facet_suggester_extracts_starter_tags_from_text apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_schema_registry_exposes_supported_document_contracts`,
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_patch_persists_controlled_facet_values apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_patch_tracks_human_added_and_system_added_tag_changes apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_page_patch_persists_page_level_facet_values apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_patch_rejects_invalid_facet_values apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_facet_suggester_extracts_starter_tags_from_text apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_schema_registry_exposes_supported_document_contracts`,
   `npm --prefix apps/web test -- libraryWorkspace.test.ts documentLibrary.test.ts documentIngestionSelectors.test.ts documentIngestionPageEditor.test.ts`,
   and `npm --prefix apps/web run build`
 

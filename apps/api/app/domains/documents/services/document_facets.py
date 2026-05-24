@@ -31,10 +31,13 @@ DOCUMENT_COMMODITY_VALUES = (
     _facet_value("NATURAL_GAS", "Natural Gas"),
     _facet_value("CRUDE_OIL", "Crude Oil"),
     _facet_value("REFINED_PRODUCTS", "Refined Products"),
+    _facet_value("DIESEL", "Diesel"),
     _facet_value("LNG", "LNG"),
     _facet_value("NGL", "NGL"),
     _facet_value("POWER", "Power"),
     _facet_value("COAL", "Coal"),
+    _facet_value("SOYBEANS", "Soybeans"),
+    _facet_value("SOYBEAN_MEAL", "Soybean Meal"),
 )
 
 DOCUMENT_COMMERCIAL_SIDE_VALUES = (
@@ -103,6 +106,8 @@ VALUE_ALIASES = {
     "commodity": {
         "CRUDE": "CRUDE_OIL",
         "OIL": "CRUDE_OIL",
+        "SOYBEAN": "SOYBEANS",
+        "SOY": "SOYBEANS",
         "NAT_GAS": "NATURAL_GAS",
         "GAS": "NATURAL_GAS",
         "NATURAL_GAS": "NATURAL_GAS",
@@ -128,12 +133,21 @@ VALUE_ALIASES = {
 
 SYSTEM_SUGGESTION_PATTERNS: tuple[tuple[str, str, str, tuple[str, ...], float], ...] = (
     ("commodity", "NATURAL_GAS", "Natural Gas", (r"\bnatural gas\b", r"\bnat gas\b"), 0.76),
-    ("commodity", "CRUDE_OIL", "Crude Oil", (r"\bcrude\b", r"\bcrude oil\b"), 0.74),
-    ("commodity", "REFINED_PRODUCTS", "Refined Products", (r"\brefined products?\b", r"\bgasoline\b", r"\bdiesel\b"), 0.72),
+    (
+        "commodity",
+        "CRUDE_OIL",
+        "Crude Oil",
+        (r"\bcrude\b", r"\bcrude oil\b", r"\bwti\b", r"\bbrent\b", r"\bwest\s+texas\s+intermediate\b"),
+        0.74,
+    ),
+    ("commodity", "REFINED_PRODUCTS", "Refined Products", (r"\brefined products?\b", r"\bgasoline\b"), 0.72),
+    ("commodity", "DIESEL", "Diesel", (r"\bdiesel\b", r"\bulsd\b", r"\bultra\s+low\s+sulfur\s+diesel\b"), 0.74),
     ("commodity", "LNG", "LNG", (r"\blng\b", r"\bliquefied natural gas\b"), 0.78),
     ("commodity", "NGL", "NGL", (r"\bngl\b", r"\bnatural gas liquids?\b"), 0.74),
     ("commodity", "POWER", "Power", (r"\bpower\b", r"\belectricity\b"), 0.7),
     ("commodity", "COAL", "Coal", (r"\bcoal\b",), 0.72),
+    ("commodity", "SOYBEAN_MEAL", "Soybean Meal", (r"\bsoybean meal\b", r"\bsoymeal\b"), 0.76),
+    ("commodity", "SOYBEANS", "Soybeans", (r"\bsoybeans?\b(?!\s+(?:meal|oil))",), 0.72),
     ("commercial_side", "BUY", "Purchase", (r"\bpurchase\b", r"\bbuy\b", r"\bbought\b"), 0.62),
     ("commercial_side", "SELL", "Sale", (r"\bsale\b", r"\bsales\b", r"\bsell\b", r"\bsold\b"), 0.62),
     ("transport_mode", "AIR", "Air", (r"\bair\b", r"\bair freight\b"), 0.68),
@@ -152,6 +166,7 @@ DOCUMENT_KIND_COMMERCIAL_SIDE_SUGGESTIONS: dict[str, tuple[str, str, float]] = {
     "PURCHASE_ORDER": ("BUY", "Purchase", 0.86),
     "SALES_ORDER": ("SELL", "Sale", 0.86),
 }
+DOCUMENT_KIND_COMMERCIAL_SIDE_ABSTAIN = {"PRICE_PUBLICATION"}
 
 
 def normalize_document_facet_assignments(
@@ -221,17 +236,88 @@ def replace_document_facet_values(
         query = query.filter(DocumentFacetValue.page_id.is_(None))
     else:
         query = query.filter(DocumentFacetValue.page_id == page_id)
-    query.delete(synchronize_session=False)
 
     now = datetime.now(timezone.utc)
-    for facet_value in normalize_document_facet_assignments(
+    existing_values = query.all()
+    existing_by_key = {
+        (value.facet_key, value.value_code): value
+        for value in existing_values
+    }
+    incoming_values = normalize_document_facet_assignments(
         raw_values,
         document_id=document_id,
         page_id=page_id,
         actor_id=actor_id,
         changed_at=now,
-    ):
-        db.add(facet_value)
+    )
+    incoming_keys: set[tuple[str, str]] = set()
+
+    for incoming_value in incoming_values:
+        key = (incoming_value.facet_key, incoming_value.value_code)
+        incoming_keys.add(key)
+        existing_value = existing_by_key.get(key)
+        if existing_value is None:
+            db.add(incoming_value)
+            continue
+        _apply_facet_value_update(
+            existing_value,
+            incoming_value=incoming_value,
+            actor_id=actor_id,
+            changed_at=now,
+        )
+
+    for existing_value in existing_values:
+        key = (existing_value.facet_key, existing_value.value_code)
+        if key not in incoming_keys:
+            _mark_facet_value_removed(
+                existing_value,
+                actor_id=actor_id,
+                changed_at=now,
+            )
+
+
+def _apply_facet_value_update(
+    existing_value: DocumentFacetValue,
+    *,
+    incoming_value: DocumentFacetValue,
+    actor_id: str,
+    changed_at: datetime,
+) -> None:
+    existing_value.value_label_snapshot = incoming_value.value_label_snapshot
+    existing_value.review_status = incoming_value.review_status
+    if incoming_value.confidence is not None or existing_value.source == "MANUAL":
+        existing_value.confidence = incoming_value.confidence
+    if incoming_value.evidence:
+        existing_value.evidence = incoming_value.evidence
+    existing_value.updated_at = changed_at
+    existing_value.updated_by = actor_id
+    existing_value.version += 1
+
+
+def _mark_facet_value_removed(
+    value: DocumentFacetValue,
+    *,
+    actor_id: str,
+    changed_at: datetime,
+) -> None:
+    if value.review_status == "REJECTED":
+        return
+    value.review_status = "REJECTED"
+    value.evidence = _append_facet_evidence(value.evidence, f"Removed by {actor_id}.")
+    value.updated_at = changed_at
+    value.updated_by = actor_id
+    value.version += 1
+
+
+def _append_facet_evidence(values: object, note: str) -> list[str]:
+    evidence: list[str] = []
+    for value in values or []:
+        normalized = clean_optional_text(value)
+        if normalized is not None:
+            evidence.append(normalized)
+    if note not in evidence:
+        evidence.append(note)
+    return evidence[:20]
 
 
 def refresh_system_suggested_page_facets(
@@ -253,19 +339,19 @@ def refresh_system_suggested_page_facets(
         .scalars()
         .all()
     )
-    existing_non_system = {
+    blocked_keys = {
         (value.facet_key, value.value_code)
         for value in existing_values
-        if value.source != "SYSTEM_DERIVED" and value.review_status != "REJECTED"
+        if not (value.source == "SYSTEM_DERIVED" and value.review_status == "SUGGESTED")
     }
     for value in existing_values:
-        if value.source == "SYSTEM_DERIVED":
+        if value.source == "SYSTEM_DERIVED" and value.review_status == "SUGGESTED":
             db.delete(value)
 
     suggestions = [
         suggestion
         for suggestion in suggest_document_facets_from_text(page.raw_text, document_kind=page.document_kind)
-        if (str(suggestion["facet_key"]), str(suggestion["value_code"])) not in existing_non_system
+        if (str(suggestion["facet_key"]), str(suggestion["value_code"])) not in blocked_keys
     ]
     now = datetime.now(timezone.utc)
     for facet_value in normalize_document_facet_assignments(
@@ -283,7 +369,12 @@ def suggest_document_facets_from_text(raw_text: str | None, *, document_kind: st
     suggestions: list[dict[str, object]] = []
     seen: set[tuple[str, str]] = set()
     normalized_document_kind = (clean_optional_text(document_kind) or "").upper()
-    kind_commercial_side = DOCUMENT_KIND_COMMERCIAL_SIDE_SUGGESTIONS.get(normalized_document_kind)
+    commercial_side_abstains = normalized_document_kind in DOCUMENT_KIND_COMMERCIAL_SIDE_ABSTAIN
+    kind_commercial_side = (
+        None
+        if commercial_side_abstains
+        else DOCUMENT_KIND_COMMERCIAL_SIDE_SUGGESTIONS.get(normalized_document_kind)
+    )
     if kind_commercial_side is not None:
         value_code, value_label, confidence = kind_commercial_side
         suggestions.append(
@@ -303,6 +394,8 @@ def suggest_document_facets_from_text(raw_text: str | None, *, document_kind: st
         return suggestions
 
     for facet_key, value_code, value_label, patterns, confidence in SYSTEM_SUGGESTION_PATTERNS:
+        if facet_key == "commercial_side" and commercial_side_abstains:
+            continue
         if facet_key == "commercial_side" and kind_commercial_side is not None:
             continue
         matched_pattern = next((pattern for pattern in patterns if re.search(pattern, text, flags=re.IGNORECASE)), None)

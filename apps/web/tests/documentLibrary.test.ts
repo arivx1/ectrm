@@ -11,6 +11,7 @@ import {
   buildDocumentLibraryFolderCounts,
   buildDocumentLibraryFolderTree,
   documentCanBeVerified,
+  documentHasExecutedWorkflows,
   filterDocumentLibraryDocuments,
   sortDocumentLibraryKindOptions,
 } from '../src/workspaces/library/libraryWorkspaceSupport'
@@ -100,6 +101,7 @@ function buildDocument(overrides: Partial<DocumentIngestionRecord> = {}): Docume
     linkage_assessment: null,
     action_plan: null,
     record_links: [],
+    activity: [],
     pages: [],
     understanding: buildDocumentUnderstanding(),
     ...overrides,
@@ -226,6 +228,9 @@ describe('document library helpers', () => {
             record_type: 'trade_invoice',
             record_id: 'INV-100',
             record_label: 'Invoice INV-100',
+            role: 'PRIMARY',
+            source: 'ACTION_PLAN',
+            summary: 'Invoice workflow link',
             linked_at: '2026-05-10T11:30:00Z',
             linked_by: 'ops.docs',
           },
@@ -256,6 +261,63 @@ describe('document library helpers', () => {
 
     expect(documentCanBeVerified(buildDocument({ review_status: 'VERIFIED' }))).toBe(false)
     expect(documentCanBeVerified(buildDocument({ status: 'PROCESSING' }))).toBe(false)
+  })
+
+  it('detects executed document workflows before allowing reprocess without warning', () => {
+    expect(documentHasExecutedWorkflows(buildDocument())).toBe(false)
+    expect(
+      documentHasExecutedWorkflows(
+        buildDocument({
+          record_links: [
+            {
+              record_type: 'PRICE_INDEX',
+              record_id: 'WTI_CUSHING_D',
+              record_label: 'WTI Cushing Daily',
+              role: 'SECONDARY',
+              source: 'DOCUMENT_WORKFLOW',
+              summary: 'Price index loaded from document workflow.',
+              linked_at: '2026-05-10T11:30:00Z',
+              linked_by: 'ops.docs',
+            },
+          ],
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      documentHasExecutedWorkflows(
+        buildDocument({
+          activity: [
+            {
+              activity_id: 'evt-workflow',
+              event_type: 'DocumentWorkflowExecuted',
+              label: 'Workflow Executed',
+              detail: 'ops.docs executed Process Prices. 1 observation processed.',
+              occurred_at: '2026-05-10T11:30:00Z',
+              actor_id: 'ops.docs',
+              payload: {},
+            },
+          ],
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      documentHasExecutedWorkflows(
+        buildDocument({
+          record_links: [
+            {
+              record_type: 'TRADE_INVOICE',
+              record_id: 'INV-100',
+              record_label: 'Invoice INV-100',
+              role: 'PRIMARY',
+              source: 'ACTION_PLAN',
+              summary: 'Invoice link from action plan.',
+              linked_at: '2026-05-10T11:30:00Z',
+              linked_by: 'ops.docs',
+            },
+          ],
+        }),
+      ),
+    ).toBe(false)
   })
 
   it('filters and sorts documents for the active library collection', () => {

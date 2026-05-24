@@ -64,6 +64,13 @@ export function documentIsLinked(document: DocumentIngestionRecord): boolean {
   return document.record_links.length > 0
 }
 
+export function documentHasExecutedWorkflows(document: DocumentIngestionRecord): boolean {
+  return (
+    (document.activity ?? []).some((entry) => entry.event_type === 'DocumentWorkflowExecuted') ||
+    document.record_links.some((link) => (link.source ?? '').trim().toUpperCase() === 'DOCUMENT_WORKFLOW')
+  )
+}
+
 export function documentHasAiAssist(document: DocumentIngestionRecord): boolean {
   return Boolean(document.processor_trace) || Boolean(document.processor_provider && document.processor_provider !== 'builtin')
 }

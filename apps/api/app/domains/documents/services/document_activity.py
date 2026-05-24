@@ -222,6 +222,15 @@ def _activity_label_and_detail(
         previous = payload.get("previous_review_status") or "UNKNOWN"
         current = payload.get("review_status") or "UNKNOWN"
         return "Review Updated", f"{actor} changed review status from {previous} to {current}."
+    if event.event_type == "DocumentWorkflowExecuted":
+        workflow_label = str(payload.get("label") or payload.get("workflow_id") or "document workflow")
+        observation_count = _coerce_int(payload.get("observation_count"))
+        count_text = (
+            f" {observation_count} observation{'' if observation_count == 1 else 's'} processed."
+            if observation_count is not None
+            else ""
+        )
+        return "Workflow Executed", f"{actor} executed {workflow_label}.{count_text}"
     if event.event_type.startswith("DocumentActionApproval"):
         request = _dict_payload(payload.get("request"))
         title = request.get("title") or request.get("action_type") or "document action"
