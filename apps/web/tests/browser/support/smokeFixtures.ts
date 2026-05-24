@@ -25,6 +25,7 @@ export const smokeSession = {
     display_name: "Ops Admin",
     role: "OPS_ADMIN",
     default_assistant_persona: "admin",
+    assistant_context_blurb: null,
   },
 } as const;
 
@@ -1344,6 +1345,7 @@ export const userAccounts = [
     display_name: "Ops Admin",
     role: "OPS_ADMIN",
     default_assistant_persona: "admin",
+    assistant_context_blurb: null,
     is_active: true,
     password_set: true,
     last_login_at: "2026-04-11T07:55:00Z",
@@ -1359,6 +1361,7 @@ export const userAccounts = [
     display_name: "Trader Alpha",
     role: "TRADER",
     default_assistant_persona: "trader",
+    assistant_context_blurb: "Covers speculative trade ideas and wants hedge rationale called out early.",
     is_active: true,
     password_set: true,
     last_login_at: "2026-04-11T08:20:00Z",

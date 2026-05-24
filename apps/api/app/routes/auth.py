@@ -28,6 +28,7 @@ from apps.api.app.domains.reference_data.services.external_data.provider_sync im
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.schemas.auth import (
     AuthenticatedUserOut,
+    AuthenticatedUserProfileUpdate,
     BootstrapAdminRequest,
     CurrentSessionOut,
     GoogleSessionRequest,
@@ -183,6 +184,38 @@ def get_current_session(
     )
 
 
+@router.patch("/me/profile", response_model=AuthenticatedUserOut)
+def update_current_user_profile(
+    payload: AuthenticatedUserProfileUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AuthenticatedUserOut:
+    principal = resolve_session_principal(db, request.headers.get("authorization"))
+    if principal is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication is required")
+
+    user = db.get(UserAccount, principal.user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication is required")
+
+    if "display_name" in payload.model_fields_set and payload.display_name is not None:
+        user.display_name = payload.display_name
+    if "default_assistant_persona" in payload.model_fields_set:
+        user.default_assistant_persona = (
+            payload.default_assistant_persona
+            or default_assistant_persona_for_role(user.role)
+        )
+    if "assistant_context_blurb" in payload.model_fields_set:
+        user.assistant_context_blurb = payload.assistant_context_blurb
+
+    user.updated_at = datetime.now(timezone.utc)
+    user.updated_by = user.user_id
+    user.version += 1
+    db.commit()
+    db.refresh(user)
+    return _to_authenticated_user(user)
+
+
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 def logout_current_session(request: Request, db: Session = Depends(get_db)) -> Response:
     principal = resolve_session_principal(db, request.headers.get("authorization"))
@@ -214,6 +247,7 @@ def _to_authenticated_user(user: UserAccount) -> AuthenticatedUserOut:
             normalize_assistant_persona_key(user.default_assistant_persona)
             or default_assistant_persona_for_role(user.role)
         ),
+        assistant_context_blurb=user.assistant_context_blurb,
     )
 
 

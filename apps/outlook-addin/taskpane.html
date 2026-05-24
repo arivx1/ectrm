@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CommodityAI Integration</title>
+  <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --color-primary: #111111;
+      --color-primary-hover: #2a2a2a;
+      --color-focus: #0078d4;
+      --color-text: #0b0b0b;
+      --color-muted: #686868;
+      --color-border: #d6d6d1;
+      --color-surface: #ffffff;
+      --color-page: #fbfbfa;
+      --color-subtle: #f4f4f1;
+      --color-success: #137333;
+      --color-warning: #6f4e00;
+      --color-error: #b3261e;
+      --font-display: Georgia, "Times New Roman", Times, serif;
+      --font-sans: "Avenir Next", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      --shadow-focus: 0 0 0 2px rgba(0, 120, 212, 0.26);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-width: 280px;
+      background: var(--color-page);
+      color: var(--color-text);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .addin-shell {
+      min-height: 100vh;
+    }
+
+    .addin-topbar {
+      display: flex;
+      min-height: 42px;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--color-border);
+      padding: 0 10px;
+      background: var(--color-surface);
+      color: var(--color-text);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .addin-topbar-context {
+      color: var(--color-muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .addin-page {
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+      padding: 24px 24px 28px;
+    }
+
+    .addin-header {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .addin-title {
+      margin: 0;
+      color: var(--color-text);
+      font-family: var(--font-display);
+      font-size: 44px;
+      font-weight: 700;
+      line-height: 0.98;
+    }
+
+    .addin-subtitle {
+      margin: 0;
+      color: var(--color-muted);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    .form-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 26px;
+    }
+
+    .form-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .section-title {
+      margin: 0;
+      border-bottom: 1px solid var(--color-border);
+      padding-bottom: 8px;
+      color: var(--color-text);
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+
+    .outline-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      padding: 16px;
+      background: var(--color-surface);
+    }
+
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    label {
+      color: var(--color-muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    input {
+      width: 100%;
+      min-height: 38px;
+      border: 1px solid var(--color-border);
+      border-radius: 4px;
+      padding: 8px 10px;
+      background: var(--color-surface);
+      color: var(--color-text);
+      font: inherit;
+      outline: none;
+    }
+
+    select {
+      width: 100%;
+      min-height: 38px;
+      border: 1px solid var(--color-border);
+      border-radius: 4px;
+      padding: 8px 10px;
+      background: var(--color-surface);
+      color: var(--color-text);
+      font: inherit;
+      outline: none;
+    }
+
+    input:focus {
+      border-color: var(--color-focus);
+      box-shadow: var(--shadow-focus);
+    }
+
+    select:focus {
+      border-color: var(--color-focus);
+      box-shadow: var(--shadow-focus);
+    }
+
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    button {
+      min-height: 38px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 8px 14px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:focus-visible {
+      outline: none;
+      box-shadow: var(--shadow-focus);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.65;
+    }
+
+    .button-primary {
+      background: var(--color-primary);
+      color: #ffffff;
+    }
+
+    .button-primary:hover:not(:disabled) {
+      background: var(--color-primary-hover);
+    }
+
+    .button-secondary {
+      border-color: var(--color-border);
+      background: var(--color-surface);
+      color: var(--color-text);
+    }
+
+    .button-secondary:hover:not(:disabled) {
+      background: var(--color-subtle);
+    }
+
+    .send-action {
+      width: 100%;
+    }
+
+    .email-summary {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .email-summary-title {
+      margin: 0;
+      color: var(--color-text);
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .email-summary-text {
+      margin: 0;
+      color: var(--color-muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .status-row {
+      display: flex;
+      min-height: 26px;
+      align-items: center;
+      gap: 10px;
+    }
+
+    #loading-spinner {
+      width: 18px;
+      height: 18px;
+      flex: 0 0 auto;
+      animation: spin 0.8s linear infinite;
+      border: 2px solid #e9e9e5;
+      border-top-color: var(--color-focus);
+      border-radius: 50%;
+    }
+
+    #loading-spinner[hidden] {
+      display: none;
+    }
+
+    #status-message {
+      min-height: 20px;
+      color: var(--color-muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    #status-message.success {
+      color: var(--color-success);
+    }
+
+    #status-message.warning {
+      color: var(--color-warning);
+    }
+
+    #status-message.error {
+      color: var(--color-error);
+    }
+
+    .sideload-message {
+      display: none;
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      background: var(--color-surface);
+      padding: 16px;
+      color: var(--color-muted);
+      font-size: 13px;
+    }
+
+    .sideload-message.visible {
+      display: block;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    @media (max-width: 340px) {
+      .addin-page {
+        padding: 22px 18px 26px;
+      }
+
+      .addin-title {
+        font-size: 38px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="addin-shell">
+    <div class="addin-topbar">
+      <span>CommodityAI</span>
+      <span class="addin-topbar-context">Outlook</span>
+    </div>
+
+    <div class="addin-page">
+      <header class="addin-header">
+        <h1 class="addin-title">CommodityAI</h1>
+        <p class="addin-subtitle">Send the selected Outlook email into CommodityAI.</p>
+      </header>
+
+      <section id="app-body" class="form-stack" hidden>
+        <section class="form-section" aria-labelledby="auth-section-title">
+          <h2 id="auth-section-title" class="section-title">Authentication</h2>
+          <div class="outline-panel">
+            <div class="field-group">
+              <label for="api-key-input">API key</label>
+              <input
+                id="api-key-input"
+                type="password"
+                placeholder="cai_live_..."
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+              />
+            </div>
+
+            <div class="button-row">
+              <button id="save-auth-btn" class="button-primary" type="button">Save and test</button>
+              <button id="clear-auth-btn" class="button-secondary" type="button">Clear key</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="form-section" aria-labelledby="email-section-title">
+          <h2 id="email-section-title" class="section-title">Email</h2>
+
+          <div id="email-summary" class="outline-panel email-summary">
+            <p class="email-summary-title">Current email</p>
+            <p id="email-summary-text" class="email-summary-text">Open an email to send it to CommodityAI.</p>
+          </div>
+
+          <div class="outline-panel">
+            <div class="field-group">
+              <label for="priority-input">Processing priority</label>
+              <select id="priority-input">
+                <option value="normal" selected>Normal</option>
+                <option value="high">High</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+          </div>
+
+          <button id="send-email-btn" class="button-primary send-action" type="button">Send current email</button>
+
+          <div class="status-row" aria-live="polite" aria-atomic="true">
+            <div id="loading-spinner" hidden aria-label="Working"></div>
+            <div id="status-message"></div>
+          </div>
+        </section>
+      </section>
+
+      <section id="sideload-message" class="sideload-message visible">
+        Open this add-in from Outlook to connect your CommodityAI API key.
+      </section>
+    </div>
+  </main>
+
+  <script type="text/javascript" src="./taskpane.js"></script>
+</body>
+</html>

@@ -135,6 +135,21 @@ function latestProcessedAt(document: DocumentIngestionRecord): string | null {
 }
 
 function buildDocumentActivityLog(document: DocumentIngestionRecord): LibraryDocumentActivityEntry[] {
+  const backendEntries: LibraryDocumentActivityEntry[] = (document.activity ?? []).map((entry) => ({
+    key: entry.activity_id,
+    label: entry.label,
+    detail: entry.detail,
+    timestamp: entry.occurred_at,
+  }))
+  if (backendEntries.length > 0) {
+    const supplementalEntries = buildSupplementalDocumentActivityLog(document, backendEntries)
+    return [...backendEntries, ...supplementalEntries].sort((left, right) => {
+      const leftTime = left.timestamp ? new Date(left.timestamp).getTime() : 0
+      const rightTime = right.timestamp ? new Date(right.timestamp).getTime() : 0
+      return rightTime - leftTime
+    })
+  }
+
   const processedAt = latestProcessedAt(document)
   const processedPageCount = document.pages.filter((page) => Boolean(page.processed_at)).length
   const entries: LibraryDocumentActivityEntry[] = [
@@ -219,6 +234,54 @@ function buildDocumentActivityLog(document: DocumentIngestionRecord): LibraryDoc
     const rightTime = right.timestamp ? new Date(right.timestamp).getTime() : 0
     return rightTime - leftTime
   })
+}
+
+function buildSupplementalDocumentActivityLog(
+  document: DocumentIngestionRecord,
+  backendEntries: LibraryDocumentActivityEntry[],
+): LibraryDocumentActivityEntry[] {
+  const entries: LibraryDocumentActivityEntry[] = []
+  const hasBackendEventAtUpdated = backendEntries.some((entry) => sameTimestamp(entry.timestamp, document.updated_at))
+
+  if (document.reviewed_at && !backendEntries.some((entry) => entry.label === 'Review Updated')) {
+    entries.push({
+      key: 'reviewed',
+      label: 'Reviewed',
+      detail: `${document.reviewed_by || 'system'} marked the file ${formatDocumentLibraryLabel(document.review_status)}.`,
+      timestamp: document.reviewed_at,
+    })
+  }
+
+  document.record_links.forEach((link) => {
+    entries.push({
+      key: `linked-${link.record_type}-${link.record_id}`,
+      label: 'Linked',
+      detail: `${link.linked_by || 'system'} linked ${link.record_label}.`,
+      timestamp: link.linked_at,
+    })
+  })
+
+  if (!backendEntries.some((entry) => entry.label === 'Processing Failed')) {
+    document.processing_errors.forEach((error, index) => {
+      entries.push({
+        key: `error-${index}`,
+        label: 'Needs Attention',
+        detail: error,
+        timestamp: document.updated_at,
+      })
+    })
+  }
+
+  if (!sameTimestamp(document.created_at, document.updated_at) && !hasBackendEventAtUpdated) {
+    entries.push({
+      key: 'updated',
+      label: 'Updated',
+      detail: `${document.updated_by || 'system'} updated the file record.`,
+      timestamp: document.updated_at,
+    })
+  }
+
+  return entries
 }
 
 function revokeDocumentSourceUrlLater(sourceUrl: string): void {
@@ -369,6 +432,7 @@ export function LibraryWorkspace({
     pagePreviewUrls,
     pagePreviewLoading,
     pagePreviewErrors,
+    clearPagePreviewsForDocument,
     fileInputRef,
     setDisplayName,
     setSelectedProcessorProvider,
@@ -1070,7 +1134,16 @@ export function LibraryWorkspace({
                                 ) : selectedDetailPagePreviewLoading ? (
                                   <p>Loading page preview...</p>
                                 ) : selectedDetailPagePreviewError ? (
-                                  <p className="field-error">{selectedDetailPagePreviewError}</p>
+                                  <div className="library-document-page-preview-error">
+                                    <p className="field-error">{selectedDetailPagePreviewError}</p>
+                                    <button
+                                      type="button"
+                                      className="button button-secondary"
+                                      onClick={() => clearPagePreviewsForDocument(documentPage.document_id)}
+                                    >
+                                      Retry Preview
+                                    </button>
+                                  </div>
                                 ) : (
                                   <p>Preview is ready and will load shortly.</p>
                                 )

@@ -55,6 +55,7 @@ class UserAccountsApiTests(unittest.TestCase):
                     email="ops@example.com",
                     display_name="Ops Lead",
                     role="ops_admin",
+                    assistant_context_blurb="Prefers queue risk before market color.",
                     password="supersecret1",
                     created_by="system",
                 ),
@@ -62,6 +63,7 @@ class UserAccountsApiTests(unittest.TestCase):
             )
             self.assertEqual(created.role, "OPS_ADMIN")
             self.assertEqual(created.default_assistant_persona, "admin")
+            self.assertEqual(created.assistant_context_blurb, "Prefers queue risk before market color.")
             self.assertTrue(created.password_set)
 
             updated = update_user(
@@ -69,12 +71,24 @@ class UserAccountsApiTests(unittest.TestCase):
                 UserAccountUpdate(
                     display_name="Operations Lead",
                     default_assistant_persona="risk",
+                    assistant_context_blurb="Focus on settlement blockers first.",
                     updated_by="admin",
                 ),
                 db=session,
             )
             self.assertEqual(updated.display_name, "Operations Lead")
             self.assertEqual(updated.default_assistant_persona, "risk")
+            self.assertEqual(updated.assistant_context_blurb, "Focus on settlement blockers first.")
+
+            cleared = update_user(
+                "ops_lead",
+                UserAccountUpdate(
+                    assistant_context_blurb="   ",
+                    updated_by="admin",
+                ),
+                db=session,
+            )
+            self.assertIsNone(cleared.assistant_context_blurb)
 
             inactive = deactivate_user(
                 "ops_lead",
@@ -93,6 +107,7 @@ class UserAccountsApiTests(unittest.TestCase):
             fetched = get_user("ops_lead", db=session)
             self.assertEqual(fetched.email, "ops@example.com")
             self.assertEqual(fetched.default_assistant_persona, "risk")
+            self.assertIsNone(fetched.assistant_context_blurb)
 
             rows = list_users(q="operations", is_active=True, limit=50, offset=0, db=session)
             self.assertEqual([row.user_id for row in rows], ["ops_lead"])

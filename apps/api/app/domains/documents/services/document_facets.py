@@ -134,8 +134,8 @@ SYSTEM_SUGGESTION_PATTERNS: tuple[tuple[str, str, str, tuple[str, ...], float], 
     ("commodity", "NGL", "NGL", (r"\bngl\b", r"\bnatural gas liquids?\b"), 0.74),
     ("commodity", "POWER", "Power", (r"\bpower\b", r"\belectricity\b"), 0.7),
     ("commodity", "COAL", "Coal", (r"\bcoal\b",), 0.72),
-    ("commercial_side", "BUY", "Purchase", (r"\bpurchase\b", r"\bbuy\b", r"\bbuyer\b"), 0.62),
-    ("commercial_side", "SELL", "Sale", (r"\bsale\b", r"\bsell\b", r"\bseller\b"), 0.62),
+    ("commercial_side", "BUY", "Purchase", (r"\bpurchase\b", r"\bbuy\b", r"\bbought\b"), 0.62),
+    ("commercial_side", "SELL", "Sale", (r"\bsale\b", r"\bsales\b", r"\bsell\b", r"\bsold\b"), 0.62),
     ("transport_mode", "AIR", "Air", (r"\bair\b", r"\bair freight\b"), 0.68),
     ("transport_mode", "VESSEL", "Vessel", (r"\bvessel\b", r"\btanker\b", r"\bship\b"), 0.76),
     ("transport_mode", "BARGE", "Barge", (r"\bbarge\b",), 0.76),
@@ -147,6 +147,11 @@ SYSTEM_SUGGESTION_PATTERNS: tuple[tuple[str, str, str, tuple[str, ...], float], 
     ("asset", "UPSTREAM", "Upstream", (r"\bupstream\b", r"\bproduction field\b", r"\bwellhead\b"), 0.7),
     ("asset", "PIPELINE", "Pipeline", (r"\bpipeline asset\b", r"\bpipeline system\b"), 0.68),
 )
+
+DOCUMENT_KIND_COMMERCIAL_SIDE_SUGGESTIONS: dict[str, tuple[str, str, float]] = {
+    "PURCHASE_ORDER": ("BUY", "Purchase", 0.86),
+    "SALES_ORDER": ("SELL", "Sale", 0.86),
+}
 
 
 def normalize_document_facet_assignments(
@@ -259,7 +264,7 @@ def refresh_system_suggested_page_facets(
 
     suggestions = [
         suggestion
-        for suggestion in suggest_document_facets_from_text(page.raw_text)
+        for suggestion in suggest_document_facets_from_text(page.raw_text, document_kind=page.document_kind)
         if (str(suggestion["facet_key"]), str(suggestion["value_code"])) not in existing_non_system
     ]
     now = datetime.now(timezone.utc)
@@ -273,14 +278,33 @@ def refresh_system_suggested_page_facets(
         db.add(facet_value)
 
 
-def suggest_document_facets_from_text(raw_text: str | None) -> list[dict[str, object]]:
+def suggest_document_facets_from_text(raw_text: str | None, *, document_kind: str | None = None) -> list[dict[str, object]]:
     text = clean_optional_text(raw_text, lowercase=True)
-    if not text:
-        return []
-
     suggestions: list[dict[str, object]] = []
     seen: set[tuple[str, str]] = set()
+    normalized_document_kind = (clean_optional_text(document_kind) or "").upper()
+    kind_commercial_side = DOCUMENT_KIND_COMMERCIAL_SIDE_SUGGESTIONS.get(normalized_document_kind)
+    if kind_commercial_side is not None:
+        value_code, value_label, confidence = kind_commercial_side
+        suggestions.append(
+            {
+                "facet_key": "commercial_side",
+                "value_code": value_code,
+                "value_label": value_label,
+                "source": "SYSTEM_DERIVED",
+                "confidence": confidence,
+                "review_status": "SUGGESTED",
+                "evidence": [f"Document kind {normalized_document_kind} implies {value_label.lower()} commercial side."],
+            }
+        )
+        seen.add(("commercial_side", value_code))
+
+    if not text:
+        return suggestions
+
     for facet_key, value_code, value_label, patterns, confidence in SYSTEM_SUGGESTION_PATTERNS:
+        if facet_key == "commercial_side" and kind_commercial_side is not None:
+            continue
         matched_pattern = next((pattern for pattern in patterns if re.search(pattern, text, flags=re.IGNORECASE)), None)
         if matched_pattern is None:
             continue

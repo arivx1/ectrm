@@ -8,6 +8,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.config import settings
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.schemas.document import DocumentActionPlanOut
@@ -22,6 +23,8 @@ from apps.api.app.schemas.document import DocumentProcessorProvider
 from apps.api.app.schemas.document import DocumentRoutingAssessmentOut
 from apps.api.app.schemas.document import DocumentTableBlockOut
 
+from .document_activity import load_document_activity_events_by_document_id
+from .document_activity import serialize_document_activity_events
 from .document_ingestion_common import build_raw_text_excerpt
 from .document_ingestion_common import clean_optional_text
 from .document_action_planning import build_document_action_plan
@@ -38,6 +41,11 @@ from .document_ingestion_storage import document_page_preview_exists
 from .document_ingestion_storage import stored_pdf_absolute_path
 from .document_understanding import build_document_page_understanding
 from .document_understanding import build_document_understanding
+
+try:
+    import pymupdf
+except ImportError:  # pragma: no cover - dependency should be available in deployed environments
+    pymupdf = None
 
 VALID_DOCUMENT_PROCESSOR_PROVIDERS = {"openai", "anthropic", "google"}
 
@@ -68,13 +76,50 @@ def get_document_page_preview_path(
     document_id: str,
     page_id: int,
 ) -> Path:
-    _document, pages = load_document_and_pages(db, document_id=document_id)
+    document, pages = load_document_and_pages(db, document_id=document_id)
     page = next((candidate for candidate in pages if candidate.page_id == page_id), None)
     if page is None:
         raise LookupError(f"Page '{page_id}' was not found for document '{document_id}'")
     preview_path = document_page_preview_absolute_path(document_id=document_id, page_number=page.page_number)
     if not preview_path.exists():
-        raise LookupError(f"Preview image is not available for page '{page_id}' in document '{document_id}'")
+        preview_path = _render_missing_document_page_preview(document=document, page=page)
+    return preview_path
+
+
+def _render_missing_document_page_preview(
+    *,
+    document: DocumentIngestion,
+    page: DocumentIngestionPage,
+) -> Path:
+    source_path = stored_pdf_absolute_path(document.storage_key)
+    if not source_path.exists():
+        raise LookupError(f"Stored source PDF is not available for document '{document.document_id}'")
+    if pymupdf is None:
+        raise LookupError(
+            f"Preview image is not available for page '{page.page_id}' in document '{document.document_id}'"
+        )
+
+    preview_path = document_page_preview_absolute_path(
+        document_id=document.document_id,
+        page_number=page.page_number,
+    )
+    try:
+        rendered_document = pymupdf.open(str(source_path))
+        try:
+            rendered_page = rendered_document.load_page(page.page_number - 1)
+            render_scale = settings.DOCUMENT_PAGE_RENDER_DPI / 72
+            pixmap = rendered_page.get_pixmap(
+                matrix=pymupdf.Matrix(render_scale, render_scale),
+                alpha=False,
+            )
+            preview_path.parent.mkdir(parents=True, exist_ok=True)
+            preview_path.write_bytes(pixmap.tobytes("png"))
+        finally:
+            rendered_document.close()
+    except Exception as exc:
+        raise LookupError(
+            f"Preview image is not available for page '{page.page_id}' in document '{document.document_id}'"
+        ) from exc
     return preview_path
 
 
@@ -118,12 +163,14 @@ def serialize_documents(
         pages_by_document[page.document_id].append(page)
     record_links_by_document = load_document_record_links_by_document_id(db, document_ids=document_ids)
     facet_values_by_document = load_document_facet_values_by_document_id(db, document_ids=document_ids)
+    activity_events_by_document = load_document_activity_events_by_document_id(db, document_ids=document_ids)
 
     serialized: list[DocumentIngestionOut] = []
     for document in documents:
         document_pages = pages_by_document.get(document.document_id, [])
         document_record_links = record_links_by_document.get(document.document_id, [])
         document_facet_values = facet_values_by_document.get(document.document_id, [])
+        document_activity_events = activity_events_by_document.get(document.document_id, [])
         facet_values_by_page = {
             page.page_id: [
                 to_document_facet_assignment_out(facet_value)
@@ -269,6 +316,7 @@ def serialize_documents(
                     for link in document_record_links
                 ],
                 facet_values=serialized_document_facet_values,
+                activity=serialize_document_activity_events(document_activity_events),
                 pages=serialized_pages,
                 understanding=build_document_understanding(
                     original_filename=document.original_filename,

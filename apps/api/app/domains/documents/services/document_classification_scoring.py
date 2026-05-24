@@ -16,6 +16,7 @@ from .schema_registry import get_document_kind_schema
 from .schema_registry import list_supported_document_kinds
 
 DETERMINISTIC_ASSESSMENT_VERSION = "deterministic-score-v1"
+LOW_CONFIDENCE_CLASSIFICATION_THRESHOLD = 0.46
 _TEXT_KEYWORD_SCORE = 0.44
 _EXTRA_TEXT_KEYWORD_SCORE = 0.08
 _FILENAME_KEYWORD_SCORE = 0.12
@@ -26,7 +27,6 @@ _TABLE_TEMPLATE_SCORE = 0.18
 _TABLE_REQUIRED_SCORE = 0.08
 _TABLE_ROW_BONUS = 0.02
 _AMBIGUITY_MARGIN = 0.12
-_LOW_CONFIDENCE_THRESHOLD = 0.46
 _MIN_TEMPLATE_OVERLAP = 0.4
 
 
@@ -114,6 +114,10 @@ def score_document_page_classification(
         second_candidate = top_candidate
         top_candidate = fallback_candidate
 
+    if _has_only_filename_signal(top_candidate, raw_text=raw_text):
+        second_candidate = top_candidate
+        top_candidate = _filename_hint_only_other_candidate(top_candidate)
+
     confidence = _finalize_confidence(
         top_candidate=top_candidate,
         second_candidate=second_candidate,
@@ -131,7 +135,7 @@ def score_document_page_classification(
         conflicts.append("OCR fallback was required, so extracted labels may be incomplete.")
     if raw_text is None and image_has_visible_content:
         conflicts.append("Visible page content was detected, but no extractable text was available.")
-    if confidence < _LOW_CONFIDENCE_THRESHOLD:
+    if confidence < LOW_CONFIDENCE_CLASSIFICATION_THRESHOLD:
         conflicts.append("Deterministic evidence stayed low-confidence, so manual review is recommended.")
 
     matched_by = ";".join(_dedupe_strings(top_candidate.matched_by_parts)[:4]) or "fallback:unknown"
@@ -359,6 +363,35 @@ def _fallback_candidates(*, searchable: str, raw_text: str | None) -> list[_Cand
             )
         )
     return candidates
+
+
+def _has_only_filename_signal(candidate: _CandidateScore, *, raw_text: str | None) -> bool:
+    if (raw_text or "").strip() or candidate.document_kind in {"OTHER", "UNKNOWN"}:
+        return False
+    return (
+        bool(candidate.filename_hits)
+        and not candidate.keyword_hits
+        and not candidate.required_fields_found
+        and not candidate.matching_keys_found
+        and not candidate.matched_table_templates
+    )
+
+
+def _filename_hint_only_other_candidate(candidate: _CandidateScore) -> _CandidateScore:
+    hinted_label = _kind_label(candidate.document_kind).lower()
+    hits = ", ".join(candidate.filename_hits[:2])
+    return _CandidateScore(
+        document_kind="OTHER",
+        document_subtype="FILENAME_HINT_ONLY",
+        score=max(candidate.score, 0.16),
+        matched_by_parts=["fallback:filename_hint_only"],
+        supporting_evidence=[
+            f"Filename hints at {hinted_label} ({hits}), but no extractable content confirmed that type."
+        ],
+        conflicts=[
+            "Only filename hints were available, so the document was placed in Other for manual review."
+        ],
+    )
 
 
 def _unknown_candidate() -> _CandidateScore:

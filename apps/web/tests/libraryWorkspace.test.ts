@@ -117,6 +117,7 @@ function buildDocument(overrides: Partial<DocumentIngestionRecord> = {}): Docume
     linkage_assessment: null,
     action_plan: null,
     record_links: [],
+    activity: [],
     pages: [
       {
         page_id: 1,
@@ -313,6 +314,7 @@ function buildController(overrides: Partial<DocumentIngestionController> = {}): 
     pagePreviewUrls: {},
     pagePreviewLoading: {},
     pagePreviewErrors: {},
+    clearPagePreviewsForDocument: () => undefined,
     fileInputRef: { current: null },
     setDisplayName: () => undefined,
     setSelectedProcessorProvider: () => undefined,
@@ -639,5 +641,70 @@ describe('LibraryWorkspace', () => {
     expect(markup).toContain('Extracted Text')
     expect(markup).toContain('Vessel nomination details for review.')
     expect(markup).toContain('Preview for page 1')
+  })
+
+  it('renders persisted document audit activity with original classification and reprocess history', () => {
+    const baseDocument = buildDocument({
+      activity: [
+        {
+          activity_id: 'evt-reclassified',
+          event_type: 'DocumentClassified',
+          label: 'Reclassified',
+          detail: 'Reclassified as TRADE CONFIRMATION across 1/1 pages by GPT / gpt-5-mini with 96% average confidence.',
+          occurred_at: '2026-05-16T19:05:00Z',
+          actor_id: 'document_processor',
+          payload: {},
+        },
+        {
+          activity_id: 'evt-reprocess',
+          event_type: 'DocumentReprocessRequested',
+          label: 'Reprocessed',
+          detail: 'ops_reviewer queued reprocessing with GPT / gpt-5-mini. Prior classification: INVOICE.',
+          occurred_at: '2026-05-16T19:04:00Z',
+          actor_id: 'ops_reviewer',
+          payload: {},
+        },
+        {
+          activity_id: 'evt-original',
+          event_type: 'DocumentClassified',
+          label: 'Original Classification',
+          detail: 'Originally classified as INVOICE across 1/1 pages by deterministic scoring with 92% average confidence.',
+          occurred_at: '2026-05-16T18:55:00Z',
+          actor_id: 'document_processor',
+          payload: {},
+        },
+      ],
+      updated_at: '2026-05-16T19:05:00Z',
+    })
+    useDocumentIngestionControllerMock.mockReturnValue(
+      buildController({
+        documents: [baseDocument],
+      }),
+    )
+
+    const markup = renderToStaticMarkup(
+      createElement(LibraryWorkspace, {
+        authSession: {
+          accessToken: 'token',
+          refreshToken: 'refresh',
+          expiresAt: '2026-05-16T22:00:00Z',
+          user: {
+            id: 'doc_admin',
+            email: 'doc_admin@example.com',
+            name: 'Doc Admin',
+            role: 'OPS_ADMIN',
+          },
+        },
+        activeDocumentId: 'DOC-225186',
+        formatDate: (value: string | null | undefined) => value ?? '',
+        onOpenOperationsWorkspace: () => undefined,
+      }),
+    )
+
+    expect(markup).toContain('Original Classification')
+    expect(markup).toContain('Originally classified as INVOICE')
+    expect(markup).toContain('Reprocessed')
+    expect(markup).toContain('Prior classification: INVOICE')
+    expect(markup).toContain('Reclassified as TRADE CONFIRMATION')
   })
 })

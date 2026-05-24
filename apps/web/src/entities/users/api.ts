@@ -8,6 +8,7 @@ export type UserAccountRecord = {
   display_name: string
   role: string
   default_assistant_persona: AssistantPersona
+  assistant_context_blurb: string | null
   is_active: boolean
   password_set: boolean
   last_login_at: string | null
@@ -24,6 +25,7 @@ export type CreateUserAccountInput = {
   display_name: string
   role: string
   default_assistant_persona?: AssistantPersona
+  assistant_context_blurb?: string | null
   password: string
 }
 
@@ -32,6 +34,7 @@ export type UpdateUserAccountInput = {
   display_name?: string
   role?: string
   default_assistant_persona?: AssistantPersona
+  assistant_context_blurb?: string | null
   password?: string
 }
 

@@ -8,6 +8,7 @@ export type StoredAuthUser = {
   display_name: string
   role: string
   default_assistant_persona?: AssistantPersona | null
+  assistant_context_blurb?: string | null
 }
 
 export type StoredAuthSession = {

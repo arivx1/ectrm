@@ -1136,6 +1136,16 @@ export type DocumentFacetAssignmentRecord = {
   version: number
 }
 
+export type DocumentActivityRecord = {
+  activity_id: string
+  event_type: string
+  label: string
+  detail: string
+  occurred_at: string
+  actor_id: string | null
+  payload: Record<string, unknown>
+}
+
 export type DocumentIngestionPageRecord = {
   page_id: number
   page_number: number
@@ -1195,6 +1205,7 @@ export type DocumentIngestionRecord = {
   action_plan: DocumentActionPlanRecord | null
   record_links: DocumentRecordLinkRecord[]
   facet_values?: DocumentFacetAssignmentRecord[]
+  activity: DocumentActivityRecord[]
   pages: DocumentIngestionPageRecord[]
   understanding: DocumentIngestionUnderstandingRecord
 }

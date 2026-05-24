@@ -216,6 +216,7 @@ dependencies.
 - [Document extraction architecture](docs/engineering/document-extraction-architecture.md)
 - [Excel-style reporting architecture](docs/engineering/excel-style-reporting-architecture.md)
 - [Trading EOD work packages](docs/engineering/trading-eod-work-packages.md)
+- [Home view instances work packages](docs/engineering/home-view-instances-work-packages.md)
 - [Trading source register](docs/engineering/trading-source-register.csv)
 - [ETRM trading source register](docs/engineering/trading-source-register-etrm.csv)
 - [Trading source candidates](docs/engineering/trading-source-candidates.csv)

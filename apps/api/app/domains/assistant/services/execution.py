@@ -220,6 +220,7 @@ def resolve_prompt_user(
         role=record.role,
         email=record.email,
         default_persona=normalize_assistant_persona_key(record.default_assistant_persona),
+        assistant_context_blurb=record.assistant_context_blurb,
         session_id=principal.session_id,
         session_expires_at=principal.expires_at,
     )

@@ -38,6 +38,13 @@
   gap: 0.55rem;
 }
 
+.data-sheet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: 0.55rem;
+}
+
 .data-sheet-table-shell {
   border-radius: 1.2rem;
 }

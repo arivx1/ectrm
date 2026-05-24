@@ -129,6 +129,40 @@
       }
     },
     {
+      "case_id": "purchase_order_vessel_supply",
+      "filename": "PURCHASE ORDER NO 28561 (1).pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Purchase Order\nPurchase Order No 28561\nOrder Date: 2026-05-22\nBuyer: Gulf Trading LLC\nSeller: Atlantic Fuels\nCommodity: ULSD\nQuantity: 10000 bbl\nVessel: MT Example\nDelivery Location: Houston Terminal",
+      "expectations": {
+        "expected_document_kind": "PURCHASE_ORDER",
+        "min_confidence": 0.85,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected purchase order terminology",
+          "Matched required purchase order fields"
+        ]
+      }
+    },
+    {
+      "case_id": "sales_order_vessel_supply",
+      "filename": "SALES ORDER SO-4412.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Sales Order\nSales Order No SO-4412\nOrder Date: 2026-05-22\nCustomer: Gulf Trading LLC\nSeller: Atlantic Fuels\nCommodity: ULSD\nQuantity: 8000 bbl\nVessel: MT Example\nDelivery Location: Houston Terminal",
+      "expectations": {
+        "expected_document_kind": "SALES_ORDER",
+        "min_confidence": 0.85,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected sales order terminology",
+          "Matched required sales order fields"
+        ]
+      }
+    },
+    {
       "case_id": "letter_of_credit_bank_instrument",
       "filename": "letter-of-credit-lc-4488.pdf",
       "text_source": "pdf_text",
@@ -271,13 +305,14 @@
       "text_source": "none",
       "raw_text": null,
       "expectations": {
-        "expected_document_kind": "INVOICE",
+        "expected_document_kind": "OTHER",
+        "expected_document_subtype": "FILENAME_HINT_ONLY",
         "max_confidence": 0.12,
         "expect_review_recommended": true,
-        "expect_abstain": false,
+        "expect_abstain": true,
         "expect_low_confidence": true,
         "supporting_evidence_contains": [
-          "Filename also hints at invoice"
+          "Filename hints at invoice"
         ],
         "conflict_contains": [
           "manual review"

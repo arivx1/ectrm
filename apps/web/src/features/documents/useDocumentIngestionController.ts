@@ -132,6 +132,7 @@ export type DocumentIngestionController = {
   pagePreviewUrls: Record<number, string>
   pagePreviewLoading: Record<number, boolean>
   pagePreviewErrors: Record<number, string>
+  clearPagePreviewsForDocument: (documentId: string) => void
   fileInputRef: MutableRefObject<HTMLInputElement | null>
   setDisplayName: (value: string) => void
   setSelectedProcessorProvider: (value: DocumentProcessorSelectionValue) => void
@@ -1275,6 +1276,7 @@ export function useDocumentIngestionController({
     pagePreviewUrls,
     pagePreviewLoading,
     pagePreviewErrors,
+    clearPagePreviewsForDocument,
     fileInputRef,
     setDisplayName,
     setSelectedProcessorProvider,

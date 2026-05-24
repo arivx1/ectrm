@@ -571,6 +571,50 @@ class AuthHttpTests(unittest.TestCase):
             self.assertTrue(created.email.endswith("@local.invalid"))
             self.assertIsNotNone(created.password_hash)
 
+    def test_current_user_can_update_profile_context_for_assistant_prompts(self) -> None:
+        session_payload = self._bootstrap_admin()
+        access_token = session_payload["access_token"]
+
+        response = self.client.patch(
+            "/auth/me/profile",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "display_name": "Operations Context Owner",
+                "default_assistant_persona": "risk",
+                "assistant_context_blurb": "  I cover the morning queue and prefer exposure risk first.  ",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["display_name"], "Operations Context Owner")
+        self.assertEqual(payload["default_assistant_persona"], "risk")
+        self.assertEqual(payload["assistant_context_blurb"], "I cover the morning queue and prefer exposure risk first.")
+
+        current_response = self.client.get(
+            "/auth/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        self.assertEqual(current_response.status_code, 200)
+        current_user = current_response.json()["user"]
+        self.assertEqual(current_user["assistant_context_blurb"], "I cover the morning queue and prefer exposure risk first.")
+
+        clear_response = self.client.patch(
+            "/auth/me/profile",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"assistant_context_blurb": "   "},
+        )
+        self.assertEqual(clear_response.status_code, 200)
+        self.assertIsNone(clear_response.json()["assistant_context_blurb"])
+
+        with self.SessionLocal() as session:
+            user = session.get(UserAccount, "ops_admin")
+            self.assertIsNotNone(user)
+            assert user is not None
+            self.assertEqual(user.display_name, "Operations Context Owner")
+            self.assertEqual(user.default_assistant_persona, "risk")
+            self.assertIsNone(user.assistant_context_blurb)
+
     def test_password_session_only_requests_start_here_for_first_login(self) -> None:
         now = datetime.now(timezone.utc)
         with self.SessionLocal() as session:

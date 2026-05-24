@@ -83,6 +83,178 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-23 - User AI Context Is Preference Context Only
+
+- Type: lesson
+- Domain: assistant prompt context, user profile configuration, and persona
+  interpretation
+- Applies to: saved user profile blurbs, default persona selection, prompt
+  assembly, managed-agent delegation, and assistant response tailoring
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/services/prompt_context.py`,
+  `apps/api/app/routes/auth.py`, and
+  `apps/web/src/workspaces/settings/SettingsWorkspace.tsx`
+- Lesson: user-authored AI context belongs in the authenticated user prompt
+  section as background and preference context. It can help the assistant
+  choose terminology, ordering, and response detail, but it is not executable
+  instruction content and must be explicitly bounded from permissions, row
+  access, allowed tools, allowed actions, reviewer roles, and deterministic
+  policy checks.
+- Deterministic opportunity: if the same saved preferences repeatedly drive
+  accepted workflow choices, promote those choices into typed user settings or
+  deterministic workspace defaults rather than expanding the freeform blurb.
+- Agent autonomy impact: agents may use profile context to personalize
+  explanations and triage framing, but it does not increase autonomy or permit
+  business writes without the existing action-request and authority controls.
+- Tests or evidence:
+  `apps/api/tests/test_auth_http.py`,
+  `apps/api/tests/test_assistant_api.py`,
+  `apps/api/tests/test_user_accounts_api.py`, and
+  `apps/web/tests/settingsWorkspace.test.ts`
+- Follow-up: add narrower typed user preferences when repeated profile blurbs
+  expose stable product behavior.
+
+### 2026-05-23 - Home View Instances Need Typed Definitions And Recipes
+
+- Type: algorithm-candidate
+- Domain: Prompt Home, user extensibility, assistant action governance, and
+  saved operating views
+- Applies to: Home card placement, card visibility, card filters, named Home
+  view instances, assistant-created views, persona-aware view suggestions, and
+  future shared desk Home layouts
+- Status: proposed
+- Source:
+  [Home View Instances Work Packages](./home-view-instances-work-packages.md),
+  [User Extensibility Initiative](./user-extensibility-initiative.md), and
+  [Agent Action Request Contract](./agent-action-request-contract.md)
+- Lesson: configurable Home should use immutable system templates, typed card
+  registries, and persisted view definitions rather than browser-local state or
+  freeform assistant JSON. Agents may interpret natural-language requests such
+  as `Make me a view to see HH NG`, but durable saved views should persist
+  through typed services, validated card ids, validated filters, permissions,
+  audit, and reviewable action requests.
+- Deterministic opportunity: promote repeated accepted Home view requests into
+  deterministic recipes such as `hub_basis_watch`, `commodity_market_watch`,
+  `imminent_shipments`, and `settlement_exception_watch` with explicit inputs,
+  card outputs, assumptions, stop conditions, tests, and outcome review.
+- Agent autonomy impact: persona can shape which cards and filters are
+  proposed, but it must not widen permission, row access, tools, action types,
+  or shared-publication authority. Personal Home view creation may become a
+  bounded low-risk action only after typed validation, assistant evals, and
+  approval/correction metrics support promotion.
+- Tests or evidence: first implementation should add focused backend tests for
+  definition validation and audit, web tests for save/switch/reset behavior,
+  assistant evals for prompt-created Home views and stop conditions, and
+  browser smoke for one end-to-end saved Home instance path.
+- Follow-up: implement the Home card registry and personal Home definition
+  service before exposing assistant-created Home instances.
+
+### 2026-05-22 - OpenAI Structured Outputs Need Explicit Strict Schemas
+
+- Type: lesson
+- Domain: document AI processing, OpenAI Responses API integration, and
+  schema-governed extraction
+- Applies to: OpenAI `response_format` JSON schemas, document reprocessing,
+  table extraction payloads, and any future strict structured-output contract
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_processor.py` and
+  `apps/api/tests/test_document_ingestion_api.py`
+- Lesson: Pydantic's default JSON schema can mark optional fields as not
+  required, but OpenAI strict structured outputs require every object property
+  to appear in `required` and require `additionalProperties: false` on each
+  object. Dynamic table row dictionaries do not fit that contract cleanly, so
+  the OpenAI-facing schema should use fixed row objects with `cells` arrays and
+  normalize them back into internal row dictionaries after parsing.
+- Stop condition: do not send a generated schema to OpenAI strict mode unless
+  tests recursively verify required keys and `additionalProperties: false`.
+- Agent autonomy impact: agents may update extraction prompts and schemas, but
+  any schema handed to an external model provider must be covered by contract
+  tests before enabling live document processing.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_openai_document_processor_uses_strict_json_schema_format apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_openai_document_processor_inlines_small_pdf_payloads`
+
+### 2026-05-22 - Buyer And Seller Labels Do Not Determine Commercial Side
+
+- Type: algorithm-added
+- Domain: document ingestion, deterministic facet suggestion, and document
+  review
+- Applies to: commercial-side facet suggestions, purchase orders, sales orders,
+  trade confirmations, contracts, and any document that lists both buyer and
+  seller parties
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_facets.py` and
+  `apps/api/tests/test_document_ingestion_api.py`
+- Lesson: party labels such as buyer and seller are role labels, not enough
+  evidence for the company's commercial side. The facet suggester should not
+  mark both `BUY` and `SELL` just because both parties are named on a document.
+  For `PURCHASE_ORDER`, suggest only `BUY`; for `SALES_ORDER`, suggest only
+  `SELL`; otherwise require explicit purchase/buy/sale/sell language or a
+  reviewer decision.
+- Stop condition: when a document names both parties but lacks explicit side
+  evidence from the company's perspective, leave commercial-side ambiguous
+  instead of adding both values.
+- Agent autonomy impact: agents may explain buyer/seller evidence and ask for
+  reviewer confirmation, but should not route or mutate business records from
+  party labels alone.
+- Tests or evidence: focused document facet suggester tests and
+  `make api-document-classification-evals`
+
+### 2026-05-22 - Weak Filename-Only Document Hints Fall Back To Other
+
+- Type: algorithm-added
+- Domain: document ingestion, deterministic classification, schema registry,
+  and document review
+- Applies to: blank or textless uploads, filename-only evidence, deterministic
+  scoring, document AI normalization prompts, Library type selection, and
+  classification evals
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_classification_scoring.py`,
+  `apps/api/app/domains/documents/services/document_processor.py`, and
+  `apps/api/tests/fixtures/document_classification_eval_corpus.json`
+- Lesson: filename-only hints are not sufficient business evidence for a typed
+  document kind. When no extractable content confirms the hinted type, place
+  the page in `OTHER` with subtype `FILENAME_HINT_ONLY`, low confidence, and a
+  manual-review conflict instead of forcing the nearest supported document kind.
+- Stop condition: keep the page in `OTHER` until text extraction, OCR, or a
+  reviewer supplies enough content evidence to classify it.
+- Agent autonomy impact: agents may explain the filename hint and suggest likely
+  next review actions, but they should not route, match, or mutate business
+  records from filename-only type evidence.
+- Tests or evidence: `make api-document-classification-evals`
+
+### 2026-05-22 - Purchase Orders Are A First-Class Document Kind
+
+- Type: algorithm-added
+- Domain: document ingestion, deterministic classification, schema registry,
+  and document review
+- Applies to: purchase-order uploads, document schema registry, deterministic
+  scoring, document AI normalization prompts, Library type selection, and
+  classification evals
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_ingestion_analysis.py`,
+  `apps/api/app/domains/documents/services/schema_registry.py`, and
+  `apps/api/tests/fixtures/document_classification_eval_corpus.json`
+- Lesson: purchase orders should not be inferred as logistics tickets or kept
+  as only a purchase/sale tag. PO number, buyer/seller, commodity, quantity,
+  vessel, and delivery context change extraction, matching, and trade creation
+  workflows enough to justify a dedicated `PURCHASE_ORDER` kind while leaving
+  commercial side and transport mode as controlled facets.
+- Deterministic opportunity: if reviewers repeatedly correct PO examples into
+  trade-create candidates, add a typed purchase-order-to-trade action planner
+  with owner gates, idempotency, stale-state checks, and explicit trade
+  economics review.
+- Agent autonomy impact: agents may explain PO evidence and draft matching or
+  trade-create recommendations, but PO-created trade records must still flow
+  through typed services and reviewable action contracts.
+- Tests or evidence: `make api-document-classification-evals`
+- Follow-up: collect reviewed PO examples, especially scanned vessel supply
+  orders, to tune OCR confidence and matching thresholds.
+
 ### 2026-05-22 - Assistant Personas Are Interpretation Context Only
 
 - Type: lesson
@@ -4739,3 +4911,91 @@ independently"`.
   `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_patch_persists_controlled_facet_values apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_page_patch_persists_page_level_facet_values apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_patch_rejects_invalid_facet_values apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_facet_suggester_extracts_starter_tags_from_text apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_schema_registry_exposes_supported_document_contracts`,
   `npm --prefix apps/web test -- libraryWorkspace.test.ts documentLibrary.test.ts documentIngestionSelectors.test.ts documentIngestionPageEditor.test.ts`,
   and `npm --prefix apps/web run build`
+
+### 2026-05-23 - Page Preview Images Are Regenerable Artifacts
+
+- Type: lesson
+- Domain: document ingestion, Library page preview, and document storage
+- Applies to: `/documents/{document_id}/pages/{page_id}/preview`, stored PDF
+  source files, and rendered page preview PNGs
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_ingestion_serialization.py`,
+  `apps/api/app/domains/documents/services/document_ingestion_storage.py`, and
+  `apps/web/src/workspaces/library/LibraryWorkspace.tsx`
+- Lesson: rendered page previews are cache artifacts, not durable business
+  truth. When a preview PNG is missing but the source PDF is still available,
+  the preview endpoint should regenerate the page image from the PDF and then
+  return it. The UI should let operators retry a failed preview request without
+  requiring a full page refresh.
+- Deterministic opportunity: keep preview generation deterministic and derived
+  from the stored source PDF, page number, render DPI, and artifact path. Do
+  not store reviewer decisions or extraction truth only inside preview files.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_page_preview_endpoint_returns_rendered_png apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_page_preview_endpoint_regenerates_missing_rendered_png`,
+  `npm --prefix apps/web test -- libraryWorkspace.test.ts documentPagePreviewCache.test.ts documentIngestionPageEditor.test.ts`,
+  and `npm --prefix apps/web run build`
+
+### 2026-05-23 - Low-Confidence Library Classification Escalates To Configured Processor
+
+- Type: algorithm-added
+- Domain: document ingestion, Library classification, page extraction, and
+  document processor routing
+- Applies to: uploaded Library documents, deterministic page classification,
+  configured document processor providers, and page-level classification payloads
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/ingestion.py`,
+  `apps/api/app/domains/documents/services/document_classification_scoring.py`,
+  `apps/api/app/domains/documents/services/document_processor.py`, and
+  `apps/api/tests/test_document_ingestion_api.py`
+- Lesson: deterministic classification remains the first-pass source of truth
+  for uploaded Library pages. When that score is below the shared
+  low-confidence threshold, ingestion may escalate only those pages to the
+  configured document processor provider, which uses the same environment-driven
+  model and API configuration pattern as the chatbot stack. Explicit `builtin`
+  processor selection is a stop condition and must suppress AI fallback.
+- Deterministic opportunity: keep confidence thresholds, provider routing,
+  provenance capture, and processor application in typed ingestion services.
+  The AI output may refine the staged document/page classification and
+  extraction payload, but it must not directly write trade, settlement,
+  logistics, risk, compliance, or external commitment records.
+- Agent autonomy impact: agents may explain why low-confidence pages were sent
+  to the configured processor and summarize processor traces, but operator
+  review, manual fallback, provenance, and typed service boundaries remain
+  required before downstream business writes.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_reprocess_can_switch_document_processor_provider apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_low_confidence_upload_uses_configured_ai_fallback apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_high_confidence_upload_skips_ai_fallback apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_upload_can_force_built_in_parser_only`
+
+### 2026-05-23 - Library Classification History Belongs In Domain Events
+
+- Type: lesson
+- Domain: document ingestion, Library audit logs, document classification,
+  document reprocessing, and review provenance
+- Applies to: uploaded Library documents, classification snapshots,
+  reprocess requests, processor runs, manual classification changes, and
+  Library activity timelines
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_activity.py`,
+  `apps/api/app/domains/documents/services/ingestion.py`,
+  `apps/api/app/domains/documents/services/document_ingestion_serialization.py`,
+  `apps/api/app/schemas/document.py`, and
+  `apps/web/src/workspaces/library/LibraryWorkspace.tsx`
+- Lesson: Library activity must not be reconstructed only from the current
+  document row. Upload, processing, original classification, reprocess request,
+  subsequent classification, manual classification correction, and review
+  updates should append `document` aggregate events with enough snapshot
+  payload to answer "what changed, from what, by whom, and when" after later
+  reprocessing overwrites page state.
+- Deterministic opportunity: keep audit event payloads structured around typed
+  classification and processing snapshots. The UI may format those events, but
+  the persisted event payload is the durable audit basis.
+- Agent autonomy impact: agents may summarize document audit history and
+  explain reprocess outcomes, but they must preserve immutable event history
+  and use typed document services for any reprocess or correction.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_activity_log_preserves_original_classification_and_reprocess_history`,
+  focused upload/reprocess fallback tests,
+  `npm --prefix apps/web test -- libraryWorkspace.test.ts`, and
+  `make api-document-classification-evals`

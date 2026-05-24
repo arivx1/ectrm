@@ -38,6 +38,7 @@ type ActiveCell = {
 type DataSheetProps<Row> = {
   label: string
   description: string
+  toolbarActions?: ReactNode
   columns: DataSheetColumn<Row>[]
   rows: Row[]
   getRowId: (row: Row) => string
@@ -99,6 +100,7 @@ function isEditableColumn<Row>(column: DataSheetColumn<Row>): column is Extract<
 export function DataSheet<Row>({
   label,
   description,
+  toolbarActions,
   columns,
   rows,
   getRowId,
@@ -264,6 +266,7 @@ export function DataSheet<Row>({
           <p id={descriptionId}>{description}</p>
         </div>
         <div className="data-sheet-status">
+          {toolbarActions ? <div className="data-sheet-actions">{toolbarActions}</div> : null}
           <span className="entity-chip entity-chip-soft">
             {rows.length} row{rows.length === 1 ? '' : 's'} • {columns.length} column{columns.length === 1 ? '' : 's'}
           </span>

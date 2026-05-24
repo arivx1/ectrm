@@ -40,12 +40,14 @@ from apps.api.app.domains.documents.services.document_processor import run_docum
 from apps.api.app.domains.documents.services.ingestion import classify_document_page
 from apps.api.app.domains.documents.services.ingestion import extract_document_header_fields
 from apps.api.app.domains.documents.services.ingestion import extract_document_table_blocks
+from apps.api.app.domains.documents.services.document_ingestion_storage import document_page_preview_absolute_path
 from apps.api.app.main import app
 from apps.api.app.models import Base
 from apps.api.app.models.document_facet_value import DocumentFacetValue
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.document_record_link import DocumentRecordLink
+from apps.api.app.models.event import Event
 from apps.api.app.models.gmail_inbox_import_receipt import GmailInboxImportReceipt
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_invoice import TradeInvoice
@@ -194,6 +196,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
         settings.DOCUMENT_STORAGE_ROOT = Path(self._storage_tempdir.name)
 
         with self.SessionLocal() as session:
+            session.query(Event).delete()
             session.query(DocumentRecordLink).delete()
             session.query(DocumentFacetValue).delete()
             session.query(GmailInboxImportReceipt).delete()
@@ -425,21 +428,23 @@ class DocumentIngestionApiTests(unittest.TestCase):
         analyzed = self._wait_for_document(admin_token, body["document_id"])
         self.assertEqual(analyzed["status"], "ANALYZED")
         self.assertEqual(analyzed["analysis_summary"]["document_classification_scope"], "DOCUMENT")
-        self.assertEqual(analyzed["analysis_summary"]["document_classification_kind"], "INVOICE")
-        self.assertEqual(analyzed["analysis_summary"]["dominant_document_kind"], "INVOICE")
+        self.assertEqual(analyzed["analysis_summary"]["document_classification_kind"], "OTHER")
+        self.assertEqual(analyzed["analysis_summary"]["dominant_document_kind"], "OTHER")
         self.assertFalse(analyzed["analysis_summary"]["page_level_classification_required"])
-        self.assertEqual(analyzed["analysis_summary"]["routing_strategy"], "SETTLEMENT_FIRST")
+        self.assertEqual(analyzed["analysis_summary"]["routing_strategy"], "MANUAL_REVIEW")
         self.assertEqual(analyzed["analysis_summary"]["artifact_profile"]["detected_file_type"], "pdf")
         self.assertEqual(analyzed["analysis_summary"]["artifact_profile"]["recommended_parse_mode"], "pdf_ocr_required")
-        self.assertTrue(analyzed["analysis_summary"]["structure_profile"]["deep_extraction_required"])
+        self.assertFalse(analyzed["analysis_summary"]["structure_profile"]["deep_extraction_required"])
         self.assertEqual(analyzed["analysis_summary"]["structure_profile"]["logical_document_count_estimate"], 1)
-        self.assertEqual(analyzed["analysis_summary"]["extraction_plan"][0]["schema_code"], "INVOICE.v1")
-        self.assertIn("invoice_lines", analyzed["analysis_summary"]["extraction_plan"][0]["schema_object_keys"])
-        self.assertEqual(analyzed["routing_assessment"]["routing_strategy"], "SETTLEMENT_FIRST")
-        self.assertEqual(analyzed["routing_assessment"]["status"], "INSUFFICIENT")
+        self.assertEqual(analyzed["analysis_summary"]["extraction_plan"][0]["document_kind"], "OTHER")
+        self.assertIsNone(analyzed["analysis_summary"]["extraction_plan"][0]["schema_code"])
+        self.assertEqual(analyzed["analysis_summary"]["extraction_plan"][0]["status"], "MANUAL_REVIEW")
+        self.assertEqual(analyzed["routing_assessment"]["routing_strategy"], "MANUAL_REVIEW")
+        self.assertEqual(analyzed["routing_assessment"]["status"], "MANUAL_REVIEW")
         self.assertEqual(len(analyzed["pages"]), 2)
-        self.assertTrue(all(page["document_kind"] == "INVOICE" for page in analyzed["pages"]))
-        self.assertTrue(all(page["routing_assessment"]["routing_strategy"] == "SETTLEMENT_FIRST" for page in analyzed["pages"]))
+        self.assertTrue(all(page["document_kind"] == "OTHER" for page in analyzed["pages"]))
+        self.assertTrue(all(page["document_subtype"] == "FILENAME_HINT_ONLY" for page in analyzed["pages"]))
+        self.assertTrue(all(page["routing_assessment"]["routing_strategy"] == "MANUAL_REVIEW" for page in analyzed["pages"]))
         self.assertTrue(all("OCR may be required" in " ".join(page["processing_warnings"]) for page in analyzed["pages"]))
         self.assertTrue(all(page["preview_available"] for page in analyzed["pages"]))
         self.assertTrue(all(page["text_source"] == "none" for page in analyzed["pages"]))
@@ -467,7 +472,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
                 .all()
             )
             self.assertEqual(len(pages), 2)
-            self.assertEqual(pages[0].document_kind, "INVOICE")
+            self.assertEqual(pages[0].document_kind, "OTHER")
             self.assertEqual(document.review_status, "UNREVIEWED")
             self.assertEqual(pages[0].review_status, "UNREVIEWED")
 
@@ -559,6 +564,107 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertIn(("asset", "POWER_GENERATION"), pairs)
         self.assertTrue(all(suggestion["review_status"] == "SUGGESTED" for suggestion in suggestions))
 
+    def test_document_facet_suggester_uses_order_kind_for_commercial_side(self) -> None:
+        purchase_order_suggestions = suggest_document_facets_from_text(
+            """
+            Purchase Order
+            Purchase Order No 28561
+            Buyer: Gulf Trading LLC
+            Seller: Atlantic Fuels
+            Vessel: MT Example
+            """,
+            document_kind="PURCHASE_ORDER",
+        )
+        purchase_order_pairs = {
+            (suggestion["facet_key"], suggestion["value_code"]) for suggestion in purchase_order_suggestions
+        }
+        self.assertIn(("commercial_side", "BUY"), purchase_order_pairs)
+        self.assertNotIn(("commercial_side", "SELL"), purchase_order_pairs)
+        self.assertIn(("transport_mode", "VESSEL"), purchase_order_pairs)
+        self.assertTrue(
+            any(
+                "Document kind PURCHASE_ORDER" in " ".join(suggestion["evidence"])
+                for suggestion in purchase_order_suggestions
+                if suggestion["facet_key"] == "commercial_side"
+            )
+        )
+
+        sales_order_suggestions = suggest_document_facets_from_text(
+            """
+            Sales Order
+            Sales Order No SO-4412
+            Customer: Gulf Trading LLC
+            Seller: Atlantic Fuels
+            Vessel: MT Example
+            """,
+            document_kind="SALES_ORDER",
+        )
+        sales_order_pairs = {
+            (suggestion["facet_key"], suggestion["value_code"]) for suggestion in sales_order_suggestions
+        }
+        self.assertIn(("commercial_side", "SELL"), sales_order_pairs)
+        self.assertNotIn(("commercial_side", "BUY"), sales_order_pairs)
+        self.assertIn(("transport_mode", "VESSEL"), sales_order_pairs)
+
+        empty_text_pairs = {
+            (suggestion["facet_key"], suggestion["value_code"])
+            for suggestion in suggest_document_facets_from_text(None, document_kind="PURCHASE_ORDER")
+        }
+        self.assertEqual(empty_text_pairs, {("commercial_side", "BUY")})
+
+    def test_document_kind_correction_refreshes_system_order_side_facets(self) -> None:
+        admin_token = self._bootstrap_admin()
+        uploaded = self._upload_document(admin_token, page_count=1)
+        document = self._wait_for_document(admin_token, uploaded["document_id"])
+        document_id = str(document["document_id"])
+        now = datetime(2026, 5, 22, 12, 0, tzinfo=timezone.utc)
+
+        with self.SessionLocal() as session:
+            page = session.query(DocumentIngestionPage).filter(DocumentIngestionPage.document_id == document_id).one()
+            self.assertIsNotNone(page.page_id)
+            page.document_kind = "WEIGH_TICKET"
+            page.raw_text = """
+            Purchase Order
+            Purchase Order No 28561
+            Buyer: Gulf Trading LLC
+            Seller: Atlantic Fuels
+            Vessel: MT Example
+            """
+            session.add(
+                DocumentFacetValue(
+                    document_id=document_id,
+                    page_id=page.page_id,
+                    facet_key="commercial_side",
+                    value_code="SELL",
+                    value_label_snapshot="Sale",
+                    source="SYSTEM_DERIVED",
+                    confidence=0.62,
+                    review_status="SUGGESTED",
+                    evidence=["Matched stale seller label."],
+                    created_at=now,
+                    created_by="document_facet_suggester",
+                    updated_at=now,
+                    updated_by="document_facet_suggester",
+                    version=1,
+                )
+            )
+            session.commit()
+
+        response = self.client.patch(
+            f"/documents/{document_id}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={"document_kind": "PURCHASE_ORDER"},
+        )
+        self.assertEqual(response.status_code, 200)
+        page_facets = response.json()["pages"][0]["facet_values"]
+        commercial_side_codes = {
+            facet["value_code"] for facet in page_facets if facet["facet_key"] == "commercial_side"
+        }
+        self.assertEqual(commercial_side_codes, {"BUY"})
+        self.assertTrue(
+            any("Document kind PURCHASE_ORDER" in " ".join(facet["evidence"]) for facet in page_facets)
+        )
+
     def test_summary_classifies_homogeneous_upload_at_document_level(self) -> None:
         pages = [
             self._summary_page(page_number=1, document_kind="INVOICE"),
@@ -617,6 +723,28 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("image/png", response.headers["content-type"])
         self.assertTrue(response.content.startswith(b"\x89PNG\r\n\x1a\n"))
+
+    def test_page_preview_endpoint_regenerates_missing_rendered_png(self) -> None:
+        admin_token = self._bootstrap_admin()
+        uploaded = self._upload_document(admin_token, page_count=1)
+        document = self._wait_for_document(admin_token, uploaded["document_id"])
+        page = document["pages"][0]
+        preview_path = document_page_preview_absolute_path(
+            document_id=document["document_id"],
+            page_number=page["page_number"],
+        )
+        self.assertTrue(preview_path.exists())
+        preview_path.unlink()
+
+        response = self.client.get(
+            f"/documents/{document['document_id']}/pages/{page['page_id']}/preview",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("image/png", response.headers["content-type"])
+        self.assertTrue(response.content.startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertTrue(preview_path.exists())
 
     def test_document_source_endpoint_returns_original_pdf(self) -> None:
         admin_token = self._bootstrap_admin()
@@ -764,6 +892,83 @@ class DocumentIngestionApiTests(unittest.TestCase):
         )
         self.assertTrue(any("OCR fallback was required" in conflict for conflict in assessment.conflicts))
 
+    def test_purchase_order_filename_and_header_classify_as_purchase_order(self) -> None:
+        text = """
+        Purchase Order
+        Purchase Order No 28561
+        Order Date: 2026-05-22
+        Buyer: Gulf Trading LLC
+        Seller: Atlantic Fuels
+        Commodity: ULSD
+        Quantity: 10000 bbl
+        Vessel: MT Example
+        Delivery Location: Houston Terminal
+        """
+        classification = classify_document_page("PURCHASE ORDER NO 28561 (1).pdf", text)
+        self.assertEqual(classification.document_kind, "PURCHASE_ORDER")
+
+        table_blocks = extract_document_table_blocks(text)
+        assessment = score_document_page_classification(
+            filename="PURCHASE ORDER NO 28561 (1).pdf",
+            raw_text=text,
+            text_source="pdf_text",
+            table_blocks=table_blocks,
+        )
+        self.assertEqual(assessment.document_kind, "PURCHASE_ORDER")
+        self.assertGreaterEqual(assessment.confidence, 0.85)
+        self.assertTrue(
+            any("Detected purchase order terminology" in evidence for evidence in assessment.supporting_evidence)
+        )
+        self.assertTrue(
+            any("Matched required purchase order fields" in evidence for evidence in assessment.supporting_evidence)
+        )
+
+    def test_sales_order_filename_and_header_classify_as_sales_order(self) -> None:
+        text = """
+        Sales Order
+        Sales Order No SO-4412
+        Order Date: 2026-05-22
+        Customer: Gulf Trading LLC
+        Seller: Atlantic Fuels
+        Commodity: ULSD
+        Quantity: 8000 bbl
+        Vessel: MT Example
+        Delivery Location: Houston Terminal
+        """
+        classification = classify_document_page("SALES ORDER SO-4412.pdf", text)
+        self.assertEqual(classification.document_kind, "SALES_ORDER")
+
+        table_blocks = extract_document_table_blocks(text)
+        assessment = score_document_page_classification(
+            filename="SALES ORDER SO-4412.pdf",
+            raw_text=text,
+            text_source="pdf_text",
+            table_blocks=table_blocks,
+        )
+        self.assertEqual(assessment.document_kind, "SALES_ORDER")
+        self.assertGreaterEqual(assessment.confidence, 0.85)
+        self.assertTrue(
+            any("Detected sales order terminology" in evidence for evidence in assessment.supporting_evidence)
+        )
+        self.assertTrue(
+            any("Matched required sales order fields" in evidence for evidence in assessment.supporting_evidence)
+        )
+
+    def test_filename_only_document_type_hint_falls_back_to_other(self) -> None:
+        assessment = score_document_page_classification(
+            filename="invoice-batch.pdf",
+            raw_text=None,
+            text_source="none",
+            table_blocks=[],
+            image_has_visible_content=False,
+        )
+
+        self.assertEqual(assessment.document_kind, "OTHER")
+        self.assertEqual(assessment.document_subtype, "FILENAME_HINT_ONLY")
+        self.assertLessEqual(assessment.confidence, 0.12)
+        self.assertTrue(any("Filename hints at invoice" in evidence for evidence in assessment.supporting_evidence))
+        self.assertTrue(any("Other for manual review" in conflict for conflict in assessment.conflicts))
+
     def test_schema_registry_exposes_supported_document_contracts(self) -> None:
         admin_token = self._bootstrap_admin()
         response = self.client.get(
@@ -787,6 +992,8 @@ class DocumentIngestionApiTests(unittest.TestCase):
         kinds = {entry["document_kind"]: entry for entry in body["document_kinds"]}
         self.assertIn("INVOICE", kinds)
         self.assertIn("DEAL_RECAP", kinds)
+        self.assertIn("PURCHASE_ORDER", kinds)
+        self.assertIn("SALES_ORDER", kinds)
         self.assertIn("LETTER_OF_CREDIT", kinds)
         self.assertIn("BILL_OF_LADING", kinds)
         self.assertIn("PIPELINE_STATEMENT", kinds)
@@ -794,6 +1001,10 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertIn("QUALITY_SPECIFICATION", kinds)
         self.assertEqual(len(kinds), len(body["document_kinds"]))
         self.assertTrue(any(field["field_key"] == "invoice_number" for field in kinds["INVOICE"]["header_fields"]))
+        self.assertTrue(any(field["field_key"] == "purchase_order_number" for field in kinds["PURCHASE_ORDER"]["header_fields"]))
+        self.assertTrue(any(template["template_key"] == "order_lines" for template in kinds["PURCHASE_ORDER"]["table_templates"]))
+        self.assertTrue(any(field["field_key"] == "sales_order_number" for field in kinds["SALES_ORDER"]["header_fields"]))
+        self.assertTrue(any(template["template_key"] == "order_lines" for template in kinds["SALES_ORDER"]["table_templates"]))
         self.assertTrue(any(field["field_key"] == "letter_of_credit_number" for field in kinds["LETTER_OF_CREDIT"]["header_fields"]))
         self.assertTrue(any(template["template_key"] == "line_items" for template in kinds["INVOICE"]["table_templates"]))
         self.assertEqual(kinds["INVOICE"]["extraction_schema_code"], "INVOICE.v1")
@@ -866,6 +1077,30 @@ class DocumentIngestionApiTests(unittest.TestCase):
                 Commodity: WTI
                 Quantity: 1000 bbl
                 Price: USD 79.25
+                """,
+            ),
+            "purchase-order-28561.pdf": (
+                "PURCHASE_ORDER",
+                """
+                Purchase Order
+                Purchase Order No 28561
+                Buyer: Gulf Trading LLC
+                Seller: Atlantic Fuels
+                Commodity: ULSD
+                Quantity: 10000 bbl
+                Vessel: MT Example
+                """,
+            ),
+            "sales-order-so-4412.pdf": (
+                "SALES_ORDER",
+                """
+                Sales Order
+                Sales Order No SO-4412
+                Customer: Gulf Trading LLC
+                Seller: Atlantic Fuels
+                Commodity: ULSD
+                Quantity: 8000 bbl
+                Vessel: MT Example
                 """,
             ),
             "letter-of-credit.pdf": (
@@ -1480,12 +1715,40 @@ class DocumentIngestionApiTests(unittest.TestCase):
     def test_openai_document_processor_uses_strict_json_schema_format(self) -> None:
         text_format = _build_openai_text_format()
 
+        def assert_strict_object_schemas(schema: dict[str, object]) -> None:
+            if "anyOf" in schema:
+                for option in schema["anyOf"]:
+                    if isinstance(option, dict):
+                        assert_strict_object_schemas(option)
+                return
+            if schema.get("type") == "array":
+                items = schema.get("items")
+                if isinstance(items, dict):
+                    assert_strict_object_schemas(items)
+                return
+            if schema.get("type") != "object":
+                return
+
+            properties = schema.get("properties")
+            self.assertIsInstance(properties, dict)
+            assert isinstance(properties, dict)
+            self.assertFalse(schema.get("additionalProperties", True))
+            self.assertEqual(set(schema.get("required", [])), set(properties))
+            for value in properties.values():
+                if isinstance(value, dict):
+                    assert_strict_object_schemas(value)
+
         self.assertEqual(text_format["type"], "json_schema")
         self.assertEqual(text_format["name"], "document_page_analysis")
         self.assertTrue(text_format["strict"])
         self.assertEqual(text_format["schema"]["type"], "object")
         self.assertFalse(text_format["schema"]["additionalProperties"])
         self.assertIn("pages", text_format["schema"]["properties"])
+        assert_strict_object_schemas(text_format["schema"])
+        page_schema = text_format["schema"]["properties"]["pages"]["items"]
+        table_schema = page_schema["properties"]["table_blocks"]["items"]
+        row_schema = table_schema["properties"]["rows"]["items"]
+        self.assertEqual(set(row_schema["properties"]), {"cells"})
 
     def test_openai_document_processor_inlines_small_pdf_payloads(self) -> None:
         settings.DOCUMENT_AI_OPENAI_INLINE_FILE_MAX_BYTES = 512
@@ -1508,7 +1771,24 @@ class DocumentIngestionApiTests(unittest.TestCase):
                                 "document_subtype": None,
                                 "confidence": 0.95,
                                 "header_fields": [],
-                                "table_blocks": [],
+                                "table_blocks": [
+                                    {
+                                        "template_key": "line_items",
+                                        "title": "Charges",
+                                        "columns": ["description", "quantity", "line_amount"],
+                                        "rows": [
+                                            {
+                                                "cells": [
+                                                    {"column": "description", "value": "WTI April"},
+                                                    {"column": "quantity", "value": "1000"},
+                                                    {"column": "line_amount", "value": "79250"},
+                                                ]
+                                            }
+                                        ],
+                                        "header_row_detected": True,
+                                        "confidence": 0.92,
+                                    }
+                                ],
                                 "warnings": [],
                             }
                         ]
@@ -1525,6 +1805,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
             )
 
         self.assertEqual(result.pages[0].document_kind, "INVOICE")
+        self.assertEqual(result.pages[0].table_blocks[0].rows[0]["description"], "WTI April")
         upload_mock.assert_not_called()
         delete_mock.assert_not_called()
         file_input = post_json_mock.call_args.kwargs["payload"]["input"][0]["content"][1]
@@ -1821,20 +2102,188 @@ class DocumentIngestionApiTests(unittest.TestCase):
             warnings,
         )
 
+    def test_low_confidence_upload_uses_configured_ai_fallback(self) -> None:
+        admin_token = self._bootstrap_admin()
+        settings.OPENAI_API_KEY = "openai-test-key"
+        settings.OPENAI_MODEL = "gpt-5-mini"
+        fake_processor_outcome = (
+            DocumentProcessorOutcome(
+                provider="openai",
+                model="gpt-5-mini",
+                pages=[
+                    DocumentProcessorPageResult(
+                        page_number=1,
+                        document_kind="INVOICE",
+                        document_subtype="AI_FALLBACK",
+                        confidence=0.96,
+                        header_fields=[
+                            {
+                                "field_key": "invoice_number",
+                                "label": "Invoice Number",
+                                "value": "INV-LOW-1",
+                                "confidence": 0.96,
+                                "source": "openai:document_ai",
+                            }
+                        ],
+                        table_blocks=[],
+                        warnings=["AI fallback resolved the low-confidence page."],
+                    )
+                ],
+            ),
+            [],
+        )
+
+        with patch(
+            "apps.api.app.domains.documents.services.ingestion.run_document_processor_analysis",
+            return_value=fake_processor_outcome,
+        ) as processor_mock:
+            uploaded = self._upload_document(
+                admin_token,
+                filename="invoice-batch.pdf",
+                page_count=1,
+            )
+            analyzed = self._wait_for_document(admin_token, uploaded["document_id"])
+
+        processor_mock.assert_called_once()
+        page = analyzed["pages"][0]
+        self.assertEqual(analyzed["processor_provider"], "openai")
+        self.assertEqual(analyzed["processor_model"], "gpt-5-mini")
+        self.assertTrue(analyzed["processor_trace"]["applied"])
+        self.assertEqual(page["document_kind"], "INVOICE")
+        self.assertEqual(page["document_subtype"], "AI_FALLBACK")
+        self.assertEqual(page["classification_payload"]["heuristic_document_kind"], "OTHER")
+        self.assertEqual(page["classification_payload"]["heuristic_document_subtype"], "FILENAME_HINT_ONLY")
+        self.assertEqual(page["classification_payload"]["processor_provider"], "openai")
+        self.assertTrue(page["classification_payload"]["processor_applied"])
+        self.assertTrue(page["processor_trace"]["applied"])
+        self.assertIn("AI fallback resolved the low-confidence page.", page["processing_warnings"])
+
+    def test_high_confidence_upload_skips_ai_fallback(self) -> None:
+        admin_token = self._bootstrap_admin()
+        settings.OPENAI_API_KEY = "openai-test-key"
+        settings.OPENAI_MODEL = "gpt-5-mini"
+        raw_text = "\n".join(
+            [
+                "INVOICE",
+                "Invoice Number: INV-9001",
+                "Invoice Date: 2026-04-06",
+                "Due Date: 2026-04-15",
+                "Counterparty: Shell Trading",
+                "Total Amount: USD 79250",
+            ]
+        )
+
+        with patch(
+            "apps.api.app.domains.documents.services.ingestion._extract_page_text",
+            return_value=(raw_text, []),
+        ), patch(
+            "apps.api.app.domains.documents.services.ingestion.run_document_processor_analysis",
+            return_value=(None, []),
+        ) as processor_mock:
+            uploaded = self._upload_document(
+                admin_token,
+                filename="invoice-packet.pdf",
+                page_count=1,
+            )
+            analyzed = self._wait_for_document(admin_token, uploaded["document_id"])
+
+        processor_mock.assert_not_called()
+        page = analyzed["pages"][0]
+        self.assertEqual(page["document_kind"], "INVOICE")
+        self.assertGreaterEqual(page["classification_confidence"], 0.46)
+        self.assertFalse(page["classification_payload"].get("processor_applied", False))
+
+    def test_activity_log_preserves_original_classification_and_reprocess_history(self) -> None:
+        admin_token = self._bootstrap_admin()
+        invoice_text = "\n".join(
+            [
+                "Invoice",
+                "Invoice Number: INV-1007",
+                "Invoice Date: 2026-04-06",
+                "Due Date: 2026-04-15",
+                "Counterparty: Shell Trading",
+                "Total Amount: USD 79250",
+                "",
+                "Description  Quantity  Line Amount",
+                "WTI April  1000  79250",
+            ]
+        )
+        confirmation_text = "\n".join(
+            [
+                "Trade Confirmation",
+                "Confirmation Number: CONF-3301",
+                "Trade ID: T-3301",
+                "Trade Date: 2026-04-08",
+                "Counterparty: Shell Trading",
+                "",
+                "Term Name  Term Value",
+                "Pricing Period  April 2026",
+            ]
+        )
+
+        with patch(
+            "apps.api.app.domains.documents.services.ingestion._extract_page_text",
+            return_value=(invoice_text, []),
+        ):
+            uploaded = self._upload_document(admin_token, filename="invoice-1007.pdf", page_count=1)
+            document = self._wait_for_document(admin_token, uploaded["document_id"])
+
+        original_classification_events = [
+            entry for entry in document["activity"] if entry["event_type"] == "DocumentClassified"
+        ]
+        self.assertEqual(len(original_classification_events), 1)
+        self.assertEqual(original_classification_events[0]["label"], "Original Classification")
+        self.assertEqual(original_classification_events[0]["payload"]["classification"]["document_kind"], "INVOICE")
+        self.assertIn("Originally classified as INVOICE", original_classification_events[0]["detail"])
+
+        with patch(
+            "apps.api.app.domains.documents.services.ingestion._extract_page_text",
+            return_value=(confirmation_text, []),
+        ):
+            response = self.client.post(
+                f"/documents/{uploaded['document_id']}/reprocess",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            self.assertEqual(response.status_code, 202)
+            reprocessed = self._wait_for_document(admin_token, uploaded["document_id"])
+
+        activity = reprocessed["activity"]
+        classified_events = [entry for entry in activity if entry["event_type"] == "DocumentClassified"]
+        reprocess_events = [entry for entry in activity if entry["event_type"] == "DocumentReprocessRequested"]
+        self.assertEqual(len(classified_events), 2)
+        self.assertEqual(len(reprocess_events), 1)
+        latest_classification = classified_events[0]
+        original_classification = classified_events[-1]
+        self.assertEqual(latest_classification["label"], "Reclassified")
+        self.assertEqual(latest_classification["payload"]["classification"]["document_kind"], "TRADE_CONFIRMATION")
+        self.assertIn("Reclassified as TRADE CONFIRMATION", latest_classification["detail"])
+        self.assertEqual(original_classification["label"], "Original Classification")
+        self.assertEqual(original_classification["payload"]["classification"]["document_kind"], "INVOICE")
+        self.assertEqual(
+            reprocess_events[0]["payload"]["previous_classification"]["document_kind"],
+            "INVOICE",
+        )
+        self.assertIn("Prior classification: INVOICE", reprocess_events[0]["detail"])
+
     def test_upload_can_force_built_in_parser_only(self) -> None:
         admin_token = self._bootstrap_admin()
         settings.OPENAI_API_KEY = "openai-test-key"
         settings.OPENAI_MODEL = "gpt-5-mini"
 
-        response = self.client.post(
-            "/documents/uploads",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            files={"file": ("invoice-batch.pdf", self._build_pdf_bytes(page_count=1), "application/pdf")},
-            data={"processor_provider": "builtin"},
-        )
+        with patch(
+            "apps.api.app.domains.documents.services.ingestion.run_document_processor_analysis",
+            return_value=(None, []),
+        ) as processor_mock:
+            response = self.client.post(
+                "/documents/uploads",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                files={"file": ("invoice-batch.pdf", self._build_pdf_bytes(page_count=1), "application/pdf")},
+                data={"processor_provider": "builtin"},
+            )
 
         self.assertEqual(response.status_code, 201)
         uploaded = response.json()
+        processor_mock.assert_not_called()
         self.assertEqual(uploaded["processor_provider"], "builtin")
         self.assertIsNone(uploaded["processor_model"])
 
@@ -1972,7 +2421,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(page["classification_payload"]["processor_provider"], "openai")
         self.assertTrue(page["processor_trace"]["applied"])
         self.assertEqual(page["processor_trace"]["provider"], "openai")
-        self.assertEqual(page["processor_trace"]["heuristic_document_kind"], "INVOICE")
+        self.assertEqual(page["processor_trace"]["heuristic_document_kind"], "OTHER")
         self.assertTrue(page["processor_trace"]["overrode_heuristics"])
         self.assertTrue(any(field["field_key"] == "invoice_number" for field in page["header_fields"]))
         self.assertTrue(any(table["template_key"] == "line_items" for table in page["table_blocks"]))
@@ -2029,8 +2478,12 @@ class DocumentIngestionApiTests(unittest.TestCase):
         settings.OPENAI_MODEL = "gpt-5-mini"
         settings.GOOGLE_MODEL = "gemini-2.5-flash"
 
-        uploaded = self._upload_document(admin_token, page_count=1)
-        document = self._wait_for_document(admin_token, uploaded["document_id"])
+        with patch(
+            "apps.api.app.domains.documents.services.ingestion.run_document_processor_analysis",
+            return_value=(None, ["Initial AI fallback skipped in test."]),
+        ):
+            uploaded = self._upload_document(admin_token, page_count=1)
+            document = self._wait_for_document(admin_token, uploaded["document_id"])
         self.assertEqual(document["processor_provider"], "openai")
 
         fake_google_outcome = (
@@ -2312,7 +2765,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
         uploaded = self._upload_document(admin_token, page_count=2)
         document = self._wait_for_document(admin_token, uploaded["document_id"])
 
-        self.assertTrue(all(page["document_kind"] == "INVOICE" for page in document["pages"]))
+        self.assertTrue(all(page["document_kind"] == "OTHER" for page in document["pages"]))
 
         update_response = self.client.patch(
             f"/documents/{document['document_id']}",
@@ -2592,7 +3045,8 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(reanalyzed["status"], "ANALYZED")
         self.assertEqual(reanalyzed["review_status"], "UNREVIEWED")
         self.assertEqual(reanalyzed["pages"][0]["review_status"], "UNREVIEWED")
-        self.assertEqual(reanalyzed["pages"][0]["document_kind"], "INVOICE")
+        self.assertEqual(reanalyzed["pages"][0]["document_kind"], "OTHER")
+        self.assertEqual(reanalyzed["pages"][0]["document_subtype"], "FILENAME_HINT_ONLY")
 
         with self.SessionLocal() as session:
             stored_document = session.get(DocumentIngestion, document["document_id"])

@@ -262,6 +262,18 @@
   resize: vertical;
 }
 
+.settings-profile-textarea {
+  min-height: 9rem;
+  resize: vertical;
+}
+
+.settings-profile-count {
+  margin: -0.35rem 0 0;
+  color: #6c7782;
+  font-size: 0.82rem;
+  text-align: right;
+}
+
 .form-note-success {
   color: #127c6c;
 }

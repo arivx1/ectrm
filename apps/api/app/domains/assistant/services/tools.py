@@ -2099,6 +2099,7 @@ async def _consult_managed_agent(
         role=actor.role,
         email=actor.email,
         default_persona=actor.default_assistant_persona,
+        assistant_context_blurb=actor.assistant_context_blurb,
         session_id=None,
         session_expires_at=None,
     )
@@ -2198,6 +2199,7 @@ async def _enlist_managed_agent(
         role=delegated_role,
         email=actor.email,
         default_persona=actor.default_assistant_persona,
+        assistant_context_blurb=actor.assistant_context_blurb,
         session_id=delegated_session_id,
         session_expires_at=None,
     )

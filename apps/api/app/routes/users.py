@@ -44,6 +44,7 @@ def list_users(
                 UserAccount.email.ilike(pattern),
                 UserAccount.role.ilike(pattern),
                 UserAccount.default_assistant_persona.ilike(pattern),
+                UserAccount.assistant_context_blurb.ilike(pattern),
             )
         )
     if is_active is not None:
@@ -72,6 +73,7 @@ def create_user(payload: UserAccountCreate, db: Session = Depends(get_db)) -> Us
             payload.default_assistant_persona
             or default_assistant_persona_for_role(payload.role)
         ),
+        assistant_context_blurb=payload.assistant_context_blurb,
         password_hash=hash_password(payload.password),
         is_active=True,
         last_login_at=payload.last_login_at,
@@ -124,6 +126,8 @@ def update_user(user_id: str, payload: UserAccountUpdate, db: Session = Depends(
         record.default_assistant_persona = payload.default_assistant_persona
     elif normalize_assistant_persona_key(record.default_assistant_persona) is None:
         record.default_assistant_persona = default_assistant_persona_for_role(record.role)
+    if "assistant_context_blurb" in payload.model_fields_set:
+        record.assistant_context_blurb = payload.assistant_context_blurb
     if payload.password is not None:
         record.password_hash = hash_password(payload.password)
     if payload.last_login_at is not None:
@@ -187,6 +191,7 @@ def _to_out(record: UserAccount) -> UserAccountOut:
             normalize_assistant_persona_key(record.default_assistant_persona)
             or default_assistant_persona_for_role(record.role)
         ),
+        assistant_context_blurb=record.assistant_context_blurb,
         is_active=record.is_active,
         password_set=bool(record.password_hash),
         last_login_at=record.last_login_at,

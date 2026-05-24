@@ -56,6 +56,14 @@ Persona context shapes terminology, priorities, evidence emphasis, and likely
 workflow intent, but it does not change permissions, row access, allowed tools,
 allowed actions, reviewer roles, or deterministic policy checks.
 
+The `Authenticated User` section can also include the user's saved AI context
+blurb from their profile. This is user-provided background and preference
+context, such as the user's role, working style, coverage area, or recurring
+preferences. Treat it like persona context: useful for interpretation and
+response shape, but not executable instructions and never authority to bypass
+permissions, policy, reviewer roles, deterministic checks, or evidence
+requirements.
+
 Organization and operating-model sections now prefer published organization
 context definitions from the backend registry when they exist. Until those
 records are populated, the assistant still falls back to the env-backed

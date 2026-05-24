@@ -8,7 +8,7 @@ from time import perf_counter
 from typing import Any, Iterable, cast
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from apps.api.app.config import settings
 from apps.api.app.core.logging import get_logger, log_outbound_request
@@ -117,6 +117,27 @@ class _ProcessorTableBlock(BaseModel):
     rows: list[dict[str, str | None]] = Field(default_factory=list, max_length=250)
     header_row_detected: bool = False
     confidence: float | None = Field(default=None, ge=0, le=1)
+
+    @field_validator("rows", mode="before")
+    @classmethod
+    def _normalize_cell_rows(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+
+        normalized_rows: list[object] = []
+        for row in value:
+            if isinstance(row, dict) and isinstance(row.get("cells"), list):
+                row_values: dict[str, object] = {}
+                for cell in row["cells"]:
+                    if not isinstance(cell, dict):
+                        continue
+                    column = clean_optional_text(cell.get("column"))
+                    if column is not None:
+                        row_values[column] = cell.get("value")
+                normalized_rows.append(row_values)
+            else:
+                normalized_rows.append(row)
+        return normalized_rows
 
 
 class _ProcessorPageAnalysis(BaseModel):
@@ -739,6 +760,9 @@ def _document_schema_instructions() -> str:
     lines.append(
         "If the page is unclear, set document_kind to UNKNOWN and leave fields or tables empty."
     )
+    lines.append(
+        "If the page is readable but does not fit any supported kind, set document_kind to OTHER instead of forcing the nearest typed category."
+    )
     return "\n".join(lines)
 
 
@@ -756,7 +780,7 @@ def _document_response_contract() -> str:
         '        {"field_key": "invoice_number", "label": "Invoice Number", "value": "INV-1007", "confidence": 0.95}\n'
         "      ],\n"
         '      "table_blocks": [\n'
-        '        {"template_key": "line_items", "title": "Charges", "columns": ["description", "quantity", "line_amount"], "rows": [{"description": "WTI April", "quantity": "1000", "line_amount": "79250"}], "header_row_detected": true, "confidence": 0.92}\n'
+        '        {"template_key": "line_items", "title": "Charges", "columns": ["description", "quantity", "line_amount"], "rows": [{"cells": [{"column": "description", "value": "WTI April"}, {"column": "quantity", "value": "1000"}, {"column": "line_amount", "value": "79250"}]}], "header_row_detected": true, "confidence": 0.92}\n'
         "      ],\n"
         '      "warnings": []\n'
         "    }\n"
@@ -775,9 +799,80 @@ def _build_openai_text_format() -> dict[str, Any]:
     return {
         "type": "json_schema",
         "name": OPENAI_DOCUMENT_RESPONSE_FORMAT_NAME,
-        "schema": _ProcessorResponse.model_json_schema(),
+        "schema": _build_openai_document_response_schema(),
         "strict": True,
     }
+
+
+def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
+    return {"anyOf": [schema, {"type": "null"}]}
+
+
+def _array_schema(items: dict[str, Any], *, max_items: int | None = None) -> dict[str, Any]:
+    schema: dict[str, Any] = {"type": "array", "items": items}
+    if max_items is not None:
+        schema["maxItems"] = max_items
+    return schema
+
+
+def _object_schema(properties: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(properties),
+        "additionalProperties": False,
+    }
+
+
+def _build_openai_document_response_schema() -> dict[str, Any]:
+    string_schema = {"type": "string"}
+    confidence_schema = _nullable({"type": "number", "minimum": 0, "maximum": 1})
+
+    table_cell_schema = _object_schema(
+        {
+            "column": {"type": "string", "maxLength": 120},
+            "value": _nullable({"type": "string", "maxLength": 500}),
+        }
+    )
+    table_row_schema = _object_schema(
+        {
+            "cells": _array_schema(table_cell_schema, max_items=64),
+        }
+    )
+    table_block_schema = _object_schema(
+        {
+            "template_key": _nullable({"type": "string", "maxLength": 64}),
+            "title": _nullable({"type": "string", "maxLength": 160}),
+            "columns": _array_schema(string_schema, max_items=24),
+            "rows": _array_schema(table_row_schema, max_items=250),
+            "header_row_detected": {"type": "boolean"},
+            "confidence": confidence_schema,
+        }
+    )
+    field_schema = _object_schema(
+        {
+            "field_key": string_schema,
+            "label": _nullable({"type": "string", "maxLength": 120}),
+            "value": {"type": "string", "maxLength": 500},
+            "confidence": confidence_schema,
+        }
+    )
+    page_schema = _object_schema(
+        {
+            "page_number": {"type": "integer", "minimum": 1},
+            "document_kind": {"type": "string", "minLength": 3, "maxLength": 64},
+            "document_subtype": _nullable({"type": "string", "maxLength": 128}),
+            "confidence": confidence_schema,
+            "header_fields": _array_schema(field_schema, max_items=64),
+            "table_blocks": _array_schema(table_block_schema, max_items=24),
+            "warnings": _array_schema(string_schema, max_items=24),
+        }
+    )
+    return _object_schema(
+        {
+            "pages": _array_schema(page_schema, max_items=250),
+        }
+    )
 
 
 def _build_pdf_data_url(payload: bytes) -> str:

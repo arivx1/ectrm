@@ -1,5 +1,5 @@
 import type { AssistantPersona } from '../../shared/models'
-import { fetchJson, postJson, requestOk } from '../../shared/api'
+import { fetchJson, patchJson, postJson, requestOk } from '../../shared/api'
 import { buildMutationHeaders } from '../../shared/mutation'
 
 export type AuthenticatedUser = {
@@ -8,6 +8,13 @@ export type AuthenticatedUser = {
   display_name: string
   role: string
   default_assistant_persona: AssistantPersona
+  assistant_context_blurb: string | null
+}
+
+export type UpdateCurrentUserProfileInput = {
+  display_name?: string
+  default_assistant_persona?: AssistantPersona
+  assistant_context_blurb?: string | null
 }
 
 export type SessionResponse = {
@@ -62,6 +69,15 @@ export async function createSingleUserAuthSession(apiBase: string): Promise<Sess
 
 export async function loadCurrentSession(apiBase: string): Promise<CurrentSessionResponse> {
   return fetchJson<CurrentSessionResponse>(`${apiBase}/auth/me`, {
+    headers: buildMutationHeaders(),
+  })
+}
+
+export async function updateCurrentUserProfile(
+  apiBase: string,
+  payload: UpdateCurrentUserProfileInput,
+): Promise<AuthenticatedUser> {
+  return patchJson<AuthenticatedUser>(`${apiBase}/auth/me/profile`, payload, {
     headers: buildMutationHeaders(),
   })
 }

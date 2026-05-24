@@ -29,10 +29,14 @@ from apps.api.app.schemas.document import DocumentProcessorSelection
 from apps.api.app.schemas.document import DocumentProcessorRuntimeSettingsOut
 from apps.api.app.schemas.document import DocumentSchemaRegistryOut
 
+from .document_activity import append_document_activity_event
+from .document_activity import build_document_classification_snapshot
+from .document_activity import build_document_processing_snapshot
 from .document_ingestion_analysis import build_page_warnings
 from .document_ingestion_analysis import classify_document_page
 from .document_ingestion_analysis import extract_document_header_fields
 from .document_ingestion_analysis import extract_document_table_blocks
+from .document_classification_scoring import LOW_CONFIDENCE_CLASSIFICATION_THRESHOLD
 from .document_classification_scoring import score_document_page_classification
 from .document_classification_scoring import serialize_deterministic_assessment
 from .document_classification_learning import apply_learned_classification_override
@@ -224,6 +228,21 @@ def ingest_pdf_document(
     for page_record in page_records:
         db.add(page_record)
     db.flush()
+    append_document_activity_event(
+        db,
+        document_id=document.document_id,
+        actor_id=actor_id,
+        event_type="DocumentUploaded",
+        occurred_at=now,
+        payload={
+            "filename": document.original_filename,
+            "display_name": document.display_name,
+            "size_bytes": document.size_bytes,
+            "page_count": document.page_count,
+            "processor_provider": document.processor_provider,
+            "processor_model": document.processor_model,
+        },
+    )
     return serialize_documents(db, [document], preloaded_pages=page_records)[0]
 
 
@@ -241,7 +260,6 @@ def process_document_ingestion(
     document.updated_at = now
     document.updated_by = actor_id
     document.analysis_summary = build_document_summary(pages, review_status=document.review_status)
-
     if reset_review_state:
         document.review_status = "UNREVIEWED"
         document.review_notes = None
@@ -269,6 +287,14 @@ def process_document_ingestion(
             page.reviewed_at = None
             page.reviewed_by = None
 
+    append_document_activity_event(
+        db,
+        document_id=document.document_id,
+        actor_id=actor_id,
+        event_type="DocumentProcessingStarted",
+        occurred_at=now,
+        payload=build_document_processing_snapshot(document, pages),
+    )
     db.flush()
 
     try:
@@ -295,18 +321,26 @@ def process_document_ingestion(
             if rendered_document is not None:
                 rendered_document.close()
 
-        processor_outcome, processor_warnings = run_document_processor_analysis(
-            filename=document.original_filename,
-            payload=payload,
-            pages=pages,
+        processor_target_page_numbers = _low_confidence_processor_target_page_numbers(
+            pages,
             processor_provider=document.processor_provider,
         )
+        processor_outcome: DocumentProcessorOutcome | None = None
+        processor_warnings: list[str] = []
+        if processor_target_page_numbers:
+            processor_outcome, processor_warnings = run_document_processor_analysis(
+                filename=document.original_filename,
+                payload=payload,
+                pages=pages,
+                processor_provider=document.processor_provider,
+            )
         if processor_outcome is not None:
             document.processor_provider = processor_outcome.provider
             document.processor_model = processor_outcome.model
             _apply_document_processor_outcome(
                 pages=pages,
                 outcome=processor_outcome,
+                target_page_numbers=processor_target_page_numbers,
             )
         for page in pages:
             apply_learned_classification_override(
@@ -320,16 +354,36 @@ def process_document_ingestion(
                 provider=document.processor_provider,
                 model=document.processor_model,
                 warnings=processor_warnings,
+                target_page_numbers=processor_target_page_numbers,
             )
         for page in pages:
             refresh_system_suggested_page_facets(db, page=page)
 
+        completed_at = datetime.now(timezone.utc)
         document.status = "FAILED" if page_errors and len(page_errors) == len(pages) else "ANALYZED"
         document.processing_errors = page_errors
         document.analysis_summary = build_document_summary(pages, review_status=document.review_status)
-        document.updated_at = datetime.now(timezone.utc)
+        document.updated_at = completed_at
         document.updated_by = actor_id
         document.version += 1
+        append_document_activity_event(
+            db,
+            document_id=document.document_id,
+            actor_id=actor_id,
+            event_type="DocumentAnalyzed",
+            occurred_at=completed_at,
+            payload=build_document_processing_snapshot(document, pages),
+        )
+        append_document_activity_event(
+            db,
+            document_id=document.document_id,
+            actor_id=actor_id,
+            event_type="DocumentClassified",
+            occurred_at=completed_at,
+            payload={
+                "classification": build_document_classification_snapshot(pages),
+            },
+        )
         db.flush()
         return serialize_documents(db, [document], preloaded_pages=pages)[0]
     except Exception as exc:
@@ -355,6 +409,10 @@ def reprocess_document_ingestion(
 ) -> DocumentIngestionOut:
     document, pages = load_document_and_pages(db, document_id=document_id)
     now = datetime.now(timezone.utc)
+    previous_classification_snapshot = build_document_classification_snapshot(pages)
+    previous_review_status = document.review_status
+    previous_processor_provider = document.processor_provider
+    previous_processor_model = document.processor_model
     if processor_provider_specified or processor_model_specified:
         requested_provider = processor_provider if processor_provider_specified else document.processor_provider
         requested_model = (
@@ -368,6 +426,21 @@ def reprocess_document_ingestion(
         )
         document.processor_provider = resolved_processor_provider
         document.processor_model = resolved_processor_model
+    append_document_activity_event(
+        db,
+        document_id=document.document_id,
+        actor_id=actor_id,
+        event_type="DocumentReprocessRequested",
+        occurred_at=now,
+        payload={
+            "previous_classification": previous_classification_snapshot,
+            "previous_review_status": previous_review_status,
+            "previous_processor_provider": previous_processor_provider,
+            "previous_processor_model": previous_processor_model,
+            "processor_provider": document.processor_provider,
+            "processor_model": document.processor_model,
+        },
+    )
     document.status = "UPLOADED"
     document.processing_errors = []
     document.review_status = "UNREVIEWED"
@@ -407,9 +480,12 @@ def _apply_document_processor_outcome(
     *,
     pages: list[DocumentIngestionPage],
     outcome: DocumentProcessorOutcome,
+    target_page_numbers: set[int] | None = None,
 ) -> None:
     page_map = {page.page_number: page for page in pages}
     for result in outcome.pages:
+        if target_page_numbers is not None and result.page_number not in target_page_numbers:
+            continue
         page = page_map.get(result.page_number)
         if page is None:
             continue
@@ -459,11 +535,14 @@ def _apply_document_processor_warnings(
     provider: str | None,
     model: str | None,
     warnings: list[str],
+    target_page_numbers: set[int] | None = None,
 ) -> None:
     if not warnings:
         return
     deduped_warnings = _dedupe_preserving_order([warning for warning in warnings if warning])
     for page in pages:
+        if target_page_numbers is not None and page.page_number not in target_page_numbers:
+            continue
         page.processing_warnings = _dedupe_preserving_order(
             [*list(page.processing_warnings or []), *deduped_warnings]
         )
@@ -479,6 +558,35 @@ def _apply_document_processor_warnings(
             [*existing_warnings, *deduped_warnings]
         )
         page.classification_payload = classification_payload
+
+
+def _low_confidence_processor_target_page_numbers(
+    pages: list[DocumentIngestionPage],
+    *,
+    processor_provider: str | None,
+) -> set[int]:
+    if processor_provider == "builtin":
+        return set()
+    return {
+        page.page_number
+        for page in pages
+        if _page_has_low_confidence_deterministic_classification(page)
+    }
+
+
+def _page_has_low_confidence_deterministic_classification(page: DocumentIngestionPage) -> bool:
+    classification_payload = dict(page.classification_payload or {})
+    deterministic_assessment = classification_payload.get("deterministic_assessment")
+    confidence: float | None = None
+    if isinstance(deterministic_assessment, dict):
+        raw_confidence = deterministic_assessment.get("confidence")
+        if isinstance(raw_confidence, (int, float)):
+            confidence = float(raw_confidence)
+    if confidence is None and page.classification_confidence is not None:
+        confidence = float(page.classification_confidence)
+    if confidence is None:
+        return True
+    return confidence < LOW_CONFIDENCE_CLASSIFICATION_THRESHOLD
 
 
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
@@ -517,6 +625,16 @@ def run_document_processing_job(
                     actor_id=DOCUMENT_PROCESSOR_ACTOR_ID,
                     error_message="Background document processing failed.",
                 )
+                append_document_activity_event(
+                    db,
+                    document_id=document.document_id,
+                    actor_id=DOCUMENT_PROCESSOR_ACTOR_ID,
+                    event_type="DocumentProcessingFailed",
+                    payload={
+                        "error_message": "Background document processing failed.",
+                        "processing": build_document_processing_snapshot(document, pages),
+                    },
+                )
                 db.commit()
 
 
@@ -529,6 +647,8 @@ def update_document_ingestion(
 ) -> DocumentIngestionOut:
     document, pages = load_document_and_pages(db, document_id=document_id)
     now = datetime.now(timezone.utc)
+    previous_classification_snapshot = build_document_classification_snapshot(pages)
+    previous_review_status = document.review_status
 
     if "display_name" in changes:
         display_name = normalize_display_name(changes.get("display_name"), document.original_filename)
@@ -569,6 +689,7 @@ def update_document_ingestion(
             )
             if previous_document_kind != page.document_kind:
                 page.updated_at = now
+                refresh_system_suggested_page_facets(db, page=page)
 
         if document_kind_changed:
             document.review_status = derive_document_review_status_after_page_change(document.review_status, pages)
@@ -593,6 +714,33 @@ def update_document_ingestion(
     document.updated_at = now
     document.updated_by = actor_id
     document.version += 1
+    if document_kind_changed:
+        append_document_activity_event(
+            db,
+            document_id=document.document_id,
+            actor_id=actor_id,
+            event_type="DocumentClassificationCorrected",
+            occurred_at=now,
+            payload={
+                "previous_classification": previous_classification_snapshot,
+                "classification": build_document_classification_snapshot(pages),
+            },
+        )
+    if "review_status" in changes and previous_review_status != document.review_status:
+        append_document_activity_event(
+            db,
+            document_id=document.document_id,
+            actor_id=actor_id,
+            event_type="DocumentReviewUpdated",
+            occurred_at=now,
+            payload={
+                "previous_review_status": previous_review_status,
+                "review_status": document.review_status,
+                "reviewed_at": document.reviewed_at,
+                "reviewed_by": document.reviewed_by,
+                "verification_mode": changes.get("verification_mode") or "STRICT",
+            },
+        )
     db.flush()
     return serialize_documents(db, [document], preloaded_pages=pages)[0]
 
@@ -611,8 +759,10 @@ def update_document_ingestion_page(
         raise LookupError(f"Page '{page_id}' was not found for document '{document_id}'")
 
     now = datetime.now(timezone.utc)
+    previous_classification_snapshot = build_document_classification_snapshot(pages)
     previous_document_kind = page.document_kind
     previous_document_subtype = page.document_subtype
+    previous_review_status = page.review_status
     next_document_kind = str(changes.get("document_kind", page.document_kind)).upper()
     if next_document_kind not in list_supported_document_kinds():
         raise ValueError(f"Document kind '{next_document_kind}' is not supported")
@@ -640,6 +790,8 @@ def update_document_ingestion_page(
             actor_id=actor_id,
             raw_values=changes.get("facet_values") or [],
         )
+    elif page.document_kind != previous_document_kind:
+        refresh_system_suggested_page_facets(db, page=page)
 
     if "review_notes" in changes:
         page.review_notes = _clean_optional_text(changes.get("review_notes"))
@@ -677,6 +829,38 @@ def update_document_ingestion_page(
     document.updated_at = now
     document.updated_by = actor_id
     document.version += 1
+    if page.document_kind != previous_document_kind or page.document_subtype != previous_document_subtype:
+        append_document_activity_event(
+            db,
+            document_id=document.document_id,
+            actor_id=actor_id,
+            event_type="DocumentPageClassificationUpdated",
+            occurred_at=now,
+            payload={
+                "page_number": page.page_number,
+                "previous_document_kind": previous_document_kind,
+                "previous_document_subtype": previous_document_subtype,
+                "document_kind": page.document_kind,
+                "document_subtype": page.document_subtype,
+                "previous_classification": previous_classification_snapshot,
+                "classification": build_document_classification_snapshot(pages),
+            },
+        )
+    if "review_status" in changes and previous_review_status != page.review_status:
+        append_document_activity_event(
+            db,
+            document_id=document.document_id,
+            actor_id=actor_id,
+            event_type="DocumentReviewUpdated",
+            occurred_at=now,
+            payload={
+                "page_number": page.page_number,
+                "previous_review_status": previous_review_status,
+                "review_status": page.review_status,
+                "reviewed_at": page.reviewed_at,
+                "reviewed_by": page.reviewed_by,
+            },
+        )
     db.flush()
     return serialize_documents(db, [document], preloaded_pages=pages)[0]
 

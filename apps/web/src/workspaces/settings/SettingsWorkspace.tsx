@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 
-import { logoutCurrentSession } from '../../entities/auth/api'
+import { logoutCurrentSession, updateCurrentUserProfile } from '../../entities/auth/api'
 import { loadPublicRuntimeSettings, type PublicRuntimeSettings } from '../../entities/app/api'
 import {
   resolveAppearancePalette,
@@ -26,6 +26,7 @@ import {
   type TradeCaptureVisibilityMode,
 } from '../../shared/tradeCaptureSettings'
 import { type StoredAuthSession } from '../../shared/mutation'
+import { type AssistantPersona } from '../../shared/models'
 import {
   clearTimeDisplaySettingsSnapshot,
   formatTimeDisplayTimeZonePreferenceLabel,
@@ -76,7 +77,25 @@ type FlashMessage = {
   message: string
 }
 
-type AuthAction = 'logout' | null
+type AuthAction = 'logout' | 'profile' | null
+
+type UserProfileForm = {
+  displayName: string
+  defaultAssistantPersona: AssistantPersona
+  assistantContextBlurb: string
+}
+
+const ASSISTANT_CONTEXT_BLURB_MAX_LENGTH = 4000
+
+const USER_PERSONA_OPTIONS: { value: AssistantPersona; label: string }[] = [
+  { value: 'operator', label: 'Operator' },
+  { value: 'trader', label: 'Trader' },
+  { value: 'risk', label: 'Risk' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'operations', label: 'Operations' },
+  { value: 'settlement', label: 'Settlement' },
+  { value: 'reference_data', label: 'Reference Data' },
+]
 
 const COLOR_MODE_OPTIONS: Array<{
   value: ColorModePreference
@@ -168,6 +187,24 @@ function formatRuleValueLabel(value: string | null): string {
   return value ? value.split('_').join(' ') : 'Any'
 }
 
+function normalizeAssistantPersona(value: string | null | undefined): AssistantPersona {
+  return USER_PERSONA_OPTIONS.some((option) => option.value === value)
+    ? (value as AssistantPersona)
+    : 'operator'
+}
+
+function formatAssistantPersona(persona: AssistantPersona | string | null | undefined): string {
+  return USER_PERSONA_OPTIONS.find((option) => option.value === persona)?.label ?? 'Operator'
+}
+
+function buildUserProfileForm(user: StoredAuthSession['user'] | null | undefined): UserProfileForm {
+  return {
+    displayName: user?.display_name ?? '',
+    defaultAssistantPersona: normalizeAssistantPersona(user?.default_assistant_persona),
+    assistantContextBlurb: user?.assistant_context_blurb ?? '',
+  }
+}
+
 function previewStyle(palette: AppearancePalette): CSSProperties {
   return {
     '--appearance-accent': palette.accent,
@@ -248,7 +285,9 @@ export function SettingsWorkspace({
     getTimeDisplaySettingsSnapshot(),
   )
   const [tradeCaptureForm, setTradeCaptureForm] = useState<TradeCaptureSettings>(() => tradeCaptureSettings)
+  const [profileForm, setProfileForm] = useState<UserProfileForm>(() => buildUserProfileForm(authSession?.user))
   const [authFlash, setAuthFlash] = useState<FlashMessage | null>(null)
+  const [profileFlash, setProfileFlash] = useState<FlashMessage | null>(null)
   const [authAction, setAuthAction] = useState<AuthAction>(null)
   const [runtimeFlash, setRuntimeFlash] = useState<FlashMessage | null>(null)
   const [appearanceFlash, setAppearanceFlash] = useState<FlashMessage | null>(null)
@@ -295,6 +334,16 @@ export function SettingsWorkspace({
   useEffect(() => {
     setTradeCaptureForm(tradeCaptureSettings)
   }, [tradeCaptureSettings])
+
+  useEffect(() => {
+    setProfileForm(buildUserProfileForm(authSession?.user))
+    setProfileFlash(null)
+  }, [
+    authSession?.user.user_id,
+    authSession?.user.display_name,
+    authSession?.user.default_assistant_persona,
+    authSession?.user.assistant_context_blurb,
+  ])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -350,6 +399,48 @@ export function SettingsWorkspace({
       } finally {
         setAuthAction(null)
       }
+    }
+  }
+
+  async function handleSaveUserProfile(event: React.FormEvent) {
+    event.preventDefault()
+    setProfileFlash(null)
+
+    if (!authSession) {
+      setProfileFlash({
+        tone: 'error',
+        message: 'Sign in before updating your user profile.',
+      })
+      return
+    }
+
+    setAuthAction('profile')
+    try {
+      const updatedUser = await updateCurrentUserProfile(appConfig.apiBase, {
+        display_name: profileForm.displayName,
+        default_assistant_persona: profileForm.defaultAssistantPersona,
+        assistant_context_blurb: profileForm.assistantContextBlurb,
+      })
+      const nextSession: StoredAuthSession = {
+        ...authSession,
+        user: {
+          ...authSession.user,
+          ...updatedUser,
+        },
+      }
+      await onSessionChange(nextSession)
+      setProfileForm(buildUserProfileForm(nextSession.user))
+      setProfileFlash({
+        tone: 'success',
+        message: 'User profile saved. Assistant context will use this profile on new requests.',
+      })
+    } catch (error) {
+      setProfileFlash({
+        tone: 'error',
+        message: error instanceof Error ? error.message : 'Could not save the user profile.',
+      })
+    } finally {
+      setAuthAction(null)
     }
   }
 
@@ -530,6 +621,11 @@ export function SettingsWorkspace({
   const activeSessionSummary = authSession
     ? `${authSession.user.role} session for ${authSession.user.user_id}`
     : 'Signed out in this browser'
+  const profileSummary = authSession
+    ? `${formatAssistantPersona(authSession.user.default_assistant_persona)} persona · ${
+        authSession.user.assistant_context_blurb?.trim() ? 'AI context saved' : 'No AI context saved'
+      }`
+    : 'Sign in to edit your profile'
   const appearanceSummary = `${formatWorkspaceModeLabel(appearanceForm.workspaceMode)} · ${formatModeLabel(appearanceForm.colorMode)} preference · ${formatModeLabel(appearancePreviewMode)} preview`
   const timeDisplaySummary = `${timeZonePreferenceLabel} saved · ${resolvedTimeZoneLabel} in effect`
   const tradeDefaultsSummary =
@@ -550,6 +646,7 @@ export function SettingsWorkspace({
         ? `API reachable · ${runtimeOverrideCount} override${runtimeOverrideCount === 1 ? '' : 's'} active`
         : 'API reachable · checked-in defaults'
       : 'API needs attention before protected operations'
+  const profileSaving = authAction === 'profile'
 
   return (
     <div className="workspace-grid settings-grid">
@@ -614,6 +711,102 @@ export function SettingsWorkspace({
                   : 'Sign in happens on the dedicated entry screen before the console opens.')}
             </p>
           </div>
+        </SettingsDisclosureCard>
+
+        <SettingsDisclosureCard
+          cardKey="settings.user-profile-card"
+          eyebrow="Account Settings"
+          title="User Profile"
+          summary={profileSummary}
+        >
+          {authSession ? (
+            <>
+              <div className="settings-summary-grid">
+                <article className="settings-summary-card">
+                  <span>Assistant persona</span>
+                  <strong>{formatAssistantPersona(authSession.user.default_assistant_persona)}</strong>
+                  <p>Default interpretation lens for new assistant requests.</p>
+                </article>
+                <article className="settings-summary-card">
+                  <span>AI context</span>
+                  <strong>{authSession.user.assistant_context_blurb?.trim() ? 'Saved' : 'Empty'}</strong>
+                  <p>Background and preferences attached to authenticated assistant context.</p>
+                </article>
+              </div>
+
+              <form className="stack-form settings-form" onSubmit={handleSaveUserProfile}>
+                <div className="mini-grid">
+                  <label className="field">
+                    <span>Display name</span>
+                    <input
+                      className="control"
+                      type="text"
+                      value={profileForm.displayName}
+                      maxLength={160}
+                      onChange={(event) => {
+                        setProfileFlash(null)
+                        setProfileForm((current) => ({ ...current, displayName: event.target.value }))
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Default persona</span>
+                    <select
+                      className="control"
+                      value={profileForm.defaultAssistantPersona}
+                      onChange={(event) => {
+                        setProfileFlash(null)
+                        setProfileForm((current) => ({
+                          ...current,
+                          defaultAssistantPersona: normalizeAssistantPersona(event.target.value),
+                        }))
+                      }}
+                    >
+                      {USER_PERSONA_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <label className="field">
+                  <span>AI context</span>
+                  <textarea
+                    className="control settings-profile-textarea"
+                    value={profileForm.assistantContextBlurb}
+                    maxLength={ASSISTANT_CONTEXT_BLURB_MAX_LENGTH}
+                    placeholder="Role, working style, desk coverage, recurring preferences, and context the assistant should keep in mind."
+                    onChange={(event) => {
+                      setProfileFlash(null)
+                      setProfileForm((current) => ({ ...current, assistantContextBlurb: event.target.value }))
+                    }}
+                  />
+                </label>
+
+                <div className="toolbar settings-actions">
+                  <button
+                    type="submit"
+                    className="button button-primary"
+                    disabled={profileSaving || !profileForm.displayName.trim()}
+                  >
+                    {profileSaving ? 'Saving Profile...' : 'Save Profile'}
+                  </button>
+                </div>
+
+                <p className="settings-profile-count">
+                  {profileForm.assistantContextBlurb.length} / {ASSISTANT_CONTEXT_BLURB_MAX_LENGTH}
+                </p>
+                <p className={`form-note ${profileFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
+                  {profileFlash?.message ??
+                    'Assistant context is treated as preference and background only. It does not change permissions or approval policy.'}
+                </p>
+              </form>
+            </>
+          ) : (
+            <div className="feedback-banner">Sign in to edit your user profile.</div>
+          )}
         </SettingsDisclosureCard>
 
         <SettingsDisclosureCard

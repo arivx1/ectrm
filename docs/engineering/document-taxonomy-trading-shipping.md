@@ -56,7 +56,9 @@ facets unless they cross one of the behavior thresholds above.
 `UNKNOWN` is a classification status for pages that are not yet confidently
 classified. `OTHER` is a fallback bucket for documents that do not fit a
 supported schema yet; it should keep the document reviewable and should prompt
-taxonomy expansion when examples repeat.
+taxonomy expansion when examples repeat. Weak filename-only hints should land
+in `OTHER` rather than forcing a typed document kind without extractable
+content evidence.
 
 The schema registry exposes the first controlled facet definitions directly on
 the relevant document-kind contracts:
@@ -74,6 +76,12 @@ Future persisted document-facet values should be typed rows with confidence,
 source, and review provenance. Loose tags may remain useful for search and
 human notes, but deterministic routing, matching, policy, and action planning
 should use controlled fields.
+
+Party labels such as buyer, seller, customer, vendor, and supplier are not
+enough to infer the company's commercial side because most commercial documents
+name both parties. Use explicit buy/sell/purchase/sale language or a
+behavior-specific document kind such as `PURCHASE_ORDER` or `SALES_ORDER`
+before suggesting the `commercial_side` facet.
 
 ## Current Record Anchors
 
@@ -99,7 +107,7 @@ trades.
 
 | Family | Representative kinds | Primary routing target | Why it matters |
 | --- | --- | --- | --- |
-| Trade execution | Trade communication, trade confirmation, trade contract, broker confirmation | `Trade` | These documents prove or discuss the economics that should exist on a booked trade. |
+| Trade execution | Trade communication, deal recap, purchase order, sales order, trade confirmation, trade contract, broker confirmation | `Trade` | These documents prove or discuss the economics that should exist on a booked trade. |
 | Trade reconciliation | Broker statement | `Position` then `Trade` | These documents usually summarize many trades and are better treated as reconciliation evidence before one-to-one linkage. |
 | Logistics | Bill of lading, truck ticket, weigh ticket, delivery confirmation | `DeliveryObligation` or `DeliveryEvent` | These documents prove movement, route, timing, and actual delivered quantities. |
 | Network flow | Pipeline statement | `DeliveryObligation` | Pipeline docs attach most naturally to scheduled or flowed delivery obligations keyed by nomination and path references. |
@@ -145,6 +153,8 @@ Two routing rules matter early:
 | Document kind | Current anchor | Future automation intent |
 | --- | --- | --- |
 | `TRADE_COMMUNICATION` | `Trade` or `TradeWorkflowItem` | Enrich open commercial or dispute workflows without over-creating records. |
+| `PURCHASE_ORDER` | `Trade`, then `DeliveryObligation` | Treat PO number, parties, product, quantity, vessel, and delivery terms as commercial-intent evidence for trade matching or assisted trade creation. |
+| `SALES_ORDER` | `Trade`, then `DeliveryObligation` | Treat sales order number, customer, seller, product, quantity, vessel, and delivery terms as commercial-intent evidence for trade matching or assisted trade creation. |
 | `TRADE_CONFIRMATION` | `Trade`, then `TradeConfirmation` | Match the booked trade, compare economics, then create or update confirmation workflow records. |
 | `TRADE_CONTRACT` | `Trade` | Match an existing trade when possible; otherwise become a candidate source for manual or assisted trade creation. |
 | `BROKER_CONFIRMATION` | `Trade` | Reconcile exchange or broker-routed executions back to booked financial trades. |

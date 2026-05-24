@@ -26,6 +26,8 @@ DocumentKind = Literal[
     "UNKNOWN",
     "TRADE_COMMUNICATION",
     "DEAL_RECAP",
+    "PURCHASE_ORDER",
+    "SALES_ORDER",
     "TRADE_CONFIRMATION",
     "TRADE_CONTRACT",
     "BROKER_CONFIRMATION",
@@ -593,6 +595,16 @@ class DocumentIngestionPageOut(BaseModel):
     understanding: DocumentIngestionPageUnderstandingOut = Field(default_factory=DocumentIngestionPageUnderstandingOut)
 
 
+class DocumentActivityOut(BaseModel):
+    activity_id: str
+    event_type: str
+    label: str
+    detail: str
+    occurred_at: datetime
+    actor_id: Optional[str] = None
+    payload: dict[str, object] = Field(default_factory=dict)
+
+
 class DocumentIngestionOut(BaseModel):
     document_id: str
     original_filename: str
@@ -625,6 +637,7 @@ class DocumentIngestionOut(BaseModel):
     action_plan: Optional[DocumentActionPlanOut] = None
     record_links: list[DocumentRecordLinkOut] = Field(default_factory=list)
     facet_values: list[DocumentFacetAssignmentOut] = Field(default_factory=list)
+    activity: list[DocumentActivityOut] = Field(default_factory=list)
     pages: list[DocumentIngestionPageOut] = Field(default_factory=list)
     understanding: DocumentIngestionUnderstandingOut = Field(default_factory=DocumentIngestionUnderstandingOut)
 

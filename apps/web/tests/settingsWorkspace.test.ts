@@ -29,6 +29,8 @@ function renderSettingsWorkspace() {
           email: 'ops@example.com',
           display_name: 'Ops User',
           role: 'OPS_ADMIN',
+          default_assistant_persona: 'risk',
+          assistant_context_blurb: 'I cover morning operations and prefer exposure risk first.',
         },
       },
       appearanceSettings: getDefaultAppearanceSettings(),
@@ -78,6 +80,10 @@ test('settings workspace renders top-level settings cards collapsed by default',
   )
   assert.match(
     markup,
+    /aria-expanded="false" aria-controls="settings-user-profile-card-panel"/,
+  )
+  assert.match(
+    markup,
     /aria-expanded="false" aria-controls="settings-trade-ticket-defaults-card-panel"/,
   )
   assert.match(
@@ -96,6 +102,28 @@ test('settings workspace renders top-level settings cards collapsed by default',
     markup,
     /aria-expanded="false" aria-controls="settings-quick-read-card-panel"/,
   )
+})
+
+test('settings workspace renders persistent user profile controls', () => {
+  usePersistentCollapsibleCardStateMock.mockImplementation((cardKey: string) => ({
+    expanded: cardKey === 'settings.user-profile-card',
+    hasPersistedValue: cardKey === 'settings.user-profile-card',
+    setExpanded: () => undefined,
+  }))
+
+  const markup = renderSettingsWorkspace()
+
+  assert.match(
+    markup,
+    /aria-expanded="true" aria-controls="settings-user-profile-card-panel"/,
+  )
+  assert.match(markup, /User Profile/)
+  assert.match(markup, /Default persona/)
+  assert.match(markup, /Risk/)
+  assert.match(markup, /AI context/)
+  assert.match(markup, /I cover morning operations and prefer exposure risk first\./)
+  assert.match(markup, />Save Profile</)
+  assert.match(markup, /does not change permissions or approval policy/)
 })
 
 test('settings workspace renders expanded card bodies when persisted open', () => {

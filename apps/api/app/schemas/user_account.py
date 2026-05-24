@@ -7,10 +7,13 @@ from pydantic import BaseModel, Field, field_validator
 
 from apps.api.app.schemas.assistant import AssistantPersona
 from apps.api.app.schemas._validation import (
+    normalize_optional_blankable_text,
     normalize_optional_text,
     normalize_required_text,
     validate_password_not_blank,
 )
+
+ASSISTANT_CONTEXT_BLURB_MAX_LENGTH = 4000
 
 
 class UserAccountCreate(BaseModel):
@@ -19,6 +22,7 @@ class UserAccountCreate(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=160)
     role: str = Field(..., min_length=1, max_length=50)
     default_assistant_persona: Optional[AssistantPersona] = None
+    assistant_context_blurb: Optional[str] = Field(None, max_length=ASSISTANT_CONTEXT_BLURB_MAX_LENGTH)
     password: str = Field(..., min_length=8, max_length=128)
     created_by: str = Field(..., min_length=1, max_length=128)
     last_login_at: Optional[datetime] = None
@@ -51,6 +55,11 @@ class UserAccountCreate(BaseModel):
         normalized = normalize_optional_text(value, field_name="default_assistant_persona", lowercase=True)
         return normalized.replace("-", "_") if normalized is not None else None
 
+    @field_validator("assistant_context_blurb")
+    @classmethod
+    def normalize_assistant_context_blurb(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_blankable_text(value)
+
     @field_validator("password")
     @classmethod
     def validate_password(cls, value: str) -> str:
@@ -67,6 +76,7 @@ class UserAccountUpdate(BaseModel):
     display_name: Optional[str] = Field(None, min_length=1, max_length=160)
     role: Optional[str] = Field(None, min_length=1, max_length=50)
     default_assistant_persona: Optional[AssistantPersona] = None
+    assistant_context_blurb: Optional[str] = Field(None, max_length=ASSISTANT_CONTEXT_BLURB_MAX_LENGTH)
     password: Optional[str] = Field(None, min_length=8, max_length=128)
     last_login_at: Optional[datetime] = None
     updated_by: str = Field(..., min_length=1, max_length=128)
@@ -93,6 +103,11 @@ class UserAccountUpdate(BaseModel):
             return value
         normalized = normalize_optional_text(value, field_name="default_assistant_persona", lowercase=True)
         return normalized.replace("-", "_") if normalized is not None else None
+
+    @field_validator("assistant_context_blurb")
+    @classmethod
+    def normalize_assistant_context_blurb(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_blankable_text(value)
 
     @field_validator("password")
     @classmethod
@@ -122,6 +137,7 @@ class UserAccountOut(BaseModel):
     display_name: str
     role: str
     default_assistant_persona: AssistantPersona
+    assistant_context_blurb: Optional[str]
     is_active: bool
     password_set: bool
     last_login_at: Optional[datetime]

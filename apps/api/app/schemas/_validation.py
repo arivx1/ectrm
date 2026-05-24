@@ -35,6 +35,24 @@ def normalize_optional_text(
     )
 
 
+def normalize_optional_blankable_text(
+    value: str | None,
+    *,
+    uppercase: bool = False,
+    lowercase: bool = False,
+) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if uppercase:
+        normalized = normalized.upper()
+    if lowercase:
+        normalized = normalized.lower()
+    return normalized
+
+
 def validate_password_not_blank(value: str) -> str:
     if not value.strip():
         raise ValueError("password must not be blank")
