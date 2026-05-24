@@ -142,6 +142,7 @@ test("prompt home registry definitions expose allowed parameters and data bindin
     "price_index_code",
     "provider",
     "quote_type",
+    "region",
   ]);
   assert.deepEqual(prices.dataBindings, [
     "latest_price_marks",

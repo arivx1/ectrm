@@ -40,6 +40,7 @@ export type PromptHomeCardFilterField =
   | "price_index_code"
   | "provider"
   | "quote_type"
+  | "region"
   | "review_status"
   | "workflow_category";
 
@@ -121,6 +122,7 @@ export const PROMPT_HOME_CARD_REGISTRY = [
       "price_index_code",
       "provider",
       "quote_type",
+      "region",
     ],
     dataBindings: ["latest_price_marks", "market_price_indices"],
     requiredEntitlements: [],
@@ -132,7 +134,7 @@ export const PROMPT_HOME_CARD_REGISTRY = [
     defaultVisible: true,
     defaultPlacement: { order: 2, columnSpan: 2, rowSpan: 2 },
     allowedParameters: ["map_record_limit", "weather_overlays"],
-    allowedFilterFields: ["commodity_code", "geography", "location_code"],
+    allowedFilterFields: ["commodity_code", "geography", "location_code", "region"],
     dataBindings: ["asset_map", "spatial_features", "weather_overlays"],
     requiredEntitlements: [],
   },

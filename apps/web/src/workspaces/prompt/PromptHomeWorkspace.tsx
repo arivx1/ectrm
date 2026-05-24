@@ -3605,7 +3605,11 @@ export function PromptHomeWorkspace({
   const [invoiceIssueCandidates, setInvoiceIssueCandidates] = useState<
     InvoiceIssueCandidateRecord[]
   >([]);
-  const cardVisibilityState = usePersistentPromptHomeCardVisibility();
+  const cardVisibilityState = usePersistentPromptHomeCardVisibility({
+    apiBase: appConfig.apiBase,
+    authSession,
+  });
+  const [homeViewNameDraft, setHomeViewNameDraft] = useState("");
   const homeCardSensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -3633,6 +3637,18 @@ export function PromptHomeWorkspace({
   const consumedPromptResumeKeyRef = useRef<string | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const timeZoneOptions = useMemo(() => listTimeDisplayTimeZoneOptions(), []);
+
+  useEffect(() => {
+    setHomeViewNameDraft(
+      cardVisibilityState.canRenameActiveHomeView
+        ? cardVisibilityState.activeHomeViewName
+        : "",
+    );
+  }, [
+    cardVisibilityState.activeHomeViewName,
+    cardVisibilityState.activeHomeViewValue,
+    cardVisibilityState.canRenameActiveHomeView,
+  ]);
 
   useEffect(() => {
     if (
@@ -4332,8 +4348,23 @@ export function PromptHomeWorkspace({
   const hiddenHomeCardCount = cardVisibilityState.hiddenCardKeys.length;
   const visibleHomeCardCount = cardVisibilityState.visibleCardKeys.length;
   const homeCardVisibilitySummary = `${visibleHomeCardCount.toLocaleString()} visible · ${hiddenHomeCardCount.toLocaleString()} hidden`;
+  const homeCardPersistenceSummary = `${cardVisibilityState.persistenceLabel} · ${cardVisibilityState.persistenceDetail}`;
+  const homeCardPersistenceBusy =
+    cardVisibilityState.persistenceStatus === "loading" ||
+    cardVisibilityState.persistenceStatus === "saving";
+  const normalizedHomeViewNameDraft = homeViewNameDraft.trim();
+  const canSaveHomeViewAs =
+    cardVisibilityState.canManageHomeViews &&
+    !homeCardPersistenceBusy &&
+    normalizedHomeViewNameDraft.length > 0;
+  const canRenameHomeView =
+    cardVisibilityState.canRenameActiveHomeView &&
+    !homeCardPersistenceBusy &&
+    normalizedHomeViewNameDraft.length > 0 &&
+    normalizedHomeViewNameDraft !== cardVisibilityState.activeHomeViewName;
   const visibleHomeCardKeys = cardVisibilityState.visibleCardKeys;
-  const homeCardsMovable = visibleHomeCardKeys.length > 1;
+  const homeCardsMovable =
+    cardVisibilityState.canEditCards && visibleHomeCardKeys.length > 1;
   const homeCardOrderIndexByKey = useMemo(
     () =>
       new Map<PromptHomeCardKey, number>(
@@ -4439,9 +4470,28 @@ export function PromptHomeWorkspace({
             <div className="prompt-home-card-filter-copy">
               <span className="eyebrow">Cards</span>
               <strong id="prompt-home-card-filter-heading">Home cards</strong>
-              <small>{homeCardVisibilitySummary}</small>
+              <small>
+                {homeCardPersistenceSummary} · {homeCardVisibilitySummary}
+              </small>
             </div>
             <div className="prompt-home-card-filter-side">
+              <label className="prompt-home-view-switcher">
+                <span>View</span>
+                <select
+                  value={cardVisibilityState.activeHomeViewValue}
+                  onChange={(event) =>
+                    cardVisibilityState.selectHomeView(event.target.value)
+                  }
+                  disabled={homeCardPersistenceBusy}
+                >
+                  {cardVisibilityState.homeViewOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                      {option.kind === "system" ? " (System)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <button
                 type="button"
                 className="prompt-home-card-filter-toggle"
@@ -4475,6 +4525,73 @@ export function PromptHomeWorkspace({
           >
             {cardFilterExpandedState.expanded ? (
               <>
+                <div className="prompt-home-view-actions">
+                  <div className="prompt-home-view-actions-copy">
+                    <strong>{cardVisibilityState.activeHomeViewName}</strong>
+                    <small>{cardVisibilityState.activeHomeViewDetail}</small>
+                  </div>
+                  <label className="prompt-home-view-name-field">
+                    <span>View name</span>
+                    <input
+                      type="text"
+                      value={homeViewNameDraft}
+                      placeholder="New Home view"
+                      onChange={(event) =>
+                        setHomeViewNameDraft(event.target.value)
+                      }
+                      disabled={
+                        homeCardPersistenceBusy ||
+                        !cardVisibilityState.canManageHomeViews
+                      }
+                    />
+                  </label>
+                  <div className="prompt-home-view-action-buttons">
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() =>
+                        cardVisibilityState.saveHomeViewAs(homeViewNameDraft)
+                      }
+                      disabled={!canSaveHomeViewAs}
+                    >
+                      Save As
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() =>
+                        cardVisibilityState.renameActiveHomeView(
+                          homeViewNameDraft,
+                        )
+                      }
+                      disabled={!canRenameHomeView}
+                    >
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-ghost"
+                      onClick={() => {
+                        if (
+                          typeof window !== "undefined" &&
+                          !window.confirm(
+                            `Delete ${cardVisibilityState.activeHomeViewName}?`,
+                          )
+                        ) {
+                          return;
+                        }
+
+                        cardVisibilityState.deleteActiveHomeView();
+                      }}
+                      disabled={
+                        homeCardPersistenceBusy ||
+                        !cardVisibilityState.canDeleteActiveHomeView
+                      }
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
                 <div
                   className="prompt-home-card-filter-grid"
                   role="group"
@@ -4493,6 +4610,10 @@ export function PromptHomeWorkspace({
                         <input
                           type="checkbox"
                           checked={cardVisible}
+                          disabled={
+                            homeCardPersistenceBusy ||
+                            !cardVisibilityState.canEditCards
+                          }
                           onChange={(event) =>
                             cardVisibilityState.setCardVisible(
                               cardOption.key,
@@ -4513,11 +4634,31 @@ export function PromptHomeWorkspace({
                     type="button"
                     className="button button-secondary"
                     onClick={cardVisibilityState.showAllCards}
-                    disabled={hiddenHomeCardCount === 0}
+                    disabled={
+                      homeCardPersistenceBusy ||
+                      hiddenHomeCardCount === 0 ||
+                      !cardVisibilityState.canEditCards
+                    }
                   >
                     Show All
                   </button>
+                  <button
+                    type="button"
+                    className="button button-ghost"
+                    onClick={cardVisibilityState.resetHomeView}
+                    disabled={
+                      homeCardPersistenceBusy ||
+                      !cardVisibilityState.canResetHomeView
+                    }
+                  >
+                    Reset Home
+                  </button>
                 </div>
+                {cardVisibilityState.persistenceError ? (
+                  <p className="form-note form-note-error">
+                    {cardVisibilityState.persistenceError}
+                  </p>
+                ) : null}
               </>
             ) : null}
           </div>

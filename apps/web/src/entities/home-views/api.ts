@@ -1,0 +1,171 @@
+import { fetchJson, patchJson, postJson, requestOk } from '../../shared/api'
+import type { AssistantPersona } from '../../shared/models'
+import type {
+  PromptHomeCardKey,
+  PromptHomeCardKind,
+  PromptHomeCardPlacement,
+  PromptHomeTemplateCard,
+} from '../../workspaces/prompt/promptHomeCards'
+
+function authorizationHeaders(accessToken: string): Record<string, string> {
+  return { Authorization: `Bearer ${accessToken}` }
+}
+
+export type HomeViewCardPlacementPayload = {
+  order: number
+  column_span: PromptHomeCardPlacement['columnSpan']
+  row_span: PromptHomeCardPlacement['rowSpan']
+}
+
+export type HomeViewCardPayload = {
+  card_id: PromptHomeCardKey
+  kind?: PromptHomeCardKind | null
+  label?: string | null
+  visible: boolean
+  placement: HomeViewCardPlacementPayload
+  parameters: Record<string, unknown>
+  filters: Record<string, unknown>
+  data_bindings: string[]
+}
+
+export type HomeViewDefinition = {
+  definition_id: number
+  definition_key: string
+  name: string
+  scope: 'PERSONAL'
+  base_template_key: 'system_home'
+  base_template_version: 1
+  persona_hint: AssistantPersona | null
+  cards: HomeViewCardPayload[]
+  global_filters: Record<string, unknown>
+  status: 'ACTIVE' | 'RETIRED'
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
+}
+
+export type HomeViewSystemTemplate = {
+  template_key: 'system_home'
+  template_version: 1
+  label: string
+  immutable: true
+  cards: HomeViewCardPayload[]
+}
+
+export type HomeViewDefinitionCreatePayload = {
+  name: string
+  scope: 'PERSONAL'
+  base_template_key: 'system_home'
+  base_template_version: 1
+  persona_hint?: AssistantPersona | null
+  cards: HomeViewCardPayload[]
+  global_filters: Record<string, unknown>
+}
+
+export type HomeViewDefinitionUpdatePayload = {
+  name?: string
+  persona_hint?: AssistantPersona | null
+  cards?: HomeViewCardPayload[]
+  global_filters?: Record<string, unknown>
+}
+
+export function toHomeViewCardPayload(card: PromptHomeTemplateCard): HomeViewCardPayload {
+  return {
+    card_id: card.cardId,
+    visible: card.visible,
+    placement: {
+      order: card.placement.order,
+      column_span: card.placement.columnSpan,
+      row_span: card.placement.rowSpan,
+    },
+    parameters: { ...card.parameters },
+    filters: { ...card.filters },
+    data_bindings: [...card.dataBindings],
+  }
+}
+
+export function homeViewCardPayloadToPromptHomeCard(card: HomeViewCardPayload): Record<string, unknown> {
+  return {
+    cardId: card.card_id,
+    kind: card.kind ?? undefined,
+    label: card.label ?? undefined,
+    visible: card.visible,
+    placement: {
+      order: card.placement.order,
+      columnSpan: card.placement.column_span,
+      rowSpan: card.placement.row_span,
+    },
+    parameters: { ...card.parameters },
+    filters: { ...card.filters },
+    dataBindings: [...card.data_bindings],
+  }
+}
+
+export async function loadHomeViewSystemTemplate(
+  apiBase: string,
+  accessToken: string,
+): Promise<HomeViewSystemTemplate> {
+  return fetchJson<HomeViewSystemTemplate>(`${apiBase}/home-view-definitions/system-template`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function listHomeViewDefinitions(
+  apiBase: string,
+  accessToken: string,
+): Promise<HomeViewDefinition[]> {
+  return fetchJson<HomeViewDefinition[]>(`${apiBase}/home-view-definitions`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function createHomeViewDefinition(
+  apiBase: string,
+  accessToken: string,
+  payload: HomeViewDefinitionCreatePayload,
+): Promise<HomeViewDefinition> {
+  return postJson<HomeViewDefinition>(`${apiBase}/home-view-definitions`, payload, {
+    headers: authorizationHeaders(accessToken),
+  })
+}
+
+export async function updateHomeViewDefinition(
+  apiBase: string,
+  accessToken: string,
+  definitionId: number,
+  payload: HomeViewDefinitionUpdatePayload,
+): Promise<HomeViewDefinition> {
+  return patchJson<HomeViewDefinition>(`${apiBase}/home-view-definitions/${definitionId}`, payload, {
+    headers: authorizationHeaders(accessToken),
+  })
+}
+
+export async function resetHomeViewDefinition(
+  apiBase: string,
+  accessToken: string,
+  definitionId: number,
+): Promise<HomeViewDefinition> {
+  return postJson<HomeViewDefinition>(
+    `${apiBase}/home-view-definitions/${definitionId}/reset`,
+    {},
+    {
+      headers: authorizationHeaders(accessToken),
+    },
+  )
+}
+
+export async function deleteHomeViewDefinition(
+  apiBase: string,
+  accessToken: string,
+  definitionId: number,
+): Promise<void> {
+  await requestOk(`${apiBase}/home-view-definitions/${definitionId}`, {
+    method: 'DELETE',
+    headers: authorizationHeaders(accessToken),
+  })
+}

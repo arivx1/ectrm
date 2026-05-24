@@ -165,6 +165,8 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.match(markup, />Voice Unavailable</);
   assert.match(markup, /<span class="eyebrow">Cards<\/span>/);
   assert.match(markup, /<strong id="prompt-home-card-filter-heading">Home cards<\/strong>/);
+  assert.match(markup, /<span>View<\/span>/);
+  assert.match(markup, /Local Home/);
   assert.match(markup, /6 visible · 0 hidden/);
   assert.match(
     markup,

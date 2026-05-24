@@ -71,9 +71,42 @@
 
 .prompt-home-card-filter-side {
   display: grid;
+  grid-template-columns: minmax(10rem, 14rem) auto;
+  gap: 0.65rem;
   justify-items: end;
   align-content: center;
   min-width: 0;
+}
+
+.prompt-home-view-switcher {
+  display: grid;
+  gap: 0.22rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.prompt-home-view-switcher span,
+.prompt-home-view-name-field span {
+  color: var(--color-copy-muted, #66717c);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.prompt-home-view-switcher select,
+.prompt-home-view-name-field input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.18);
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+}
+
+.prompt-home-view-switcher select {
+  min-height: 2.2rem;
+  padding: 0.42rem 0.5rem;
 }
 
 .prompt-home-card-filter-toggle {
@@ -114,6 +147,45 @@
   gap: 0.45rem;
 }
 
+.prompt-home-view-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem) auto;
+  gap: 0.65rem;
+  align-items: end;
+  padding: 0.64rem;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.14);
+  border-radius: 0.72rem;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.prompt-home-view-actions-copy,
+.prompt-home-view-name-field {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.prompt-home-view-actions-copy strong {
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
+
+.prompt-home-view-actions-copy small {
+  color: var(--color-copy-muted, #66717c);
+}
+
+.prompt-home-view-name-field input {
+  min-height: 2.35rem;
+  padding: 0.48rem 0.58rem;
+}
+
+.prompt-home-view-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: flex-end;
+}
+
 .prompt-home-card-filter-choice {
   display: flex;
   align-items: center;
@@ -130,6 +202,11 @@
 .prompt-home-card-filter-choice.is-hidden {
   border-style: dashed;
   opacity: 0.72;
+}
+
+.prompt-home-card-filter-choice:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.68;
 }
 
 .prompt-home-card-filter-choice input {
@@ -153,6 +230,8 @@
 
 .prompt-home-card-filter-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
   justify-content: flex-end;
 }
 
@@ -2656,6 +2735,19 @@
     justify-items: start;
     justify-content: flex-start;
     text-align: left;
+  }
+
+  .prompt-home-card-filter-side,
+  .prompt-home-view-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .prompt-home-view-action-buttons {
+    justify-content: stretch;
+  }
+
+  .prompt-home-view-action-buttons .button {
+    flex: 1 1 100%;
   }
 
   .prompt-home-card-filter-actions .button {

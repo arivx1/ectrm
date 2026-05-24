@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "vitest";
 
 import {
+  buildPromptHomeCardsFromLocalPreferences,
+  buildPromptHomeCardsFromOrderAndHidden,
   getPromptHomeCardOrderSnapshot,
   getPromptHomeHiddenCardKeysSnapshot,
   normalizePromptHomeCardOrder,
   normalizePromptHomeHiddenCardKeys,
+  promptHomeTemplateCardsToOrderAndHidden,
   PROMPT_HOME_CARD_ORDER_STORAGE_KEY,
   PROMPT_HOME_CARD_VISIBILITY_STORAGE_KEY,
   savePromptHomeCardOrder,
@@ -159,4 +162,51 @@ test("prompt home card order ignores malformed storage entries", () => {
     "documents",
     "prompt",
   ]);
+});
+
+test("prompt home cards can seed a personal view from local order and visibility", () => {
+  installWindowWithStorage({
+    [PROMPT_HOME_CARD_ORDER_STORAGE_KEY]: JSON.stringify({
+      order: ["prompt", "map", "prices"],
+    }),
+    [PROMPT_HOME_CARD_VISIBILITY_STORAGE_KEY]: JSON.stringify({
+      hidden: ["map", "old-card"],
+    }),
+  });
+
+  const cards = buildPromptHomeCardsFromLocalPreferences();
+
+  assert.deepEqual(
+    cards.map((card) => card.cardId),
+    ["prompt", "map", "prices", "timeframe", "documents", "communication"],
+  );
+  assert.deepEqual(
+    cards.map((card) => card.placement.order),
+    [0, 1, 2, 3, 4, 5],
+  );
+  assert.equal(cards.find((card) => card.cardId === "map")?.visible, false);
+  assert.equal(cards.find((card) => card.cardId === "prompt")?.visible, true);
+  assert.deepEqual(promptHomeTemplateCardsToOrderAndHidden(cards), {
+    order: ["prompt", "map", "prices", "timeframe", "documents", "communication"],
+    hidden: ["map"],
+  });
+});
+
+test("prompt home reset cards resolve to the immutable system card order", () => {
+  const cards = buildPromptHomeCardsFromOrderAndHidden([], []);
+
+  assert.deepEqual(
+    promptHomeTemplateCardsToOrderAndHidden(cards),
+    {
+      order: [
+        "timeframe",
+        "prices",
+        "map",
+        "documents",
+        "communication",
+        "prompt",
+      ],
+      hidden: [],
+    },
+  );
 });
