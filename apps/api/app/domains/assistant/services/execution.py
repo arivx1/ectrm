@@ -419,6 +419,8 @@ def prepare_assistant_execution(
         db=db,
         agent_definition=agent_definition,
         action_specs=ACTION_SPECS,
+        user_role=user.role,
+        default_persona=user.default_persona,
     )
     prompt_context = _apply_prompt_enrichment(
         prompt_context,

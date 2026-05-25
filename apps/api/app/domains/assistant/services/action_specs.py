@@ -65,6 +65,7 @@ class AssistantActionPlanningContext:
     message_lower: str
     context: str | None
     context_fields: dict[str, str]
+    persona: str | None
     db: Session
 
 

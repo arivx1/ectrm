@@ -429,6 +429,48 @@ MANAGED_AGENT_EVAL_CASES = (
         ),
     ),
     AssistantEvalCase(
+        name="action-agent-stages-risk-persona-hh-ng-home-view-creation",
+        agent=AssistantEvalAgentFixture(
+            agent_id="home-view-risk-stager",
+            name="Home View Risk Stager",
+            capabilities=("ACTION", "EXPLAIN"),
+            allowed_workspaces=("assistant", "dashboard", "reports"),
+            allowed_action_types=("create_home_view_instance",),
+            system_prompt="Stage typed Home view instance requests and preserve persona-specific recipe emphasis.",
+        ),
+        request_payload={
+            "agent_id": "home-view-risk-stager",
+            "workspace": "assistant",
+            "persona": "risk",
+            "use_live_tools": False,
+            "messages": [
+                {"role": "user", "content": "Make me a view to see HH NG."},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-home-view-risk-1",
+                "output_text": "I staged a risk-focused Home view request for review.",
+                "usage": {"input_tokens": 16, "output_tokens": 11},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="home-view-risk-stager",
+            agent_name="Home View Risk Stager",
+            message_contains=("risk-focused Home view request",),
+            warning_count=0,
+            tool_names=(),
+            action_request_types=("create_home_view_instance",),
+            action_request_statuses=("PENDING",),
+            prompt_section_keys=("managed-agent", "persona", "approval-gated-action", "workspace"),
+            prompt_section_content_contains=(
+                ("approval-gated-action", ("create_home_view_instance", "persona_hint", "risk")),
+            ),
+            provider_request_count=1,
+            provider_tools_key_present=False,
+        ),
+    ),
+    AssistantEvalCase(
         name="action-agent-stops-ambiguous-home-view-creation",
         agent=AssistantEvalAgentFixture(
             agent_id="home-view-ambiguous-stopper",

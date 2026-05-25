@@ -483,37 +483,43 @@ proposal form until a human owner approves the domain rule.
 - Applies to: Home card placement, card visibility, card filters, named Home
   view instances, assistant-created views, persona-aware view suggestions, and
   future shared desk Home layouts
-- Status: proposed
+- Status: implemented incrementally for personal Home view definitions,
+  approval-gated assistant creation, and the first deterministic recipe layer;
+  shared publication and broad recipe promotion remain follow-ups.
 - Source:
   [Home View Instances Work Packages](./home-view-instances-work-packages.md),
   [User Extensibility Initiative](./user-extensibility-initiative.md),
-  [Agent Action Request Contract](./agent-action-request-contract.md), and
-  `apps/api/app/domains/assistant/services/tools.py`
+  [Agent Action Request Contract](./agent-action-request-contract.md),
+  `apps/api/app/domains/assistant/services/tools.py`,
+  `apps/api/app/domains/assistant/services/action_planners.py`, and
+  `apps/api/app/domains/home_views/services/recipes.py`
 - Lesson: configurable Home should use immutable system templates, typed card
   registries, and persisted view definitions rather than browser-local state or
   freeform assistant JSON. Agents may interpret natural-language requests such
   as `Make me a view to see HH NG`, but durable saved views should persist
   through typed services, validated card ids, validated filters, permissions,
   audit, and reviewable action requests.
-- Deterministic opportunity: promote repeated accepted Home view requests into
-  deterministic recipes such as `hub_basis_watch`, `commodity_market_watch`,
-  `imminent_shipments`, and `settlement_exception_watch` with explicit inputs,
-  card outputs, assumptions, stop conditions, tests, and outcome review.
-- Agent autonomy impact: persona can shape which cards and filters are
-  proposed, but it must not widen permission, row access, tools, action types,
-  or shared-publication authority. Personal Home view creation may become a
-  bounded low-risk action only after typed validation, assistant evals, and
-  approval/correction metrics support promotion. Assistant Home tools should
-  stay observe-only and visibility-scoped until the governed
-  `create_home_view_instance` action exists.
-- Tests or evidence: first implementation should add focused backend tests for
-  definition validation and audit, web tests for save/switch/reset behavior,
-  assistant evals for prompt-created Home views and stop conditions, and
-  browser smoke for one end-to-end saved Home instance path. HVI-07 added
-  focused assistant tooling coverage and `make api-assistant-evals` for
-  read-only Home catalog and visible-instance inspection.
-- Follow-up: implement the governed `create_home_view_instance` action before
-  allowing assistant-created Home instances to persist.
+- Deterministic opportunity: HVI-09 added a Home view recipe registry for
+  `hub_basis_watch`, `commodity_market_watch`, `imminent_shipments`,
+  `settlement_exception_watch`, and `document_review_queue` with explicit
+  inputs, card outputs, assumptions, stop conditions, tests, and review
+  preview metadata. Expand recipe behavior only when accepted/rejected outcomes
+  show stable reviewer preferences and the needed Home card surfaces exist.
+- Agent autonomy impact: persona can shape card emphasis and recipe defaults,
+  but it must not widen permission, row access, tools, action types, reviewer
+  roles, or shared-publication authority. The governed
+  `create_home_view_instance` action is approval-gated, personal-scope only,
+  and still persists through typed Home definition services rather than
+  freeform model output.
+- Tests or evidence: HVI-07 added focused assistant tooling coverage and
+  `make api-assistant-evals` for read-only Home catalog and visible-instance
+  inspection. HVI-08 added action staging/execution coverage for HH NG,
+  duplicate-name, invalid-card, ambiguous-request, and invalid-filter paths.
+  HVI-09 added `apps/api/tests/test_home_view_recipes.py`, persona-emphasis API
+  coverage, and assistant evals for risk-persona HH NG recipe staging.
+- Follow-up: add recipe outcome review in HVI-10 before broadening autonomous
+  recipe promotion, and keep shared/team Home publication human/API-owned until
+  a separate governed action and approval model exist.
 
 ### 2026-05-22 - OpenAI Structured Outputs Need Explicit Strict Schemas
 

@@ -571,6 +571,7 @@ class AssistantActionPreviewOut(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     blocking_reasons: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
+    metadata: dict[str, object] = Field(default_factory=dict)
     existing_invoice_count: Optional[int] = None
 
 

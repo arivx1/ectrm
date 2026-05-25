@@ -724,6 +724,14 @@ Backend assistant engineer with action-request and typed service experience.
 - approval surfaces show enough metadata to review the proposed Home instance
   without opening the original chat
 
+### Implementation Notes
+
+HVI-08 is implemented through the governed `create_home_view_instance`
+assistant action. The action stages personal Home view definitions only,
+validates card and filter payloads through the Home definition service, records
+review context and stale-state basis, and executes through the same typed
+service used by manual Home view saves after approval.
+
 ## HVI-09: Persona-Aware Deterministic View Recipes
 
 ### Priority
@@ -803,6 +811,20 @@ experience.
 - recipe outputs are covered by focused tests and assistant evals
 - accepted/rejected recipe outcomes can be reviewed for future promotion or
   retirement
+
+### Implementation Notes
+
+HVI-09 is implemented for the first deterministic recipe layer in
+`domains/home_views/services/recipes.py`. The registry declares
+`commodity_market_watch`, `hub_basis_watch`, `imminent_shipments`,
+`settlement_exception_watch`, and `document_review_queue`; the assistant action
+planner now consumes recipe outputs instead of composing HH natural-gas Home
+views inline. The initial functional market recipes resolve HH NG/Henry Hub
+natural gas, include related active gas indices for basis context when present,
+vary visible-card order for trader, risk, operations, and settlement personas,
+and record recipe metadata in the action request review preview. Shipment and
+settlement-exception recipes are registered but stop until dedicated Home cards
+exist.
 
 ## HVI-10: Evals, Browser Smoke, And Recipe Outcome Review
 

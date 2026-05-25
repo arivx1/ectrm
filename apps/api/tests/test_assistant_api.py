@@ -2938,6 +2938,18 @@ class AssistantApiTests(unittest.TestCase):
         self.assertFalse(cards_by_id["documents"]["visible"])
         self.assertEqual(action_request["review_context"]["required_reviewer_role"], "REQUESTING_USER_OR_ADMIN")
         self.assertEqual(
+            action_request["review_context"]["proposed_mutation"]["recipe_key"],
+            "hub_basis_watch",
+        )
+        self.assertEqual(
+            action_request["review_context"]["action_preview"]["metadata"]["recipe_key"],
+            "hub_basis_watch",
+        )
+        self.assertEqual(
+            action_request["review_context"]["action_preview"]["metadata"]["resolved_inputs"]["commodity_code"],
+            "NATGAS",
+        )
+        self.assertEqual(
             action_request["review_context"]["stale_state_basis"],
             {
                 "scope": "PERSONAL",
@@ -2968,6 +2980,58 @@ class AssistantApiTests(unittest.TestCase):
             self.assertEqual(record.name, "HH NG Watch")
             self.assertEqual(record.scope, "PERSONAL")
             self.assertEqual(record.created_by, "assistant_user")
+
+    def test_home_view_instance_action_uses_request_persona_recipe_emphasis(self) -> None:
+        token = self._create_session_token(role="TRADER")
+        self._seed_home_view_reference_data()
+        self._create_agent(
+            agent_id="home-view-risk-agent",
+            name="Home View Risk Agent",
+            status="ACTIVE",
+            allowed_workspaces=["assistant", "dashboard", "reports"],
+            capabilities=["ACTION", "EXPLAIN"],
+            allowed_action_types=["create_home_view_instance"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="STAGE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "home-view-risk-agent",
+                    "workspace": "assistant",
+                    "persona": "risk",
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Make me a view to see HH NG."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        action_request = response.json()["action_requests"][0]
+        self.assertEqual(action_request["payload"]["persona_hint"], "risk")
+        visible_cards = [
+            card["card_id"]
+            for card in action_request["payload"]["cards"]
+            if card["visible"]
+        ]
+        self.assertEqual(visible_cards[:2], ["map", "prices"])
+        self.assertEqual(
+            action_request["review_context"]["action_preview"]["metadata"]["recipe_key"],
+            "hub_basis_watch",
+        )
+        self.assertIn(
+            "No dedicated exposure or position Home card exists yet",
+            " ".join(action_request["review_context"]["missing_evidence"]),
+        )
 
     def test_home_view_instance_action_duplicate_name_fails_safely_on_approval(self) -> None:
         token = self._create_session_token(role="TRADER")

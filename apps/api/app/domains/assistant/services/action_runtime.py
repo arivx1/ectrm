@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.assistant.personas import resolve_assistant_persona_key
 from apps.api.app.domains.assistant.services.action_planners import ACTION_PLANNERS
 from apps.api.app.domains.assistant.services.action_planners import ACTION_PLANNER_SEQUENCE
 from apps.api.app.domains.assistant.services.action_planners import first_matching_action_plan
@@ -45,6 +46,8 @@ def plan_action_requests(
     db: Session,
     agent_definition: ManagedAssistantAgent | None,
     action_specs: dict[str, AssistantActionSpec],
+    user_role: str | None = None,
+    default_persona: str | None = None,
 ) -> AssistantActionRuntimeResult:
     if agent_definition is None:
         return AssistantActionRuntimeResult(sections=(), proposals=())
@@ -60,6 +63,11 @@ def plan_action_requests(
         message_lower=latest_message.lower(),
         context=payload.context,
         context_fields=parse_action_context_fields(payload.context),
+        persona=resolve_assistant_persona_key(
+            requested_persona=payload.persona,
+            default_persona=default_persona,
+            user_role=user_role,
+        ),
         db=db,
     )
     planning_candidate = first_matching_action_plan(planning_context, action_specs=action_specs)
