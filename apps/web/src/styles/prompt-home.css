@@ -700,7 +700,10 @@
 }
 
 .prompt-home-price-row-draggable {
-  touch-action: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.42rem;
+  align-items: center;
 }
 
 .prompt-home-price-row-action.is-dragging {
@@ -708,6 +711,31 @@
   background: rgba(255, 255, 255, 0.11);
   opacity: 0.78;
   z-index: 2;
+}
+
+.prompt-home-price-row-drag-handle {
+  min-width: 2.45rem;
+  min-height: 2rem;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.22);
+  border-radius: 0.38rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--terminal-muted, #94a8ba);
+  cursor: grab;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
+  touch-action: none;
+}
+
+.prompt-home-price-row-drag-handle:active {
+  cursor: grabbing;
+}
+
+.prompt-home-price-row-drag-handle:focus-visible {
+  outline: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.72);
+  outline-offset: 2px;
 }
 
 .prompt-home-price-fields {

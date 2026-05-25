@@ -201,6 +201,10 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.doesNotMatch(markup, /No latest price marks/);
   assert.match(markup, /aria-label="Sort prices by Product"/);
   assert.match(markup, /aria-label="Sort prices by Updated"/);
+  assert.match(
+    markup,
+    /aria-label="Double-click to open the price dashboard for Henry Hub Natural Gas"/,
+  );
   assert.match(markup, /No mark yet/);
   assert.match(markup, /Market price marks/);
   assert.match(markup, /0 latest marks · 1 active index/);
@@ -655,8 +659,8 @@ test("prompt home prices map pricing service output into a card view model", () 
       price: "-6.75",
       unit: "MWH",
       currency: "USD",
-      date: "May 22, 2026",
-      time: "1:05 PM UTC",
+      date: "05/22/2026",
+      time: "13:05:00",
       source: "CAISO · SP15",
       hasLatestMark: true,
     },
@@ -923,7 +927,7 @@ test("prompt home price marks format the price date and time", () => {
         downloaded_at: "2026-05-17T10:00:00Z",
       }),
     ),
-    "Daily · source date May 16, 2026 · published May 16, 2026, 2:45 PM UTC",
+    "Daily · source date 05/16/2026 · published 05/16/2026 14:45:00",
   );
   assert.equal(
     formatPromptHomePriceDateTime(
@@ -933,7 +937,7 @@ test("prompt home price marks format the price date and time", () => {
         downloaded_at: "2026-05-17T10:00:00Z",
       }),
     ),
-    "Daily · source date May 16, 2026 · synced May 17, 2026, 10:00 AM UTC",
+    "Daily · source date 05/16/2026 · synced 05/17/2026 10:00:00",
   );
   assert.equal(formatPromptHomePriceFrequency("5MIN"), "5-min");
   assert.equal(formatPromptHomePriceFrequency("15MIN"), "15-min");
@@ -945,7 +949,7 @@ test("prompt home price marks format the price date and time", () => {
         observation_date: "2026-05-22",
       }),
     ),
-    "May 22, 2026",
+    "05/22/2026",
   );
   assert.equal(
     formatPromptHomePriceTime(
@@ -972,7 +976,7 @@ test("prompt home price marks format the price date and time", () => {
         source_revision: "2026-05-22T13:05:00:ptid:1",
       }),
     ),
-    "1:05 PM UTC",
+    "13:05:00",
   );
   assert.equal(
     formatPromptHomePriceUpdatedAt(
@@ -980,7 +984,7 @@ test("prompt home price marks format the price date and time", () => {
         downloaded_at: "2026-05-22T23:40:00Z",
       }),
     ),
-    "May 22, 2026, 11:40 PM UTC",
+    "05/22/2026 23:40:00",
   );
   assert.equal(
     formatPromptHomePriceSource(

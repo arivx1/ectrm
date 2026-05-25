@@ -39,7 +39,7 @@ describe('ReportsWorkspace', () => {
     expect(markup).toContain('Desk-wide end-of-day posture rolled up from pricing, workflow, settlement, projection-integrity, and accrual evidence.')
   })
 
-  it('renders a Home-routed price BI report focus', () => {
+  it('renders a Home-routed price dashboard focus without the general report deck', () => {
     const markup = renderToStaticMarkup(
       createElement(ReportsWorkspace, {
         activeTrades: [],
@@ -62,11 +62,15 @@ describe('ReportsWorkspace', () => {
       }),
     )
 
-    expect(markup).toContain('Open Henry Hub Natural Gas price BI report')
+    expect(markup).toContain('Open Henry Hub Natural Gas price dashboard')
     expect(markup).toContain('Home')
     expect(markup).toContain('Filter: HH_NATGAS')
-    expect(markup).toContain('Price BI Report · HH_NATGAS')
+    expect(markup).toContain('Price Dashboard Tiles')
+    expect(markup).toContain('Price Dashboard · HH_NATGAS')
     expect(markup).toContain('Price observation history, range, source provenance, and freshness for the selected price index.')
-    expect(markup).toContain('The selected price index has no loaded observations for the price BI report.')
+    expect(markup).toContain('The selected price index has no loaded observations for the price dashboard.')
+    expect(markup).not.toContain('Workbook Data Sources')
+    expect(markup).not.toContain('Trading EOD')
+    expect(markup).not.toContain('Draft Validator')
   })
 })

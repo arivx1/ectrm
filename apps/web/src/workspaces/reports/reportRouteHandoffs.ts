@@ -5,7 +5,7 @@ import {
 } from '../../shared/appRouteHandoff'
 
 export const PRICE_INDEX_BI_REPORT_ID = 'reports-price-bi'
-export const PRICE_INDEX_BI_REPORT_TITLE = 'Price BI Report'
+export const PRICE_INDEX_BI_REPORT_TITLE = 'Price Dashboard'
 
 type PriceIndexBiReportHandoffInput = {
   priceIndexCode: string
@@ -29,9 +29,9 @@ export function buildPriceIndexBiReportHandoff({
     },
     tradeInspectorTab: null,
     eventType: null,
-    label: `Open ${priceIndexLabel} price BI report`,
+    label: `Open ${priceIndexLabel} price dashboard`,
     rationale:
-      'The Home price card opened the reusable price BI report filtered to this price index so the analyst can review price observations without creating a separate page per curve.',
+      'The Home price card opened the reusable price dashboard filtered to this price index so the analyst can review price observations without creating a separate page per curve.',
     filter: normalizedCode,
     sourceRunId: null,
     sourceConversationId: null,

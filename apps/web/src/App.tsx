@@ -540,6 +540,24 @@ function AuthenticatedWorkspaceShell({
     )
   }
 
+  function renderBackButton(className?: string) {
+    return (
+      <button
+        type="button"
+        className={['button button-ghost app-back-button', className].filter(Boolean).join(' ')}
+        onClick={() => {
+          route.navigateBack()
+          shell.setMobileNavOpen(false)
+        }}
+        disabled={!route.canNavigateBack}
+        aria-label="Go back to the previous view"
+        title={route.canNavigateBack ? 'Go back' : 'No previous view'}
+      >
+        Back
+      </button>
+    )
+  }
+
   function renderWorkspaceSetLauncher() {
     if (!appearance.isTerminalMode) {
       return null
@@ -576,6 +594,7 @@ function AuthenticatedWorkspaceShell({
           <span className="brand-mark">Strata</span>
         </div>
         <div className="mobile-topbar-actions">
+          {renderBackButton('app-back-button-mobile')}
           {renderTerminalCommandTrigger('terminal-command-trigger-mobile')}
           {renderShortcutReferenceTrigger('terminal-shortcut-trigger-mobile')}
           <button
@@ -725,7 +744,10 @@ function AuthenticatedWorkspaceShell({
         {isPromptHomeView ? (
           <header className="workspace-topbar workspace-topbar-prompt">
             <div className="workspace-topbar-copy">
-              <strong>{currentWorkspaceLabel}</strong>
+              <div className="workspace-topbar-title-row">
+                {renderBackButton('app-back-button-desktop')}
+                <strong>{currentWorkspaceLabel}</strong>
+              </div>
             </div>
             <div className="workspace-topbar-actions">
               {renderTerminalCommandTrigger()}
@@ -757,7 +779,10 @@ function AuthenticatedWorkspaceShell({
             <div className="hero-copy">
               {isMessagingWorkspaceView ? (
                 <div className="hero-compact-heading-row">
-                  <h2>{displayedHeroTitle}</h2>
+                  <div className="hero-title-with-back">
+                    {renderBackButton('app-back-button-desktop')}
+                    <h2>{displayedHeroTitle}</h2>
+                  </div>
                   <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
                     {effectiveSystemStateLabel}
                   </span>
@@ -765,7 +790,10 @@ function AuthenticatedWorkspaceShell({
               ) : (
                 <>
                   <div className="hero-heading-row">
-                    <span className="eyebrow">Workspace</span>
+                    <div className="hero-heading-meta">
+                      {renderBackButton('app-back-button-desktop')}
+                      <span className="eyebrow">Workspace</span>
+                    </div>
                     <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
                       {effectiveSystemStateLabel}
                     </span>

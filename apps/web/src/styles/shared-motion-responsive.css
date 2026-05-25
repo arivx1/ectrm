@@ -198,6 +198,14 @@
     justify-content: flex-start;
   }
 
+  .app-back-button-desktop {
+    display: none;
+  }
+
+  .app-back-button-mobile {
+    display: inline-flex;
+  }
+
   .workspace-topbar-token {
     width: 100%;
   }

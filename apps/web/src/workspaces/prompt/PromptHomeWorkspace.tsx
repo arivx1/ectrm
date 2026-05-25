@@ -2304,14 +2304,18 @@ function PromptHomePriceRowFields({
 function PromptHomePriceRow({
   row,
   onOpenPriceReport,
+  dragAttributes,
   dragListeners,
+  setDragHandleRef,
   setNodeRef,
   style,
   isDragging = false,
 }: {
   row: PromptHomePriceRowViewModel;
   onOpenPriceReport: (priceIndex: PriceIndexRecord) => void;
+  dragAttributes?: DraggableAttributes;
   dragListeners?: PromptHomeSortableListeners;
+  setDragHandleRef?: (element: HTMLElement | null) => void;
   setNodeRef?: (element: HTMLElement | null) => void;
   style?: CSSProperties;
   isDragging?: boolean;
@@ -2327,9 +2331,12 @@ function PromptHomePriceRow({
       )}
       role="button"
       tabIndex={0}
-      aria-label={`Double-click to open the BI report for ${row.priceIndex.name || row.priceIndexCode}`}
-      title={`Drag to reorder. Double-click to open the BI report for ${row.priceIndexCode}`}
-      onDoubleClick={() => onOpenPriceReport(row.priceIndex)}
+      aria-label={`Double-click to open the price dashboard for ${row.priceIndex.name || row.priceIndexCode}`}
+      title={`Double-click to open the price dashboard for ${row.priceIndexCode}`}
+      onDoubleClick={(event) => {
+        event.preventDefault();
+        onOpenPriceReport(row.priceIndex);
+      }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") {
           return;
@@ -2337,8 +2344,22 @@ function PromptHomePriceRow({
         event.preventDefault();
         onOpenPriceReport(row.priceIndex);
       }}
-      {...dragListeners}
     >
+      {dragListeners ? (
+        <button
+          type="button"
+          className="prompt-home-price-row-drag-handle"
+          aria-label={`Drag ${row.priceIndexCode} price row`}
+          title={`Drag ${row.priceIndexCode} to reorder`}
+          ref={setDragHandleRef}
+          onClick={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          {...dragAttributes}
+          {...dragListeners}
+        >
+          Move
+        </button>
+      ) : null}
       <PromptHomePriceRowFields row={row} />
     </article>
   );
@@ -2352,7 +2373,9 @@ function SortablePromptHomePriceRow({
   onOpenPriceReport: (priceIndex: PriceIndexRecord) => void;
 }) {
   const {
+    attributes,
     listeners,
+    setActivatorNodeRef,
     setNodeRef,
     transform,
     transition,
@@ -2367,7 +2390,9 @@ function SortablePromptHomePriceRow({
     <PromptHomePriceRow
       row={row}
       onOpenPriceReport={onOpenPriceReport}
+      dragAttributes={attributes}
       dragListeners={listeners}
+      setDragHandleRef={setActivatorNodeRef}
       setNodeRef={setNodeRef}
       style={style}
       isDragging={isDragging}

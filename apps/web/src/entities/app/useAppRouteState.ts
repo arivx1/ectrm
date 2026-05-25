@@ -19,6 +19,73 @@ import {
 } from '../../shared/appRouteHandoff'
 
 export const DEFAULT_APP_VIEW_KEY: ViewKey = 'prompt'
+const APP_HISTORY_INDEX_STATE_KEY = '__ectrmAppHistoryIndex'
+
+type AppHistoryState = {
+  [APP_HISTORY_INDEX_STATE_KEY]?: number
+}
+
+export type AppBackAction =
+  | {
+      kind: 'history-back'
+    }
+  | {
+      kind: 'fallback'
+      view: ViewKey
+    }
+  | {
+      kind: 'noop'
+    }
+
+function readAppHistoryIndexFromState(state: unknown): number | null {
+  if (!state || typeof state !== 'object') {
+    return null
+  }
+
+  const value = (state as AppHistoryState)[APP_HISTORY_INDEX_STATE_KEY]
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
+}
+
+function buildAppHistoryState(index: number): AppHistoryState & Record<string, unknown> {
+  const currentState =
+    typeof window !== 'undefined' && window.history.state && typeof window.history.state === 'object'
+      ? (window.history.state as Record<string, unknown>)
+      : {}
+
+  return {
+    ...currentState,
+    [APP_HISTORY_INDEX_STATE_KEY]: index,
+  }
+}
+
+function replaceCurrentAppHistoryState(index: number) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.history.replaceState(buildAppHistoryState(index), '', currentAppUrl())
+}
+
+export function resolveAppBackAction(args: {
+  appHistoryIndex: number
+  activeNavigationSectionKey: PrimaryNavigationSectionKey | null
+  currentView: ViewKey
+  fallbackView?: ViewKey
+}): AppBackAction {
+  if (args.appHistoryIndex > 0) {
+    return { kind: 'history-back' }
+  }
+
+  const fallbackView = args.fallbackView ?? DEFAULT_APP_VIEW_KEY
+  if (args.activeNavigationSectionKey !== null || args.currentView !== fallbackView) {
+    return {
+      kind: 'fallback',
+      view: fallbackView,
+    }
+  }
+
+  return { kind: 'noop' }
+}
 
 function defaultAppViewKey(): ViewKey {
   if (typeof window === 'undefined') {
@@ -123,6 +190,35 @@ function buildAppRouteUrl(route: AppRouteState, hash: string): string {
   return `${window.location.pathname}${query ? `?${query}` : ''}${hash}`
 }
 
+function currentWindowAppHistoryIndex(fallbackIndex: number): number {
+  if (typeof window === 'undefined') {
+    return fallbackIndex
+  }
+
+  return readAppHistoryIndexFromState(window.history.state) ?? fallbackIndex
+}
+
+function writeAppRouteHistory(
+  route: AppRouteState,
+  historyMode: 'push' | 'replace',
+  nextHash: string,
+  fallbackHistoryIndex: number,
+): number {
+  const nextUrl = buildAppRouteUrl(route, nextHash)
+  const currentHistoryIndex = currentWindowAppHistoryIndex(fallbackHistoryIndex)
+  if (nextUrl === currentAppUrl()) {
+    if (typeof window !== 'undefined' && readAppHistoryIndexFromState(window.history.state) === null) {
+      replaceCurrentAppHistoryState(currentHistoryIndex)
+    }
+    return currentHistoryIndex
+  }
+
+  const historyMethod = historyMode === 'push' ? 'pushState' : 'replaceState'
+  const nextHistoryIndex = historyMode === 'push' ? currentHistoryIndex + 1 : currentHistoryIndex
+  window.history[historyMethod](buildAppHistoryState(nextHistoryIndex), '', nextUrl)
+  return nextHistoryIndex
+}
+
 export function useAppRouteState() {
   const initialRoute = useMemo(() => readAppRouteState(), [])
   const [activeNavigationSectionKey, setActiveNavigationSectionKey] =
@@ -134,19 +230,21 @@ export function useAppRouteState() {
   const [selectedLibraryDocumentId, setSelectedLibraryDocumentId] =
     useState<string | null>(initialRoute.libraryDocumentId)
   const [routeHandoff, setRouteHandoff] = useState<AppRouteHandoff | null>(initialRoute.handoff)
+  const [appHistoryIndex, setAppHistoryIndex] = useState(() =>
+    typeof window === 'undefined' ? 0 : readAppHistoryIndexFromState(window.history.state) ?? 0,
+  )
+
+  function currentTrackedAppHistoryIndex(): number {
+    return currentWindowAppHistoryIndex(appHistoryIndex)
+  }
 
   function syncRouteState(
     route: AppRouteState,
     historyMode: 'push' | 'replace',
     nextHash = '',
   ) {
-    const nextUrl = buildAppRouteUrl(route, nextHash)
-    if (nextUrl === currentAppUrl()) {
-      return
-    }
-
-    const historyMethod = historyMode === 'push' ? 'pushState' : 'replaceState'
-    window.history[historyMethod](null, '', nextUrl)
+    const nextHistoryIndex = writeAppRouteHistory(route, historyMode, nextHash, currentTrackedAppHistoryIndex())
+    setAppHistoryIndex(nextHistoryIndex)
   }
 
   function navigateToView(
@@ -301,9 +399,36 @@ export function useAppRouteState() {
     setRouteHandoff(nextHandoff)
   }
 
+  function navigateBack() {
+    const backAction = resolveAppBackAction({
+      appHistoryIndex: currentTrackedAppHistoryIndex(),
+      activeNavigationSectionKey,
+      currentView,
+      fallbackView: defaultAppViewKey(),
+    })
+
+    if (backAction.kind === 'history-back') {
+      window.history.back()
+      return
+    }
+
+    if (backAction.kind === 'fallback') {
+      applyViewNavigation(backAction.view, 'replace', null, {
+        tradeId: null,
+        messagingConversationId: null,
+        libraryDocumentId: null,
+      })
+    }
+  }
+
   useEffect(() => {
-    function handlePopState() {
+    if (readAppHistoryIndexFromState(window.history.state) === null) {
+      replaceCurrentAppHistoryState(0)
+    }
+
+    function handlePopState(event: PopStateEvent) {
       const nextRoute = readAppRouteState()
+      setAppHistoryIndex(readAppHistoryIndexFromState(event.state) ?? 0)
       setActiveNavigationSectionKey(nextRoute.section)
       setCurrentView(nextRoute.view)
       setRouteHandoff(nextRoute.handoff)
@@ -322,8 +447,15 @@ export function useAppRouteState() {
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
 
+  const backAction = resolveAppBackAction({
+    appHistoryIndex,
+    activeNavigationSectionKey,
+    currentView,
+    fallbackView: defaultAppViewKey(),
+  })
+
   useEffect(() => {
-    syncRouteState(
+    writeAppRouteHistory(
       {
         section: activeNavigationSectionKey,
         view: currentView,
@@ -334,6 +466,7 @@ export function useAppRouteState() {
       },
       'replace',
       currentView === 'settings' ? window.location.hash : '',
+      0,
     )
   }, [
     activeNavigationSectionKey,
@@ -349,6 +482,8 @@ export function useAppRouteState() {
     currentView,
     handleViewLinkClick,
     hrefForView,
+    canNavigateBack: backAction.kind !== 'noop',
+    navigateBack,
     navigateToSection,
     navigateToTrade,
     navigateToView,

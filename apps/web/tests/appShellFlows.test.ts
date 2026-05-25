@@ -5,11 +5,60 @@ import {
   buildAuthInterruptionContinueLabel,
   resolveAuthInterruptionResumeAction,
 } from '../src/entities/app/useAuthInterruptionFlow.ts'
-import { DEFAULT_APP_VIEW_KEY } from '../src/entities/app/useAppRouteState.ts'
+import {
+  DEFAULT_APP_VIEW_KEY,
+  resolveAppBackAction,
+} from '../src/entities/app/useAppRouteState.ts'
 import { resolveStartHereRoutingAction } from '../src/entities/app/useStartHereRouting.ts'
 
 test('the app default route starts at the prompt home', () => {
   assert.equal(DEFAULT_APP_VIEW_KEY, 'prompt')
+})
+
+test('app back uses tracked in-app history before falling back to home', () => {
+  assert.deepEqual(
+    resolveAppBackAction({
+      appHistoryIndex: 2,
+      activeNavigationSectionKey: null,
+      currentView: 'trades',
+    }),
+    { kind: 'history-back' },
+  )
+
+  assert.deepEqual(
+    resolveAppBackAction({
+      appHistoryIndex: 0,
+      activeNavigationSectionKey: null,
+      currentView: 'trades',
+    }),
+    {
+      kind: 'fallback',
+      view: 'prompt',
+    },
+  )
+
+  assert.deepEqual(
+    resolveAppBackAction({
+      appHistoryIndex: 0,
+      activeNavigationSectionKey: null,
+      currentView: 'prompt',
+    }),
+    { kind: 'noop' },
+  )
+})
+
+test('app back leaves section landing views through the default home fallback', () => {
+  assert.deepEqual(
+    resolveAppBackAction({
+      appHistoryIndex: 0,
+      activeNavigationSectionKey: 'trading',
+      currentView: 'prompt',
+    }),
+    {
+      kind: 'fallback',
+      view: 'prompt',
+    },
+  )
 })
 
 test('auth interruption labels prioritize the trade amendment flow', () => {

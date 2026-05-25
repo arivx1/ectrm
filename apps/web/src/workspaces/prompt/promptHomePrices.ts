@@ -141,12 +141,7 @@ function formatPromptHomeObservationDate(value: string): string {
     return value;
   }
 
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(parsedDate);
+  return formatPromptHomeCompactUtcDate(parsedDate);
 }
 
 function promptHomePriceTimestamp(
@@ -170,25 +165,28 @@ function promptHomePriceRevisionTimestamp(value: string): Date | null {
   return promptHomePriceTimestamp(`${isoTimestampMatch[1]}Z`);
 }
 
-function formatPromptHomeObservationTimestamp(value: Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "UTC",
-    timeZoneName: "short",
-  }).format(value);
+function formatPromptHomeCompactDatePart(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function formatPromptHomeCompactUtcDate(value: Date): string {
+  return [
+    formatPromptHomeCompactDatePart(value.getUTCMonth() + 1),
+    formatPromptHomeCompactDatePart(value.getUTCDate()),
+    String(value.getUTCFullYear()),
+  ].join("/");
 }
 
 function formatPromptHomeObservationTime(value: Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "UTC",
-    timeZoneName: "short",
-  }).format(value);
+  return [
+    formatPromptHomeCompactDatePart(value.getUTCHours()),
+    formatPromptHomeCompactDatePart(value.getUTCMinutes()),
+    formatPromptHomeCompactDatePart(value.getUTCSeconds()),
+  ].join(":");
+}
+
+function formatPromptHomeObservationTimestamp(value: Date): string {
+  return `${formatPromptHomeCompactUtcDate(value)} ${formatPromptHomeObservationTime(value)}`;
 }
 
 function formatPromptHomeSourceRevisionTime(

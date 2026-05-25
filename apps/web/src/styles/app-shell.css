@@ -344,6 +344,23 @@
   min-width: 0;
 }
 
+.workspace-topbar-title-row,
+.hero-title-with-back {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.hero-title-with-back {
+  flex: 1 1 30rem;
+  flex-wrap: wrap;
+}
+
+.hero-title-with-back h2 {
+  min-width: 0;
+}
+
 .workspace-topbar-copy strong {
   font-family: "Avenir Next", "Segoe UI", sans-serif;
   font-size: 1rem;
@@ -402,6 +419,27 @@
 
 .workspace-topbar-signout {
   white-space: nowrap;
+}
+
+.app-back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-height: 2.45rem;
+  padding: 0.62rem 0.82rem;
+  border-radius: 0.9rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.app-back-button::before {
+  content: "<";
+  font-weight: 800;
+  line-height: 1;
+}
+
+.app-back-button-mobile {
+  display: none;
 }
 
 .terminal-command-trigger {
