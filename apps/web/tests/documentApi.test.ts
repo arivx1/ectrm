@@ -234,6 +234,7 @@ test('selected document candidate APIs post selected record targets', async () =
   postJsonMock
     .mockResolvedValueOnce({ document_id: 'DOC-INVOICE-1' })
     .mockResolvedValueOnce({ request_id: 1, document_id: 'DOC-INVOICE-1', status: 'PENDING' })
+    .mockResolvedValueOnce({ request_id: 2, document_id: 'DOC-INVOICE-1', status: 'PENDING' })
 
   await attachSelectedDocumentRecordCandidate('http://api.test', documentSession, 'DOC-INVOICE-1', {
     record_type: 'TRADE_INVOICE',
@@ -243,6 +244,10 @@ test('selected document candidate APIs post selected record targets', async () =
     record_type: 'TRADE_INVOICE',
     record_id: '42',
     request_comment: 'Selected in Library.',
+  })
+  await stageSelectedDocumentRecordCandidateApprovalRequest('http://api.test', documentSession, 'DOC-INVOICE-1', {
+    record_type: 'TRADE_INVOICE',
+    request_comment: 'Create from Library.',
   })
 
   assert.equal(postJsonMock.mock.calls[0][0], 'http://api.test/documents/DOC-INVOICE-1/record-candidate-attachments')
@@ -258,5 +263,13 @@ test('selected document candidate APIs post selected record targets', async () =
     record_type: 'TRADE_INVOICE',
     record_id: '42',
     request_comment: 'Selected in Library.',
+  })
+  assert.equal(
+    postJsonMock.mock.calls[2][0],
+    'http://api.test/documents/DOC-INVOICE-1/record-candidate-attachments/approval-requests',
+  )
+  assert.deepEqual(postJsonMock.mock.calls[2][1], {
+    record_type: 'TRADE_INVOICE',
+    request_comment: 'Create from Library.',
   })
 })

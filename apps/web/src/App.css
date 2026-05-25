@@ -13,6 +13,7 @@
 @import "./styles/prompt-home.css";
 @import "./styles/messaging-workspace.css";
 @import "./styles/assistant-workspace.css";
+@import "./styles/assistant-chart-artifacts.css";
 @import "./styles/data-sheet.css";
 @import "./styles/docs-content.css";
 @import "./styles/roadmap-workspace.css";

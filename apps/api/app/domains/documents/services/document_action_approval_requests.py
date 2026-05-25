@@ -357,8 +357,8 @@ def _ensure_selected_candidate_plan_still_current(
     action_plan: DocumentActionPlanOut,
 ) -> None:
     target = action_plan.target
-    if target is None or target.record_id is None:
-        raise ValueError("The selected document approval no longer has a concrete target record.")
+    if target is None:
+        raise ValueError("The selected document approval no longer has a target record.")
 
     linkage = build_document_linkage_assessment(
         db,
@@ -366,6 +366,20 @@ def _ensure_selected_candidate_plan_still_current(
         review_status=review_status,
         document_id=document_id,
     )
+    if target.record_id is None:
+        if not any(
+            not candidate.existing_record
+            and candidate.record_type == target.record_type
+            and candidate.create_if_missing
+            and candidate.candidate_state == "CREATE_CANDIDATE"
+            for candidate in linkage.candidates
+        ):
+            raise ValueError(
+                "The selected document action approval no longer matches a current record candidate. "
+                "Reject this request and stage a new approval."
+            )
+        return
+
     if not any(
         candidate.existing_record
         and candidate.record_type == target.record_type

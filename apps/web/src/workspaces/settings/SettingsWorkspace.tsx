@@ -3,6 +3,14 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import { logoutCurrentSession, updateCurrentUserProfile } from '../../entities/auth/api'
 import { loadPublicRuntimeSettings, type PublicRuntimeSettings } from '../../entities/app/api'
 import {
+  clearAssistantResponseSettingsSnapshot,
+  formatMessagingAgentBrevityPreference,
+  getAssistantResponseSettingsSnapshot,
+  MESSAGING_AGENT_BREVITY_OPTIONS,
+  saveAssistantResponseSettingsSnapshot,
+  type AssistantResponseSettings,
+} from '../../shared/assistantResponseSettings'
+import {
   resolveAppearancePalette,
   type AppearancePalette,
   type AppearanceSettings,
@@ -298,6 +306,9 @@ export function SettingsWorkspace({
   const [runtimeOverrideForm, setRuntimeOverrideForm] = useState<ClientRuntimeOverrideSnapshot>(() =>
     getClientRuntimeOverrideSnapshot(),
   )
+  const [assistantResponseForm, setAssistantResponseForm] = useState<AssistantResponseSettings>(() =>
+    getAssistantResponseSettingsSnapshot(),
+  )
   const [appearanceForm, setAppearanceForm] = useState<AppearanceSettings>(() => appearanceSettings)
   const [timeDisplayForm, setTimeDisplayForm] = useState<TimeDisplaySettings>(() =>
     getTimeDisplaySettingsSnapshot(),
@@ -308,6 +319,7 @@ export function SettingsWorkspace({
   const [profileFlash, setProfileFlash] = useState<FlashMessage | null>(null)
   const [authAction, setAuthAction] = useState<AuthAction>(null)
   const [runtimeFlash, setRuntimeFlash] = useState<FlashMessage | null>(null)
+  const [assistantResponseFlash, setAssistantResponseFlash] = useState<FlashMessage | null>(null)
   const [appearanceFlash, setAppearanceFlash] = useState<FlashMessage | null>(null)
   const [timeDisplayFlash, setTimeDisplayFlash] = useState<FlashMessage | null>(null)
   const [tradeCaptureFlash, setTradeCaptureFlash] = useState<FlashMessage | null>(null)
@@ -517,6 +529,25 @@ export function SettingsWorkspace({
     window.location.reload()
   }
 
+  function handleSaveAssistantResponseSettings(event: React.FormEvent) {
+    event.preventDefault()
+    const savedSettings = saveAssistantResponseSettingsSnapshot(assistantResponseForm)
+    setAssistantResponseForm(savedSettings)
+    setAssistantResponseFlash({
+      tone: 'success',
+      message: 'Messaging agent reply style saved locally for this browser.',
+    })
+  }
+
+  function handleResetAssistantResponseSettings() {
+    const defaultSettings = clearAssistantResponseSettingsSnapshot()
+    setAssistantResponseForm(defaultSettings)
+    setAssistantResponseFlash({
+      tone: 'success',
+      message: 'Messaging agent reply style reset to Brief for this browser.',
+    })
+  }
+
   function handleSaveAppearance(event: React.FormEvent) {
     event.preventDefault()
     const savedSettings = onAppearanceSettingsChange(appearanceForm)
@@ -654,6 +685,10 @@ export function SettingsWorkspace({
     runtimeOverrideCount > 0
       ? `${runtimeOverrideCount} browser override${runtimeOverrideCount === 1 ? '' : 's'} active`
       : 'No browser overrides are active'
+  const assistantResponseBrevityLabel = formatMessagingAgentBrevityPreference(
+    assistantResponseForm.messagingAgentBrevity,
+  )
+  const assistantResponseSummary = `${assistantResponseBrevityLabel} messaging replies`
   const clientSettingsSummary = `${health === 'ok' ? 'API reachable' : 'API attention'} · ${appConfig.apiBase}`
   const serverSettingsSummary = serverSettingsLoading
     ? 'Loading public API settings'
@@ -916,6 +951,71 @@ export function SettingsWorkspace({
           ) : (
             <div className="feedback-banner">Sign in to edit your user profile.</div>
           )}
+        </SettingsDisclosureCard>
+
+        <SettingsDisclosureCard
+          cardKey="settings.assistant-response-card"
+          eyebrow="Browser Settings"
+          title="Messaging Agent Replies"
+          summary={assistantResponseSummary}
+        >
+          <div className="settings-summary-grid">
+            <article className="settings-summary-card">
+              <span>Conciseness</span>
+              <strong>{assistantResponseBrevityLabel}</strong>
+              <p>Applied to agent replies drafted from the Messages workspace.</p>
+            </article>
+            <article className="settings-summary-card">
+              <span>Authority</span>
+              <strong>Unchanged</strong>
+              <p>Agents still draft, explain, or stage governed follow-up only.</p>
+            </article>
+          </div>
+
+          <form className="stack-form settings-form" onSubmit={handleSaveAssistantResponseSettings}>
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Messaging agents</span>
+                <h3>Reply Conciseness</h3>
+              </div>
+              <p>Choose the default length for assistant replies inside desk message threads.</p>
+            </div>
+
+            <div className="appearance-mode-options" aria-label="Messaging agent reply conciseness">
+              {MESSAGING_AGENT_BREVITY_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`appearance-mode-option ${assistantResponseForm.messagingAgentBrevity === option.value ? 'is-active' : ''}`}
+                  aria-pressed={assistantResponseForm.messagingAgentBrevity === option.value}
+                  onClick={() => {
+                    setAssistantResponseFlash(null)
+                    setAssistantResponseForm((current) => ({
+                      ...current,
+                      messagingAgentBrevity: option.value,
+                    }))
+                  }}
+                >
+                  <span>{option.label}</span>
+                  <strong>{option.detail}</strong>
+                </button>
+              ))}
+            </div>
+
+            <div className="toolbar settings-actions">
+              <button type="submit" className="button button-primary">
+                Apply Reply Style
+              </button>
+              <button type="button" className="button button-ghost" onClick={handleResetAssistantResponseSettings}>
+                Reset to Brief
+              </button>
+            </div>
+
+            <p className={`form-note ${assistantResponseFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
+              {assistantResponseFlash?.message ??
+                'This preference is stored in this browser and does not change agent authority, permissions, tools, or approval policy.'}
+            </p>
+          </form>
         </SettingsDisclosureCard>
 
         <SettingsDisclosureCard

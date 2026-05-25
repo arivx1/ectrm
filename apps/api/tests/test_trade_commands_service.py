@@ -20,6 +20,7 @@ from apps.api.app.domains.trading.services.trade_commands import (
 from apps.api.app.models import Base
 from apps.api.app.models.event import Event
 from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
+from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
 from apps.api.app.routes.events import append_event
 from apps.api.app.schemas.event import EventCreate
@@ -55,6 +56,27 @@ class TradeCommandsServiceTests(unittest.TestCase):
 
     def _seed_trade(self, session, *, trade_id: str, last_event_id: str) -> None:
         now = datetime(2026, 4, 27, 14, 55, tzinfo=timezone.utc)
+        if session.get(ReferenceUnit, "MMBTU") is None:
+            session.add(
+                ReferenceUnit(
+                    code="MMBTU",
+                    name="Million British Thermal Units",
+                    commodity_class="NATURAL_GAS",
+                    dimension="ENERGY",
+                    base_unit_code=None,
+                    conversion_factor=None,
+                    precision=3,
+                    description="Test gas energy unit",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=now,
+                    created_by="test-user",
+                    updated_at=now,
+                    updated_by="test-user",
+                    version=1,
+                )
+            )
         session.add(
             Trade(
                 trade_id=trade_id,

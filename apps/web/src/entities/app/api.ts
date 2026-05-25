@@ -26,6 +26,7 @@ import type {
   OptionExposureRow,
   PortfolioRecord,
   PositionRow,
+  PriceSourceReviewRecord,
   PriceIndexRecord,
   RailRouteRecord,
   ReferenceRecord,
@@ -358,6 +359,7 @@ export type WeatherWorkspaceBootstrap = {
 export type AdminWorkspaceBootstrap = {
   externalDataRuns: ExternalDataRunRecord[]
   externalDataSyncStatus: ExternalDataSyncStatusRecord | null
+  externalDataPriceSources: PriceSourceReviewRecord[]
   tradingSources: TradingSourceRecord[]
   weatherLocations: WeatherLocationRecord[]
   weatherSyncStatus: WeatherSyncStatusRecord | null
@@ -1148,6 +1150,7 @@ export async function loadAdminWorkspaceBootstrap(
     return {
       externalDataRuns: [],
       externalDataSyncStatus: null,
+      externalDataPriceSources: [],
       tradingSources: [],
       weatherLocations: [],
       weatherSyncStatus: null,
@@ -1156,6 +1159,7 @@ export async function loadAdminWorkspaceBootstrap(
 
   let externalDataRuns: ExternalDataRunRecord[] = []
   let externalDataSyncStatus: ExternalDataSyncStatusRecord | null = null
+  let externalDataPriceSources: PriceSourceReviewRecord[] = []
   let tradingSources: TradingSourceRecord[] = []
   let weatherLocations: WeatherLocationRecord[] = []
   let weatherSyncStatus: WeatherSyncStatusRecord | null = null
@@ -1168,7 +1172,9 @@ export async function loadAdminWorkspaceBootstrap(
     ADMIN_LIST_LIMIT_MAX,
   )
 
-  const [externalDataRunsResult, externalDataSyncStatusResult, tradingSourcesResult, weatherLocationsResult, weatherSyncStatusResult] =
+  const priceSourcesLimit = ADMIN_LIST_LIMIT_MAX
+
+  const [externalDataRunsResult, externalDataSyncStatusResult, priceSourcesResult, tradingSourcesResult, weatherLocationsResult, weatherSyncStatusResult] =
     await Promise.allSettled([
       fetchJson<ExternalDataRunRecord[]>(
         `${apiBase}${withLimit('/admin/external-data/runs', externalDataRunsLimit)}`,
@@ -1178,6 +1184,13 @@ export async function loadAdminWorkspaceBootstrap(
         headers: options.adminHeaders,
         cache: 'no-store',
       }),
+      fetchJson<PriceSourceReviewRecord[]>(
+        `${apiBase}${withLimit('/admin/external-data/price-sources', priceSourcesLimit)}`,
+        {
+          headers: options.adminHeaders,
+          cache: 'no-store',
+        },
+      ),
       fetchJson<TradingSourceRecord[]>(
         `${apiBase}${withLimit('/admin/trading-sources', tradingSourcesLimit)}`,
         { headers: options.adminHeaders },
@@ -1199,6 +1212,10 @@ export async function loadAdminWorkspaceBootstrap(
     externalDataSyncStatus = externalDataSyncStatusResult.value
   }
 
+  if (priceSourcesResult.status === 'fulfilled') {
+    externalDataPriceSources = priceSourcesResult.value
+  }
+
   if (tradingSourcesResult.status === 'fulfilled') {
     tradingSources = tradingSourcesResult.value
   }
@@ -1214,6 +1231,7 @@ export async function loadAdminWorkspaceBootstrap(
   return {
     externalDataRuns,
     externalDataSyncStatus,
+    externalDataPriceSources,
     tradingSources,
     weatherLocations,
     weatherSyncStatus,

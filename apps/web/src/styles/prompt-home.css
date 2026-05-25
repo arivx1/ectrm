@@ -677,6 +677,39 @@
   background: rgba(255, 255, 255, 0.05);
 }
 
+.prompt-home-price-row-action {
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast, 0.16s) ease,
+    background var(--duration-fast, 0.16s) ease,
+    transform var(--duration-fast, 0.16s) ease;
+}
+
+.prompt-home-price-row-action:hover {
+  border-color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.34);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.prompt-home-price-row-action:focus-visible {
+  outline: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.72);
+  outline-offset: 2px;
+}
+
+.prompt-home-price-row-action:active {
+  transform: translateY(1px);
+}
+
+.prompt-home-price-row-draggable {
+  touch-action: none;
+}
+
+.prompt-home-price-row-action.is-dragging {
+  border-color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.52);
+  background: rgba(255, 255, 255, 0.11);
+  opacity: 0.78;
+  z-index: 2;
+}
+
 .prompt-home-price-fields {
   display: grid;
   grid-template-columns: var(--prompt-home-price-grid-template);

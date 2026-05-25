@@ -100,14 +100,14 @@ def append_trade_write_command(
     commit: bool = False,
     refresh: bool = False,
 ) -> Event:
-    _precheck_trade_write(db, command)
+    event_payload = _precheck_trade_write(db, command)
     return append_domain_event(
         db,
         AppendDomainEventCommand(
             aggregate_type="trade",
             aggregate_id=command.trade_id,
             event_type=TRADE_COMMAND_EVENT_TYPES[command.command_type],
-            payload=command.payload,
+            payload=event_payload,
             occurred_at=command.occurred_at,
             recorded_at=command.recorded_at,
             actor_id=command.actor_id,
@@ -131,21 +131,20 @@ def append_trade_write_command(
     )
 
 
-def _precheck_trade_write(db: Session, command: TradeWriteCommand) -> None:
+def _precheck_trade_write(db: Session, command: TradeWriteCommand) -> Mapping[str, Any]:
     _ensure_trade_write_authorized()
     if command.command_type == "BookTrade":
-        _precheck_book_trade(db, command)
-        return
+        return _precheck_book_trade(db, command)
     if command.command_type == "AmendTradeTerms":
         trade = _load_existing_trade(db, command.trade_id)
         _enforce_trade_write_stale_state(trade, command)
-        _precheck_amend_trade(db, command, trade=trade)
-        return
+        return _precheck_amend_trade(db, command, trade=trade)
     if command.command_type == "CancelTrade":
         trade = _load_existing_trade(db, command.trade_id)
         _enforce_trade_write_stale_state(trade, command)
         _precheck_cancel_trade(trade=trade)
-        return
+        return dict(command.payload or {})
+    return dict(command.payload or {})
 
 
 def _ensure_trade_write_authorized() -> None:
@@ -183,18 +182,22 @@ def _enforce_trade_write_stale_state(trade: Trade, command: TradeWriteCommand) -
         )
 
 
-def _precheck_book_trade(db: Session, command: TradeWriteCommand) -> None:
+def _precheck_book_trade(db: Session, command: TradeWriteCommand) -> Mapping[str, Any]:
     existing = db.execute(select(Trade).where(Trade.trade_id == command.trade_id)).scalars().first()
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Trade already exists")
-    validate_book_trade_write(
+    payload = dict(command.payload or {})
+    validated = validate_book_trade_write(
         db,
         trade_id=command.trade_id,
-        payload_data=dict(command.payload or {}),
+        payload_data=payload,
         occurred_at=command.occurred_at,
         actor_id=command.actor_id or "system.command",
         checked_at=command.recorded_at,
     )
+    payload["unit_of_measure"] = validated.unit_of_measure
+    payload["price_unit_code"] = validated.price_unit_code
+    return payload
 
 
 def _precheck_amend_trade(
@@ -202,12 +205,16 @@ def _precheck_amend_trade(
     command: TradeWriteCommand,
     *,
     trade: Trade,
-) -> None:
-    validate_amend_trade_write(
+) -> Mapping[str, Any]:
+    payload = dict(command.payload or {})
+    validated = validate_amend_trade_write(
         db,
         trade=trade,
-        payload_data=dict(command.payload or {}),
+        payload_data=payload,
     )
+    payload["unit_of_measure"] = validated.unit_of_measure
+    payload["price_unit_code"] = validated.price_unit_code
+    return payload
 
 
 def _precheck_cancel_trade(*, trade: Trade) -> None:

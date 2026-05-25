@@ -37,6 +37,21 @@ from apps.api.app.domains.documents.services.ingestion import (
 from apps.api.app.domains.documents.services.ingestion import (
     list_document_ingestions as load_document_ingestions,
 )
+from apps.api.app.domains.home_views.services.definitions import (
+    HOME_VIEW_ASSET_MAP_GEOGRAPHIES,
+    HOME_VIEW_PRICE_MARK_STATUSES,
+    HOME_VIEW_PRICE_QUOTE_TYPES,
+    HOME_VIEW_PRICE_SORT_DIRECTIONS,
+    HOME_VIEW_PRICE_SORT_FIELDS,
+    build_home_system_template,
+    list_visible_home_view_definitions,
+    to_home_view_definition_out,
+)
+from apps.api.app.domains.home_views.services.registry import (
+    HOME_SYSTEM_TEMPLATE_KEY,
+    HOME_SYSTEM_TEMPLATE_VERSION,
+    HOME_VIEW_CARD_REGISTRY,
+)
 from apps.api.app.domains.integrations.services.gmail_inbox import (
     GmailInboxIntegrationError,
     get_gmail_inbox_message_detail as load_gmail_inbox_message_detail,
@@ -158,6 +173,12 @@ MANAGED_AGENT_INTROSPECTION_TOOL_NAMES: tuple[str, ...] = (
 GLOBAL_READ_INTROSPECTION_TOOL_NAMES: tuple[str, ...] = (
     *MANAGED_AGENT_INTROSPECTION_TOOL_NAMES,
     *APP_CONTEXT_INTROSPECTION_TOOL_NAMES,
+)
+HOME_VIEW_ASSISTANT_TOOL_NAMES: tuple[str, ...] = (
+    "list_home_view_cards",
+    "get_home_system_template",
+    "get_home_view_filter_options",
+    "list_home_view_instances",
 )
 MANAGED_AGENT_COORDINATION_TOOL_NAMES: tuple[str, ...] = (
     "consult_managed_agent",
@@ -570,6 +591,108 @@ def _build_code_file_evidence(payload: dict[str, Any]) -> tuple[AssistantToolEvi
     )
 
 
+def _build_home_view_card_registry_evidence(payload: dict[str, Any]) -> tuple[AssistantToolEvidenceOut, ...]:
+    return (
+        _build_tool_evidence_item(
+            kind="application",
+            title="Home card registry",
+            locator="home_view_cards",
+            summary=(
+                f"{payload.get('card_count', 0)} supported Home card(s) are available on "
+                f"{payload.get('template_key', HOME_SYSTEM_TEMPLATE_KEY)} v{payload.get('template_version', HOME_SYSTEM_TEMPLATE_VERSION)}."
+            ),
+            badges=_normalize_tool_evidence_badges(
+                [
+                    "read-only",
+                    f"{len(payload.get('supported_filter_fields') or [])} filter field(s)",
+                ]
+            ),
+            metadata={
+                "template_key": payload.get("template_key"),
+                "template_version": payload.get("template_version"),
+                "card_ids": [row.get("card_id") for row in payload.get("cards") or []],
+            },
+        ),
+    )
+
+
+def _build_home_system_template_evidence(payload: dict[str, Any]) -> tuple[AssistantToolEvidenceOut, ...]:
+    return (
+        _build_tool_evidence_item(
+            kind="application",
+            title=str(payload.get("label") or "System Home"),
+            locator=str(payload.get("template_key") or HOME_SYSTEM_TEMPLATE_KEY),
+            summary=(
+                f"Immutable Home template v{payload.get('template_version')} includes "
+                f"{payload.get('card_count', 0)} card(s)."
+            ),
+            badges=_normalize_tool_evidence_badges(["immutable", "read-only"]),
+            metadata={
+                "template_key": payload.get("template_key"),
+                "template_version": payload.get("template_version"),
+                "card_ids": [row.get("card_id") for row in payload.get("cards") or []],
+            },
+        ),
+    )
+
+
+def _build_home_view_filter_options_evidence(payload: dict[str, Any]) -> tuple[AssistantToolEvidenceOut, ...]:
+    cards = list(payload.get("cards") or [])
+    return (
+        _build_tool_evidence_item(
+            kind="application",
+            title="Home card filter options",
+            locator=str(payload.get("card_id") or "all_home_cards"),
+            summary=(
+                f"Loaded supported filter and parameter option metadata for {len(cards)} Home card(s)."
+            ),
+            badges=_normalize_tool_evidence_badges(
+                [
+                    "read-only",
+                    "reference-backed" if payload.get("includes_reference_options") else None,
+                ]
+            ),
+            metadata={
+                "card_id": payload.get("card_id"),
+                "reference_option_limit": payload.get("reference_option_limit"),
+                "card_ids": [row.get("card_id") for row in cards],
+            },
+        ),
+    )
+
+
+def _build_home_view_instances_evidence(payload: dict[str, Any]) -> tuple[AssistantToolEvidenceOut, ...]:
+    items = list(payload.get("items") or [])
+    warning_count = sum(
+        1
+        for item in items
+        if (item.get("validation") or {}).get("warning_count")
+    )
+    return (
+        _build_tool_evidence_item(
+            kind="application",
+            title="Visible Home view instances",
+            locator=str(payload.get("actor_id") or "current_user"),
+            summary=(
+                f"{payload.get('count', 0)} visible active Home view instance(s) were loaded for the current actor."
+            ),
+            badges=_normalize_tool_evidence_badges(
+                [
+                    "visibility-scoped",
+                    f"{payload.get('shared_count', 0)} shared",
+                    f"{payload.get('personal_count', 0)} personal",
+                    f"{warning_count} warning(s)" if warning_count else None,
+                ]
+            ),
+            metadata={
+                "actor_id": payload.get("actor_id"),
+                "scope_filter": payload.get("scope_filter"),
+                "definition_ids": [row.get("definition_id") for row in items],
+            },
+        ),
+    )
+
+
 def _build_tool_output_preview(tool_name: str, output: dict[str, Any]) -> dict[str, Any] | None:
     if tool_name == "consult_managed_agent":
         preview = {
@@ -597,6 +720,58 @@ def _build_tool_output_preview(tool_name: str, output: dict[str, Any]) -> dict[s
             "executed_action_count": output.get("executed_action_count"),
             "pending_action_count": output.get("pending_action_count"),
             "failed_action_count": output.get("failed_action_count"),
+        }
+        return {key: value for key, value in preview.items() if value not in (None, [], "")}
+
+    if tool_name == "list_home_view_cards":
+        preview = {
+            "card_count": output.get("card_count"),
+            "template_key": output.get("template_key"),
+            "template_version": output.get("template_version"),
+            "card_ids": [row.get("card_id") for row in list(output.get("cards") or [])[:8]],
+            "supported_filter_fields": list(output.get("supported_filter_fields") or []),
+        }
+        return {key: value for key, value in preview.items() if value not in (None, [], "")}
+
+    if tool_name == "get_home_system_template":
+        preview = {
+            "template_key": output.get("template_key"),
+            "template_version": output.get("template_version"),
+            "immutable": output.get("immutable"),
+            "card_count": output.get("card_count"),
+            "card_ids": [row.get("card_id") for row in list(output.get("cards") or [])[:8]],
+        }
+        return {key: value for key, value in preview.items() if value not in (None, [], "")}
+
+    if tool_name == "get_home_view_filter_options":
+        cards = list(output.get("cards") or [])
+        preview = {
+            "card_id": output.get("card_id"),
+            "card_count": len(cards),
+            "card_ids": [row.get("card_id") for row in cards[:8]],
+            "includes_reference_options": output.get("includes_reference_options"),
+            "reference_option_limit": output.get("reference_option_limit"),
+        }
+        return {key: value for key, value in preview.items() if value not in (None, [], "")}
+
+    if tool_name == "list_home_view_instances":
+        preview = {
+            "count": output.get("count"),
+            "personal_count": output.get("personal_count"),
+            "shared_count": output.get("shared_count"),
+            "scope_filter": output.get("scope_filter"),
+            "definition_ids": [row.get("definition_id") for row in list(output.get("items") or [])[:8]],
+        }
+        return {key: value for key, value in preview.items() if value not in (None, [], "")}
+
+    if tool_name == "get_document_type_counts":
+        segments = list(output.get("segments") or [])
+        top_segment = segments[0] if segments and isinstance(segments[0], dict) else {}
+        preview = {
+            "total_count": output.get("total_count"),
+            "type_count": output.get("type_count"),
+            "top_document_kind": top_segment.get("document_kind"),
+            "top_count": top_segment.get("count"),
         }
         return {key: value for key, value in preview.items() if value not in (None, [], "")}
 
@@ -1327,6 +1502,93 @@ def build_tool_definitions(*, actor_id: str | None = None) -> list[AssistantTool
             ),
         ),
         AssistantToolDefinition(
+            name="list_home_view_cards",
+            description=(
+                "List the supported Prompt Home card registry with card ids, labels, default placement, allowed "
+                "parameters, allowed filters, and data bindings. Use this before drafting a Home view so the "
+                "assistant stays inside the typed Home card contract. This is read-only."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+            executor=_list_home_view_cards,
+        ),
+        AssistantToolDefinition(
+            name="get_home_system_template",
+            description=(
+                "Load the immutable System Home template, including the default card order and visibility. Use this "
+                "when the user asks what the base Home looks like or before proposing a saved Home instance. "
+                "This is read-only and does not create or update a view."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+            executor=_get_home_system_template,
+        ),
+        AssistantToolDefinition(
+            name="get_home_view_filter_options",
+            description=(
+                "Load supported Prompt Home card filter and parameter options, including active reference-data "
+                "choices where safe. Use this before proposing filters such as HH NG, US natural gas, geography, "
+                "quote type, or price-card sort behavior. This is read-only."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "card_id": {
+                        "type": "string",
+                        "description": "Optional Home card id to focus, such as prices, map, documents, communication, timeframe, or prompt.",
+                    },
+                    "include_reference_options": {
+                        "type": "boolean",
+                        "description": "Whether to include active reference-data option examples for supported fields. Defaults to true.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum active reference options per field. Defaults to 10 and is capped at 25.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=_get_home_view_filter_options,
+        ),
+        AssistantToolDefinition(
+            name="list_home_view_instances",
+            description=(
+                "List active Home view instances visible to the authenticated user, including personal and shared "
+                "definitions, owner scope, status, version, validation metadata, and optional card summaries. "
+                "Use this before drafting or staging a new saved Home view to avoid duplicates and respect visibility."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": ["PERSONAL", "TEAM", "ORGANIZATION", "SHARED"],
+                        "description": "Optional visible scope filter. SHARED includes TEAM and ORGANIZATION instances.",
+                    },
+                    "include_cards": {
+                        "type": "boolean",
+                        "description": "Whether to include concise saved card configuration summaries. Defaults to true.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of visible Home instances to return. Defaults to 10 and is capped at 25.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=lambda db, arguments, actor_id=actor_id: _list_home_view_instances(
+                db,
+                arguments,
+                actor_id=actor_id,
+            ),
+        ),
+        AssistantToolDefinition(
             name="list_deliveries",
             description=(
                 "Load delivery obligations with execution and actualization context. Use this when the user "
@@ -1552,6 +1814,35 @@ def build_tool_definitions(*, actor_id: str | None = None) -> list[AssistantTool
                 "additionalProperties": False,
             },
             executor=_list_documents,
+        ),
+        AssistantToolDefinition(
+            name="get_document_type_counts",
+            description=(
+                "Count document-ingestion records by dominant document type and return a chart artifact. Use this "
+                "when the user asks for document type totals, counts by document type, or a chart of documents. "
+                "The document-type aggregation is categorical, so request pie or bar for chart_type. This is "
+                "read-only. When presenting the result in Prompt Home or Messages, include the "
+                "returned chart object as JSON in a fenced block labelled ectrm-chart so the app can render it."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "chart_type": {
+                        "type": "string",
+                        "description": "Optional chart type for categorical document type counts. Supported values: pie or bar. Defaults to pie.",
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Optional exact document ingestion status such as UPLOADED, PROCESSING, ANALYZED, or FAILED.",
+                    },
+                    "review_status": {
+                        "type": "string",
+                        "description": "Optional exact review status such as UNREVIEWED, IN_REVIEW, or VERIFIED.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=_get_document_type_counts,
         ),
         AssistantToolDefinition(
             name="get_document_ingestion",
@@ -1880,6 +2171,573 @@ def augment_managed_agent_introspection_tools(
             resolved_tools.append(tool_name)
             seen.add(tool_name)
     return tuple(resolved_tools)
+
+
+def _list_home_view_cards(_db: Session, _arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    cards = [_serialize_home_view_registry_entry(entry) for entry in HOME_VIEW_CARD_REGISTRY]
+    supported_filter_fields = sorted({field for entry in HOME_VIEW_CARD_REGISTRY for field in entry.allowed_filter_fields})
+    supported_parameters = sorted({parameter for entry in HOME_VIEW_CARD_REGISTRY for parameter in entry.allowed_parameters})
+    payload = {
+        "catalog_key": "home_card_registry",
+        "template_key": HOME_SYSTEM_TEMPLATE_KEY,
+        "template_version": HOME_SYSTEM_TEMPLATE_VERSION,
+        "card_count": len(cards),
+        "cards": cards,
+        "supported_filter_fields": supported_filter_fields,
+        "supported_parameters": supported_parameters,
+        "static_options": {
+            "geography": list(HOME_VIEW_ASSET_MAP_GEOGRAPHIES),
+            "price_mark_status": list(HOME_VIEW_PRICE_MARK_STATUSES),
+            "price_sort": _home_view_price_sort_options(),
+            "quote_type": list(HOME_VIEW_PRICE_QUOTE_TYPES),
+        },
+        "read_only": True,
+    }
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=f"Loaded the Home card registry with {len(cards)} supported card(s).",
+        record_count=len(cards),
+        evidence_items=_build_home_view_card_registry_evidence(payload),
+    )
+
+
+def _get_home_system_template(_db: Session, _arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    template = build_home_system_template()
+    cards = [_serialize_home_view_card_definition(card) for card in template.cards]
+    payload = {
+        "template_key": template.template_key,
+        "template_version": template.template_version,
+        "label": template.label,
+        "immutable": template.immutable,
+        "card_count": len(cards),
+        "cards": cards,
+        "read_only": True,
+    }
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=f"Loaded immutable System Home template v{template.template_version} with {len(cards)} card(s).",
+        record_count=len(cards),
+        evidence_items=_build_home_system_template_evidence(payload),
+    )
+
+
+def _get_home_view_filter_options(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    card_id = _normalize_optional_home_view_card_id(arguments.get("card_id"))
+    include_reference_options = _normalize_bool(
+        arguments.get("include_reference_options"),
+        default=True,
+        field_name="include_reference_options",
+    )
+    limit = _normalize_limit(arguments.get("limit"), default=10)
+    entries = [
+        entry
+        for entry in HOME_VIEW_CARD_REGISTRY
+        if card_id is None or entry.card_id == card_id
+    ]
+    cards = [
+        _serialize_home_view_filter_option_card(
+            db,
+            entry,
+            include_reference_options=include_reference_options,
+            limit=limit,
+        )
+        for entry in entries
+    ]
+    payload = {
+        "card_id": card_id,
+        "cards": cards,
+        "includes_reference_options": include_reference_options,
+        "reference_option_limit": limit,
+        "read_only": True,
+    }
+    summary = f"Loaded Home filter and parameter option metadata for {len(cards)} card(s)."
+    if card_id:
+        summary += f" Card '{card_id}'."
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=summary,
+        record_count=len(cards),
+        evidence_items=_build_home_view_filter_options_evidence(payload),
+    )
+
+
+def _list_home_view_instances(
+    db: Session,
+    arguments: dict[str, Any],
+    *,
+    actor_id: str | None,
+) -> AssistantToolExecutionResult:
+    if not actor_id:
+        raise AssistantToolServiceError("list_home_view_instances requires an authenticated actor context.")
+
+    scope_filter = _normalize_optional_home_view_scope(arguments.get("scope"))
+    include_cards = _normalize_bool(arguments.get("include_cards"), default=True, field_name="include_cards")
+    limit = _normalize_limit(arguments.get("limit"), default=10)
+    actor_role = _resolve_tool_actor_role(db, actor_id)
+    records = list_visible_home_view_definitions(db, actor_id=actor_id)
+    if scope_filter == "SHARED":
+        records = [record for record in records if record.scope in {"TEAM", "ORGANIZATION"}]
+    elif scope_filter is not None:
+        records = [record for record in records if record.scope == scope_filter]
+    rows = [
+        to_home_view_definition_out(record, db=db, actor_id=actor_id, actor_role=actor_role)
+        for record in records[:limit]
+    ]
+    items = [
+        _serialize_home_view_definition_summary(row, include_cards=include_cards)
+        for row in rows
+    ]
+    personal_count = sum(1 for row in items if row.get("scope") == "PERSONAL")
+    shared_count = sum(1 for row in items if row.get("is_shared"))
+    payload = {
+        "actor_id": actor_id,
+        "scope_filter": scope_filter,
+        "count": len(items),
+        "personal_count": personal_count,
+        "shared_count": shared_count,
+        "items": items,
+        "truncated": len(records) > len(items),
+        "read_only": True,
+    }
+    summary = f"Loaded {len(items)} visible active Home view instance(s)."
+    if scope_filter:
+        summary += f" Scope filter {scope_filter}."
+    if payload["truncated"]:
+        summary += " Results were truncated at the tool limit."
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=summary,
+        record_count=len(items),
+        evidence_items=_build_home_view_instances_evidence(payload),
+    )
+
+
+def _serialize_home_view_registry_entry(entry: Any) -> dict[str, Any]:
+    return {
+        "card_id": entry.card_id,
+        "kind": entry.kind,
+        "label": entry.label,
+        "default_visible": entry.default_visible,
+        "default_placement": {
+            "column_span": entry.default_column_span,
+            "row_span": entry.default_row_span,
+        },
+        "allowed_parameters": list(entry.allowed_parameters),
+        "allowed_filter_fields": list(entry.allowed_filter_fields),
+        "data_bindings": list(entry.data_bindings),
+    }
+
+
+def _serialize_home_view_card_definition(card: Any) -> dict[str, Any]:
+    placement = card.placement
+    payload: dict[str, Any] = {
+        "card_id": card.card_id,
+        "kind": card.kind,
+        "label": card.label,
+        "visible": card.visible,
+        "placement": (
+            {
+                "order": placement.order,
+                "column_span": placement.column_span,
+                "row_span": placement.row_span,
+            }
+            if placement is not None
+            else None
+        ),
+        "data_bindings": list(card.data_bindings or []),
+    }
+    if card.parameters:
+        payload["parameters"] = dict(card.parameters)
+    if card.filters:
+        payload["filters"] = dict(card.filters)
+    return payload
+
+
+def _serialize_home_view_definition_summary(
+    definition: Any,
+    *,
+    include_cards: bool,
+) -> dict[str, Any]:
+    visible_cards = [card.card_id for card in definition.cards if card.visible]
+    payload: dict[str, Any] = {
+        "definition_id": definition.definition_id,
+        "definition_key": definition.definition_key,
+        "name": definition.name,
+        "scope": definition.scope,
+        "scope_owner_key": definition.scope_owner_key,
+        "status": definition.status,
+        "version": definition.version,
+        "base_template_key": definition.base_template_key,
+        "base_template_version": definition.base_template_version,
+        "persona_hint": definition.persona_hint,
+        "is_shared": definition.is_shared,
+        "can_edit": definition.can_edit,
+        "can_duplicate": definition.can_duplicate,
+        "updated_at": _json_default(definition.updated_at),
+        "updated_by": definition.updated_by,
+        "global_filters": dict(definition.global_filters or {}),
+        "card_count": len(definition.cards),
+        "visible_card_ids": visible_cards,
+        "validation": {
+            "ok": not definition.validation_warnings,
+            "warning_count": len(definition.validation_warnings),
+            "warnings": list(definition.validation_warnings),
+        },
+    }
+    if include_cards:
+        payload["cards"] = [_serialize_home_view_card_definition(card) for card in definition.cards]
+    return payload
+
+
+def _normalize_optional_home_view_card_id(value: Any) -> str | None:
+    card_id = _optional_text(value)
+    if card_id is None:
+        return None
+    normalized = card_id.strip().lower().replace("-", "_")
+    supported = {entry.card_id for entry in HOME_VIEW_CARD_REGISTRY}
+    if normalized not in supported:
+        raise AssistantToolServiceError(
+            f"card_id must be one of {', '.join(sorted(supported))}."
+        )
+    return normalized
+
+
+def _normalize_optional_home_view_scope(value: Any) -> str | None:
+    scope = _optional_upper(value)
+    if scope is None:
+        return None
+    if scope not in {"PERSONAL", "TEAM", "ORGANIZATION", "SHARED"}:
+        raise AssistantToolServiceError("scope must be PERSONAL, TEAM, ORGANIZATION, or SHARED.")
+    return scope
+
+
+def _resolve_tool_actor_role(db: Session, actor_id: str) -> str | None:
+    request_role = get_request_identity().role
+    if request_role:
+        return request_role
+    actor = db.get(UserAccount, actor_id)
+    return actor.role if actor is not None else None
+
+
+def _home_view_price_sort_options() -> list[str]:
+    return [
+        f"{field}_{direction}"
+        for field in HOME_VIEW_PRICE_SORT_FIELDS
+        for direction in HOME_VIEW_PRICE_SORT_DIRECTIONS
+    ]
+
+
+def _serialize_home_view_filter_option_card(
+    db: Session,
+    entry: Any,
+    *,
+    include_reference_options: bool,
+    limit: int,
+) -> dict[str, Any]:
+    return {
+        "card_id": entry.card_id,
+        "label": entry.label,
+        "kind": entry.kind,
+        "filters": [
+            _home_view_filter_field_options(
+                db,
+                field_name,
+                include_reference_options=include_reference_options,
+                limit=limit,
+            )
+            for field_name in entry.allowed_filter_fields
+        ],
+        "parameters": [
+            _home_view_parameter_options(parameter_name)
+            for parameter_name in entry.allowed_parameters
+        ],
+    }
+
+
+def _home_view_filter_field_options(
+    db: Session,
+    field_name: str,
+    *,
+    include_reference_options: bool,
+    limit: int,
+) -> dict[str, Any]:
+    if field_name == "price_index_code":
+        return _home_view_reference_field_options(
+            db,
+            field_name=field_name,
+            source="reference_price_indices.active",
+            include_reference_options=include_reference_options,
+            limit=limit,
+            rows_loader=_home_view_price_index_options,
+        )
+    if field_name == "commodity_code":
+        return _home_view_reference_field_options(
+            db,
+            field_name=field_name,
+            source="reference_commodities.active",
+            include_reference_options=include_reference_options,
+            limit=limit,
+            rows_loader=_home_view_commodity_options,
+        )
+    if field_name == "location_code":
+        return _home_view_reference_field_options(
+            db,
+            field_name=field_name,
+            source="reference_locations.active",
+            include_reference_options=include_reference_options,
+            limit=limit,
+            rows_loader=_home_view_location_options,
+        )
+    if field_name == "provider":
+        return _home_view_distinct_value_field_options(
+            db,
+            field_name=field_name,
+            source="reference_price_indices.active.provider",
+            include_reference_options=include_reference_options,
+            limit=limit,
+            model=ReferencePriceIndex,
+            column=ReferencePriceIndex.provider,
+        )
+    if field_name == "region":
+        return _home_view_distinct_value_field_options(
+            db,
+            field_name=field_name,
+            source="reference_locations.active.region",
+            include_reference_options=include_reference_options,
+            limit=limit,
+            model=ReferenceLocation,
+            column=ReferenceLocation.region,
+        )
+    if field_name == "quote_type":
+        return _home_view_static_field_options(
+            field_name=field_name,
+            source="home_view_contract.static",
+            options=list(HOME_VIEW_PRICE_QUOTE_TYPES),
+        )
+    if field_name == "geography":
+        return _home_view_static_field_options(
+            field_name=field_name,
+            source="home_view_contract.static",
+            options=list(HOME_VIEW_ASSET_MAP_GEOGRAPHIES),
+        )
+    return {
+        "field": field_name,
+        "kind": "filter",
+        "value_shape": "text_or_text_list",
+        "source": "home_view_contract.free_text",
+        "options": [],
+        "option_count": 0,
+        "truncated": False,
+    }
+
+
+def _home_view_parameter_options(parameter_name: str) -> dict[str, Any]:
+    if parameter_name == "price_mark_status":
+        return _home_view_static_field_options(
+            field_name=parameter_name,
+            source="home_view_contract.static",
+            options=list(HOME_VIEW_PRICE_MARK_STATUSES),
+            kind="parameter",
+        )
+    if parameter_name == "price_sort":
+        return _home_view_static_field_options(
+            field_name=parameter_name,
+            source="home_view_contract.static",
+            options=_home_view_price_sort_options(),
+            kind="parameter",
+        )
+    if parameter_name == "map_record_limit":
+        return {
+            "field": parameter_name,
+            "kind": "parameter",
+            "value_shape": "integer",
+            "source": "home_view_contract.range",
+            "minimum": 1,
+            "maximum": 5000,
+            "options": [],
+            "option_count": 0,
+            "truncated": False,
+        }
+    return {
+        "field": parameter_name,
+        "kind": "parameter",
+        "value_shape": "json_value",
+        "source": "home_view_contract.config",
+        "options": [],
+        "option_count": 0,
+        "truncated": False,
+    }
+
+
+def _home_view_static_field_options(
+    *,
+    field_name: str,
+    source: str,
+    options: list[str],
+    kind: str = "filter",
+) -> dict[str, Any]:
+    return {
+        "field": field_name,
+        "kind": kind,
+        "value_shape": "text_or_text_list" if kind == "filter" else "text",
+        "source": source,
+        "options": list(options),
+        "option_count": len(options),
+        "truncated": False,
+    }
+
+
+def _home_view_reference_field_options(
+    db: Session,
+    *,
+    field_name: str,
+    source: str,
+    include_reference_options: bool,
+    limit: int,
+    rows_loader: Callable[[Session, int], tuple[list[dict[str, Any]], int]],
+) -> dict[str, Any]:
+    options: list[dict[str, Any]] = []
+    option_count = 0
+    if include_reference_options:
+        options, option_count = rows_loader(db, limit)
+    return {
+        "field": field_name,
+        "kind": "filter",
+        "value_shape": "code_or_code_list",
+        "source": source,
+        "options": options,
+        "option_count": option_count,
+        "truncated": option_count > len(options),
+    }
+
+
+def _home_view_distinct_value_field_options(
+    db: Session,
+    *,
+    field_name: str,
+    source: str,
+    include_reference_options: bool,
+    limit: int,
+    model: Any,
+    column: Any,
+) -> dict[str, Any]:
+    values: list[str] = []
+    if include_reference_options:
+        values = [
+            str(value)
+            for value in db.execute(
+                select(column)
+                .where(model.is_active.is_(True), column.is_not(None))
+                .distinct()
+                .order_by(column)
+            )
+            .scalars()
+            .all()
+            if _optional_text(value) is not None
+        ]
+    return {
+        "field": field_name,
+        "kind": "filter",
+        "value_shape": "text_or_text_list",
+        "source": source,
+        "options": values[:limit],
+        "option_count": len(values),
+        "truncated": len(values) > limit,
+    }
+
+
+def _home_view_price_index_options(db: Session, limit: int) -> tuple[list[dict[str, Any]], int]:
+    option_count = int(
+        db.execute(
+            select(func.count()).select_from(ReferencePriceIndex).where(ReferencePriceIndex.is_active.is_(True))
+        ).scalar_one()
+    )
+    rows = (
+        db.execute(
+            select(ReferencePriceIndex)
+            .where(ReferencePriceIndex.is_active.is_(True))
+            .order_by(ReferencePriceIndex.code)
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+    return (
+        [
+            {
+                "code": row.code,
+                "name": row.name,
+                "commodity_code": row.commodity_code,
+                "location_code": row.location_code,
+                "provider": row.provider,
+                "quote_type": row.quote_type,
+                "market": row.market,
+            }
+            for row in rows
+        ],
+        option_count,
+    )
+
+
+def _home_view_commodity_options(db: Session, limit: int) -> tuple[list[dict[str, Any]], int]:
+    option_count = int(
+        db.execute(
+            select(func.count()).select_from(ReferenceCommodity).where(ReferenceCommodity.is_active.is_(True))
+        ).scalar_one()
+    )
+    rows = (
+        db.execute(
+            select(ReferenceCommodity)
+            .where(ReferenceCommodity.is_active.is_(True))
+            .order_by(ReferenceCommodity.code)
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+    return (
+        [
+            {
+                "code": row.code,
+                "name": row.name,
+                "commodity_class": row.commodity_class,
+            }
+            for row in rows
+        ],
+        option_count,
+    )
+
+
+def _home_view_location_options(db: Session, limit: int) -> tuple[list[dict[str, Any]], int]:
+    option_count = int(
+        db.execute(
+            select(func.count()).select_from(ReferenceLocation).where(ReferenceLocation.is_active.is_(True))
+        ).scalar_one()
+    )
+    rows = (
+        db.execute(
+            select(ReferenceLocation)
+            .where(ReferenceLocation.is_active.is_(True))
+            .order_by(ReferenceLocation.code)
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+    return (
+        [
+            {
+                "code": row.code,
+                "name": row.name,
+                "location_type": row.location_type,
+                "market": row.market,
+                "region": row.region,
+                "country_code": row.country_code,
+            }
+            for row in rows
+        ],
+        option_count,
+    )
 
 
 def _list_managed_agents(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
@@ -3828,6 +4686,42 @@ def _list_accounting_entries(db: Session, arguments: dict[str, Any]) -> Assistan
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(rows))
 
 
+def _normalize_document_kind_for_counts(value: Any) -> str:
+    text = str(value or "").strip().upper()
+    return text or "UNKNOWN"
+
+
+def _format_document_kind_label(value: str) -> str:
+    return value.replace("_", " ").title()
+
+
+def _normalize_document_type_count_chart_type(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return text if text in {"pie", "bar"} else "pie"
+
+
+def _document_count_kind(
+    document: DocumentIngestion,
+    page_kind_counts_by_document: dict[str, dict[str, int]],
+) -> str:
+    analysis_summary = dict(document.analysis_summary or {})
+    summary_kind = _normalize_document_kind_for_counts(analysis_summary.get("dominant_document_kind"))
+    if summary_kind != "UNKNOWN":
+        return summary_kind
+
+    page_kind_counts = page_kind_counts_by_document.get(document.document_id, {})
+    known_page_kind_counts = {
+        kind: count
+        for kind, count in page_kind_counts.items()
+        if kind and kind != "UNKNOWN" and count > 0
+    }
+    if len(known_page_kind_counts) == 1:
+        return next(iter(known_page_kind_counts))
+    if len(known_page_kind_counts) > 1:
+        return "MIXED"
+    return "UNKNOWN"
+
+
 def _list_documents(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
     status = _optional_upper(arguments.get("status"))
     review_status = _optional_upper(arguments.get("review_status"))
@@ -3854,6 +4748,92 @@ def _list_documents(db: Session, arguments: dict[str, Any]) -> AssistantToolExec
     if document_kind:
         summary += f" Dominant document kind filter: {document_kind}."
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=len(items))
+
+
+def _get_document_type_counts(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    chart_type = _normalize_document_type_count_chart_type(arguments.get("chart_type"))
+    status = _optional_upper(arguments.get("status"))
+    review_status = _optional_upper(arguments.get("review_status"))
+
+    documents = (
+        db.execute(
+            select(DocumentIngestion).order_by(
+                DocumentIngestion.created_at.desc(),
+                DocumentIngestion.document_id.desc(),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if status:
+        documents = [document for document in documents if document.status == status]
+    if review_status:
+        documents = [document for document in documents if document.review_status == review_status]
+
+    document_ids = [document.document_id for document in documents]
+    page_kind_counts_by_document: dict[str, dict[str, int]] = {}
+    if document_ids:
+        page_rows = db.execute(
+            select(DocumentIngestionPage.document_id, DocumentIngestionPage.document_kind).where(
+                DocumentIngestionPage.document_id.in_(document_ids)
+            )
+        ).all()
+        for document_id, document_kind in page_rows:
+            normalized_kind = _normalize_document_kind_for_counts(document_kind)
+            page_kind_counts = page_kind_counts_by_document.setdefault(str(document_id), {})
+            page_kind_counts[normalized_kind] = page_kind_counts.get(normalized_kind, 0) + 1
+
+    counts_by_kind: dict[str, int] = {}
+    for document in documents:
+        document_kind = _document_count_kind(document, page_kind_counts_by_document)
+        counts_by_kind[document_kind] = counts_by_kind.get(document_kind, 0) + 1
+
+    total_count = sum(counts_by_kind.values())
+    segments = [
+        {
+            "document_kind": document_kind,
+            "label": _format_document_kind_label(document_kind),
+            "count": count,
+            "value": count,
+            "percentage": round(count / total_count, 4) if total_count else 0,
+        }
+        for document_kind, count in sorted(
+            counts_by_kind.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+    ]
+    chart = {
+        "artifact_type": "ectrm.chart",
+        "version": 1,
+        "chart_type": chart_type,
+        "title": "Documents by document type",
+        "value_label": "Documents",
+        "segments": segments,
+    }
+    filters = {
+        key: value
+        for key, value in {
+            "status": status,
+            "review_status": review_status,
+        }.items()
+        if value
+    }
+    payload = {
+        "total_count": total_count,
+        "type_count": len(segments),
+        "segments": segments,
+        "chart": chart,
+        "filters": filters,
+        "render_hint": (
+            "Include the chart object JSON in a fenced block labelled ectrm-chart when the user asks to see "
+            "the chart in Prompt Home or Messages. The chart renderer also supports line, area, scatter, and "
+            "histogram artifacts when a tool returns points or bins for those shapes."
+        ),
+    }
+    summary = f"Returned document type counts for {total_count} document row(s) across {len(segments)} type(s)."
+    if filters:
+        summary += f" Filters: {', '.join(f'{key}={value}' for key, value in filters.items())}."
+    return AssistantToolExecutionResult(output=payload, summary=summary, record_count=total_count)
 
 
 def _get_document_ingestion(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:

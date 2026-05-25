@@ -636,6 +636,16 @@ Backend assistant/platform engineer.
 - tool traces appear in assistant run metadata
 - tests cover allowed and disallowed visibility paths
 
+### Implementation Note
+
+HVI-07 is implemented through read-only assistant tools for the Home card
+registry, immutable System Home template, safe filter/parameter option
+metadata, and active visible Home instances. The tools reuse the typed Home
+view definition services, preserve user visibility boundaries, add concise
+trace previews/evidence, and are included in the default tool policy for
+market, pre-trade, desk briefing, and reporting roles that can draft
+Home-view recommendations.
+
 ## HVI-08: Governed `create_home_view_instance` Action
 
 ### Priority

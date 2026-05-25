@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime
 
 from fastapi.encoders import jsonable_encoder
@@ -16,6 +17,14 @@ from apps.api.app.domains.assistant.services.action_specs import (
     AssistantActionSpec,
 )
 from apps.api.app.domains.accruals.services.accruals import MANUAL_ENTRY_TYPES
+from apps.api.app.domains.home_views.services.definitions import (
+    home_view_name_key,
+    normalize_home_view_cards,
+)
+from apps.api.app.domains.home_views.services.registry import (
+    HOME_SYSTEM_TEMPLATE_KEY,
+    HOME_SYSTEM_TEMPLATE_VERSION,
+)
 from apps.api.app.domains.operations.services.actualizations import build_delivery_obligation_id
 from apps.api.app.domains.operations.services.actualizations import preview_trade_actualization_void
 from apps.api.app.domains.operations.services.settlement_invoices import preview_trade_invoice_issue
@@ -29,6 +38,9 @@ from apps.api.app.domains.reports.services.settlement_presets import settlement_
 from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.document_ingestion import DocumentIngestion
+from apps.api.app.models.reference_commodity import ReferenceCommodity
+from apps.api.app.models.reference_location import ReferenceLocation
+from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.trade_accounting_entry import TradeAccountingEntry
 from apps.api.app.models.trade_accrual_entry import TradeAccrualEntry
 from apps.api.app.models.trade_accrual_lot import TradeAccrualLot
@@ -40,6 +52,11 @@ from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.schemas.report import SettlementReportFilters
 from apps.api.app.schemas.report import SettlementReportPresetCreate
+from apps.api.app.schemas.home_view import (
+    HomeViewCardDefinition,
+    HomeViewCardPlacement,
+    HomeViewDefinitionCreate,
+)
 from apps.api.app.shared.enums import DeliveryEventType
 
 TRADE_ID_PATTERN = re.compile(r"\b([A-Za-z][A-Za-z0-9]{0,5}-\d{2,})\b")
@@ -111,6 +128,19 @@ TRADE_PAYLOAD_CONTEXT_KEYS: tuple[str, ...] = (
 )
 TRADE_NUMERIC_CONTEXT_KEYS = {"price", "volume", "option_strike_price"}
 TRADE_INTEGER_CONTEXT_KEYS = {"pretrade_review_id"}
+
+
+@dataclass(frozen=True)
+class _HomeViewSignal:
+    label: str
+    fallback_name: str
+    persona_hint: str
+    global_filters: dict[str, object]
+    price_filters: dict[str, object]
+    map_filters: dict[str, object]
+    assumptions: tuple[str, ...]
+    missing_evidence: tuple[str, ...]
+    supporting_records: tuple[dict[str, object], ...]
 
 
 def _object_ref(record_type: str, record_id: object, label: str | None = None) -> dict[str, object]:
@@ -385,6 +415,18 @@ class CreateSettlementReportPresetActionPlanner:
         )
 
 
+class CreateHomeViewInstanceActionPlanner:
+    action_type = "create_home_view_instance"
+
+    def plan(self, context: AssistantActionPlanningContext) -> AssistantActionPlanningCandidate | None:
+        return _plan_create_home_view_instance(
+            message=context.message,
+            message_lower=context.message_lower,
+            context_fields=context.context_fields,
+            db=context.db,
+        )
+
+
 class VoidTradeInvoiceActionPlanner:
     action_type = "void_trade_invoice"
 
@@ -467,6 +509,7 @@ ACTION_PLANNER_SEQUENCE: tuple[AssistantActionPlanner, ...] = (
     CreateAccountingEntryActionPlanner(),
     CreateSettlementReportPresetActionPlanner(),
     ReverseAccountingEntryActionPlanner(),
+    CreateHomeViewInstanceActionPlanner(),
     ReprocessDocumentIngestionActionPlanner(),
 )
 ACTION_PLANNERS: dict[str, AssistantActionPlanner] = {
@@ -780,6 +823,500 @@ def _plan_create_settlement_report_preset(
             description=(
                 f"Create a {payload.scope.lower()} settlement report preset named "
                 f'"{payload.name}" with {filters_summary}.'
+            ),
+            payload=proposal_payload,
+        )
+    )
+
+
+def _mentions_create_home_view_instance(message_lower: str) -> bool:
+    creation_terms = ("create", "save", "add", "make", "build", "new", "configure")
+    view_terms = (
+        "home view",
+        "home screen",
+        "home dashboard",
+        "dashboard view",
+        "view",
+        "lens",
+    )
+    return any(term in message_lower for term in creation_terms) and any(
+        term in message_lower for term in view_terms
+    )
+
+
+def _resolve_home_view_name(
+    message: str,
+    context_fields: dict[str, str],
+    *,
+    fallback_name: str,
+) -> str:
+    context_name = _first_present_value(context_fields, "home_view_name", "view_name", "instance_name", "name")
+    if context_name:
+        return context_name.strip()
+
+    patterns = (
+        re.compile(r'(?:named|called|call it|name it)\s+"([^"\n]{1,120})"', re.IGNORECASE),
+        re.compile(r"(?:named|called|call it|name it)\s+'([^'\n]{1,120})'", re.IGNORECASE),
+        re.compile(r'(?:save|create|make|build)(?:\s+this)?(?:\s+home)?(?:\s+view)?\s+as\s+"([^"\n]{1,120})"', re.IGNORECASE),
+        re.compile(r"(?:save|create|make|build)(?:\s+this)?(?:\s+home)?(?:\s+view)?\s+as\s+'([^'\n]{1,120})'", re.IGNORECASE),
+        re.compile(
+            r"(?:home\s+view|view|lens)\s+(?:named|called)\s+([A-Za-z0-9][A-Za-z0-9 _-]{0,118}?)(?:\s+with\b|\s+for\b|\s+to\b|$)",
+            re.IGNORECASE,
+        ),
+    )
+    for pattern in patterns:
+        match = pattern.search(message)
+        if match is not None:
+            candidate = match.group(1).strip()
+            if candidate:
+                return candidate
+    return fallback_name
+
+
+def _resolve_home_view_scope(message_lower: str, context_fields: dict[str, str]) -> tuple[str | None, str | None]:
+    scope_value = _first_present_value(context_fields, "home_view_scope", "view_scope", "scope")
+    if scope_value:
+        normalized_scope = scope_value.strip().upper()
+        if normalized_scope == "PERSONAL":
+            return normalized_scope, None
+        return None, "Assistant-created Home views are limited to personal instances; publish shared views separately."
+    if "shared home view" in message_lower or "team home view" in message_lower or "organization home view" in message_lower:
+        return None, "Assistant-created Home views are limited to personal instances; publish shared views separately."
+    return "PERSONAL", None
+
+
+def _explicit_home_price_index_code(message: str, context_fields: dict[str, str]) -> str | None:
+    context_value = _first_present_value(context_fields, "price_index_code", "home_price_index_code")
+    if context_value:
+        return context_value.strip().upper()
+    match = re.search(
+        r"\bprice[_\s-]*index(?:[_\s-]*code)?\s*[:#]\s*([A-Za-z0-9_]{2,50})\b",
+        message,
+        re.IGNORECASE,
+    )
+    if match is not None:
+        return match.group(1).strip().upper()
+    return None
+
+
+def _explicit_home_commodity_code(context_fields: dict[str, str]) -> str | None:
+    context_value = _first_present_value(context_fields, "commodity_code", "home_commodity_code")
+    return context_value.strip().upper() if context_value else None
+
+
+def _active_home_reference_rows(db: Session, model: type) -> list:
+    return list(db.execute(select(model).where(model.is_active.is_(True))).scalars().all())
+
+
+def _find_active_home_price_index(db: Session, code: str) -> ReferencePriceIndex | None:
+    return (
+        db.execute(
+            select(ReferencePriceIndex).where(
+                ReferencePriceIndex.code == code.strip().upper(),
+                ReferencePriceIndex.is_active.is_(True),
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+
+def _choose_natural_gas_commodity_code(db: Session) -> tuple[str | None, str | None]:
+    active_commodities = _active_home_reference_rows(db, ReferenceCommodity)
+    if not active_commodities:
+        return "NATGAS", "No active commodity catalog rows were available; NATGAS was used as the supported natural-gas fallback."
+
+    preferred_codes = ("NATGAS", "NATURAL_GAS", "NAT_GAS", "NG")
+    by_code = {row.code.upper(): row for row in active_commodities}
+    for code in preferred_codes:
+        if code in by_code:
+            return by_code[code].code, None
+    for row in active_commodities:
+        normalized_name = _normalized_lookup_key(f"{row.code} {row.name}")
+        if "natural gas" in normalized_name or "nat gas" in normalized_name:
+            return row.code, None
+    return None, "I could not resolve an active natural-gas commodity code for that Home view."
+
+
+def _choose_henry_hub_location_code(db: Session) -> tuple[str | None, str | None]:
+    active_locations = _active_home_reference_rows(db, ReferenceLocation)
+    if not active_locations:
+        return "HENRY_HUB", "No active location catalog rows were available; HENRY_HUB was used as the supported Henry Hub fallback."
+
+    by_code = {row.code.upper(): row for row in active_locations}
+    if "HENRY_HUB" in by_code:
+        return by_code["HENRY_HUB"].code, None
+    for row in active_locations:
+        normalized_name = _normalized_lookup_key(f"{row.code} {row.name}")
+        if "henry hub" in normalized_name:
+            return row.code, None
+    return None, "No active Henry Hub location was available; the view will use commodity-level filters."
+
+
+def _choose_henry_hub_price_index(db: Session) -> tuple[str | None, str | None, dict[str, object] | None]:
+    active_indices = _active_home_reference_rows(db, ReferencePriceIndex)
+    if not active_indices:
+        return (
+            "HH_NATGAS",
+            "No active price-index catalog rows were available; HH_NATGAS was used as the supported Henry Hub fallback.",
+            None,
+        )
+
+    preferred_codes = ("HH_NATGAS", "NG_HH_PROMPT", "HH")
+    by_code = {row.code.upper(): row for row in active_indices}
+    for code in preferred_codes:
+        if code in by_code:
+            row = by_code[code]
+            return row.code, None, _supporting_record(
+                "reference_price_index",
+                row.code,
+                f"Active price index {row.name} for {row.commodity_code}.",
+                label=row.name,
+            )
+    for row in active_indices:
+        normalized_name = _normalized_lookup_key(f"{row.code} {row.name} {row.commodity_code}")
+        if "henry hub" in normalized_name or "hh natgas" in normalized_name:
+            return row.code, None, _supporting_record(
+                "reference_price_index",
+                row.code,
+                f"Active price index {row.name} for {row.commodity_code}.",
+                label=row.name,
+            )
+    return None, "I could not resolve an active Henry Hub natural-gas price index for that Home view.", None
+
+
+def _home_signal_from_price_index(
+    *,
+    db: Session,
+    price_index_code: str,
+) -> tuple[_HomeViewSignal | None, str | None]:
+    active_indices = _active_home_reference_rows(db, ReferencePriceIndex)
+    price_index = _find_active_home_price_index(db, price_index_code)
+    if price_index is None:
+        if active_indices or price_index_code != "HH_NATGAS":
+            return None, f"price_index_code must reference an active Home price index: {price_index_code}."
+        commodity_code = "NATGAS"
+        location_code = "HENRY_HUB"
+        index_label = "Henry Hub Natural Gas"
+        missing_evidence = (
+            "No active price-index catalog rows were available; HH_NATGAS was used as the supported Henry Hub fallback.",
+        )
+        supporting_records: tuple[dict[str, object], ...] = ()
+    else:
+        commodity_code = price_index.commodity_code
+        location_code = price_index.location_code
+        index_label = price_index.name
+        missing_evidence = ()
+        supporting_records = (
+            _supporting_record(
+                "reference_price_index",
+                price_index.code,
+                f"Active price index {price_index.name} for {price_index.commodity_code}.",
+                label=price_index.name,
+            ),
+        )
+
+    map_filters: dict[str, object] = {"commodity_code": commodity_code, "geography": "North America"}
+    if location_code:
+        map_filters["location_code"] = location_code
+    return _HomeViewSignal(
+        label=index_label,
+        fallback_name="HH NG Watch" if price_index_code == "HH_NATGAS" else f"{price_index_code} Watch",
+        persona_hint="trader",
+        global_filters={"commodity_code": commodity_code},
+        price_filters={
+            "price_index_code": price_index_code,
+            "commodity_code": commodity_code,
+        },
+        map_filters=map_filters,
+        assumptions=("Mapped the request to a personal market-monitoring Home view.",),
+        missing_evidence=missing_evidence,
+        supporting_records=supporting_records,
+    ), None
+
+
+def _home_signal_from_natural_gas(
+    *,
+    db: Session,
+    message_lower: str,
+    include_henry_hub: bool,
+) -> tuple[_HomeViewSignal | None, str | None]:
+    commodity_code, commodity_warning = _choose_natural_gas_commodity_code(db)
+    if commodity_code is None:
+        return None, commodity_warning
+
+    missing_evidence: list[str] = []
+    if commodity_warning:
+        missing_evidence.append(commodity_warning)
+    supporting_records: list[dict[str, object]] = []
+    price_filters: dict[str, object] = {"commodity_code": commodity_code}
+    map_filters: dict[str, object] = {"commodity_code": commodity_code, "geography": "North America"}
+    fallback_name = "US Natural Gas Watch" if " us " in f" {message_lower} " or "united states" in message_lower else "Natural Gas Watch"
+    label = "Natural Gas"
+
+    assumptions = ["Mapped the request to a personal natural-gas market-monitoring Home view."]
+    if include_henry_hub:
+        price_index_code, price_index_warning, price_index_record = _choose_henry_hub_price_index(db)
+        if price_index_code is None:
+            return None, price_index_warning
+        price_filters["price_index_code"] = price_index_code
+        if price_index_record is not None:
+            supporting_records.append(price_index_record)
+        if price_index_warning:
+            missing_evidence.append(price_index_warning)
+        location_code, location_warning = _choose_henry_hub_location_code(db)
+        if location_code is not None:
+            map_filters["location_code"] = location_code
+        if location_warning:
+            missing_evidence.append(location_warning)
+        fallback_name = "HH NG Watch"
+        label = "Henry Hub Natural Gas"
+        assumptions.append("Interpreted HH NG as Henry Hub natural gas.")
+
+    if "basis" in message_lower:
+        assumptions.append(
+            "Basis comparison is represented with the natural-gas price-index filter until a dedicated basis card exists."
+        )
+
+    return _HomeViewSignal(
+        label=label,
+        fallback_name=fallback_name,
+        persona_hint="trader",
+        global_filters={"commodity_code": commodity_code},
+        price_filters=price_filters,
+        map_filters=map_filters,
+        assumptions=tuple(assumptions),
+        missing_evidence=tuple(missing_evidence),
+        supporting_records=tuple(supporting_records),
+    ), None
+
+
+def _resolve_home_view_signal(
+    *,
+    message: str,
+    message_lower: str,
+    context_fields: dict[str, str],
+    db: Session,
+) -> tuple[_HomeViewSignal | None, str | None]:
+    explicit_price_index = _explicit_home_price_index_code(message, context_fields)
+    if explicit_price_index:
+        return _home_signal_from_price_index(db=db, price_index_code=explicit_price_index)
+
+    explicit_commodity = _explicit_home_commodity_code(context_fields)
+    if explicit_commodity:
+        if explicit_commodity in {"NATGAS", "NATURAL_GAS", "NAT_GAS", "NG"}:
+            return _home_signal_from_natural_gas(db=db, message_lower=message_lower, include_henry_hub=False)
+        return None, f"commodity_code is not supported for assistant Home view creation yet: {explicit_commodity}."
+
+    normalized_message = _normalized_lookup_key(message)
+    mentions_hh = bool(re.search(r"\bhh\b", message_lower)) or "henry hub" in normalized_message
+    mentions_natural_gas = (
+        bool(re.search(r"\bng\b", message_lower))
+        or "natural gas" in normalized_message
+        or "nat gas" in normalized_message
+        or (mentions_hh and "gas" in normalized_message)
+    )
+    if mentions_hh:
+        return _home_signal_from_natural_gas(db=db, message_lower=message_lower, include_henry_hub=True)
+    if mentions_natural_gas:
+        return _home_signal_from_natural_gas(db=db, message_lower=message_lower, include_henry_hub=False)
+    if "atlantis" in normalized_message:
+        return None, "I could not resolve a supported Home view filter signal for Atlantis."
+    return None, (
+        "I couldn't resolve a supported Home view signal from that request. "
+        "Name a supported filter such as HH NG, Henry Hub natural gas, or US natural gas."
+    )
+
+
+def _home_view_cards_for_signal(signal: _HomeViewSignal) -> list[HomeViewCardDefinition]:
+    return [
+        HomeViewCardDefinition(
+            card_id="prices",
+            visible=True,
+            placement=HomeViewCardPlacement(order=0, column_span=2, row_span=1),
+            parameters={"price_sort": "updated_desc"},
+            filters=dict(signal.price_filters),
+            data_bindings=["latest_price_marks", "market_price_indices"],
+        ),
+        HomeViewCardDefinition(
+            card_id="map",
+            visible=True,
+            placement=HomeViewCardPlacement(order=1, column_span=2, row_span=2),
+            parameters={"map_record_limit": 250},
+            filters=dict(signal.map_filters),
+            data_bindings=["asset_map", "weather_overlays"],
+        ),
+        HomeViewCardDefinition(
+            card_id="prompt",
+            visible=True,
+            placement=HomeViewCardPlacement(order=2, column_span=2, row_span=1),
+            parameters={"starter_kit": "market_watch"},
+            filters={"workflow_category": "market_monitoring"},
+            data_bindings=["assistant_conversation", "operator_attention_counts"],
+        ),
+        HomeViewCardDefinition(
+            card_id="timeframe",
+            visible=False,
+            placement=HomeViewCardPlacement(order=3, column_span=1, row_span=1),
+            parameters={},
+            filters={},
+            data_bindings=["calendar_events", "user_events"],
+        ),
+        HomeViewCardDefinition(
+            card_id="documents",
+            visible=False,
+            placement=HomeViewCardPlacement(order=4, column_span=1, row_span=1),
+            parameters={},
+            filters={},
+            data_bindings=["document_ingestion"],
+        ),
+        HomeViewCardDefinition(
+            card_id="communication",
+            visible=False,
+            placement=HomeViewCardPlacement(order=5, column_span=1, row_span=1),
+            parameters={},
+            filters={},
+            data_bindings=["message_threads", "operator_attention_counts"],
+        ),
+    ]
+
+
+def _summarize_home_view_cards(cards: list[HomeViewCardDefinition]) -> str:
+    visible_cards = [card.card_id for card in cards if card.visible]
+    return ", ".join(visible_cards) if visible_cards else "no visible cards"
+
+
+def _home_view_filter_catalog_supporting_record(db: Session) -> dict[str, object]:
+    active_commodity_count = len(_active_home_reference_rows(db, ReferenceCommodity))
+    active_location_count = len(_active_home_reference_rows(db, ReferenceLocation))
+    active_price_index_count = len(_active_home_reference_rows(db, ReferencePriceIndex))
+    return _supporting_record(
+        "home_view_filter_catalog",
+        "current",
+        (
+            "Validated against the current Home view card registry and active reference catalog "
+            f"({active_commodity_count} commodities, {active_location_count} locations, "
+            f"{active_price_index_count} price indices)."
+        ),
+        label="Current Home view filter catalog",
+    )
+
+
+def _plan_create_home_view_instance(
+    *,
+    message: str,
+    message_lower: str,
+    context_fields: dict[str, str],
+    db: Session,
+) -> AssistantActionPlanningCandidate | None:
+    if not _mentions_create_home_view_instance(message_lower):
+        return None
+
+    scope, scope_warning = _resolve_home_view_scope(message_lower, context_fields)
+    if scope_warning:
+        return AssistantActionPlanningCandidate(warning=scope_warning)
+    assert scope is not None
+
+    signal, signal_warning = _resolve_home_view_signal(
+        message=message,
+        message_lower=message_lower,
+        context_fields=context_fields,
+        db=db,
+    )
+    if signal_warning:
+        return AssistantActionPlanningCandidate(warning=signal_warning)
+    assert signal is not None
+
+    name = _resolve_home_view_name(message, context_fields, fallback_name=signal.fallback_name)
+    try:
+        payload = HomeViewDefinitionCreate(
+            name=name,
+            scope=scope,
+            base_template_key=HOME_SYSTEM_TEMPLATE_KEY,
+            base_template_version=HOME_SYSTEM_TEMPLATE_VERSION,
+            persona_hint=signal.persona_hint,
+            cards=_home_view_cards_for_signal(signal),
+            global_filters=dict(signal.global_filters),
+        )
+        normalized_cards = normalize_home_view_cards(payload.cards, db=db)
+    except Exception as exc:
+        return AssistantActionPlanningCandidate(
+            warning=f"The Home view request could not be translated into a valid Home definition: {exc}"
+        )
+
+    cards_payload = [card.model_dump(mode="json", exclude_none=True) for card in normalized_cards]
+    filters_summary = ", ".join(f"{key} {value}" for key, value in payload.global_filters.items())
+    visible_card_summary = _summarize_home_view_cards(normalized_cards)
+    name_key = home_view_name_key(payload.name)
+    assumptions = list(signal.assumptions)
+    if scope == "PERSONAL":
+        assumptions.append("Scope defaulted to PERSONAL because assistant-created shared Home views are out of scope.")
+
+    proposal_payload = _with_review_context(
+        {
+            "name": payload.name,
+            "scope": payload.scope,
+            "base_template_key": payload.base_template_key,
+            "base_template_version": payload.base_template_version,
+            "persona_hint": payload.persona_hint,
+            "cards": cards_payload,
+            "global_filters": dict(payload.global_filters),
+        },
+        owning_work_object={
+            "type": "home_view_definition",
+            "id": f"{payload.scope}:{name_key}",
+            "label": f"Home view {payload.name}",
+        },
+        required_reviewer_role="REQUESTING_USER_OR_ADMIN",
+        business_rationale=(
+            f'The user asked to save a personal Home view named "{payload.name}" for {signal.label}.'
+        ),
+        proposed_mutation={
+            "operation": "create_home_view_instance",
+            "name": payload.name,
+            "scope": payload.scope,
+            "base_template": {
+                "key": payload.base_template_key,
+                "version": payload.base_template_version,
+            },
+            "persona_hint": payload.persona_hint,
+            "visible_cards": [card.card_id for card in normalized_cards if card.visible],
+            "global_filters": dict(payload.global_filters),
+        },
+        supporting_records=(
+            _supporting_record(
+                "home_system_template",
+                f"{HOME_SYSTEM_TEMPLATE_KEY}:v{HOME_SYSTEM_TEMPLATE_VERSION}",
+                "The immutable system Home template is the base for the proposed personal instance.",
+                label="System Home template",
+            ),
+            _home_view_filter_catalog_supporting_record(db),
+            *signal.supporting_records,
+        ),
+        assumptions=tuple(assumptions),
+        missing_evidence=signal.missing_evidence,
+        expected_downstream_effects=(
+            "Create one active personal Home view definition for the requesting user.",
+            "Expose the saved Home view instance in the Home view switcher.",
+            "Leave the immutable system Home version and business records unchanged.",
+        ),
+        stale_state_basis={
+            "scope": payload.scope,
+            "name_key": name_key,
+            "existing_definition_id": None,
+            "base_template_key": payload.base_template_key,
+            "base_template_version": payload.base_template_version,
+        },
+        idempotency_key=f"assistant-action:create_home_view_instance:{payload.scope}:{name_key}",
+    )
+    return AssistantActionPlanningCandidate(
+        proposal=AssistantActionProposal(
+            action_type="create_home_view_instance",
+            summary=f'Create Home view "{payload.name}"',
+            description=(
+                f"Create a {payload.scope.lower()} Home view named "
+                f'"{payload.name}" with {filters_summary or "no global filters"} and visible cards: '
+                f"{visible_card_summary}."
             ),
             payload=proposal_payload,
         )

@@ -1,5 +1,6 @@
 """External market-data services."""
 
+from apps.api.app.domains.reference_data.services.external_data.bls_sync import sync_bls_ppi_series
 from apps.api.app.domains.reference_data.services.external_data.caiso_sync import sync_caiso_series
 from apps.api.app.domains.reference_data.services.external_data.cftc_sync import sync_cftc_series
 from apps.api.app.domains.reference_data.services.external_data.counterparty_credit_import import (
@@ -24,6 +25,7 @@ from apps.api.app.domains.reference_data.services.external_data.usda_nass_sync i
 from apps.api.app.domains.reference_data.services.external_data.world_bank_sync import sync_world_bank_series
 
 __all__ = [
+    "sync_bls_ppi_series",
     "sync_caiso_series",
     "sync_cftc_series",
     "import_counterparty_credit_snapshots",

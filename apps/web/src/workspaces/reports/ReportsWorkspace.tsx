@@ -10,6 +10,8 @@ import {
   loadTradingEodReport,
   validateReportDefinitionDraft,
 } from '../../entities/reports/api'
+import { loadPriceIndexObservations } from '../../entities/market-data/api'
+import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
 import { appConfig } from '../../shared/config'
 import { formatCurrencyAmount } from '../../shared/format'
 import type {
@@ -23,6 +25,7 @@ import type {
   PnlTradeValuation,
   PnlHistoryReport,
   PortfolioRecord,
+  PriceIndexObservationRecord,
   ReportDefinitionDraft,
   ReportDefinitionValidationResult,
   ReportingOverview,
@@ -35,8 +38,10 @@ import { matchesTextFilter } from '../../shared/filtering'
 import { buildUnitLabelByCommodity, summarizeUnitLabels } from '../../shared/unitDisplay'
 import { MetricValue } from '../../shared/ui/MetricValue'
 import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
-import { TileLayout } from '../../shared/ui/TileLayout'
+import { TileLayout, type WorkspaceTile } from '../../shared/ui/TileLayout'
+import { WorkspaceHandoffFocusBanner } from '../../shared/ui/WorkspaceHandoffFocusBanner'
 import { reportErrorState } from './reportTileScaffold'
+import { resolvePriceIndexBiReportFilter } from './reportRouteHandoffs'
 import { buildSettlementReportTiles } from './settlementReportTiles'
 import { ALL_FILTER_VALUE } from './settlementReportLens'
 import { TradingEodSummaryPanel } from './TradingEodSummaryPanel'
@@ -49,9 +54,12 @@ import {
 } from './reportUtils'
 import { useSettlementReportLens } from './useSettlementReportLens'
 
+const PRICE_BI_OBSERVATION_LIMIT = 120
+
 type ReportsWorkspaceProps = {
   activeTrades: Trade[]
   authSession: StoredAuthSession | null
+  routeHandoff?: AppRouteHandoff | null
   globalFilter: string
   counterpartyCreditReport: CounterpartyCreditReportRow[]
   portfolios: PortfolioRecord[]
@@ -62,6 +70,7 @@ type ReportsWorkspaceProps = {
   onOpenPrompt: () => void
   onOpenSettlement: () => void
   onOpenTrade: (tradeId: string) => void
+  onClearHandoff?: () => void
 }
 
 type PortfolioValuationRollup = {
@@ -79,6 +88,40 @@ type TradeAttributionDisplayRow = PnlTradeAttributionRow & {
 
 function valuationCoverageTone(valuation: PnlTradeValuation): 'active' | 'in-progress' {
   return valuation.included_in_totals ? 'active' : 'in-progress'
+}
+
+function priceObservationDigits(observation: PriceIndexObservationRecord | null): number {
+  if (!observation) {
+    return 2
+  }
+
+  return observation.unit_code === 'GAL' ? 3 : 2
+}
+
+function formatPriceObservationAmount(
+  observation: PriceIndexObservationRecord | null,
+  formatNumber: (value: number | null, digits?: number) => string,
+): string {
+  if (!observation) {
+    return 'No observation'
+  }
+
+  const currencyPrefix = observation.currency_code ? `${observation.currency_code} ` : ''
+  return `${currencyPrefix}${formatNumber(observation.value, priceObservationDigits(observation))} / ${observation.unit_code}`
+}
+
+function formatPriceObservationDelta(
+  latest: PriceIndexObservationRecord | null,
+  previous: PriceIndexObservationRecord | null,
+  formatNumber: (value: number | null, digits?: number) => string,
+): string {
+  if (!latest || !previous) {
+    return 'No prior observation'
+  }
+
+  const delta = latest.value - previous.value
+  const sign = delta > 0 ? '+' : ''
+  return `${sign}${formatNumber(delta, priceObservationDigits(latest))} ${latest.currency_code ?? ''}/${latest.unit_code}`.trim()
 }
 
 function attributionTone(category: string): 'active' | 'in-progress' | 'blocked' {
@@ -359,6 +402,7 @@ function validationStatusTone(result: ReportDefinitionValidationResult): 'active
 export function ReportsWorkspace({
   activeTrades,
   authSession,
+  routeHandoff = null,
   globalFilter,
   counterpartyCreditReport,
   portfolios,
@@ -369,9 +413,12 @@ export function ReportsWorkspace({
   onOpenPrompt,
   onOpenSettlement,
   onOpenTrade,
+  onClearHandoff,
 }: ReportsWorkspaceProps) {
   const reportAccessToken = authSession?.accessToken
   const hasGlobalFilter = globalFilter.trim().length > 0
+  const priceIndexReportFilter = resolvePriceIndexBiReportFilter(routeHandoff) ?? ''
+  const hasPriceIndexReportFilter = priceIndexReportFilter.trim().length > 0
   const [overview, setOverview] = useState<ReportingOverview | null>(null)
   const [semanticDatasets, setSemanticDatasets] = useState<SemanticDatasetDefinition[]>([])
   const [builderDatasetId, setBuilderDatasetId] = useState('')
@@ -396,6 +443,9 @@ export function ReportsWorkspace({
   const [valuationError, setValuationError] = useState('')
   const [comparisonLoading, setComparisonLoading] = useState(false)
   const [comparisonError, setComparisonError] = useState('')
+  const [priceBiObservations, setPriceBiObservations] = useState<PriceIndexObservationRecord[]>([])
+  const [priceBiLoading, setPriceBiLoading] = useState(false)
+  const [priceBiError, setPriceBiError] = useState('')
   const settlement = useSettlementReportLens({ authSession, reportAccessToken })
 
   useEffect(() => {
@@ -449,6 +499,48 @@ export function ReportsWorkspace({
       cancelled = true
     }
   }, [reportAccessToken])
+
+  useEffect(() => {
+    if (!hasPriceIndexReportFilter) {
+      setPriceBiObservations([])
+      setPriceBiLoading(false)
+      setPriceBiError('')
+      return
+    }
+
+    let cancelled = false
+
+    async function loadPriceBiReport() {
+      setPriceBiLoading(true)
+      setPriceBiError('')
+
+      try {
+        const observations = await loadPriceIndexObservations(
+          appConfig.apiBase,
+          priceIndexReportFilter,
+          PRICE_BI_OBSERVATION_LIMIT,
+        )
+        if (!cancelled) {
+          setPriceBiObservations(observations)
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setPriceBiObservations([])
+          setPriceBiError(nextError instanceof Error ? nextError.message : 'Unable to load price observations.')
+        }
+      } finally {
+        if (!cancelled) {
+          setPriceBiLoading(false)
+        }
+      }
+    }
+
+    void loadPriceBiReport()
+
+    return () => {
+      cancelled = true
+    }
+  }, [hasPriceIndexReportFilter, priceIndexReportFilter])
 
   const rankedCounterparties = useMemo(() => {
     return [...counterpartyCreditReport].sort((left, right) => {
@@ -800,6 +892,38 @@ export function ReportsWorkspace({
         comparisonStartDate !== previousAvailableSnapshotDate,
     ) ||
     Boolean(comparisonEndDate && latestAvailableSnapshotDate && comparisonEndDate !== latestAvailableSnapshotDate)
+  const priceBiObservationRows = useMemo(
+    () => [...priceBiObservations].sort((left, right) => right.observation_date.localeCompare(left.observation_date)),
+    [priceBiObservations],
+  )
+  const latestPriceBiObservation = priceBiObservationRows[0] ?? null
+  const previousPriceBiObservation = priceBiObservationRows[1] ?? null
+  const oldestPriceBiObservation = priceBiObservationRows[priceBiObservationRows.length - 1] ?? null
+  const priceBiLowObservation = useMemo(
+    () =>
+      priceBiObservationRows.reduce<PriceIndexObservationRecord | null>(
+        (currentLow, observation) =>
+          currentLow === null || observation.value < currentLow.value ? observation : currentLow,
+        null,
+      ),
+    [priceBiObservationRows],
+  )
+  const priceBiHighObservation = useMemo(
+    () =>
+      priceBiObservationRows.reduce<PriceIndexObservationRecord | null>(
+        (currentHigh, observation) =>
+          currentHigh === null || observation.value > currentHigh.value ? observation : currentHigh,
+        null,
+      ),
+    [priceBiObservationRows],
+  )
+  const priceBiAverage =
+    priceBiObservationRows.length > 0
+      ? priceBiObservationRows.reduce((sum, observation) => sum + observation.value, 0) / priceBiObservationRows.length
+      : null
+  const priceBiSourceLabel = latestPriceBiObservation
+    ? `${latestPriceBiObservation.source_provider} ${latestPriceBiObservation.source_series_id}`
+    : 'No source'
 
   function resetValuationSnapshotFilters() {
     setValuationPortfolioFilter(ALL_FILTER_VALUE)
@@ -910,6 +1034,117 @@ export function ReportsWorkspace({
       ),
     },
   ]
+  const priceBiReportTiles: WorkspaceTile[] = hasPriceIndexReportFilter
+    ? [
+        {
+          id: 'reports-price-bi',
+          eyebrow: 'Prices',
+          title: `Price BI Report · ${priceIndexReportFilter}`,
+          description: 'Price observation history, range, source provenance, and freshness for the selected price index.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: priceBiLoading ? (
+            <div className="skeleton-stack">
+              <div className="skeleton-block" />
+              <div className="skeleton-block" />
+            </div>
+          ) : priceBiError ? (
+            reportErrorState(priceBiError)
+          ) : priceBiObservationRows.length > 0 ? (
+            <div className="pnl-trend-panel">
+              <div className="pnl-trend-topbar">
+                <div className="pnl-trend-copy">
+                  <span>
+                    {oldestPriceBiObservation && latestPriceBiObservation
+                      ? `${formatDateOnly(oldestPriceBiObservation.observation_date)} to ${formatDateOnly(latestPriceBiObservation.observation_date)}`
+                      : 'Observation window unavailable'}
+                  </span>
+                  <p>{priceBiSourceLabel}</p>
+                </div>
+                <div className="shipment-card-meta">
+                  <span className="entity-chip entity-chip-soft">Price index {priceIndexReportFilter}</span>
+                  <span className="entity-chip entity-chip-soft">
+                    {formatNumber(priceBiObservationRows.length, 0)} observation
+                    {priceBiObservationRows.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="pnl-trend-summary-grid">
+                <article className="pnl-trend-stat-card pnl-trend-stat-card-emphasis">
+                  <span>Latest Price</span>
+                  <strong>{formatPriceObservationAmount(latestPriceBiObservation, formatNumber)}</strong>
+                  <p>
+                    {latestPriceBiObservation
+                      ? formatDateOnly(latestPriceBiObservation.observation_date)
+                      : 'No latest observation'}
+                  </p>
+                </article>
+                <article className="pnl-trend-stat-card">
+                  <span>Change</span>
+                  <strong>
+                    {formatPriceObservationDelta(latestPriceBiObservation, previousPriceBiObservation, formatNumber)}
+                  </strong>
+                  <p>Latest observation versus prior observation.</p>
+                </article>
+                <article className="pnl-trend-stat-card">
+                  <span>Range</span>
+                  <strong>
+                    {priceBiLowObservation && priceBiHighObservation
+                      ? `${formatNumber(priceBiLowObservation.value, priceObservationDigits(priceBiLowObservation))} to ${formatNumber(priceBiHighObservation.value, priceObservationDigits(priceBiHighObservation))}`
+                      : 'No range'}
+                  </strong>
+                  <p>{latestPriceBiObservation?.unit_code ?? 'Unit unavailable'}</p>
+                </article>
+                <article className="pnl-trend-stat-card">
+                  <span>Average</span>
+                  <strong>
+                    {latestPriceBiObservation && priceBiAverage !== null
+                      ? `${latestPriceBiObservation.currency_code ? `${latestPriceBiObservation.currency_code} ` : ''}${formatNumber(priceBiAverage, priceObservationDigits(latestPriceBiObservation))} / ${latestPriceBiObservation.unit_code}`
+                      : 'No average'}
+                  </strong>
+                  <p>Simple average over the loaded observations.</p>
+                </article>
+              </div>
+
+              <div className="position-list">
+                {priceBiObservationRows.slice(0, 18).map((observation) => (
+                  <article key={observation.id} className="position-card shipment-card">
+                    <div className="shipment-card-head">
+                      <div className="shipment-card-copy">
+                        <strong>{formatDateOnly(observation.observation_date)}</strong>
+                        <span>
+                          {observation.source_provider} · {observation.source_series_id}
+                        </span>
+                      </div>
+                      <span className="status-pill status-pill-active">
+                        {formatPriceObservationAmount(observation, formatNumber)}
+                      </span>
+                    </div>
+                    <div className="shipment-card-actions">
+                      <span>
+                        {observation.source_frequency}
+                        {observation.source_revision ? ` · Revision ${observation.source_revision}` : ''}
+                      </span>
+                      <div className="shipment-card-meta">
+                        <span className="entity-chip entity-chip-soft">
+                          Downloaded {formatDate(observation.downloaded_at)}
+                        </span>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <strong>No price observations yet</strong>
+              <p>The selected price index has no loaded observations for the price BI report.</p>
+            </div>
+          ),
+        },
+      ]
+    : []
 
   return (
     <TileLayout
@@ -917,19 +1152,29 @@ export function ReportsWorkspace({
       workspaceLabel="Reports"
       authSession={authSession}
       headerContent={
-        hasGlobalFilter ? (
-          <section className="surface workspace-local-filter">
-            <div className="workspace-local-filter-copy">
-              <div>
-                <span className="eyebrow">Filter</span>
-                <h3>Global Report Filter</h3>
-              </div>
-              <p>
-                Global nav filter “{globalFilter.trim()}” is also narrowing the exposure, activity, valuation, and
-                credit slices on this screen. Existing date and portfolio controls still apply inside each report module.
-              </p>
-            </div>
-          </section>
+        routeHandoff || hasGlobalFilter ? (
+          <>
+            <WorkspaceHandoffFocusBanner
+              handoff={routeHandoff}
+              currentView="reports"
+              clearLabel="Show Full Reports"
+              onClear={onClearHandoff ?? (() => undefined)}
+            />
+            {hasGlobalFilter ? (
+              <section className="surface workspace-local-filter">
+                <div className="workspace-local-filter-copy">
+                  <div>
+                    <span className="eyebrow">Filter</span>
+                    <h3>Global Report Filter</h3>
+                  </div>
+                  <p>
+                    Global nav filter “{globalFilter.trim()}” is also narrowing the exposure, activity, valuation, and
+                    credit slices on this screen. Existing date and portfolio controls still apply inside each report module.
+                  </p>
+                </div>
+              </section>
+            ) : null}
+          </>
         ) : undefined
       }
       sections={[
@@ -939,6 +1184,7 @@ export function ReportsWorkspace({
         },
       ]}
       tiles={[
+        ...priceBiReportTiles,
         {
           id: 'reports-data-sources',
           eyebrow: 'Builder',

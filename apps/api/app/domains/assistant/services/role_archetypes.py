@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from typing import get_args
 
 from apps.api.app.domains.assistant.services.skills import INTER_AGENT_CONSULTATION_SKILL, list_agent_skill_keys
-from apps.api.app.domains.assistant.services.tools import augment_managed_agent_introspection_tools, list_tool_names
+from apps.api.app.domains.assistant.services.tools import (
+    HOME_VIEW_ASSISTANT_TOOL_NAMES,
+    augment_managed_agent_introspection_tools,
+    list_tool_names,
+)
 from apps.api.app.schemas.assistant import (
     ALL_ASSISTANT_ACTION_TYPES,
     AssistantAgentAuthorityLevel,
@@ -78,6 +82,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "list_trade_confirmations",
             "list_deliveries",
             "list_documents",
+            "get_document_type_counts",
             "get_document_ingestion",
             "list_gmail_inbox_messages",
             "get_gmail_inbox_message",
@@ -315,6 +320,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "list_workflow_items",
             "list_trade_attention_candidates",
             "list_documents",
+            "get_document_type_counts",
             "get_document_ingestion",
             "list_gmail_inbox_messages",
             "get_gmail_inbox_message",
@@ -765,6 +771,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         skills=("document_triage", "inter_agent_consultation"),
         default_tools=(
             "list_documents",
+            "get_document_type_counts",
             "get_document_ingestion",
             "list_gmail_inbox_messages",
             "get_gmail_inbox_message",
@@ -799,6 +806,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "get_latest_commodity_prices",
             "get_latest_market_news",
             "list_workflow_items",
+            *HOME_VIEW_ASSISTANT_TOOL_NAMES,
         ),
         maximum_action_types=(),
         authority_ceiling="DRAFT",
@@ -830,6 +838,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "list_positions",
             "list_trades",
             "get_workspace_summary",
+            *HOME_VIEW_ASSISTANT_TOOL_NAMES,
         ),
         maximum_action_types=(),
         authority_ceiling="DRAFT",
@@ -871,6 +880,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "list_positions",
             "list_trades",
             "get_workspace_summary",
+            *HOME_VIEW_ASSISTANT_TOOL_NAMES,
         ),
         maximum_action_types=(),
         authority_ceiling="DRAFT",
@@ -932,6 +942,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         skills=("document_triage", "trade_operations_coordination", "inter_agent_consultation"),
         default_tools=(
             "list_documents",
+            "get_document_type_counts",
             "get_document_ingestion",
             "list_gmail_inbox_messages",
             "get_gmail_inbox_message",
@@ -981,6 +992,7 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
             "get_latest_commodity_prices",
             "get_latest_market_news",
             "list_workflow_items",
+            *HOME_VIEW_ASSISTANT_TOOL_NAMES,
         ),
         maximum_action_types=(),
         authority_ceiling="DRAFT",

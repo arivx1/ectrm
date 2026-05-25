@@ -95,7 +95,6 @@ const REPLY_SIGNALS = [
   'need to',
   'agent',
   'assistant',
-  '@',
 ]
 
 const NO_REPLY_EXACT_MATCHES = new Set([
@@ -109,12 +108,49 @@ const NO_REPLY_EXACT_MATCHES = new Set([
   'fyi',
 ])
 
+const AGENT_INVOCATION_SIGNALS = [
+  'agent',
+  'assistant',
+  'messaging agent',
+  'ectrm assistant',
+]
+
 function normalizeText(value: string): string {
   return value.trim().toLowerCase()
 }
 
 function containsAny(text: string, patterns: string[]): boolean {
   return patterns.some((pattern) => text.includes(pattern))
+}
+
+function startsWithHumanAddress(
+  channel: MessagingWorkspaceChannel,
+  normalizedDraft: string,
+): boolean {
+  return channel.members.some((member) => {
+    if (member.tone !== 'human') {
+      return false
+    }
+
+    const memberName = normalizeText(member.name)
+    if (!memberName) {
+      return false
+    }
+
+    const firstName = memberName.split(/\s+/)[0]
+    const mentionToken = `@[${memberName}]`
+    const addressForms = [
+      mentionToken,
+      `${memberName},`,
+      `${memberName}:`,
+      `${memberName} `,
+      firstName ? `${firstName},` : '',
+      firstName ? `${firstName}:` : '',
+      firstName ? `${firstName} ` : '',
+    ].filter((addressForm) => addressForm.length > 0)
+
+    return addressForms.some((addressForm) => normalizedDraft.startsWith(addressForm))
+  })
 }
 
 function determineTargetWorkspace(
@@ -218,6 +254,19 @@ export function decideMessagingAgentRoute(args: {
   const replyRequested = containsAny(normalizedDraft, REPLY_SIGNALS)
   const shortNote = normalizedDraft.split(/\s+/).filter((token) => token.length > 0).length <= 3
   const noteOnly = NO_REPLY_EXACT_MATCHES.has(normalizedDraft)
+  const humanAddressed = startsWithHumanAddress(args.channel, normalizedDraft)
+  const agentInvited = containsAny(normalizedDraft, AGENT_INVOCATION_SIGNALS)
+
+  if (humanAddressed && !agentInvited) {
+    return {
+      shouldReply: false,
+      routeMode: 'no_reply',
+      rationale:
+        'This is addressed to a human in the thread, so the messaging router stayed available without interrupting.',
+      targetWorkspace,
+      targetAgent: null,
+    }
+  }
 
   if (!replyRequested && (shortNote || noteOnly)) {
     return {

@@ -1486,6 +1486,7 @@ export const WORKSPACE_RENDERERS: Record<
       <ReportsWorkspace
         activeTrades={context.summary.activeTrades}
         authSession={context.workspaceData.authSession}
+        routeHandoff={context.routeHandoff}
         globalFilter={GLOBAL_FILTER_DISABLED}
         counterpartyCreditReport={context.workspaceData.counterpartyCreditReport}
         portfolios={context.workspaceData.portfolios}
@@ -1496,6 +1497,7 @@ export const WORKSPACE_RENDERERS: Record<
         onOpenPrompt={() => context.navigateToView('prompt')}
         onOpenSettlement={() => context.navigateToView('settlement')}
         onOpenTrade={context.navigateToTrade}
+        onClearHandoff={() => context.navigateToView('reports', null)}
       />
     ),
   },
@@ -1612,6 +1614,7 @@ export const WORKSPACE_RENDERERS: Record<
         priceIndices={context.workspaceData.priceIndices}
         externalDataRuns={context.workspaceData.externalDataRuns}
         externalDataSyncStatus={context.workspaceData.externalDataSyncStatus}
+        externalDataPriceSources={context.workspaceData.externalDataPriceSources}
         tradingSources={context.workspaceData.tradingSources}
         weatherLocations={context.workspaceData.weatherLocations}
         weatherSyncStatus={context.workspaceData.weatherSyncStatus}

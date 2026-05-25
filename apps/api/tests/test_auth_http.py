@@ -27,6 +27,7 @@ from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
+from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
@@ -208,6 +209,26 @@ class AuthHttpTests(unittest.TestCase):
                     trader_persona=None,
                     risk_archetype=None,
                     description="Test portfolio",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=now,
+                    created_by="system",
+                    updated_at=now,
+                    updated_by="system",
+                    version=1,
+                )
+            )
+            session.add(
+                ReferenceUnit(
+                    code="BBL",
+                    name="Barrel",
+                    commodity_class="CRUDE_OIL",
+                    dimension="VOLUME",
+                    base_unit_code=None,
+                    conversion_factor=None,
+                    precision=3,
+                    description="Test barrel unit",
                     is_active=True,
                     effective_from=None,
                     effective_to=None,

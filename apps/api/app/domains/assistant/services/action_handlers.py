@@ -21,6 +21,14 @@ from apps.api.app.domains.assistant.services.action_specs import (
     AssistantActionHandler,
 )
 from apps.api.app.domains.documents.services.ingestion import reprocess_document_ingestion
+from apps.api.app.domains.home_views.services.definitions import (
+    HomeViewDefinitionConflictError,
+    HomeViewDefinitionValidationError,
+    create_home_view_definition,
+    find_home_view_definition_by_scope_name,
+    home_view_name_key,
+    to_home_view_definition_out,
+)
 from apps.api.app.domains.operations.services.actualizations import (
     build_delivery_obligation_id,
     upsert_trade_actualization,
@@ -70,6 +78,7 @@ from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
+from apps.api.app.schemas.home_view import HomeViewDefinitionCreate
 from apps.api.app.schemas.report import SettlementReportPresetCreate
 
 __all__ = [
@@ -229,6 +238,47 @@ class CreateSettlementReportPresetActionHandler(NonIdempotentActionHandler):
             "scope": scope,
             "name_key": settlement_preset_name_key(name),
             "existing_preset_id": existing.id if existing is not None else None,
+        }
+
+
+class CreateHomeViewInstanceActionHandler(NonIdempotentActionHandler):
+    action_type = "create_home_view_instance"
+
+    def execute(self, context: AssistantActionExecutionContext) -> dict[str, object]:
+        return _execute_create_home_view_instance_action(
+            db=context.db,
+            record=context.record,
+            actor_role=context.actor_role,
+        )
+
+    def current_stale_state(
+        self,
+        *,
+        db: Session,
+        record: AssistantActionRequest,
+    ) -> dict[str, object | None]:
+        name = _required_str_payload_value(
+            record,
+            "name",
+            "The Home view request is missing a name.",
+        )
+        scope = _required_str_payload_value(
+            record,
+            "scope",
+            "The Home view request is missing a scope.",
+        )
+        existing = find_home_view_definition_by_scope_name(
+            db,
+            owner_user_id=record.user_id,
+            scope=scope,
+            name=name,
+        )
+        return {
+            "scope": scope,
+            "name_key": home_view_name_key(name),
+            "existing_definition_id": existing.id if existing is not None else None,
+            "base_template_key": _optional_str_payload_value(record, "base_template_key"),
+            "base_template_version": _optional_int_payload_value(record, "base_template_version"),
         }
 
 
@@ -919,6 +969,7 @@ ACTION_HANDLER_SEQUENCE: tuple[AssistantActionHandler, ...] = (
     AmendTradeActionHandler(),
     CancelTradeActionHandler(),
     CreateSettlementReportPresetActionHandler(),
+    CreateHomeViewInstanceActionHandler(),
     RecordDeliveryEventActionHandler(),
     ReverseDeliveryEventActionHandler(),
     CreateManualAccrualEntryActionHandler(),
@@ -1049,6 +1100,68 @@ def _execute_create_settlement_report_preset_action(
     return {
         "preset": to_settlement_preset_out(
             preset,
+            actor_id=record.user_id,
+            actor_role=actor_role,
+        ).model_dump(mode="json"),
+    }
+
+
+def _execute_create_home_view_instance_action(
+    *,
+    db: Session,
+    record: AssistantActionRequest,
+    actor_role: str | None,
+) -> dict[str, object]:
+    raw_cards = (record.payload or {}).get("cards")
+    if not isinstance(raw_cards, list):
+        raise AssistantActionRequestError("The Home view request is missing card definitions.")
+    raw_global_filters = (record.payload or {}).get("global_filters")
+    if raw_global_filters is not None and not isinstance(raw_global_filters, dict):
+        raise AssistantActionRequestError("The Home view request global_filters must be an object.")
+    try:
+        payload = HomeViewDefinitionCreate.model_validate(
+            {
+                "name": _required_str_payload_value(
+                    record,
+                    "name",
+                    "The Home view request is missing a name.",
+                ),
+                "scope": _required_str_payload_value(
+                    record,
+                    "scope",
+                    "The Home view request is missing a scope.",
+                ),
+                "base_template_key": _required_str_payload_value(
+                    record,
+                    "base_template_key",
+                    "The Home view request is missing a base_template_key.",
+                ),
+                "base_template_version": _required_int_payload_value(
+                    record,
+                    "base_template_version",
+                    "The Home view request is missing a base_template_version.",
+                ),
+                "persona_hint": (record.payload or {}).get("persona_hint"),
+                "cards": raw_cards,
+                "global_filters": dict(raw_global_filters or {}),
+            }
+        )
+    except Exception as exc:
+        raise AssistantActionRequestError(str(exc)) from exc
+
+    try:
+        home_view = create_home_view_definition(
+            db,
+            owner_user_id=record.user_id,
+            payload=payload,
+        )
+    except (HomeViewDefinitionConflictError, HomeViewDefinitionValidationError) as exc:
+        raise AssistantActionRequestError(str(exc)) from exc
+
+    return {
+        "home_view_definition": to_home_view_definition_out(
+            home_view,
+            db=db,
             actor_id=record.user_id,
             actor_role=actor_role,
         ).model_dump(mode="json"),

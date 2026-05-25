@@ -88,6 +88,10 @@ test('settings workspace renders top-level settings cards collapsed by default',
   )
   assert.match(
     markup,
+    /aria-expanded="false" aria-controls="settings-assistant-response-card-panel"/,
+  )
+  assert.match(
+    markup,
     /aria-expanded="false" aria-controls="settings-trade-ticket-defaults-card-panel"/,
   )
   assert.match(
@@ -159,6 +163,29 @@ test('settings workspace renders expanded card bodies when persisted open', () =
   assert.match(markup, /Hide card/)
   assert.match(markup, /New Ticket Starting Values/)
   assert.match(markup, /Rule Stack/)
+})
+
+test('settings workspace exposes messaging agent conciseness controls', () => {
+  usePersistentCollapsibleCardStateMock.mockImplementation((cardKey: string) => ({
+    expanded: cardKey === 'settings.assistant-response-card',
+    hasPersistedValue: cardKey === 'settings.assistant-response-card',
+    setExpanded: () => undefined,
+  }))
+
+  const markup = renderSettingsWorkspace()
+
+  assert.match(
+    markup,
+    /aria-expanded="true" aria-controls="settings-assistant-response-card-panel"/,
+  )
+  assert.match(markup, /Messaging Agent Replies/)
+  assert.match(markup, /Reply Conciseness/)
+  assert.match(markup, /Balanced/)
+  assert.match(markup, /Brief/)
+  assert.match(markup, /Terse/)
+  assert.match(markup, />Apply Reply Style</)
+  assert.match(markup, />Reset to Brief</)
+  assert.match(markup, /does not change agent authority/i)
 })
 
 test('settings workspace renders the custom event entry form when that card is expanded', () => {

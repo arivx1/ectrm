@@ -221,9 +221,15 @@ const externalDataSyncRouteByProvider = {
   EIA: 'eia',
   EIA_FUNDAMENTALS: 'eia-fundamentals',
   FRED: 'fred',
+  BLS_PPI: 'bls-ppi',
+  WORLD_BANK: 'world-bank',
+  USDA_NASS: 'usda-nass',
+  EIA_WHOLESALE_POWER: 'eia-wholesale-power',
   CFTC: 'cftc',
   CAISO: 'caiso',
   ERCOT: 'ercot',
+  MISO: 'miso',
+  NYISO: 'nyiso',
   KALSHI: 'kalshi',
 } as const satisfies Record<ExternalDataSyncProvider, string>
 

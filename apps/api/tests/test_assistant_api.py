@@ -47,6 +47,7 @@ from apps.api.app.domains.assistant.services.role_archetypes import validate_rol
 from apps.api.app.domains.assistant.services.execution import prepare_assistant_execution
 from apps.api.app.domains.assistant.services.agent_revisions import serialize_agent_revision_payload
 from apps.api.app.domains.assistant.services.tools import build_tool_definitions
+from apps.api.app.domains.home_views.services.definitions import create_home_view_definition
 from apps.api.app.main import app
 from apps.api.app.models import Base
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
@@ -66,12 +67,14 @@ from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.event import Event
+from apps.api.app.models.home_view_definition import HomeViewDefinition
 from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
 from apps.api.app.models.reference_currency import ReferenceCurrency
 from apps.api.app.models.reference_location import ReferenceLocation
+from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
 from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.report_preset import ReportPreset
@@ -89,6 +92,7 @@ from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 from apps.api.app.models.wiki_page import WikiPage
 from apps.api.app.schemas.assistant import ALL_ASSISTANT_ACTION_TYPES, AssistantPromptRequest
+from apps.api.app.schemas.home_view import HomeViewDefinitionCreate
 
 
 class _FakeAssistantService:
@@ -208,6 +212,7 @@ class AssistantApiTests(unittest.TestCase):
             session.query(AssistantAgent).delete()
             session.query(AssistantAgentProfileRequest).delete()
             session.query(MutationProvenanceRecord).delete()
+            session.query(HomeViewDefinition).delete()
             session.query(ReportPreset).delete()
             session.query(WikiPage).delete()
             session.query(Trade).delete()
@@ -481,11 +486,14 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("pretrade_structuring", pre_trade["skills"])
         self.assertIn("analyze_pretrade_scenario_draft", pre_trade["default_tools"])
         self.assertIn("get_pretrade_recommendation_run", pre_trade["default_tools"])
+        self.assertIn("list_home_view_cards", pre_trade["default_tools"])
+        self.assertIn("list_home_view_instances", pre_trade["default_tools"])
         self.assertIn("market-research-agent", pre_trade["recommended_parent_role_keys"])
 
         market_research = next(row for row in payload if row["role_key"] == "market-research-agent")
         self.assertIn("get_latest_commodity_prices", market_research["default_tools"])
         self.assertIn("get_latest_market_news", market_research["default_tools"])
+        self.assertIn("get_home_view_filter_options", market_research["default_tools"])
         self.assertEqual(market_research["recommended_orchestration_pattern"], "PARALLEL")
         self.assertIn("risk-sentinel", market_research["recommended_managed_role_keys"])
 
@@ -717,6 +725,7 @@ class AssistantApiTests(unittest.TestCase):
                 "create_accounting_entry",
                 "create_settlement_report_preset",
                 "reverse_accounting_entry",
+                "create_home_view_instance",
                 "reprocess_document_ingestion",
             ),
         )
@@ -1959,6 +1968,7 @@ class AssistantApiTests(unittest.TestCase):
                 "reverse_trade_payment",
                 "create_accounting_entry",
                 "create_settlement_report_preset",
+                "create_home_view_instance",
                 "reverse_accounting_entry",
                 "reprocess_document_ingestion",
             },
@@ -2875,6 +2885,233 @@ class AssistantApiTests(unittest.TestCase):
                 },
             },
         )
+
+    def test_assistant_prompt_creates_and_executes_home_view_instance_action_request(self) -> None:
+        token = self._create_session_token(role="TRADER")
+        self._seed_home_view_reference_data()
+        self._create_agent(
+            agent_id="home-view-agent",
+            name="Home View Agent",
+            status="ACTIVE",
+            allowed_workspaces=["assistant", "dashboard", "reports"],
+            capabilities=["ACTION", "EXPLAIN"],
+            allowed_action_types=["create_home_view_instance"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="STAGE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "home-view-agent",
+                    "workspace": "assistant",
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "Make me a view to see HH NG."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["action_requests"]), 1)
+        action_request = payload["action_requests"][0]
+        self.assertEqual(action_request["status"], "PENDING")
+        self.assertEqual(action_request["action_type"], "create_home_view_instance")
+        self.assertEqual(action_request["payload"]["name"], "HH NG Watch")
+        self.assertEqual(action_request["payload"]["scope"], "PERSONAL")
+        self.assertEqual(action_request["payload"]["base_template_key"], "system_home")
+        self.assertEqual(action_request["payload"]["base_template_version"], 1)
+        self.assertEqual(action_request["payload"]["persona_hint"], "trader")
+        self.assertEqual(action_request["payload"]["global_filters"], {"commodity_code": "NATGAS"})
+        cards_by_id = {card["card_id"]: card for card in action_request["payload"]["cards"]}
+        self.assertEqual(cards_by_id["prices"]["filters"]["price_index_code"], "HH_NATGAS")
+        self.assertEqual(cards_by_id["prices"]["filters"]["commodity_code"], "NATGAS")
+        self.assertEqual(cards_by_id["map"]["filters"]["location_code"], "HENRY_HUB")
+        self.assertFalse(cards_by_id["documents"]["visible"])
+        self.assertEqual(action_request["review_context"]["required_reviewer_role"], "REQUESTING_USER_OR_ADMIN")
+        self.assertEqual(
+            action_request["review_context"]["stale_state_basis"],
+            {
+                "scope": "PERSONAL",
+                "name_key": "hh ng watch",
+                "existing_definition_id": None,
+                "base_template_key": "system_home",
+                "base_template_version": 1,
+            },
+        )
+        self.assertEqual(
+            action_request["review_context"]["idempotency_key"],
+            "assistant-action:create_home_view_instance:PERSONAL:hh ng watch",
+        )
+        self.assertEqual(action_request["review_context"]["execution_mode"], "REVIEW_REQUIRED")
+
+        approve_response = self.client.post(
+            f"/assistant/action-requests/{action_request['action_request_id']}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(approve_response.status_code, 200)
+        approved = approve_response.json()
+        self.assertEqual(approved["status"], "EXECUTED")
+        self.assertEqual(approved["result"]["home_view_definition"]["name"], "HH NG Watch")
+        self.assertEqual(approved["result"]["home_view_definition"]["scope_owner_key"], "assistant_user")
+        with self.SessionLocal() as session:
+            record = session.query(HomeViewDefinition).one()
+            self.assertEqual(record.name, "HH NG Watch")
+            self.assertEqual(record.scope, "PERSONAL")
+            self.assertEqual(record.created_by, "assistant_user")
+
+    def test_home_view_instance_action_duplicate_name_fails_safely_on_approval(self) -> None:
+        token = self._create_session_token(role="TRADER")
+        self._seed_home_view_reference_data()
+        self._create_agent(
+            agent_id="home-view-duplicate-agent",
+            name="Home View Duplicate Agent",
+            status="ACTIVE",
+            allowed_workspaces=["assistant", "dashboard"],
+            capabilities=["ACTION", "EXPLAIN"],
+            allowed_action_types=["create_home_view_instance"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="STAGE",
+        )
+        fake_service = _FakeAssistantService()
+
+        with patch(
+            "apps.api.app.routes.assistant.get_assistant_service",
+            return_value=fake_service,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "home-view-duplicate-agent",
+                    "workspace": "assistant",
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": 'Make me a view to see HH NG called "Duplicate HH NG".'},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        action_request = response.json()["action_requests"][0]
+        with self.SessionLocal() as session:
+            create_home_view_definition(
+                session,
+                owner_user_id="assistant_user",
+                payload=self._home_view_create_payload(name="Duplicate HH NG"),
+            )
+
+        approve_response = self.client.post(
+            f"/assistant/action-requests/{action_request['action_request_id']}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(approve_response.status_code, 200)
+        approved = approve_response.json()
+        self.assertEqual(approved["status"], "FAILED")
+        self.assertIn("staged review context is stale", approved["error_detail"])
+        self.assertIn("existing_definition_id", approved["error_detail"])
+
+    def test_home_view_instance_action_invalid_card_payload_fails_safely(self) -> None:
+        token = self._create_session_token(role="TRADER")
+        self._seed_home_view_reference_data()
+        self._create_agent(
+            agent_id="home-view-invalid-agent",
+            name="Home View Invalid Agent",
+            status="ACTIVE",
+            allowed_workspaces=["assistant", "dashboard"],
+            capabilities=["ACTION", "EXPLAIN"],
+            allowed_action_types=["create_home_view_instance"],
+            provider="openai",
+            model="gpt-5-mini",
+            authority_ceiling="STAGE",
+        )
+        self._create_assistant_run(agent_id="home-view-invalid-agent", input_tokens=10, output_tokens=5)
+        with self.SessionLocal() as session:
+            run = session.query(AssistantRun).one()
+            now = datetime.now(timezone.utc)
+            action_request = AssistantActionRequest(
+                run_id=run.id,
+                status="PENDING",
+                user_id="assistant_user",
+                session_id="test-session",
+                workspace="assistant",
+                agent_id="home-view-invalid-agent",
+                agent_name="Home View Invalid Agent",
+                action_type="create_home_view_instance",
+                summary='Create Home view "Bad Card"',
+                description="Create a Home view with an invalid card payload.",
+                payload={
+                    "name": "Bad Card",
+                    "scope": "PERSONAL",
+                    "base_template_key": "system_home",
+                    "base_template_version": 1,
+                    "persona_hint": "trader",
+                    "cards": [
+                        {
+                            "card_id": "not_a_home_card",
+                            "visible": True,
+                            "placement": {"order": 0, "column_span": 1, "row_span": 1},
+                            "parameters": {},
+                            "filters": {},
+                            "data_bindings": [],
+                        }
+                    ],
+                    "global_filters": {"commodity_code": "NATGAS"},
+                    "review_context": {
+                        "owning_work_object": {
+                            "type": "home_view_definition",
+                            "id": "PERSONAL:bad card",
+                            "label": "Home view Bad Card",
+                        },
+                        "required_reviewer_role": "REQUESTING_USER_OR_ADMIN",
+                        "business_rationale": "Negative test for invalid Home card validation.",
+                        "proposed_mutation": {"operation": "create_home_view_instance"},
+                        "supporting_records": [],
+                        "assumptions": [],
+                        "missing_evidence": [],
+                        "expected_downstream_effects": [],
+                        "stale_state_basis": {
+                            "scope": "PERSONAL",
+                            "name_key": "bad card",
+                            "existing_definition_id": None,
+                            "base_template_key": "system_home",
+                            "base_template_version": 1,
+                        },
+                        "idempotency_key": "assistant-action:create_home_view_instance:PERSONAL:bad card",
+                    },
+                },
+                result=None,
+                error_detail=None,
+                created_at=now,
+                decided_at=None,
+                decided_by=None,
+            )
+            session.add(action_request)
+            session.commit()
+            action_request_id = action_request.id
+
+        approve_response = self.client.post(
+            f"/assistant/action-requests/{action_request_id}/approve",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(approve_response.status_code, 200)
+        approved = approve_response.json()
+        self.assertEqual(approved["status"], "FAILED")
+        self.assertIn("not_a_home_card", approved["error_detail"])
+        with self.SessionLocal() as session:
+            self.assertEqual(session.query(HomeViewDefinition).count(), 0)
 
     def test_execute_capable_agent_autonomously_executes_settlement_preset_creation(self) -> None:
         token = self._create_session_token()
@@ -8905,6 +9142,137 @@ class AssistantApiTests(unittest.TestCase):
                 )
             )
         session.flush()
+
+    def _seed_home_view_reference_data(self) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            commodity = session.get(ReferenceCommodity, "NATGAS")
+            if commodity is None:
+                session.add(
+                    ReferenceCommodity(
+                        code="NATGAS",
+                        commodity_class="GAS",
+                        allowed_transport_modes=["PIPELINE"],
+                        name="Natural Gas",
+                        description="Assistant API Home view commodity fixture",
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=now,
+                        created_by="test-suite",
+                        updated_at=now,
+                        updated_by="test-suite",
+                        version=1,
+                    )
+                )
+            else:
+                commodity.is_active = True
+                commodity.name = "Natural Gas"
+                commodity.updated_at = now
+                commodity.updated_by = "test-suite"
+
+            location = session.get(ReferenceLocation, "HENRY_HUB")
+            if location is None:
+                session.add(
+                    ReferenceLocation(
+                        code="HENRY_HUB",
+                        parent_location_code=None,
+                        name="Henry Hub",
+                        location_kind="POINT",
+                        location_type="HUB",
+                        market="US",
+                        city=None,
+                        subdivision_code="US-LA",
+                        country_code="US",
+                        continent_code="NA",
+                        latitude=None,
+                        longitude=None,
+                        region="North America",
+                        timezone="America/Chicago",
+                        description="Assistant API Home view location fixture",
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=now,
+                        created_by="test-suite",
+                        updated_at=now,
+                        updated_by="test-suite",
+                        version=1,
+                    )
+                )
+            else:
+                location.is_active = True
+                location.name = "Henry Hub"
+                location.updated_at = now
+                location.updated_by = "test-suite"
+
+            price_index = session.get(ReferencePriceIndex, "HH_NATGAS")
+            if price_index is None:
+                session.add(
+                    ReferencePriceIndex(
+                        code="HH_NATGAS",
+                        name="Henry Hub Natural Gas",
+                        commodity_code="NATGAS",
+                        currency_code="USD",
+                        unit_code="MMBTU",
+                        provider="EIA",
+                        quote_type="SPOT",
+                        market="US",
+                        location_code="HENRY_HUB",
+                        calendar_code=None,
+                        description="Assistant API Home view price-index fixture",
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=now,
+                        created_by="test-suite",
+                        updated_at=now,
+                        updated_by="test-suite",
+                        version=1,
+                    )
+                )
+            else:
+                price_index.is_active = True
+                price_index.name = "Henry Hub Natural Gas"
+                price_index.commodity_code = "NATGAS"
+                price_index.location_code = "HENRY_HUB"
+                price_index.updated_at = now
+                price_index.updated_by = "test-suite"
+            session.commit()
+
+    def _home_view_create_payload(self, *, name: str) -> HomeViewDefinitionCreate:
+        return HomeViewDefinitionCreate.model_validate(
+            {
+                "name": name,
+                "scope": "PERSONAL",
+                "base_template_key": "system_home",
+                "base_template_version": 1,
+                "persona_hint": "trader",
+                "global_filters": {"commodity_code": "NATGAS"},
+                "cards": [
+                    {
+                        "card_id": "prices",
+                        "visible": True,
+                        "placement": {"order": 0, "column_span": 2, "row_span": 1},
+                        "parameters": {"price_sort": "updated_desc"},
+                        "filters": {"price_index_code": "HH_NATGAS", "commodity_code": "NATGAS"},
+                        "data_bindings": ["latest_price_marks", "market_price_indices"],
+                    },
+                    {
+                        "card_id": "map",
+                        "visible": True,
+                        "placement": {"order": 1, "column_span": 2, "row_span": 2},
+                        "parameters": {"map_record_limit": 250},
+                        "filters": {
+                            "commodity_code": "NATGAS",
+                            "location_code": "HENRY_HUB",
+                            "geography": "North America",
+                        },
+                        "data_bindings": ["asset_map", "weather_overlays"],
+                    },
+                ],
+            }
+        )
 
     def _seed_accrual_lot_record(
         self,

@@ -266,6 +266,41 @@ class RunMarketDataSchedulerScriptTests(unittest.TestCase):
         world_bank_mock.assert_called_once()
         self.assertIn("WORLD_BANK scheduler run", buffer.getvalue())
 
+    def test_main_runs_bls_ppi_provider_when_due(self) -> None:
+        session = _FakeSession()
+        with patch.object(run_market_data_scheduler, "SessionLocal", return_value=session), patch.object(
+            run_market_data_scheduler,
+            "build_external_data_sync_status",
+            return_value={"providers": [{"provider": "BLS_PPI", "due_for_sync": True}]},
+        ), patch.object(
+            run_market_data_scheduler,
+            "sync_bls_ppi_series",
+            return_value=SimpleNamespace(
+                id=20,
+                status="SUCCEEDED",
+                series_count=10,
+                observation_count=120,
+                error_summary=None,
+            ),
+        ) as bls_ppi_mock, patch(
+            "sys.argv",
+            [
+                "run_market_data_scheduler.py",
+                "--provider",
+                "bls-ppi",
+                "--max-cycles",
+                "1",
+            ],
+        ):
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = run_market_data_scheduler.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(session.closed)
+        bls_ppi_mock.assert_called_once()
+        self.assertIn("BLS_PPI scheduler run", buffer.getvalue())
+
     def test_main_runs_usda_nass_provider_when_due(self) -> None:
         session = _FakeSession()
         with patch.object(run_market_data_scheduler, "SessionLocal", return_value=session), patch.object(

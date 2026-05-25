@@ -71,7 +71,6 @@ def build_document_action_plan(
         )
 
     dominant_kind = _dominant_document_kind(pages)
-    field_map = _build_document_field_map(pages)
     candidates = list(linkage_assessment.candidates)
     if not candidates:
         return _manual_review_plan(
@@ -93,48 +92,85 @@ def build_document_action_plan(
     for record_type in preferred_types:
         existing_candidate = candidate_by_type.get(record_type)
         if existing_candidate is not None:
-            return _build_attach_plan(
+            return build_document_action_plan_for_candidate(
                 document_id=document_id,
-                candidate=existing_candidate,
+                pages=pages,
                 review_status=review_status,
                 linkage_assessment=linkage_assessment,
+                selected_candidate=existing_candidate,
             )
 
         create_candidate = create_candidate_by_type.get(record_type)
         if create_candidate is not None:
-            return _build_create_plan(
+            return build_document_action_plan_for_candidate(
                 document_id=document_id,
-                candidate=create_candidate,
+                pages=pages,
                 review_status=review_status,
                 linkage_assessment=linkage_assessment,
-                field_map=field_map,
-                all_candidates=candidates,
+                selected_candidate=create_candidate,
             )
 
     for candidate in candidates:
         if candidate.existing_record:
-            return _build_attach_plan(
+            return build_document_action_plan_for_candidate(
                 document_id=document_id,
-                candidate=candidate,
+                pages=pages,
                 review_status=review_status,
                 linkage_assessment=linkage_assessment,
+                selected_candidate=candidate,
             )
 
     for candidate in candidates:
         if not candidate.existing_record and candidate.create_if_missing:
-            return _build_create_plan(
+            return build_document_action_plan_for_candidate(
                 document_id=document_id,
-                candidate=candidate,
+                pages=pages,
                 review_status=review_status,
                 linkage_assessment=linkage_assessment,
-                field_map=field_map,
-                all_candidates=candidates,
+                selected_candidate=candidate,
             )
 
     return _manual_review_plan(
         document_id=document_id,
         confidence=linkage_assessment.confidence,
         reasons=linkage_assessment.reasons or ["The document still needs manual action planning."],
+    )
+
+
+def build_document_action_plan_for_candidate(
+    *,
+    document_id: str,
+    pages: list[DocumentIngestionPage],
+    review_status: str,
+    linkage_assessment: DocumentLinkageAssessmentOut,
+    selected_candidate: DocumentLinkageCandidateOut,
+) -> DocumentActionPlanOut:
+    candidates = list(linkage_assessment.candidates)
+    if selected_candidate.existing_record:
+        return _build_attach_plan(
+            document_id=document_id,
+            candidate=selected_candidate,
+            review_status=review_status,
+            linkage_assessment=linkage_assessment,
+        )
+
+    if selected_candidate.create_if_missing:
+        return _build_create_plan(
+            document_id=document_id,
+            candidate=selected_candidate,
+            review_status=review_status,
+            linkage_assessment=linkage_assessment,
+            field_map=_build_document_field_map(pages),
+            all_candidates=candidates,
+        )
+
+    return _manual_review_plan(
+        document_id=document_id,
+        confidence=linkage_assessment.confidence,
+        reasons=[
+            f"Selected candidate {selected_candidate.record_label} is not eligible for attach or create.",
+            *linkage_assessment.reasons[:2],
+        ],
     )
 
 
@@ -329,14 +365,17 @@ def _build_create_payload(
         return payload
 
     if target_candidate.record_type == "TRADE_PAYMENT":
+        advice_date = field_map.get("advice_date")
         payload.update(
             {
                 "invoice_id": owner_candidate.record_id if owner_candidate is not None else None,
                 "trade_id": owner_candidate.record_id if owner_candidate and owner_candidate.record_type == "TRADE" else field_map.get("trade_id"),
                 "invoice_number": field_map.get("invoice_number"),
                 "payment_reference": field_map.get("payment_reference"),
-                "payment_amount": _normalized_amount(field_map.get("total_amount")),
-                "due_at": field_map.get("due_date"),
+                "payment_amount": _normalized_amount(field_map.get("amount") or field_map.get("total_amount")),
+                "payment_currency_code": field_map.get("currency"),
+                "due_at": field_map.get("due_date") or advice_date,
+                "received_at": advice_date,
             }
         )
         return payload

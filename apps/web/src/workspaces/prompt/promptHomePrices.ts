@@ -36,6 +36,8 @@ export type PromptHomePriceSortState = {
   direction: PromptHomePriceSortDirection;
 };
 
+export type PromptHomePriceManualOrder = string[];
+
 export type PromptHomePricingSnapshotSource = {
   priceIndices: readonly PriceIndexRecord[];
   latestMarks: readonly PriceIndexObservationRecord[];
@@ -43,9 +45,7 @@ export type PromptHomePricingSnapshotSource = {
 
 export type PromptHomePricesCardStatus =
   | "reference_loading"
-  | "pricing_loading"
   | "no_active_indices"
-  | "no_latest_marks"
   | "filtered_empty"
   | "ready";
 
@@ -570,9 +570,10 @@ export function sortPromptHomeDisplayPriceIndices(
   priceIndices: PriceIndexRecord[],
   latestMarksByCode: Record<string, PriceIndexObservationRecord>,
   sortState: PromptHomePriceSortState | null,
+  manualOrder: readonly string[] = [],
 ): PriceIndexRecord[] {
   if (!sortState) {
-    return priceIndices;
+    return applyPromptHomePriceManualOrder(priceIndices, manualOrder);
   }
 
   return [...priceIndices].sort((left, right) => {
@@ -588,6 +589,52 @@ export function sortPromptHomeDisplayPriceIndices(
     return fieldCompare !== 0
       ? fieldCompare
       : promptHomePriceIndexFallbackCompare(left, right);
+  });
+}
+
+export function normalizePromptHomePriceManualOrder(
+  priceIndexCodes: readonly string[],
+): PromptHomePriceManualOrder {
+  const seenCodes = new Set<string>();
+  const normalizedCodes: string[] = [];
+  for (const priceIndexCode of priceIndexCodes) {
+    const normalizedCode = normalizePromptHomePriceIndexCode(priceIndexCode);
+    if (!normalizedCode || seenCodes.has(normalizedCode)) {
+      continue;
+    }
+
+    seenCodes.add(normalizedCode);
+    normalizedCodes.push(normalizedCode);
+  }
+  return normalizedCodes;
+}
+
+export function applyPromptHomePriceManualOrder(
+  priceIndices: PriceIndexRecord[],
+  manualOrder: readonly string[],
+): PriceIndexRecord[] {
+  const normalizedManualOrder = normalizePromptHomePriceManualOrder(manualOrder);
+  if (normalizedManualOrder.length === 0) {
+    return priceIndices;
+  }
+
+  const orderByCode = new Map(
+    normalizedManualOrder.map((priceIndexCode, index) => [priceIndexCode, index]),
+  );
+  return [...priceIndices].sort((left, right) => {
+    const leftOrder = orderByCode.get(left.code.trim().toUpperCase());
+    const rightOrder = orderByCode.get(right.code.trim().toUpperCase());
+    if (leftOrder === undefined && rightOrder === undefined) {
+      return 0;
+    }
+    if (leftOrder === undefined) {
+      return 1;
+    }
+    if (rightOrder === undefined) {
+      return -1;
+    }
+
+    return leftOrder - rightOrder;
   });
 }
 
@@ -989,8 +1036,8 @@ export function buildPromptHomePricesCardViewModel(
   options: {
     filters: PromptHomePriceFilters;
     sortState: PromptHomePriceSortState | null;
+    manualOrder?: readonly string[];
     referenceDataLoading?: boolean;
-    pricingSnapshotLoading?: boolean;
   },
 ): PromptHomePricesCardViewModel {
   const activePriceIndices = selectPromptHomePriceIndices([
@@ -1020,12 +1067,18 @@ export function buildPromptHomePricesCardViewModel(
     filteredPriceIndices,
     latestMarksByCode,
     options.sortState,
+    options.manualOrder,
   );
   const latestMarkCount = countPromptHomeLatestMarks(
     activePriceIndices,
     latestMarksByCode,
   );
-  const allRows = sortedPriceIndices.map((priceIndex) =>
+  const allRows = sortPromptHomeDisplayPriceIndices(
+    sortedPriceIndices,
+    latestMarksByCode,
+    null,
+    options.manualOrder,
+  ).map((priceIndex) =>
     buildPromptHomePriceRowViewModel(
       priceIndex,
       latestMarksByCode[priceIndex.code] ?? null,
@@ -1041,16 +1094,8 @@ export function buildPromptHomePricesCardViewModel(
   let status: PromptHomePricesCardStatus = "ready";
   if (options.referenceDataLoading && activePriceIndices.length === 0) {
     status = "reference_loading";
-  } else if (
-    options.pricingSnapshotLoading &&
-    activePriceIndices.length > 0 &&
-    latestMarkCount === 0
-  ) {
-    status = "pricing_loading";
   } else if (activePriceIndices.length === 0) {
     status = "no_active_indices";
-  } else if (latestMarkCount === 0 && !hasActiveFilters) {
-    status = "no_latest_marks";
   } else if (rows.length === 0) {
     status = "filtered_empty";
   }

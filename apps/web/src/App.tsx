@@ -361,7 +361,17 @@ function AuthenticatedWorkspaceShell({
   const heroTitle = showingNavigationSectionLanding ? activePrimarySection.heroTitle : HERO_TITLE_BY_VIEW[currentView]
   const heroBody = showingNavigationSectionLanding ? activePrimarySection.heroBody : HERO_BODY_BY_VIEW[currentView]
   const isPromptHomeView = !showingNavigationSectionLanding && currentView === 'prompt'
-  const showHeroBadge = showingNavigationSectionLanding || currentView !== 'library'
+  const isMessagingWorkspaceView = !showingNavigationSectionLanding && currentView === 'messages'
+  const displayedHeroTitle = isMessagingWorkspaceView ? `Messaging: ${heroTitle}` : heroTitle
+  const displayedHeroBody = isMessagingWorkspaceView ? '' : heroBody
+  const showHeroBadge = showingNavigationSectionLanding || (currentView !== 'library' && currentView !== 'messages')
+  const mainStageClassName = [
+    'main-stage',
+    isPromptHomeView ? 'main-stage-prompt' : null,
+    isMessagingWorkspaceView ? 'main-stage-messages' : null,
+  ]
+    .filter(Boolean)
+    .join(' ')
   const hasAuthenticationIssue =
     isAuthenticationRequiredMessage(workspaceData.error) ||
     Object.values(workspaceData.groupErrors).some((message) => isAuthenticationRequiredMessage(message))
@@ -700,7 +710,7 @@ function AuthenticatedWorkspaceShell({
       </aside>
 
       <main
-        className={`main-stage ${isPromptHomeView ? 'main-stage-prompt' : ''}`}
+        className={mainStageClassName}
         tabIndex={-1}
         data-terminal-shortcut-target="main-stage"
       >
@@ -743,16 +753,27 @@ function AuthenticatedWorkspaceShell({
             </div>
           </header>
         ) : (
-          <header className="hero">
+          <header className={`hero ${isMessagingWorkspaceView ? 'hero-compact' : ''}`}>
             <div className="hero-copy">
-              <div className="hero-heading-row">
-                <span className="eyebrow">Workspace</span>
-                <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
-                  {effectiveSystemStateLabel}
-                </span>
-              </div>
-              <h2>{heroTitle}</h2>
-              {heroBody ? <p>{heroBody}</p> : null}
+              {isMessagingWorkspaceView ? (
+                <div className="hero-compact-heading-row">
+                  <h2>{displayedHeroTitle}</h2>
+                  <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
+                    {effectiveSystemStateLabel}
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <div className="hero-heading-row">
+                    <span className="eyebrow">Workspace</span>
+                    <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
+                      {effectiveSystemStateLabel}
+                    </span>
+                  </div>
+                  <h2>{displayedHeroTitle}</h2>
+                </>
+              )}
+              {displayedHeroBody ? <p>{displayedHeroBody}</p> : null}
             </div>
 
             {showHeroBadge ? (

@@ -364,6 +364,22 @@
   min-width: 0;
 }
 
+.hero-compact {
+  align-items: center;
+}
+
+.hero-compact .hero-copy {
+  width: 100%;
+}
+
+.hero-compact-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 .hero-heading-row {
   display: flex;
   justify-content: space-between;
@@ -392,6 +408,19 @@
   max-width: 14ch;
   font-size: clamp(2.6rem, 4.2vw, 4.4rem);
   line-height: 0.94;
+}
+
+.hero.hero-compact h2 {
+  flex: 1 1 30rem;
+  min-width: 0;
+  max-width: none;
+  margin-top: 0;
+  font-size: clamp(1.45rem, 2.1vw, 2.2rem);
+  line-height: 1.08;
+}
+
+.hero-compact-heading-row .hero-session-pill {
+  flex: 0 0 auto;
 }
 
 .hero p {

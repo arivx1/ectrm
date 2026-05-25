@@ -32,8 +32,10 @@ from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.document_record_link import DocumentRecordLink
 from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_leg import TradeLeg
+from apps.api.app.models.trade_payment import TradePayment
 
 
 class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
@@ -57,6 +59,8 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
             session.query(DocumentActionApprovalRequest).delete()
             session.query(DocumentActionDecision).delete()
             session.query(DocumentRecordLink).delete()
+            session.query(TradeConfirmation).delete()
+            session.query(TradePayment).delete()
             session.query(DocumentIngestionPage).delete()
             session.query(DocumentIngestion).delete()
             session.query(Event).delete()
@@ -120,6 +124,7 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
         document_id: str,
         document_kind: str,
         header_fields: list[dict[str, object]],
+        table_blocks: list[dict[str, object]] | None = None,
     ) -> tuple[DocumentIngestion, DocumentIngestionPage]:
         now = datetime(2026, 4, 14, 13, 0, tzinfo=timezone.utc)
         normalized_header_fields = [
@@ -168,7 +173,7 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
             classification_confidence=0.98,
             classification_payload={},
             header_fields=normalized_header_fields,
-            table_blocks=[],
+            table_blocks=table_blocks or [],
             raw_text=None,
             processing_warnings=[],
             processing_errors=[],
@@ -181,6 +186,102 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
             updated_at=now,
         )
         return document, page
+
+    def _seed_confirmation(
+        self,
+        *,
+        trade_id: str,
+        confirmation_number: str,
+        source_document_id: str | None = None,
+    ) -> TradeConfirmation:
+        now = datetime(2026, 4, 14, 12, 30, tzinfo=timezone.utc)
+        return TradeConfirmation(
+            trade_id=trade_id,
+            source_document_id=source_document_id,
+            confirmation_number=confirmation_number,
+            status="SENT",
+            sent_at=now,
+            confirmed_at=None,
+            issue_count=0,
+            last_issued_at=None,
+            last_issued_by=None,
+            last_issue_method=None,
+            last_issue_recipient=None,
+            last_issue_note=None,
+            receipt_status="NOT_ISSUED",
+            received_at=None,
+            received_by=None,
+            response_method=None,
+            response_reference=None,
+            response_note=None,
+            dispute_reason=None,
+            notes=None,
+            comparison_waiver_note=None,
+            comparison_waived_at=None,
+            comparison_waived_by=None,
+            created_at=now,
+            created_by="tester",
+            updated_at=now,
+            updated_by="tester",
+            version=1,
+        )
+
+    def _seed_invoice(
+        self,
+        *,
+        trade_id: str,
+        invoice_number: str,
+        invoice_amount: Decimal = Decimal("99000"),
+    ) -> TradeInvoice:
+        now = datetime(2026, 4, 14, 12, 45, tzinfo=timezone.utc)
+        return TradeInvoice(
+            trade_id=trade_id,
+            delivery_id=None,
+            leg_no=None,
+            invoice_number=invoice_number,
+            invoice_currency_code="USD",
+            billed_quantity=None,
+            quantity_unit_code=None,
+            invoice_amount=invoice_amount,
+            status="ISSUED",
+            issued_at=now,
+            due_at=datetime(2026, 4, 20, 0, 0, tzinfo=timezone.utc),
+            dispute_reason=None,
+            notes=None,
+            created_at=now,
+            created_by="tester",
+            updated_at=now,
+            updated_by="tester",
+            version=1,
+        )
+
+    def _seed_payment(
+        self,
+        *,
+        trade_id: str,
+        invoice_id: int,
+        payment_reference: str,
+        payment_amount: Decimal = Decimal("99000"),
+    ) -> TradePayment:
+        now = datetime(2026, 4, 15, 12, 0, tzinfo=timezone.utc)
+        return TradePayment(
+            trade_id=trade_id,
+            invoice_id=invoice_id,
+            payment_reference=payment_reference,
+            payment_currency_code="USD",
+            payment_amount=payment_amount,
+            status="PAID",
+            due_at=now,
+            received_at=now,
+            reversal_of_payment_id=None,
+            reversal_reason=None,
+            notes=None,
+            created_at=now,
+            created_by="tester",
+            updated_at=now,
+            updated_by="tester",
+            version=1,
+        )
 
     def test_stage_approval_request_creates_pending_queue_item(self) -> None:
         with self.SessionLocal() as session:
@@ -325,6 +426,439 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
         self.assertEqual(links[0].record_type, "TRADE_INVOICE")
         self.assertEqual(links[0].record_id, invoice_id)
         self.assertTrue(any(link.record_label == "Invoice INV-SEL-100" for link in result.record_links))
+
+    def test_selected_create_candidate_approval_creates_missing_invoice(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-SEL-200")
+            document, page = self._seed_verified_document(
+                document_id="DOC-SEL-200",
+                document_kind="INVOICE",
+                header_fields=[
+                    {"field_key": "invoice_number", "value": "INV-SEL-200"},
+                    {"field_key": "trade_id", "value": "TRD-SEL-200"},
+                    {"field_key": "invoice_date", "value": "2026-04-14"},
+                    {"field_key": "due_date", "value": "2026-04-20"},
+                    {"field_key": "counterparty", "value": "Shell Trading"},
+                    {"field_key": "total_amount", "value": "99000"},
+                ],
+            )
+            session.add_all([trade, document, page])
+            session.commit()
+
+            staged = stage_selected_document_record_candidate_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                record_type="TRADE_INVOICE",
+                record_id=None,
+                request_comment="Create the missing invoice from this document.",
+            )
+            self.assertEqual(staged.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+            self.assertEqual(staged.operation_type, "issue_trade_invoice")
+            self.assertEqual(staged.target_record_type, "TRADE_INVOICE")
+            self.assertIsNone(staged.target_record_id)
+            self.assertEqual(staged.owner_record_type, "TRADE")
+            self.assertEqual(staged.owner_record_id, "TRD-SEL-200")
+            self.assertEqual(
+                staged.action_plan_snapshot["payload"]["selected_candidate"]["existing_record"],
+                False,
+            )
+
+            executed = approve_document_action_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="approver",
+                decision_comment="Approved missing invoice creation.",
+            )
+            executed_status = executed.status
+            invoices = session.execute(
+                select(TradeInvoice).where(TradeInvoice.trade_id == trade.trade_id)
+            ).scalars().all()
+            invoice_numbers = [invoice.invoice_number for invoice in invoices]
+            links = session.execute(
+                select(DocumentRecordLink)
+                .where(DocumentRecordLink.document_id == document.document_id)
+                .order_by(DocumentRecordLink.record_type.asc())
+            ).scalars().all()
+            link_record_types = {link.record_type for link in links}
+            session.commit()
+
+        self.assertEqual(executed_status, "EXECUTED")
+        self.assertEqual(invoice_numbers, ["INV-SEL-200"])
+        self.assertEqual(link_record_types, {"TRADE", "TRADE_INVOICE"})
+
+    def test_selected_create_candidate_approval_rechecks_missing_record_before_execution(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-SEL-250")
+            document, page = self._seed_verified_document(
+                document_id="DOC-SEL-250",
+                document_kind="INVOICE",
+                header_fields=[
+                    {"field_key": "invoice_number", "value": "INV-SEL-250"},
+                    {"field_key": "trade_id", "value": "TRD-SEL-250"},
+                    {"field_key": "invoice_date", "value": "2026-04-14"},
+                    {"field_key": "due_date", "value": "2026-04-20"},
+                    {"field_key": "counterparty", "value": "Shell Trading"},
+                    {"field_key": "total_amount", "value": "99000"},
+                ],
+            )
+            session.add_all([trade, document, page])
+            session.commit()
+
+            stage_selected_document_record_candidate_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                record_type="TRADE_INVOICE",
+                record_id=None,
+                request_comment="Create the missing invoice from this document.",
+            )
+            session.add(
+                TradeInvoice(
+                    trade_id=trade.trade_id,
+                    delivery_id=None,
+                    leg_no=None,
+                    invoice_number="INV-SEL-250",
+                    invoice_currency_code="USD",
+                    billed_quantity=None,
+                    quantity_unit_code=None,
+                    invoice_amount=Decimal("99000"),
+                    status="ISSUED",
+                    issued_at=datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc),
+                    due_at=datetime(2026, 4, 20, 0, 0, tzinfo=timezone.utc),
+                    dispute_reason=None,
+                    notes=None,
+                    created_at=datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc),
+                    created_by="tester",
+                    updated_at=datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc),
+                    updated_by="tester",
+                    version=1,
+                )
+            )
+            session.commit()
+
+            with self.assertRaisesRegex(ValueError, "no longer matches a current record candidate"):
+                approve_document_action_approval_request(
+                    session,
+                    document_id=document.document_id,
+                    actor_id="approver",
+                    decision_comment="Approved missing invoice creation.",
+                )
+
+    def test_selected_confirmation_candidate_approval_attaches_existing_confirmation(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-CON-100")
+            confirmation = self._seed_confirmation(
+                trade_id=trade.trade_id,
+                confirmation_number="CONF-SEL-100",
+            )
+            document, page = self._seed_verified_document(
+                document_id="DOC-CON-100",
+                document_kind="TRADE_CONFIRMATION",
+                header_fields=[
+                    {"field_key": "confirmation_number", "value": "CONF-SEL-100"},
+                    {"field_key": "trade_id", "value": "TRD-CON-100"},
+                ],
+            )
+            session.add_all([trade, confirmation, document, page])
+            session.commit()
+            session.refresh(confirmation)
+            confirmation_id = str(confirmation.id)
+
+            with self.assertRaisesRegex(ValueError, "requires approval"):
+                execute_selected_document_record_candidate_attach(
+                    session,
+                    document_id=document.document_id,
+                    actor_id="reviewer",
+                    record_type="TRADE_CONFIRMATION",
+                    record_id=confirmation_id,
+                )
+
+            staged = stage_selected_document_record_candidate_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                record_type="TRADE_CONFIRMATION",
+                record_id=confirmation_id,
+                request_comment="Attach the selected confirmation.",
+            )
+            self.assertEqual(staged.action_type, "ATTACH_EXISTING_RECORD")
+            self.assertEqual(staged.target_record_type, "TRADE_CONFIRMATION")
+            self.assertEqual(staged.target_record_id, confirmation_id)
+
+            approve_document_action_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="approver",
+                decision_comment="Approved selected confirmation attachment.",
+            )
+            links = session.execute(
+                select(DocumentRecordLink).where(DocumentRecordLink.document_id == document.document_id)
+            ).scalars().all()
+            linked_records = [(link.record_type, link.record_id) for link in links]
+            linked_confirmation = session.get(TradeConfirmation, int(confirmation_id))
+            source_document_id = linked_confirmation.source_document_id if linked_confirmation is not None else None
+            session.commit()
+
+        self.assertEqual(source_document_id, "DOC-CON-100")
+        self.assertEqual(linked_records, [("TRADE_CONFIRMATION", confirmation_id)])
+
+    def test_selected_confirmation_create_candidate_approval_creates_missing_confirmation(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-CON-200")
+            document, page = self._seed_verified_document(
+                document_id="DOC-CON-200",
+                document_kind="TRADE_CONFIRMATION",
+                header_fields=[
+                    {"field_key": "confirmation_number", "value": "CONF-SEL-200"},
+                    {"field_key": "trade_id", "value": "TRD-CON-200"},
+                    {"field_key": "trade_date", "value": "2026-04-14"},
+                    {"field_key": "counterparty", "value": "Shell Trading"},
+                ],
+            )
+            session.add_all([trade, document, page])
+            session.commit()
+
+            staged = stage_selected_document_record_candidate_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                record_type="TRADE_CONFIRMATION",
+                record_id=None,
+                request_comment="Create the missing confirmation from this document.",
+            )
+            self.assertEqual(staged.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+            self.assertEqual(staged.operation_type, "create_trade_confirmation")
+            self.assertEqual(staged.target_record_type, "TRADE_CONFIRMATION")
+            self.assertIsNone(staged.target_record_id)
+            self.assertEqual(staged.owner_record_type, "TRADE")
+            self.assertEqual(staged.owner_record_id, "TRD-CON-200")
+
+            executed = approve_document_action_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="approver",
+                decision_comment="Approved missing confirmation creation.",
+            )
+            executed_status = executed.status
+            confirmations = session.execute(
+                select(TradeConfirmation).where(TradeConfirmation.trade_id == trade.trade_id)
+            ).scalars().all()
+            confirmation_numbers = [confirmation.confirmation_number for confirmation in confirmations]
+            source_document_ids = [confirmation.source_document_id for confirmation in confirmations]
+            links = session.execute(
+                select(DocumentRecordLink)
+                .where(DocumentRecordLink.document_id == document.document_id)
+                .order_by(DocumentRecordLink.record_type.asc())
+            ).scalars().all()
+            link_record_types = {link.record_type for link in links}
+            session.commit()
+
+        self.assertEqual(executed_status, "EXECUTED")
+        self.assertEqual(confirmation_numbers, ["CONF-SEL-200"])
+        self.assertEqual(source_document_ids, ["DOC-CON-200"])
+        self.assertEqual(link_record_types, {"TRADE", "TRADE_CONFIRMATION"})
+
+    def test_selected_confirmation_create_candidate_rechecks_missing_record_before_execution(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-CON-250")
+            document, page = self._seed_verified_document(
+                document_id="DOC-CON-250",
+                document_kind="TRADE_CONFIRMATION",
+                header_fields=[
+                    {"field_key": "confirmation_number", "value": "CONF-SEL-250"},
+                    {"field_key": "trade_id", "value": "TRD-CON-250"},
+                    {"field_key": "trade_date", "value": "2026-04-14"},
+                    {"field_key": "counterparty", "value": "Shell Trading"},
+                ],
+            )
+            session.add_all([trade, document, page])
+            session.commit()
+
+            stage_selected_document_record_candidate_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                record_type="TRADE_CONFIRMATION",
+                record_id=None,
+                request_comment="Create the missing confirmation from this document.",
+            )
+            session.add(
+                self._seed_confirmation(
+                    trade_id=trade.trade_id,
+                    confirmation_number="CONF-SEL-250",
+                )
+            )
+            session.commit()
+
+            with self.assertRaisesRegex(ValueError, "no longer matches a current record candidate"):
+                approve_document_action_approval_request(
+                    session,
+                    document_id=document.document_id,
+                    actor_id="approver",
+                    decision_comment="Approved missing confirmation creation.",
+                )
+
+    def test_execute_selected_candidate_attach_links_high_confidence_payment(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-PAY-100")
+            invoice = self._seed_invoice(
+                trade_id=trade.trade_id,
+                invoice_number="INV-PAY-100",
+            )
+            session.add_all([trade, invoice])
+            session.commit()
+            session.refresh(invoice)
+            payment = self._seed_payment(
+                trade_id=trade.trade_id,
+                invoice_id=invoice.id,
+                payment_reference="PAY-SEL-100",
+            )
+            document, page = self._seed_verified_document(
+                document_id="DOC-PAY-100",
+                document_kind="PAYMENT_ADVICE",
+                header_fields=[
+                    {"field_key": "payment_reference", "value": "PAY-SEL-100"},
+                    {"field_key": "invoice_number", "value": "INV-PAY-100"},
+                    {"field_key": "advice_date", "value": "2026-04-15"},
+                    {"field_key": "amount", "value": "99000"},
+                    {"field_key": "currency", "value": "USD"},
+                ],
+            )
+            session.add_all([payment, document, page])
+            session.commit()
+            session.refresh(payment)
+            payment_id = str(payment.id)
+
+            result = execute_selected_document_record_candidate_attach(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                record_type="TRADE_PAYMENT",
+                record_id=payment_id,
+            )
+            session.commit()
+            links = session.execute(
+                select(DocumentRecordLink).where(DocumentRecordLink.document_id == document.document_id)
+            ).scalars().all()
+            linked_records = [(link.record_type, link.record_id) for link in links]
+
+        self.assertEqual(linked_records, [("TRADE_PAYMENT", payment_id)])
+        self.assertTrue(any(link.record_label == "Payment PAY-SEL-100" for link in result.record_links))
+
+    def test_selected_payment_create_candidate_approval_creates_missing_payment(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-PAY-200")
+            invoice = self._seed_invoice(
+                trade_id=trade.trade_id,
+                invoice_number="INV-PAY-200",
+            )
+            document, page = self._seed_verified_document(
+                document_id="DOC-PAY-200",
+                document_kind="PAYMENT_ADVICE",
+                header_fields=[
+                    {"field_key": "payment_reference", "value": "PAY-SEL-200"},
+                    {"field_key": "invoice_number", "value": "INV-PAY-200"},
+                    {"field_key": "advice_date", "value": "2026-04-15"},
+                    {"field_key": "amount", "value": "99000"},
+                    {"field_key": "currency", "value": "USD"},
+                ],
+            )
+            session.add_all([trade, invoice, document, page])
+            session.commit()
+            session.refresh(invoice)
+            invoice_id = str(invoice.id)
+
+            staged = stage_selected_document_record_candidate_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                record_type="TRADE_PAYMENT",
+                record_id=None,
+                request_comment="Create the missing payment from this advice.",
+            )
+            self.assertEqual(staged.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+            self.assertEqual(staged.operation_type, "create_trade_payment")
+            self.assertEqual(staged.target_record_type, "TRADE_PAYMENT")
+            self.assertIsNone(staged.target_record_id)
+            self.assertEqual(staged.owner_record_type, "TRADE_INVOICE")
+            self.assertEqual(staged.owner_record_id, invoice_id)
+            self.assertEqual(staged.action_plan_snapshot["payload"]["payment_amount"], "99000")
+            self.assertEqual(staged.action_plan_snapshot["payload"]["payment_currency_code"], "USD")
+            self.assertEqual(staged.action_plan_snapshot["payload"]["received_at"], "2026-04-15")
+
+            executed = approve_document_action_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="approver",
+                decision_comment="Approved missing payment creation.",
+            )
+            executed_status = executed.status
+            payments = session.execute(
+                select(TradePayment).where(TradePayment.invoice_id == invoice.id)
+            ).scalars().all()
+            payment_summaries = [
+                (payment.payment_reference, payment.status, payment.received_at is not None)
+                for payment in payments
+            ]
+            links = session.execute(
+                select(DocumentRecordLink)
+                .where(DocumentRecordLink.document_id == document.document_id)
+                .order_by(DocumentRecordLink.record_type.asc())
+            ).scalars().all()
+            link_record_types = {link.record_type for link in links}
+            session.commit()
+
+        self.assertEqual(executed_status, "EXECUTED")
+        self.assertEqual(payment_summaries, [("PAY-SEL-200", "PAID", True)])
+        self.assertEqual(link_record_types, {"TRADE_INVOICE", "TRADE_PAYMENT"})
+
+    def test_selected_payment_create_candidate_rechecks_missing_record_before_execution(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-PAY-250")
+            invoice = self._seed_invoice(
+                trade_id=trade.trade_id,
+                invoice_number="INV-PAY-250",
+            )
+            document, page = self._seed_verified_document(
+                document_id="DOC-PAY-250",
+                document_kind="PAYMENT_ADVICE",
+                header_fields=[
+                    {"field_key": "payment_reference", "value": "PAY-SEL-250"},
+                    {"field_key": "invoice_number", "value": "INV-PAY-250"},
+                    {"field_key": "advice_date", "value": "2026-04-15"},
+                    {"field_key": "amount", "value": "99000"},
+                    {"field_key": "currency", "value": "USD"},
+                ],
+            )
+            session.add_all([trade, invoice, document, page])
+            session.commit()
+            session.refresh(invoice)
+
+            stage_selected_document_record_candidate_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                record_type="TRADE_PAYMENT",
+                record_id=None,
+                request_comment="Create the missing payment from this advice.",
+            )
+            session.add(
+                self._seed_payment(
+                    trade_id=trade.trade_id,
+                    invoice_id=invoice.id,
+                    payment_reference="PAY-SEL-250",
+                )
+            )
+            session.commit()
+
+            with self.assertRaisesRegex(ValueError, "no longer matches a current record candidate"):
+                approve_document_action_approval_request(
+                    session,
+                    document_id=document.document_id,
+                    actor_id="approver",
+                    decision_comment="Approved missing payment creation.",
+                )
 
     def test_selected_low_confidence_candidate_can_be_approved_and_attached(self) -> None:
         invoice_id: str | None = None

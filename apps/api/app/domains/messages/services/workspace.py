@@ -103,13 +103,6 @@ ECTRM_DESK = MessagingWorkspaceSeedMember(
     initials="EC",
     tone="desk",
 )
-MIA_CHEN = MessagingWorkspaceSeedMember(
-    name="Mia Chen",
-    title="Scheduler",
-    presence="Online",
-    initials="MC",
-    tone="human",
-)
 APPROVALS_BOT = MessagingWorkspaceSeedMember(
     name="Approvals Bot",
     title="Action request lane",
@@ -196,11 +189,11 @@ DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS: tuple[MessagingWorkspaceSeedConversat
             MessagingWorkspaceSeedTimelineItem(
                 message_id="assistant-msg-2",
                 kind="message",
-                source="HUMAN",
+                source="OPS",
                 created_at=build_seed_timestamp(13, 12),
                 parent_message_id="assistant-msg-1",
                 thread_root_message_id="assistant-msg-1",
-                author=MIA_CHEN,
+                author=OPS_QUEUE,
                 body="Keep this threaded with the nomination conversation so Operations can react without switching screens.",
                 reactions=("aligned 2",),
             ),
@@ -255,12 +248,12 @@ DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS: tuple[MessagingWorkspaceSeedConversat
             MessagingWorkspaceSeedTimelineItem(
                 message_id="northshore-msg-2",
                 kind="message",
-                source="HUMAN",
+                source="OPS",
                 created_at=build_seed_timestamp(15, 1),
                 parent_message_id="northshore-msg-1",
                 thread_root_message_id="northshore-msg-1",
-                author=MIA_CHEN,
-                body="I can take this into the operations lane as soon as the desk confirms we should accept the revised timing.",
+                author=OPS_QUEUE,
+                body="Operations can take this into the queue as soon as the desk confirms whether to accept the revised timing.",
                 reactions=("on it 1",),
             ),
             MessagingWorkspaceSeedTimelineItem(
@@ -308,10 +301,10 @@ DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS: tuple[MessagingWorkspaceSeedConversat
             MessagingWorkspaceSeedTimelineItem(
                 message_id="ops-msg-2",
                 kind="message",
-                source="HUMAN",
+                source="OPS",
                 created_at=build_seed_timestamp(14, 52),
-                author=MIA_CHEN,
-                body="If this looked more like Slack, I would handle queue review here first and then jump into the workboard only when I need the record-level controls.",
+                author=OPS_QUEUE,
+                body="Queue review can start here first, then jump into the workboard only when record-level controls are needed.",
                 reactions=("yes 4",),
             ),
         ),
@@ -391,16 +384,28 @@ DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS: tuple[MessagingWorkspaceSeedConversat
             MessagingWorkspaceSeedTimelineItem(
                 message_id="settlement-msg-2",
                 kind="message",
-                source="HUMAN",
+                source="OPS",
                 created_at=build_seed_timestamp(14, 24),
                 parent_message_id="settlement-msg-1",
                 thread_root_message_id="settlement-msg-1",
-                author=MIA_CHEN,
-                body="I will update this lane once Operations confirms the delivery window. That way settlement does not have to chase the queue separately.",
+                author=OPS_QUEUE,
+                body="Operations will update this lane once the delivery window is confirmed so settlement does not have to chase the queue separately.",
                 reactions=("thanks 1",),
             ),
         ),
     ),
+)
+
+DEFAULT_MESSAGING_WORKSPACE_SEED_ITEMS_BY_ID = {
+    item.message_id: item
+    for conversation in DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS
+    for item in conversation.timeline
+}
+LEGACY_MESSAGING_PERSONA_MESSAGE_IDS = (
+    "assistant-msg-2",
+    "northshore-msg-2",
+    "ops-msg-2",
+    "settlement-msg-2",
 )
 
 
@@ -636,6 +641,37 @@ def messaging_workspace_tables_available(db: Session) -> bool:
     )
 
 
+def replace_legacy_messaging_workspace_personas(db: Session) -> bool:
+    records = db.execute(
+        select(MessagingWorkspaceMessage).where(
+            MessagingWorkspaceMessage.message_id.in_(LEGACY_MESSAGING_PERSONA_MESSAGE_IDS)
+        )
+    ).scalars().all()
+    changed = False
+
+    for record in records:
+        if record.author_name != "Mia Chen":
+            continue
+
+        seed_item = DEFAULT_MESSAGING_WORKSPACE_SEED_ITEMS_BY_ID.get(record.message_id)
+        if seed_item is None or seed_item.author is None:
+            continue
+
+        record.source = seed_item.source
+        record.body = seed_item.body
+        record.author_name = seed_item.author.name
+        record.author_title = seed_item.author.title
+        record.author_presence = seed_item.author.presence
+        record.author_initials = seed_item.author.initials
+        record.author_tone = seed_item.author.tone
+        record.created_by_user_id = None
+        record.created_by_session_id = None
+        record.created_by_role = None
+        changed = True
+
+    return changed
+
+
 def ensure_messaging_workspace_conversations(db: Session) -> list[MessagingWorkspaceConversation]:
     if not messaging_workspace_tables_available(db):
         return build_default_messaging_workspace_conversation_records()
@@ -650,6 +686,7 @@ def ensure_messaging_workspace_conversations(db: Session) -> list[MessagingWorks
     existing_message_ids = set(existing_messages)
     now = datetime.now(timezone.utc)
     created = False
+    updated = replace_legacy_messaging_workspace_personas(db)
 
     for definition in DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS:
         if definition.conversation_id in existing_by_id:
@@ -692,7 +729,7 @@ def ensure_messaging_workspace_conversations(db: Session) -> list[MessagingWorks
         if latest_seed_activity > normalize_timestamp(conversation.updated_at):
             conversation.updated_at = latest_seed_activity
 
-    if created:
+    if created or updated:
         db.commit()
 
     return db.execute(

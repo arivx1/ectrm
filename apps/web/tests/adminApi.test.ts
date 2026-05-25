@@ -66,6 +66,24 @@ test('runExternalDataSync routes provider-specific syncs through the typed admin
   assert.equal(headers.get('Authorization'), 'Bearer admin-token')
 })
 
+test('runExternalDataSync supports the full price-provider sync route set', async () => {
+  const providerRoutes = [
+    ['BLS_PPI', 'bls-ppi'],
+    ['WORLD_BANK', 'world-bank'],
+    ['USDA_NASS', 'usda-nass'],
+    ['EIA_WHOLESALE_POWER', 'eia-wholesale-power'],
+    ['MISO', 'miso'],
+    ['NYISO', 'nyiso'],
+  ] as const
+
+  for (const [provider, route] of providerRoutes) {
+    postJsonMock.mockResolvedValueOnce({ id: 102, provider })
+    await runExternalDataSync('http://api.test', provider)
+    const [url] = postJsonMock.mock.calls.at(-1)!
+    assert.equal(url, `http://api.test/admin/external-data/${route}/sync`)
+  }
+})
+
 test('previewCounterpartyCreditImport applies the shared preview payload contract', async () => {
   const rows = [{ duns: '12345' }]
   const expected = { provider: 'DNB', total_rows: 1 }

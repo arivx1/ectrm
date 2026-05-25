@@ -28,6 +28,8 @@ from apps.api.app.routes.external_data import (
     list_latest_price_index_observations,
     list_price_index_observations,
     list_external_data_runs,
+    list_price_sources_for_review,
+    trigger_bls_ppi_sync,
     trigger_caiso_sync,
     trigger_kalshi_sync,
     trigger_cftc_sync,
@@ -96,6 +98,23 @@ class ExternalDataApiTests(unittest.TestCase):
                         created_at=datetime.now(timezone.utc),
                         created_by="system",
                         updated_at=datetime.now(timezone.utc),
+                        updated_by="system",
+                        version=1,
+                    ),
+                    ReferencePriceIndexSource(
+                        id=1,
+                        price_index_code="WTI_CUSHING_D",
+                        provider="EIA",
+                        dataset_code=None,
+                        series_id="PET.RWTC.D",
+                        frequency="daily",
+                        source_unit="BBL",
+                        source_currency_code="USD",
+                        transform_rule=None,
+                        is_active=True,
+                        created_at=datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc),
+                        created_by="system",
+                        updated_at=datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc),
                         updated_by="system",
                         version=1,
                     ),
@@ -364,6 +383,24 @@ class ExternalDataApiTests(unittest.TestCase):
 
         self.assertEqual(payload.status, "SUCCEEDED")
         self.assertEqual(payload.observation_count, 2)
+
+    def test_list_price_sources_for_review_includes_mapping_latest_mark_and_run_status(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            payload = list_price_sources_for_review(provider="eia", is_active=True, limit=50, offset=0, db=session)
+
+        self.assertEqual(len(payload), 1)
+        source = payload[0]
+        self.assertEqual(source.price_index_code, "WTI_CUSHING_D")
+        self.assertEqual(source.price_index_name, "WTI Cushing Spot Daily")
+        self.assertEqual(source.commodity_code, "WTI")
+        self.assertEqual(source.provider, "EIA")
+        self.assertEqual(source.series_id, "PET.RWTC.D")
+        self.assertEqual(source.latest_observation_date, date(2026, 3, 10))
+        self.assertEqual(source.latest_value, 67.2)
+        self.assertEqual(source.latest_run_id, 2)
+        self.assertEqual(source.latest_run_status, "SUCCEEDED")
+        self.assertIn(source.review_status, {"current", "stale"})
 
     def test_get_latest_price_index_observation_returns_latest_date(self) -> None:
         self._seed_rows()
@@ -826,10 +863,11 @@ class ExternalDataApiTests(unittest.TestCase):
             payload = get_external_data_sync_status(db=session)
 
         providers = {row.provider: row for row in payload.providers}
-        self.assertEqual(payload.provider_count, 12)
+        self.assertEqual(payload.provider_count, 13)
         self.assertEqual(providers["EIA"].health_status, "healthy")
         self.assertEqual(providers["EIA_FUNDAMENTALS"].health_status, "healthy")
         self.assertEqual(providers["FRED"].health_status, "healthy")
+        self.assertEqual(providers["BLS_PPI"].health_status, "unknown")
         self.assertEqual(providers["WORLD_BANK"].health_status, "unknown")
         self.assertEqual(providers["USDA_NASS"].health_status, "unknown")
         self.assertEqual(providers["EIA_WHOLESALE_POWER"].health_status, "unknown")
@@ -921,6 +959,28 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(payload.id, 2)
         self.assertEqual(payload.status, "SUCCEEDED")
         sync_mock.assert_called_once()
+
+    def test_trigger_bls_ppi_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch(
+                "apps.api.app.routes.external_data.sync_bls_ppi_series",
+                return_value=expected_run,
+            ) as sync_mock:
+                payload = trigger_bls_ppi_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="STEEL_MILL_PRODUCTS_BLS_PPI_M",
+                        lookback_days=1460,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+        self.assertEqual(sync_mock.call_args.kwargs["price_index_code"], "STEEL_MILL_PRODUCTS_BLS_PPI_M")
 
     def test_trigger_world_bank_sync_returns_run_payload(self) -> None:
         self._seed_rows()

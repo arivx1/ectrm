@@ -10,6 +10,7 @@ from apps.api.app.db.engine import SessionLocal
 from apps.api.app.models.external_data_run import ExternalDataRun
 
 from . import (
+    sync_bls_ppi_series,
     sync_caiso_series,
     sync_cftc_series,
     sync_eia_fundamental_series,
@@ -32,6 +33,7 @@ DEFAULT_MARKET_DATA_SYNC_PROVIDERS = (
     "EIA",
     "EIA_FUNDAMENTALS",
     "FRED",
+    "BLS_PPI",
     "WORLD_BANK",
     "EIA_WHOLESALE_POWER",
     "CFTC",
@@ -81,6 +83,12 @@ def sync_external_data_provider(
         return sync_fred_series(
             db,
             lookback_days=settings.FRED_SYNC_DEFAULT_LOOKBACK_DAYS,
+            requested_by=requested_by,
+        )
+    if normalized_provider == "BLS_PPI":
+        return sync_bls_ppi_series(
+            db,
+            lookback_days=settings.BLS_PPI_SYNC_DEFAULT_LOOKBACK_DAYS,
             requested_by=requested_by,
         )
     if normalized_provider == "WORLD_BANK":

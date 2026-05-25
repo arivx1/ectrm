@@ -209,10 +209,23 @@ function canAttachSelectedWorkflowCandidate(candidate: DocumentLinkageCandidateR
 
 function canRequestSelectedWorkflowCandidateApproval(candidate: DocumentLinkageCandidateRecord): boolean {
   return (
-    candidate.existing_record &&
-    Boolean(candidate.record_id) &&
-    candidate.candidate_state !== 'ALREADY_LINKED'
+    (candidate.existing_record &&
+      Boolean(candidate.record_id) &&
+      candidate.candidate_state !== 'ALREADY_LINKED') ||
+    (!candidate.existing_record &&
+      candidate.create_if_missing &&
+      candidate.candidate_state === 'CREATE_CANDIDATE')
   )
+}
+
+function selectedWorkflowCandidateActionLabel(candidate: DocumentLinkageCandidateRecord): string {
+  if (canAttachSelectedWorkflowCandidate(candidate)) {
+    return 'Attach Selected'
+  }
+  if (!candidate.existing_record && candidate.create_if_missing) {
+    return 'Create Via Approval'
+  }
+  return 'Request Approval'
 }
 
 function sameTimestamp(left: string | null | undefined, right: string | null | undefined): boolean {
@@ -1049,8 +1062,8 @@ export function LibraryWorkspace({
   }
 
   async function handleRequestSelectedWorkflowCandidateApproval(candidate: DocumentLinkageCandidateRecord) {
-    if (!authSession || !workflowDialogDocumentId || !candidate.record_id) {
-      setWorkflowError('Select a concrete record candidate before requesting approval.')
+    if (!authSession || !workflowDialogDocumentId) {
+      setWorkflowError('Select a record candidate before requesting approval.')
       return
     }
 
@@ -1067,7 +1080,7 @@ export function LibraryWorkspace({
         documentId,
         {
           record_type: candidate.record_type,
-          record_id: candidate.record_id,
+          ...(candidate.record_id ? { record_id: candidate.record_id } : {}),
           request_comment: `Requested from Library candidate selection: ${candidate.record_label}`,
         },
       )
@@ -2576,9 +2589,7 @@ export function LibraryWorkspace({
                             ? 'Working...'
                             : workflowPendingApprovalRequest
                               ? 'Approval Pending'
-                              : canAttachSelectedWorkflowCandidate(selectedWorkflowCandidate)
-                                ? 'Attach Selected'
-                                : 'Request Approval'}
+                              : selectedWorkflowCandidateActionLabel(selectedWorkflowCandidate)}
                         </button>
                       </div>
                     ) : null}

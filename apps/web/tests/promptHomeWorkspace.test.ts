@@ -198,14 +198,10 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     markup,
     /id="prompt-home-prices-panel" class="prompt-home-prices-card-body"/,
   );
-  assert.match(markup, /No latest price marks/);
-  assert.match(
-    markup,
-    /The typed pricing snapshot did not return marks for the active price indices yet\./,
-  );
-  assert.doesNotMatch(markup, /aria-label="Sort prices by Product"/);
-  assert.doesNotMatch(markup, /aria-label="Sort prices by Updated"/);
-  assert.doesNotMatch(markup, /No mark yet/);
+  assert.doesNotMatch(markup, /No latest price marks/);
+  assert.match(markup, /aria-label="Sort prices by Product"/);
+  assert.match(markup, /aria-label="Sort prices by Updated"/);
+  assert.match(markup, /No mark yet/);
   assert.match(markup, /Market price marks/);
   assert.match(markup, /0 latest marks · 1 active index/);
   assert.match(markup, /Code, market, commodity/);
@@ -862,6 +858,27 @@ test("prompt home price headers can sort display indices by selected field", () 
     ).map((priceIndex) => priceIndex.code),
     ["BRENT_SPOT_D", "CAISO_SP15_RT5M", "CORN_GLOBAL_IMF_M"],
   );
+  assert.deepEqual(
+    sortPromptHomeDisplayPriceIndices(
+      indices,
+      latestMarksByCode,
+      null,
+      ["CAISO_SP15_RT5M", "BRENT_SPOT_D"],
+    ).map((priceIndex) => priceIndex.code),
+    ["CAISO_SP15_RT5M", "BRENT_SPOT_D", "CORN_GLOBAL_IMF_M"],
+  );
+  assert.deepEqual(
+    sortPromptHomeDisplayPriceIndices(
+      indices,
+      latestMarksByCode,
+      {
+        field: "product",
+        direction: "asc",
+      },
+      ["CAISO_SP15_RT5M", "BRENT_SPOT_D"],
+    ).map((priceIndex) => priceIndex.code),
+    ["BRENT_SPOT_D", "CORN_GLOBAL_IMF_M", "CAISO_SP15_RT5M"],
+  );
 
   const productSort = nextPromptHomePriceSortState(null, "product");
   assert.deepEqual(productSort, { field: "product", direction: "asc" });
@@ -1028,6 +1045,26 @@ test("prompt home prices view model can show every active missing mark", () => {
       ),
     );
   }
+
+  const defaultViewModel = buildPromptHomePricesCardViewModel(
+    {
+      priceIndices,
+      latestMarks: [],
+    },
+    {
+      filters: {
+        query: "",
+        provider: PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER,
+        markFilter: "all",
+      },
+      sortState: null,
+    },
+  );
+
+  assert.equal(defaultViewModel.status, "ready");
+  assert.equal(defaultViewModel.latestMarkCount, 0);
+  assert.equal(defaultViewModel.rows.length, 8);
+  assert.ok(defaultViewModel.rows.every((row) => row.price === "No mark yet"));
 });
 
 function priceObservation(
@@ -1077,6 +1114,51 @@ test("prompt home renders read aloud controls for assistant messages", () => {
 
   assert.equal((markup.match(/Read Aloud/g) ?? []).length, 1);
   assert.match(markup, /Summarize the open operations queue\./);
+});
+
+test("prompt home renders assistant chart artifacts without showing the fenced payload", () => {
+  const chartMessage = [
+    "Document mix by type.",
+    "```ectrm-chart",
+    JSON.stringify({
+      artifact_type: "ectrm.chart",
+      version: 1,
+      chart_type: "pie",
+      title: "Documents by document type",
+      value_label: "Documents",
+      segments: [
+        { document_kind: "INVOICE", label: "Invoice", count: 2 },
+        {
+          document_kind: "TRADE_CONFIRMATION",
+          label: "Trade Confirmation",
+          count: 1,
+        },
+      ],
+    }),
+    "```",
+  ].join("\n");
+
+  const markup = renderToStaticMarkup(
+    createElement(PromptHomeWorkspace, {
+      authSession: null,
+      health: "ok",
+      counts: defaultCounts,
+      onOpenView: () => undefined,
+      initialMessages: [
+        {
+          id: "msg-assistant-chart",
+          role: "assistant",
+          content: chartMessage,
+        },
+      ],
+    }),
+  );
+
+  assert.match(markup, /Document mix by type\./);
+  assert.match(markup, /assistant-chart-card/);
+  assert.match(markup, /Documents by document type/);
+  assert.match(markup, /Trade Confirmation/);
+  assert.doesNotMatch(markup, /```ectrm-chart/);
 });
 
 test("prompt home map card uses the shared eyebrow and title structure", () => {

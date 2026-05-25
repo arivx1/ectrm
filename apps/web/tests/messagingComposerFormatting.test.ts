@@ -50,10 +50,10 @@ test('mention and emoji insertions preserve the draft around the current cursor'
       selectionStart: 0,
       selectionEnd: 0,
     },
-    buildMessagingMentionToken('Mia Chen'),
+    buildMessagingMentionToken('Northshore LNG'),
   )
 
-  assert.equal(mentionResult.value, '@[Mia Chen] Please review this.')
+  assert.equal(mentionResult.value, '@[Northshore LNG] Please review this.')
 
   const emojiResult = insertMessagingComposerSnippet(
     {

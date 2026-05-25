@@ -14,6 +14,7 @@ from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reference_data.services.external_data import (
     import_counterparty_credit_snapshots,
     preview_dnb_counterparty_credit_rows,
+    sync_bls_ppi_series,
     sync_caiso_series,
     sync_cftc_series,
     sync_eia_fundamental_series,
@@ -28,6 +29,9 @@ from apps.api.app.domains.reference_data.services.external_data import (
     sync_world_bank_series,
 )
 from apps.api.app.domains.reference_data.services.external_data.market_context import build_market_context
+from apps.api.app.domains.reference_data.services.external_data.price_source_review import (
+    list_price_source_review_rows,
+)
 from apps.api.app.domains.reference_data.services.external_data.sync_status import build_external_data_sync_status
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
@@ -46,6 +50,7 @@ from apps.api.app.schemas.external_data import (
     ExternalSeriesObservationOut,
     ExternalSeriesSyncRequest,
     MarketContextOut,
+    PriceSourceReviewOut,
     PriceIndexObservationOut,
 )
 
@@ -89,6 +94,26 @@ def get_external_data_sync_status(
     )
 
 
+@admin_router.get("/price-sources", response_model=List[PriceSourceReviewOut])
+def list_price_sources_for_review(
+    provider: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> List[PriceSourceReviewOut]:
+    return [
+        PriceSourceReviewOut(**row)
+        for row in list_price_source_review_rows(
+            db,
+            provider=provider,
+            is_active=is_active,
+            limit=limit,
+            offset=offset,
+        )
+    ]
+
+
 @admin_router.post("/eia/sync", response_model=ExternalDataRunOut)
 def trigger_eia_sync(payload: EIASyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
     actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
@@ -108,6 +133,18 @@ def trigger_fred_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(
     run = sync_fred_series(
         db,
         series_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/bls-ppi/sync", response_model=ExternalDataRunOut)
+def trigger_bls_ppi_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_bls_ppi_series(
+        db,
+        price_index_code=payload.series_code,
         lookback_days=payload.lookback_days,
         requested_by=actor_id,
     )

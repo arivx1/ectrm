@@ -6,6 +6,7 @@ import { test } from "vitest";
 
 import { MessagingWorkspace } from "../src/workspaces/messages/MessagingWorkspace";
 import { shouldSendMessageOnKeyDown } from "../src/workspaces/messages/messagingComposerKeybindings";
+import { buildThreadContext } from "../src/workspaces/messages/messagingThreadContext";
 import {
   appendMessagingWorkspacePost,
   buildMessagingWorkspacePostFromRecord,
@@ -61,11 +62,11 @@ const initialWorkspaceState = {
           tone: "desk" as const,
         },
         {
-          name: "Mia Chen",
-          title: "Scheduler",
-          presence: "Online",
-          initials: "MC",
-          tone: "human" as const,
+          name: "Operations Queue",
+          title: "Desk queue digest",
+          presence: "Tracking handoffs",
+          initials: "OQ",
+          tone: "ops" as const,
         },
         {
           name: "Approvals Bot",
@@ -127,7 +128,7 @@ const initialWorkspaceState = {
           parent_message_id: null,
           thread_root_message_id: "assistant-msg-1",
           reply_count: 1,
-          thread_participants: ["Mia Chen"],
+          thread_participants: ["Operations Queue"],
           created_by_user_id: null,
           created_by_role: null,
           edited_at: null,
@@ -138,15 +139,15 @@ const initialWorkspaceState = {
           id: "assistant-msg-2",
           kind: "message" as const,
           created_at: "2026-05-16T17:12:00Z",
-          source: "human",
+          source: "ops",
           label: null,
           detail: null,
           author: {
-            name: "Mia Chen",
-            title: "Scheduler",
-            presence: "Online",
-            initials: "MC",
-            tone: "human" as const,
+            name: "Operations Queue",
+            title: "Desk queue digest",
+            presence: "Tracking handoffs",
+            initials: "OQ",
+            tone: "ops" as const,
           },
           body: [
             "Keep this threaded with the nomination conversation so Operations can react without switching screens.",
@@ -157,8 +158,8 @@ const initialWorkspaceState = {
           thread_root_message_id: "assistant-msg-1",
           reply_count: 0,
           thread_participants: [],
-          created_by_user_id: "mia.chen",
-          created_by_role: "OPERATIONS",
+          created_by_user_id: null,
+          created_by_role: null,
           edited_at: null,
           deleted_at: null,
           pinned_at: null,
@@ -200,11 +201,11 @@ const initialWorkspaceState = {
           tone: "human" as const,
         },
         {
-          name: "Mia Chen",
-          title: "Scheduler",
-          presence: "Online",
-          initials: "MC",
-          tone: "human" as const,
+          name: "Operations Queue",
+          title: "Desk queue digest",
+          presence: "Tracking handoffs",
+          initials: "OQ",
+          tone: "ops" as const,
         },
       ],
       timeline: [
@@ -281,24 +282,96 @@ test("messaging workspace renders the dedicated unified inbox view", () => {
 
   assert.match(markup, /Message #ectrm-assistant/);
   assert.match(markup, /Conversation list/);
-  assert.match(markup, /Thread details/);
+  assert.match(markup, /Channels/);
+  assert.match(markup, />ectrm-assistant</);
+  assert.doesNotMatch(markup, /Approval packet is ready/);
+  assert.doesNotMatch(markup, /Northshore asked for desk confirmation/);
   assert.match(markup, /Send message/);
   assert.match(markup, /Clear draft/);
-  assert.match(markup, /Let messaging agent decide/);
+  assert.doesNotMatch(markup, /Let messaging agent decide/);
   assert.match(markup, /@Mention/);
   assert.match(markup, /Emoji/);
   assert.match(markup, /Attach/);
   assert.match(markup, /Reply in thread/);
   assert.match(markup, /Quote/);
-  assert.match(markup, /Open Assistant Console/);
-  assert.match(markup, /Open Work Queue/);
-  assert.match(markup, /Open Settlement/);
   assert.match(markup, /Action draft AR-204 moved into governed review/);
   assert.match(markup, /AR-204 governed action draft/);
+  assert.doesNotMatch(markup, /Thread details/);
+  assert.doesNotMatch(markup, /Start the thread here/);
+  assert.doesNotMatch(markup, /Lane context/);
+  assert.doesNotMatch(markup, /People in this lane/);
+  assert.doesNotMatch(markup, /Why this reads more like Slack/);
+  assert.doesNotMatch(markup, /Jump routes/);
+  assert.doesNotMatch(markup, /Open Work Queue/);
+  assert.doesNotMatch(markup, /Open Settlement/);
   assert.doesNotMatch(markup, /Desk Messages/);
   assert.doesNotMatch(markup, /Desk channels/);
   assert.doesNotMatch(markup, /Jump to a channel or thread/);
   assert.doesNotMatch(markup, /Slack-style desk surface/);
+  assert.doesNotMatch(markup, /Mia Chen/);
+  assert.doesNotMatch(markup, /Scheduler/);
+});
+
+test("messaging workspace renders assistant chart artifacts in message bodies", () => {
+  const chartBody = [
+    "Document mix by type.",
+    "```ectrm-chart",
+    JSON.stringify({
+      artifact_type: "ectrm.chart",
+      version: 1,
+      chart_type: "pie",
+      title: "Documents by document type",
+      value_label: "Documents",
+      segments: [
+        { document_kind: "INVOICE", label: "Invoice", count: 2 },
+        {
+          document_kind: "TRADE_CONFIRMATION",
+          label: "Trade Confirmation",
+          count: 1,
+        },
+      ],
+    }),
+    "```",
+  ].join("\n");
+  const workspaceStateWithChart = {
+    ...initialWorkspaceState,
+    conversations: initialWorkspaceState.conversations.map((conversation) =>
+      conversation.conversation_id === "ectrm-assistant"
+        ? {
+            ...conversation,
+            timeline: conversation.timeline.map((item) =>
+              item.id === "assistant-msg-1"
+                ? {
+                    ...item,
+                    body: [chartBody],
+                  }
+                : item,
+            ),
+          }
+        : conversation,
+    ),
+  };
+
+  const markup = renderToStaticMarkup(
+    createElement(MessagingWorkspace, {
+      authSession: null,
+      counts: defaultCounts,
+      onSessionSync: () => undefined,
+      onOpenPrompt: () => undefined,
+      onOpenAssistant: () => undefined,
+      onOpenOperations: () => undefined,
+      onOpenSettlement: () => undefined,
+      onSelectConversation: () => undefined,
+      selectedConversationId: "ectrm-assistant",
+      initialWorkspaceState: workspaceStateWithChart,
+    }),
+  );
+
+  assert.match(markup, /Document mix by type\./);
+  assert.match(markup, /assistant-chart-card/);
+  assert.match(markup, /Documents by document type/);
+  assert.match(markup, /Trade Confirmation/);
+  assert.doesNotMatch(markup, /```ectrm-chart/);
 });
 
 test("messaging workspace honors the selected conversation instead of hard-wiring the first lane", () => {
@@ -373,7 +446,7 @@ test("appendMessagingWorkspacePost keeps threaded replies attached to their root
     author: {
       name: "Analyst",
       title: "Desk operator",
-      presence: "Online",
+      presence: "Available",
       initials: "AN",
       tone: "human",
     },
@@ -399,6 +472,57 @@ test("appendMessagingWorkspacePost keeps threaded replies attached to their root
   if (replyMessage?.kind === "message") {
     assert.equal(replyMessage.parentMessageId, "root-post-1");
     assert.equal(replyMessage.threadRootMessageId, "root-post-1");
+  }
+});
+
+test("appendMessagingWorkspacePost keeps assistant replies threaded under the triggering message", () => {
+  const channel = buildMessagingWorkspaceChannels(defaultCounts)[0];
+  const withTriggeringMessage = appendMessagingWorkspacePost(channel, {
+    id: "triggering-post-1",
+    author: {
+      name: "Admin",
+      title: "Desk operator",
+      presence: "You",
+      initials: "AD",
+      tone: "human",
+    },
+    timestamp: "3:45 PM",
+    body: "Agent, summarize the nomination blocker.",
+  });
+  const withAssistantReply = appendMessagingWorkspacePost(withTriggeringMessage, {
+    id: "assistant-reply-1",
+    author: {
+      name: "ECTRM Assistant",
+      title: "Managed agent · Assistant Console",
+      presence: "Responding in thread",
+      initials: "EA",
+      tone: "system",
+    },
+    timestamp: "3:46 PM",
+    body: "Operations has the next timing check.",
+    source: "assistant",
+    parentMessageId: "triggering-post-1",
+    threadRootMessageId: "triggering-post-1",
+  });
+
+  const triggeringMessage = withAssistantReply.timeline.find(
+    (item) => item.kind === "message" && item.id === "triggering-post-1",
+  );
+  const assistantReply = withAssistantReply.timeline.find(
+    (item) => item.kind === "message" && item.id === "assistant-reply-1",
+  );
+
+  assert.equal(triggeringMessage?.kind, "message");
+  assert.equal(assistantReply?.kind, "message");
+  if (triggeringMessage?.kind === "message") {
+    assert.equal(triggeringMessage.replyCount, 1);
+    assert.deepEqual(triggeringMessage.threadParticipants, ["ECTRM Assistant"]);
+  }
+  if (assistantReply?.kind === "message") {
+    assert.equal(assistantReply.source, "assistant");
+    assert.equal(assistantReply.parentMessageId, "triggering-post-1");
+    assert.equal(assistantReply.threadRootMessageId, "triggering-post-1");
+    assert.equal(assistantReply.replyCount, 0);
   }
 });
 
@@ -438,6 +562,17 @@ test("plain Enter sends while Shift+Enter keeps multiline drafting", () => {
     }),
     false,
   );
+});
+
+test("messaging thread context applies the selected brevity setting", () => {
+  const channel = buildMessagingWorkspaceChannels(defaultCounts)[0];
+  const context = buildThreadContext(channel, {
+    messagingAgentBrevity: "terse",
+  });
+
+  assert.match(context, /Reply style:/);
+  assert.match(context, /one short answer/i);
+  assert.match(context, /single most important next step/i);
 });
 
 test("buildMessagingWorkspacePostFromRecord preserves durable author metadata for thread rendering", () => {

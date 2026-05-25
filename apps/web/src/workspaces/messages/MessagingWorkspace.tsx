@@ -20,6 +20,14 @@ import {
   updateMessagingWorkspacePost,
   type MessagingWorkspaceState,
 } from '../../entities/messages/api'
+import {
+  getAssistantResponseSettingsSnapshot,
+} from '../../shared/assistantResponseSettings'
+import { AssistantChartArtifactList } from '../../shared/AssistantChartArtifactList'
+import {
+  parseAssistantChartArtifacts,
+  splitAssistantMessageText,
+} from '../../shared/assistantChartArtifacts'
 import { appConfig } from '../../shared/config'
 import type { AssistantPromptRequest, AssistantProvider } from '../../shared/models'
 import {
@@ -32,6 +40,7 @@ import {
   type MessagingComposerFormatAction,
 } from './messagingComposerFormatting'
 import { shouldSendMessageOnKeyDown } from './messagingComposerKeybindings'
+import { buildThreadContext } from './messagingThreadContext'
 import { resolveMessagingAgentSession } from './messagingAgentSession'
 import {
   appendMessagingWorkspacePost,
@@ -106,30 +115,6 @@ function buildAssistantAuthor(
     initials: buildMemberInitials(agentName),
     tone: 'system',
   }
-}
-
-function buildThreadContext(selectedChannel: MessagingWorkspaceChannel): string {
-  const recentTimeline = selectedChannel.timeline
-    .slice(-6)
-    .map((item) => {
-      if (item.kind === 'system') {
-        return `System: ${item.label} - ${item.detail}`
-      }
-
-      return `${item.author.name} (${item.author.title}) at ${item.timestamp}: ${item.body.join(' ')}`
-    })
-    .join('\n')
-
-  return [
-    `Slack-style desk channel: ${selectedChannel.label}`,
-    `Connected workspace: ${selectedChannel.connectedWorkspace}`,
-    `Operational topic: ${selectedChannel.topic}`,
-    `Reply style: concise desk-thread response with clear next step.`,
-    `Authority: do not externally commit the firm or send counterparty communication as completed fact; draft, explain, or stage governed follow-up only.`,
-    `Current highlights: ${selectedChannel.highlights.join(' | ')}`,
-    'Recent thread:',
-    recentTimeline,
-  ].join('\n')
 }
 
 function formatAuditTimestamp(value: string | null | undefined): string | null {
@@ -218,10 +203,6 @@ function renderParagraphWithMentions(paragraph: string) {
 export function MessagingWorkspace(props: MessagingWorkspaceProps) {
   const {
     authSession,
-    onOpenPrompt,
-    onOpenAssistant,
-    onOpenOperations,
-    onOpenSettlement,
     onSelectConversation,
     selectedConversationId,
     initialWorkspaceState = null,
@@ -677,41 +658,6 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
       return
     }
 
-    try {
-      const persistedPost = await postDraftToThread(selectedChannel, nextDraft, {
-        attachment: selectedChannelAttachment,
-      })
-      setDraftsByChannelId((current) => ({
-        ...current,
-        [selectedChannel.id]: '',
-      }))
-      setAttachmentsByChannelId((current) => ({
-        ...current,
-        [selectedChannel.id]: null,
-      }))
-      setComposerStatusByChannelId((current) => ({
-        ...current,
-        [selectedChannel.id]: `Posted to ${selectedChannel.label} at ${persistedPost.timestamp}.`,
-      }))
-    } catch (error) {
-      setComposerStatusByChannelId((current) => ({
-        ...current,
-        [selectedChannel.id]:
-          error instanceof Error ? error.message : `Could not post to ${selectedChannel.label}.`,
-      }))
-    }
-  }
-
-  async function handleAskAssistant() {
-    if (!selectedChannel) {
-      return
-    }
-
-    const nextDraft = selectedChannelDraft.trim()
-    if (!nextDraft) {
-      return
-    }
-
     const previewRoutingDecision = decideMessagingAgentRoute({
       channel: selectedChannel,
       draft: nextDraft,
@@ -719,6 +665,7 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
     })
 
     let userTimestamp = ''
+    let triggeringPost: MessagingWorkspacePost | null = null
     try {
       const persistedPost = await postDraftToThread(selectedChannel, nextDraft, {
         attachment: selectedChannelAttachment,
@@ -732,6 +679,7 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
         [selectedChannel.id]: null,
       }))
       userTimestamp = persistedPost.timestamp
+      triggeringPost = persistedPost
     } catch (error) {
       setComposerStatusByChannelId((current) => ({
         ...current,
@@ -743,7 +691,7 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
     if (!previewRoutingDecision.shouldReply) {
       setComposerStatusByChannelId((current) => ({
         ...current,
-        [selectedChannel.id]: previewRoutingDecision.rationale,
+        [selectedChannel.id]: `Posted to ${selectedChannel.label} at ${userTimestamp}. ${previewRoutingDecision.rationale}`,
       }))
       return
     }
@@ -761,10 +709,16 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
     }
 
     const replySession = sessionResolution.session
+    const assistantParentMessageId = triggeringPost.id
+    const assistantThreadRootMessageId = triggeringPost.threadRootMessageId ?? triggeringPost.id
+    setSelectedThreadRootIdByChannelId((current) => ({
+      ...current,
+      [selectedChannel.id]: assistantThreadRootMessageId,
+    }))
     setAssistantReplyChannelId(selectedChannel.id)
     setComposerStatusByChannelId((current) => ({
       ...current,
-      [selectedChannel.id]: `Posted to ${selectedChannel.label} at ${userTimestamp}. Agent is drafting a reply...`,
+      [selectedChannel.id]: `Posted to ${selectedChannel.label} at ${userTimestamp}. Agent is drafting a threaded reply...`,
     }))
 
     try {
@@ -779,6 +733,7 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
         loadAssistantRuntimeSettings(appConfig.apiBase),
         listAssistantAgents(appConfig.apiBase),
       ])
+      const responseSettings = getAssistantResponseSettingsSnapshot()
 
       const provider = runtimeSettings.effective_default_provider ?? runtimeSettings.default_provider
       if (!runtimeSettings.enabled || !provider) {
@@ -808,7 +763,7 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
         agent_id: routingDecision.targetAgent?.agent_id,
         provider: provider as AssistantProvider,
         workspace: routingDecision.targetWorkspace,
-        context: buildThreadContext(selectedChannel),
+        context: buildThreadContext(selectedChannel, responseSettings),
         use_live_tools: true,
         messages: [
           {
@@ -843,6 +798,8 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
               timestamp: formatMessageTimestamp(new Date()),
               body: 'Drafting a reply...',
               source: 'assistant',
+              parentMessageId: assistantParentMessageId,
+              threadRootMessageId: assistantThreadRootMessageId,
             })
             assistantMessageStarted = true
             return
@@ -868,6 +825,8 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
                 timestamp: formatMessageTimestamp(new Date()),
                 body: delta,
                 source: 'assistant',
+                parentMessageId: assistantParentMessageId,
+                threadRootMessageId: assistantThreadRootMessageId,
               })
               assistantMessageStarted = true
               assistantReplyBody += delta
@@ -904,6 +863,7 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
                   conversation_id: selectedChannel.id,
                   body: finalBody,
                   source: 'assistant',
+                  parent_message_id: assistantParentMessageId,
                   assistant_run_id: completeRunId,
                   assistant_agent_id: completeAgentId,
                   assistant_agent_name: completeAgentName,
@@ -937,8 +897,8 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
               ...current,
               [selectedChannel.id]:
                 stagedActionRequestCount > 0
-                  ? `${routingDecision.rationale} Agent replied in ${selectedChannel.label} and staged ${stagedActionRequestCount.toLocaleString()} governed action request${stagedActionRequestCount === 1 ? '' : 's'}.`
-                  : `${routingDecision.rationale} Agent replied in ${selectedChannel.label}.`,
+                  ? `${routingDecision.rationale} Agent replied in thread and staged ${stagedActionRequestCount.toLocaleString()} governed action request${stagedActionRequestCount === 1 ? '' : 's'}.`
+                  : `${routingDecision.rationale} Agent replied in thread.`,
             }))
           }
         },
@@ -1191,6 +1151,8 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
     const threadTimestamp = formatAuditTimestamp(message.editedAt)
     const pinTimestamp = formatAuditTimestamp(message.pinnedAt)
     const isCompact = options?.compact ?? false
+    const renderedMessage = parseAssistantChartArtifacts(message.body.join('\n\n'))
+    const renderedParagraphs = splitAssistantMessageText(renderedMessage.text)
 
     return (
       <article
@@ -1242,9 +1204,14 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
           ) : message.deletedAt ? (
             <p className="messaging-desk-message-deleted">Message deleted.</p>
           ) : (
-            message.body.map((paragraph) => (
-              <p key={paragraph}>{renderParagraphWithMentions(paragraph)}</p>
-            ))
+            <>
+              {renderedParagraphs.map((paragraph, paragraphIndex) => (
+                <p key={`${message.id}-paragraph-${paragraphIndex}`}>
+                  {renderParagraphWithMentions(paragraph)}
+                </p>
+              ))}
+              <AssistantChartArtifactList charts={renderedMessage.charts} />
+            </>
           )}
 
           {message.attachment && !message.deletedAt ? (
@@ -1364,45 +1331,92 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
     )
   }
 
+  function renderSelectedThread(rootMessage: MessagingWorkspaceTimelineMessage) {
+    if (!selectedThreadRoot || selectedThreadRoot.id !== rootMessage.id) {
+      return null
+    }
+
+    const replyPending = threadReplyPendingRootId === rootMessage.id
+
+    return (
+      <div className="messaging-desk-inline-thread">
+        {selectedThreadReplies.length > 0 ? (
+          <div className="messaging-desk-thread-replies">
+            {selectedThreadReplies.map((reply) => renderMessage(reply, { compact: true }))}
+          </div>
+        ) : null}
+        <form className="messaging-desk-thread-composer" onSubmit={handleThreadReplySubmit}>
+          <textarea
+            aria-label={`Reply in thread for ${rootMessage.author.name}`}
+            placeholder={`Reply in thread to ${rootMessage.author.name}`}
+            value={selectedThreadDraft}
+            onChange={handleThreadDraftChange}
+            onKeyDown={handleThreadDraftKeyDown}
+          />
+          <div className="messaging-desk-thread-composer-actions">
+            <button
+              type="button"
+              className="button button-ghost"
+              onClick={() => handleThreadSelect(null)}
+            >
+              Hide
+            </button>
+            <button
+              type="submit"
+              className="button button-primary"
+              disabled={selectedThreadDraft.trim().length === 0 || replyPending}
+            >
+              {replyPending ? 'Sending...' : 'Reply'}
+            </button>
+          </div>
+        </form>
+      </div>
+    )
+  }
+
   return (
     <div className="messaging-workspace">
-      <section className="surface messaging-desk-shell">
+      <section className={`surface messaging-desk-shell${channels.length === 0 ? ' is-empty' : ''}`}>
+        {channels.length > 0 ? (
+          <nav
+            className="messaging-desk-conversation-strip"
+            aria-label="Conversation list"
+          >
+            <div className="messaging-desk-channel-rail-head">
+              <span className="eyebrow">Channels</span>
+              <strong>{channels.length.toLocaleString()}</strong>
+            </div>
+            {channels.map((channel) => {
+              const isSelected = channel.id === selectedChannel?.id
+              const channelRailLabel = channel.label.replace(/^[#@]/, '')
+              return (
+                <button
+                  key={channel.id}
+                  type="button"
+                  className={`messaging-desk-conversation-tab${isSelected ? ' is-selected' : ''}`}
+                  aria-pressed={isSelected}
+                  onClick={() => handleConversationSelect(channel.id)}
+                >
+                  <span className="messaging-desk-conversation-icon" aria-hidden="true">
+                    {channel.kind === 'dm' ? '@' : '#'}
+                  </span>
+                  <strong>{channelRailLabel}</strong>
+                  {channel.unreadCount > 0 ? (
+                    <span className="messaging-desk-conversation-unread">
+                      {channel.unreadCount.toLocaleString()}
+                    </span>
+                  ) : null}
+                </button>
+              )
+            })}
+          </nav>
+        ) : null}
         {selectedChannel ? (
           <>
             <section
               className="messaging-desk-channel"
               aria-label={`Message ${selectedChannel.label}`}
             >
-              <nav
-                className="messaging-desk-conversation-strip"
-                aria-label="Conversation list"
-              >
-                {channels.map((channel) => {
-                  const isSelected = channel.id === selectedChannel.id
-                  return (
-                    <button
-                      key={channel.id}
-                      type="button"
-                      className={`messaging-desk-conversation-tab${isSelected ? ' is-selected' : ''}`}
-                      aria-pressed={isSelected}
-                      onClick={() => handleConversationSelect(channel.id)}
-                    >
-                      <div className="messaging-desk-conversation-tab-head">
-                        <strong>{channel.label}</strong>
-                        {channel.unreadCount > 0 ? (
-                          <span>{channel.unreadCount.toLocaleString()}</span>
-                        ) : null}
-                      </div>
-                      <small>
-                        {channel.kind === 'dm' ? 'Direct message' : 'Channel'} ·{' '}
-                        {channel.connectedWorkspace}
-                      </small>
-                      <p>{channel.preview}</p>
-                    </button>
-                  )
-                })}
-              </nav>
-
               <header className="messaging-desk-channel-header">
                 <div className="messaging-desk-channel-copy">
                   <div className="messaging-desk-channel-title-row">
@@ -1420,16 +1434,27 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
               </header>
 
               <div className="messaging-desk-feed" ref={feedRef}>
-                {visibleTimeline.map((item) =>
-                  item.kind === 'system' ? (
-                    <div key={item.id} className="messaging-desk-divider">
-                      <span>{item.label}</span>
-                      <small>{item.detail}</small>
+                {visibleTimeline.map((item) => {
+                  if (item.kind === 'system') {
+                    return (
+                      <div key={item.id} className="messaging-desk-divider">
+                        <span>{item.label}</span>
+                        <small>{item.detail}</small>
+                      </div>
+                    )
+                  }
+
+                  const isThreadOpen = selectedThreadRoot?.id === item.id
+                  return (
+                    <div
+                      key={item.id}
+                      className={`messaging-desk-feed-message${isThreadOpen ? ' has-thread-open' : ''}`}
+                    >
+                      {renderMessage(item)}
+                      {renderSelectedThread(item)}
                     </div>
-                  ) : (
-                    renderMessage(item)
-                  ),
-                )}
+                  )
+                })}
               </div>
 
               <form
@@ -1555,15 +1580,7 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
                       className="button button-primary"
                       disabled={sendDisabled || assistantReplyPending}
                     >
-                      Send message
-                    </button>
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      onClick={() => void handleAskAssistant()}
-                      disabled={sendDisabled || assistantReplyPending}
-                    >
-                      {assistantReplyPending ? 'Messaging agent deciding...' : 'Let messaging agent decide'}
+                      {assistantReplyPending ? 'Agent drafting...' : 'Send message'}
                     </button>
                   </div>
                 </div>
@@ -1574,160 +1591,6 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
                 </p>
               </form>
             </section>
-
-            <aside className="messaging-desk-context">
-              <section className="messaging-desk-context-card">
-                <span className="eyebrow">Thread details</span>
-                {selectedThreadRoot ? (
-                  <>
-                    <strong>
-                      {selectedThreadRoot.replyCount
-                        ? `${selectedThreadRoot.replyCount.toLocaleString()} threaded repl${selectedThreadRoot.replyCount === 1 ? 'y' : 'ies'}`
-                        : 'Start the thread here'}
-                    </strong>
-                    <p>
-                      Keep side replies attached to the originating message instead of flattening every follow-up into the channel feed.
-                    </p>
-                    <div className="messaging-desk-thread-panel">
-                      {renderMessage(selectedThreadRoot, { compact: true })}
-                      <div className="messaging-desk-thread-replies">
-                        {selectedThreadReplies.length > 0 ? (
-                          selectedThreadReplies.map((reply) =>
-                            renderMessage(reply, { compact: true }),
-                          )
-                        ) : (
-                          <p className="messaging-desk-thread-empty">
-                            No replies yet. Use this lane to keep the side conversation attached.
-                          </p>
-                        )}
-                      </div>
-                      <form
-                        className="messaging-desk-thread-composer"
-                        onSubmit={handleThreadReplySubmit}
-                      >
-                        <textarea
-                          aria-label={`Reply in thread for ${selectedThreadRoot.author.name}`}
-                          placeholder={`Reply in thread to ${selectedThreadRoot.author.name}`}
-                          value={selectedThreadDraft}
-                          onChange={handleThreadDraftChange}
-                          onKeyDown={handleThreadDraftKeyDown}
-                        />
-                        <div className="messaging-desk-thread-composer-actions">
-                          <button
-                            type="button"
-                            className="button button-ghost"
-                            onClick={() => handleThreadSelect(null)}
-                          >
-                            Close thread
-                          </button>
-                          <button
-                            type="submit"
-                            className="button button-primary"
-                            disabled={
-                              selectedThreadDraft.trim().length === 0 ||
-                              threadReplyPendingRootId === selectedThreadRoot.id
-                            }
-                          >
-                            {threadReplyPendingRootId === selectedThreadRoot.id
-                              ? 'Sending thread reply...'
-                              : 'Send thread reply'}
-                          </button>
-                        </div>
-                      </form>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <strong>Select a message to thread</strong>
-                    <p>
-                      Reply in thread keeps message-specific follow-up attached to the originating post instead of appending everything to the channel timeline.
-                    </p>
-                  </>
-                )}
-              </section>
-
-              <section className="messaging-desk-context-card">
-                <strong>Lane context</strong>
-                <p>{selectedChannel.topic}</p>
-                <div className="messaging-desk-metric-list">
-                  {selectedChannel.metrics.map((metric) => (
-                    <article key={metric.label} className="messaging-desk-metric-card">
-                      <span>{metric.label}</span>
-                      <strong>{metric.value}</strong>
-                    </article>
-                  ))}
-                </div>
-              </section>
-
-              <section className="messaging-desk-context-card">
-                <strong>People in this lane</strong>
-                <div className="messaging-desk-member-list">
-                  {selectedChannel.members.map((member) => (
-                    <article key={member.name} className="messaging-desk-member-card">
-                      <div
-                        className="messaging-desk-member-avatar"
-                        data-tone={member.tone}
-                        aria-hidden="true"
-                      >
-                        {member.initials}
-                      </div>
-                      <div>
-                        <strong>{member.name}</strong>
-                        <p>{member.title}</p>
-                        <small>{member.presence}</small>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </section>
-
-              <section className="messaging-desk-context-card">
-                <strong>Why this reads more like Slack</strong>
-                <ul className="messaging-desk-highlight-list">
-                  {selectedChannel.highlights.map((highlight) => (
-                    <li key={highlight}>{highlight}</li>
-                  ))}
-                </ul>
-              </section>
-
-              <section className="messaging-desk-context-card">
-                <strong>Jump routes</strong>
-                <p>
-                  Use messaging as the front door, then open the deeper workspace
-                  only when you need record-level controls.
-                </p>
-                <div className="messaging-desk-jump-actions">
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    onClick={onOpenPrompt}
-                  >
-                    Open Home
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    onClick={onOpenAssistant}
-                  >
-                    Open Assistant Console
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    onClick={onOpenOperations}
-                  >
-                    Open Work Queue
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    onClick={onOpenSettlement}
-                  >
-                    Open Settlement
-                  </button>
-                </div>
-              </section>
-            </aside>
           </>
         ) : (
           <div className="messaging-desk-empty">

@@ -20,6 +20,7 @@ from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_invoice import TradeInvoice
 
 
 class DocumentWorkflowsServiceTests(unittest.TestCase):
@@ -47,6 +48,7 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
             session.query(ExternalDataRun).delete()
             session.query(DocumentIngestionPage).delete()
             session.query(DocumentIngestion).delete()
+            session.query(TradeInvoice).delete()
             session.query(Trade).delete()
             session.query(ReferencePriceIndex).delete()
             session.commit()
@@ -247,6 +249,38 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
         session.add(record)
         return record
 
+    def _seed_invoice(
+        self,
+        session,
+        *,
+        trade_id: str,
+        invoice_number: str,
+        invoice_amount: Decimal = Decimal("99000"),
+    ) -> TradeInvoice:
+        now = datetime(2026, 4, 14, 12, 45, tzinfo=timezone.utc)
+        record = TradeInvoice(
+            trade_id=trade_id,
+            delivery_id=None,
+            leg_no=None,
+            invoice_number=invoice_number,
+            invoice_currency_code="USD",
+            billed_quantity=None,
+            quantity_unit_code=None,
+            invoice_amount=invoice_amount,
+            status="ISSUED",
+            issued_at=now,
+            due_at=datetime(2026, 4, 20, 0, 0, tzinfo=timezone.utc),
+            dispute_reason=None,
+            notes=None,
+            created_at=now,
+            created_by="tester",
+            updated_at=now,
+            updated_by="tester",
+            version=1,
+        )
+        session.add(record)
+        return record
+
     def test_workflow_registry_assigns_process_prices_to_price_publication_report(self) -> None:
         with self.SessionLocal() as session:
             self._seed_price_index(session)
@@ -299,6 +333,81 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
         self.assertEqual(create_workflow.target.record_type, "TRADE_INVOICE")
         self.assertEqual(create_workflow.owner.record_type, "TRADE")
         self.assertEqual(create_workflow.owner.record_id, "TRD-WF-200")
+        self.assertTrue(create_workflow.approval_required)
+        self.assertIn("CREATES_NEW_RECORD", create_workflow.risk_flags)
+        self.assertIn("FINANCIAL_MUTATION", create_workflow.risk_flags)
+
+    def test_workflow_summary_exposes_create_confirmation_candidate_under_trade(self) -> None:
+        with self.SessionLocal() as session:
+            self._seed_trade(session, trade_id="TRD-WF-CON-200")
+            document = self._seed_verified_document(
+                session,
+                document_id="DOC-CON-WF-200",
+                document_kind="TRADE_CONFIRMATION",
+                header_fields=[
+                    {"field_key": "confirmation_number", "value": "CONF-WF-200"},
+                    {"field_key": "trade_id", "value": "TRD-WF-CON-200"},
+                    {"field_key": "trade_date", "value": "2026-04-14"},
+                    {"field_key": "counterparty", "value": "Shell Trading"},
+                ],
+            )
+            session.commit()
+
+            workflows = list_document_workflows(session, document_id=document.document_id)
+
+        self.assertEqual(workflows.action_plan.candidate_state, "CREATE_CANDIDATE")
+        self.assertEqual(workflows.action_plan.operation_type, "create_trade_confirmation")
+        self.assertEqual(workflows.governance.status, "HUMAN_CONFIRMATION_REQUIRED")
+        self.assertEqual(
+            [workflow.workflow_id for workflow in workflows.workflows],
+            ["create_confirmation_from_document", "match_existing_record"],
+        )
+        create_workflow = workflows.workflows[0]
+        self.assertEqual(create_workflow.status, "READY")
+        self.assertEqual(create_workflow.target.record_type, "TRADE_CONFIRMATION")
+        self.assertEqual(create_workflow.owner.record_type, "TRADE")
+        self.assertEqual(create_workflow.owner.record_id, "TRD-WF-CON-200")
+        self.assertTrue(create_workflow.approval_required)
+        self.assertIn("CREATES_NEW_RECORD", create_workflow.risk_flags)
+        self.assertIn("FINANCIAL_MUTATION", create_workflow.risk_flags)
+
+    def test_workflow_summary_exposes_create_payment_candidate_under_invoice(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(session, trade_id="TRD-WF-PAY-200")
+            invoice = self._seed_invoice(
+                session,
+                trade_id=trade.trade_id,
+                invoice_number="INV-WF-PAY-200",
+            )
+            document = self._seed_verified_document(
+                session,
+                document_id="DOC-PAY-WF-200",
+                document_kind="PAYMENT_ADVICE",
+                header_fields=[
+                    {"field_key": "payment_reference", "value": "PAY-WF-200"},
+                    {"field_key": "invoice_number", "value": "INV-WF-PAY-200"},
+                    {"field_key": "advice_date", "value": "2026-04-15"},
+                    {"field_key": "amount", "value": "99000"},
+                    {"field_key": "currency", "value": "USD"},
+                ],
+            )
+            session.commit()
+            invoice_id = str(invoice.id)
+
+            workflows = list_document_workflows(session, document_id=document.document_id)
+
+        self.assertEqual(workflows.action_plan.candidate_state, "CREATE_CANDIDATE")
+        self.assertEqual(workflows.action_plan.operation_type, "create_trade_payment")
+        self.assertEqual(workflows.governance.status, "HUMAN_CONFIRMATION_REQUIRED")
+        self.assertEqual(
+            [workflow.workflow_id for workflow in workflows.workflows],
+            ["create_payment_from_document", "match_existing_record"],
+        )
+        create_workflow = workflows.workflows[0]
+        self.assertEqual(create_workflow.status, "READY")
+        self.assertEqual(create_workflow.target.record_type, "TRADE_PAYMENT")
+        self.assertEqual(create_workflow.owner.record_type, "TRADE_INVOICE")
+        self.assertEqual(create_workflow.owner.record_id, invoice_id)
         self.assertTrue(create_workflow.approval_required)
         self.assertIn("CREATES_NEW_RECORD", create_workflow.risk_flags)
         self.assertIn("FINANCIAL_MUTATION", create_workflow.risk_flags)

@@ -84,6 +84,7 @@ import type {
   DeliveryRecord,
   PortfolioRecord,
   PriceIndexRecord,
+  PriceSourceReviewRecord,
   RailRouteRecord,
   ReferenceRecord,
   SpatialFeatureRecord,
@@ -204,6 +205,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const [portfolios, setPortfolios] = useState<PortfolioRecord[]>([])
   const [externalDataRuns, setExternalDataRuns] = useState<ExternalDataRunRecord[]>([])
   const [externalDataSyncStatus, setExternalDataSyncStatus] = useState<ExternalDataSyncStatusRecord | null>(null)
+  const [externalDataPriceSources, setExternalDataPriceSources] = useState<PriceSourceReviewRecord[]>([])
   const [tradingSources, setTradingSources] = useState<TradingSourceRecord[]>([])
   const [weatherLocations, setWeatherLocations] = useState<WeatherLocationRecord[]>([])
   const [weatherSyncStatus, setWeatherSyncStatus] = useState<WeatherSyncStatusRecord | null>(null)
@@ -339,6 +341,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setPortfolios([])
     setExternalDataRuns([])
     setExternalDataSyncStatus(null)
+    setExternalDataPriceSources([])
     setTradingSources([])
     setWeatherLocations([])
     setWeatherSyncStatus(null)
@@ -536,6 +539,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         const payload = await loadAdminWorkspaceBootstrap(appConfig.apiBase, { adminHeaders })
         setExternalDataRuns(payload.externalDataRuns as ExternalDataRunRecord[])
         setExternalDataSyncStatus(payload.externalDataSyncStatus as ExternalDataSyncStatusRecord | null)
+        setExternalDataPriceSources(payload.externalDataPriceSources as PriceSourceReviewRecord[])
         setTradingSources(payload.tradingSources as TradingSourceRecord[])
         setWeatherLocations(payload.weatherLocations as WeatherLocationRecord[])
         setWeatherSyncStatus(payload.weatherSyncStatus as WeatherSyncStatusRecord | null)
@@ -1093,6 +1097,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     deliveries,
     error,
     events,
+    externalDataPriceSources,
     externalDataRuns,
     externalDataSyncStatus,
     groupErrors,

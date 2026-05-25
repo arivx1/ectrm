@@ -609,8 +609,9 @@ def _lookup_trade_payments(db: Session, field_map: dict[str, str], limit: int) -
     payment_reference = _normalized_token(field_map.get("payment_reference"))
     invoice_number = _normalized_token(field_map.get("invoice_number"))
     trade_id = _normalized_token(field_map.get("trade_id"))
-    due_date = _parse_date(field_map.get("due_date"))
-    total_amount = _parse_decimal(field_map.get("total_amount"))
+    due_date = _parse_date(field_map.get("due_date") or field_map.get("advice_date"))
+    amount_key = "amount" if field_map.get("amount") is not None else "total_amount"
+    total_amount = _parse_decimal(field_map.get("amount") or field_map.get("total_amount"))
 
     conditions = []
     if payment_reference:
@@ -642,7 +643,7 @@ def _lookup_trade_payments(db: Session, field_map: dict[str, str], limit: int) -
         if due_date and _same_date(payment.due_at, due_date):
             matched_keys.append("due_date")
         if total_amount is not None and _same_decimal(payment.payment_amount, total_amount):
-            matched_keys.append("total_amount")
+            matched_keys.append(amount_key)
         if not matched_keys:
             continue
         matches.append(

@@ -1,6 +1,6 @@
 import type { InspectorTab, ViewKey } from './models'
 
-export type AppRouteHandoffSource = 'events' | 'assistant' | 'map' | 'reference' | 'terminal'
+export type AppRouteHandoffSource = 'events' | 'assistant' | 'map' | 'reference' | 'terminal' | 'home'
 export type AppRouteHandoffFocusType =
   | 'trade'
   | 'workflow_item'
@@ -90,6 +90,7 @@ function normalizeHandoffSource(value: unknown): AppRouteHandoffSource | null {
     case 'map':
     case 'reference':
     case 'terminal':
+    case 'home':
       return value
     default:
       return null
@@ -381,6 +382,15 @@ export function describeAppRouteHandoff(
       detail:
         normalizedHandoff.rationale ??
         `Terminal search opened with ${formatFocusType(normalizedHandoff.focus.type)} ${focusLabel} in focus. Clear the focus when you are ready to widen back to the full workspace.`,
+    }
+  }
+
+  if (normalizedHandoff.source === 'home') {
+    return {
+      title: normalizedHandoff.label ?? `Opened from Home for ${focusLabel}`,
+      detail:
+        normalizedHandoff.rationale ??
+        `Home opened with ${formatFocusType(normalizedHandoff.focus.type)} ${focusLabel} in focus. Clear the focus when you are ready to widen back to the full workspace.`,
     }
   }
 

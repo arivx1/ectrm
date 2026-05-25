@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type {
   CounterpartyCreditPreviewRecord,
   ExternalDataSyncStatusRecord,
+  PriceSourceReviewRecord,
   WeatherLocationRecord,
   WeatherSyncStatusRecord,
 } from '../../shared/models'
@@ -11,6 +12,7 @@ import { tradeStatusIsActive } from '../../shared/trading'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import { type StoredAuthSession } from '../../shared/mutation'
+import type { ExternalDataSyncProvider } from '../../entities/app/workspaceDataShared'
 import { AgentManagementPanel } from './AgentManagementPanel'
 import { AssistantApprovalInboxPanel } from './AssistantApprovalInboxPanel'
 import { AssistantControlTowerPanel } from './AssistantControlTowerPanel'
@@ -83,7 +85,6 @@ type TradingSourceRecord = {
 
 type ExternalDataProviderStatusRecord = ExternalDataSyncStatusRecord['providers'][number]
 type CounterpartyCreditPreviewRow = CounterpartyCreditPreviewRecord['rows'][number]
-type ExternalDataSyncProvider = 'EIA' | 'EIA_FUNDAMENTALS' | 'FRED' | 'CFTC' | 'CAISO' | 'ERCOT' | 'KALSHI'
 
 type SchemaEntityKey =
   | 'events'
@@ -108,6 +109,7 @@ type AdminWorkspaceProps = {
   priceIndices: PriceIndexRecord[]
   externalDataRuns: ExternalDataRunRecord[]
   externalDataSyncStatus: ExternalDataSyncStatusRecord | null
+  externalDataPriceSources: PriceSourceReviewRecord[]
   tradingSources: TradingSourceRecord[]
   weatherLocations: WeatherLocationRecord[]
   weatherSyncStatus: WeatherSyncStatusRecord | null
@@ -375,6 +377,43 @@ function marketDataCategoryLabel(value: string): string {
   }
 }
 
+function priceSourceReviewTone(status: string): 'active' | 'blocked' | 'in-progress' | 'cancelled' {
+  switch (status) {
+    case 'current':
+    case 'loaded':
+      return 'active'
+    case 'running':
+      return 'in-progress'
+    case 'inactive':
+      return 'cancelled'
+    default:
+      return 'blocked'
+  }
+}
+
+function priceSourceReviewLabel(status: string): string {
+  switch (status) {
+    case 'current':
+      return 'Current'
+    case 'loaded':
+      return 'Loaded'
+    case 'stale':
+      return 'Stale'
+    case 'failed':
+      return 'Failed'
+    case 'running':
+      return 'Running'
+    case 'missing':
+      return 'Missing mark'
+    case 'unmapped':
+      return 'Unmapped'
+    case 'inactive':
+      return 'Inactive'
+    default:
+      return 'Unknown'
+  }
+}
+
 function matchesAdminTradeFilter(trade: Trade, query: string): boolean {
   return matchesTextFilter(query, [
     trade.trade_id,
@@ -437,6 +476,36 @@ function matchesExternalDataProviderFilter(provider: ExternalDataProviderStatusR
     provider.error_summary,
     provider.latest_run?.id,
     provider.latest_run?.status,
+  ])
+}
+
+function matchesPriceSourceReviewFilter(source: PriceSourceReviewRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    source.price_index_code,
+    source.price_index_name,
+    source.commodity_code,
+    source.quote_type,
+    source.market,
+    source.location_code,
+    source.price_unit_code,
+    source.price_currency_code,
+    source.provider,
+    source.dataset_code,
+    source.series_id,
+    source.frequency,
+    source.source_unit,
+    source.source_currency_code,
+    source.transform_rule,
+    source.review_status,
+    source.provider_health_status,
+    source.latest_run_status,
+    source.latest_run_id,
+    source.last_success_at,
+    source.provider_error_summary,
+    source.latest_observation_date,
+    source.latest_value,
+    source.latest_source_revision,
+    source.latest_downloaded_at,
   ])
 }
 
@@ -532,6 +601,7 @@ export function AdminWorkspace({
   priceIndices,
   externalDataRuns,
   externalDataSyncStatus,
+  externalDataPriceSources,
   tradingSources,
   weatherLocations,
   weatherSyncStatus,
@@ -606,6 +676,13 @@ export function AdminWorkspace({
   const visibleExternalDataRuns = useMemo(
     () => externalDataRuns.filter((run) => matchesExternalDataRunFilter(run, effectiveScreenFilter)),
     [effectiveScreenFilter, externalDataRuns],
+  )
+  const visibleExternalDataPriceSources = useMemo(
+    () =>
+      externalDataPriceSources.filter((source) =>
+        matchesPriceSourceReviewFilter(source, effectiveScreenFilter),
+      ),
+    [effectiveScreenFilter, externalDataPriceSources],
   )
   const visibleTradingSources = useMemo(
     () => tradingSources.filter((source) => matchesTradingSourceFilter(source, effectiveScreenFilter)),
@@ -846,6 +923,24 @@ export function AdminWorkspace({
   const marketDataAttentionCount = marketDataProviders.filter((provider) =>
     ['failed', 'stale', 'missing', 'degraded'].includes(provider.health_status),
   ).length
+  const priceSourceAttentionCount = visibleExternalDataPriceSources.filter((source) =>
+    ['failed', 'stale', 'missing', 'unmapped'].includes(source.review_status),
+  ).length
+  const priceSourceProviderCount = useMemo(
+    () => new Set(visibleExternalDataPriceSources.map((source) => source.provider)).size,
+    [visibleExternalDataPriceSources],
+  )
+  const latestMarkedPriceSource = useMemo(
+    () =>
+      visibleExternalDataPriceSources
+        .filter((source) => source.latest_downloaded_at)
+        .sort((left, right) => {
+          const leftTime = new Date(left.latest_downloaded_at ?? '').getTime()
+          const rightTime = new Date(right.latest_downloaded_at ?? '').getTime()
+          return rightTime - leftTime
+        })[0] ?? null,
+    [visibleExternalDataPriceSources],
+  )
   const counterpartyCreditImportRuns = useMemo(
     () => visibleExternalDataRuns.filter((run) => run.job_name === 'import_counterparty_credit_snapshots'),
     [visibleExternalDataRuns],
@@ -896,6 +991,7 @@ export function AdminWorkspace({
           activeCommodities.length +
           priceIndices.length +
           externalDataRuns.length +
+          externalDataPriceSources.length +
           tradingSources.length +
           weatherLocations.length +
           (counterpartyCreditPreview?.rows.length ?? 0)
@@ -908,6 +1004,7 @@ export function AdminWorkspace({
           visibleActiveCommodities.length +
           visiblePriceIndices.length +
           visibleExternalDataRuns.length +
+          visibleExternalDataPriceSources.length +
           visibleTradingSources.length +
           visibleWeatherLocations.length +
           visibleCounterpartyCreditPreviewRows.length
@@ -1038,6 +1135,22 @@ export function AdminWorkspace({
             </article>
             <article className="admin-card">
               <AdminCardTitle
+                label="Price Sources"
+                tooltip="Reviewable source-to-price-index mappings loaded from the governed price source catalog."
+              />
+              <p>
+                {visibleExternalDataPriceSources.length > 0
+                  ? `${visibleExternalDataPriceSources.length} price sources across ${priceSourceProviderCount} providers.`
+                  : 'No price sources are currently in view.'}
+              </p>
+              <span>
+                {visibleExternalDataPriceSources.length > 0
+                  ? `${priceSourceAttentionCount} need attention`
+                  : 'Load or seed price-index sources to populate the catalog'}
+              </span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
                 label="Latest Healthy Data"
                 tooltip="Newest successfully ingested market-data observation currently available across the tracked providers."
               />
@@ -1095,6 +1208,64 @@ export function AdminWorkspace({
                 </article>
               ))
             )}
+          </div>
+
+          <div className="admin-run-list">
+            <div className="detail-row">
+              <span>
+                Price source inventory · {visibleExternalDataPriceSources.length} source{visibleExternalDataPriceSources.length === 1 ? '' : 's'}
+                {latestMarkedPriceSource?.latest_downloaded_at
+                  ? ` · latest mark loaded ${formatDate(latestMarkedPriceSource.latest_downloaded_at)}`
+                  : ''}
+              </span>
+            </div>
+            {visibleExternalDataPriceSources.length === 0 ? (
+              <div className="detail-row">
+                <span>{hasScreenFilter ? 'No price sources match the current local filter.' : 'No price source catalog rows are loaded yet.'}</span>
+              </div>
+            ) : (
+              visibleExternalDataPriceSources.slice(0, 40).map((source) => {
+                const latestValue =
+                  source.latest_value != null
+                    ? `${formatNumber(source.latest_value, 3)} ${source.latest_unit_code ?? source.source_unit}${source.latest_currency_code ? ` ${source.latest_currency_code}` : ''}`
+                    : 'No observation'
+
+                return (
+                  <article key={`${source.provider}-${source.series_id}-${source.id}`} className="admin-run-row admin-weather-row">
+                    <div>
+                      <strong>{source.price_index_code}</strong>
+                      <p>
+                        {source.price_index_name ?? 'Unmapped price index'} · {source.provider} · {source.series_id}
+                      </p>
+                      <div className="admin-weather-row-detail">
+                        <span>{source.commodity_code ?? 'No commodity'}</span>
+                        <span>{source.frequency.toUpperCase()}</span>
+                        <span>{source.market ?? source.dataset_code ?? 'No market'}</span>
+                        <span>{source.location_code ?? 'No location'}</span>
+                      </div>
+                      {source.provider_error_summary ? <p>{source.provider_error_summary}</p> : null}
+                    </div>
+                    <div className="admin-run-meta">
+                      <span className={`status-pill status-pill-${priceSourceReviewTone(source.review_status)}`}>
+                        {priceSourceReviewLabel(source.review_status)}
+                      </span>
+                      <span>
+                        {source.latest_observation_date
+                          ? `${formatDateOnly(source.latest_observation_date)} · ${latestValue}`
+                          : latestValue}
+                      </span>
+                      <span>{source.latest_downloaded_at ? `Loaded ${formatDate(source.latest_downloaded_at)}` : 'Never loaded'}</span>
+                      <span>{source.latest_run_id ? `Run #${source.latest_run_id}` : source.latest_run_status ?? 'No run'}</span>
+                    </div>
+                  </article>
+                )
+              })
+            )}
+            {visibleExternalDataPriceSources.length > 40 ? (
+              <div className="detail-row">
+                <span>Showing the first 40 matching price sources. Narrow the local filter to inspect the rest.</span>
+              </div>
+            ) : null}
           </div>
 
           <div className="admin-run-list">

@@ -135,6 +135,15 @@ def _provider_definitions() -> tuple[dict[str, object], ...]:
             "scheduler_interval_minutes": settings.FRED_SYNC_INTERVAL_MINUTES,
         },
         {
+            "provider": "BLS_PPI",
+            "label": "BLS PPI Commodity Index Sync",
+            "category": "price",
+            "observation_kind": "price",
+            "series_kind": "price",
+            "success_sla_hours": settings.BLS_PPI_SYNC_SUCCESS_SLA_HOURS,
+            "scheduler_interval_minutes": settings.BLS_PPI_SYNC_INTERVAL_MINUTES,
+        },
+        {
             "provider": "WORLD_BANK",
             "label": "World Bank Pink Sheet Sync",
             "category": "price",

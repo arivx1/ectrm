@@ -614,13 +614,6 @@ export function buildMessagingWorkspaceChannels(
     initials: 'EC',
     tone: 'desk',
   }
-  const miaChen: MessagingWorkspaceMember = {
-    name: 'Mia Chen',
-    title: 'Scheduler',
-    presence: 'Online',
-    initials: 'MC',
-    tone: 'human',
-  }
   const approvalsBot: MessagingWorkspaceMember = {
     name: 'Approvals Bot',
     title: 'Action request lane',
@@ -683,7 +676,7 @@ export function buildMessagingWorkspaceChannels(
         { label: 'Desk attention', value: formatCountValue(counts.attentionItems) },
         { label: 'Open work', value: formatCountValue(counts.openWorkItems) },
       ],
-      members: [ectrmDesk, miaChen, approvalsBot],
+      members: [ectrmDesk, opsQueue, approvalsBot],
       timeline: [
         {
           id: 'assistant-day',
@@ -713,7 +706,7 @@ export function buildMessagingWorkspaceChannels(
         {
           id: 'assistant-msg-2',
           kind: 'message',
-          author: miaChen,
+          author: opsQueue,
           timestamp: '1:12 PM',
           body: [
             'Keep this threaded with the nomination conversation so Operations can react without switching screens.',
@@ -756,7 +749,7 @@ export function buildMessagingWorkspaceChannels(
         { label: 'Settlement queue', value: formatCountValue(counts.settlementQueueItems) },
         { label: 'Payments due', value: formatCountValue(counts.paymentsDue) },
       ],
-      members: [northshore, miaChen, settlementControl],
+      members: [northshore, opsQueue, settlementControl],
       timeline: [
         {
           id: 'northshore-day',
@@ -784,10 +777,10 @@ export function buildMessagingWorkspaceChannels(
         {
           id: 'northshore-msg-2',
           kind: 'message',
-          author: miaChen,
+          author: opsQueue,
           timestamp: '3:01 PM',
           body: [
-            'I can take this into the operations lane as soon as the desk confirms we should accept the revised timing.',
+            'Operations can take this into the queue as soon as the desk confirms whether to accept the revised timing.',
           ],
           reactions: ['on it 1'],
         },
@@ -827,7 +820,7 @@ export function buildMessagingWorkspaceChannels(
         { label: 'Ops queue', value: formatCountValue(counts.operationsQueueItems) },
         { label: 'Settlement queue', value: formatCountValue(counts.settlementQueueItems) },
       ],
-      members: [opsQueue, miaChen, ectrmDesk],
+      members: [opsQueue, ectrmDesk],
       timeline: [
         {
           id: 'ops-day',
@@ -848,10 +841,10 @@ export function buildMessagingWorkspaceChannels(
         {
           id: 'ops-msg-2',
           kind: 'message',
-          author: miaChen,
+          author: opsQueue,
           timestamp: '2:52 PM',
           body: [
-            'If this looked more like Slack, I would handle queue review here first and then jump into the workboard only when I need the record-level controls.',
+            'Queue review can start here first, then jump into the workboard only when record-level controls are needed.',
           ],
           reactions: ['yes 4'],
         },
@@ -882,7 +875,7 @@ export function buildMessagingWorkspaceChannels(
         { label: 'Stale pricing', value: formatCountValue(counts.stalePricingItems) },
         { label: 'Pending pricing', value: formatCountValue(counts.pendingPricingTrades) },
       ],
-      members: [dashboardAttention, ectrmDesk, miaChen],
+      members: [dashboardAttention, ectrmDesk],
       timeline: [
         {
           id: 'attention-day',
@@ -937,7 +930,7 @@ export function buildMessagingWorkspaceChannels(
         { label: 'Payments due', value: formatCountValue(counts.paymentsDue) },
         { label: 'Pending settlement', value: formatCountValue(counts.pendingSettlementTrades) },
       ],
-      members: [settlementControl, miaChen],
+      members: [settlementControl, opsQueue],
       timeline: [
         {
           id: 'settlement-day',
@@ -957,10 +950,10 @@ export function buildMessagingWorkspaceChannels(
         {
           id: 'settlement-msg-2',
           kind: 'message',
-          author: miaChen,
+          author: opsQueue,
           timestamp: '2:24 PM',
           body: [
-            'I will update this lane once Operations confirms the delivery window. That way settlement does not have to chase the queue separately.',
+            'Operations will update this lane once the delivery window is confirmed so settlement does not have to chase the queue separately.',
           ],
           reactions: ['thanks 1'],
         },

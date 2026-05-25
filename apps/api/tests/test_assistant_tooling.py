@@ -34,6 +34,7 @@ from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
 from apps.api.app.models.external_series_observation import ExternalSeriesObservation
+from apps.api.app.models.home_view_definition import HomeViewDefinition
 from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.models.position import Position
 from apps.api.app.models.price_index_observation import PriceIndexObservation
@@ -114,6 +115,7 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
             session.query(TradeInvoice).delete()
             session.query(TradeConfirmation).delete()
             session.query(TradeWorkflowItem).delete()
+            session.query(HomeViewDefinition).delete()
             session.query(ReportPreset).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
@@ -2062,6 +2064,284 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail_result.output["document"]["pages"][0]["document_kind"], "TRADE_CONFIRMATION")
         self.assertEqual(list_trace.tool_name, "list_documents")
         self.assertEqual(detail_trace.tool_name, "get_document_ingestion")
+
+    def test_tool_service_returns_document_type_count_chart(self) -> None:
+        created_at = datetime(2026, 3, 19, 14, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    DocumentIngestion(
+                        document_id="doc-invoice-summary",
+                        original_filename="invoice-summary.pdf",
+                        display_name="Invoice From Summary",
+                        content_type="application/pdf",
+                        storage_key="documents/doc-invoice-summary.pdf",
+                        sha256="1" * 64,
+                        size_bytes=2048,
+                        page_count=1,
+                        status="ANALYZED",
+                        processor_provider="openai",
+                        processor_model="gpt-5-mini",
+                        classifier_version="test-classifier",
+                        extractor_version="test-extractor",
+                        analysis_summary={"dominant_document_kind": "INVOICE"},
+                        processing_errors=[],
+                        review_status="VERIFIED",
+                        review_notes=None,
+                        reviewed_at=None,
+                        reviewed_by=None,
+                        created_at=created_at,
+                        created_by="settlement.ops",
+                        updated_at=created_at,
+                        updated_by="settlement.ops",
+                        version=1,
+                    ),
+                    DocumentIngestion(
+                        document_id="doc-invoice-page",
+                        original_filename="invoice-page.pdf",
+                        display_name="Invoice From Page",
+                        content_type="application/pdf",
+                        storage_key="documents/doc-invoice-page.pdf",
+                        sha256="2" * 64,
+                        size_bytes=2048,
+                        page_count=1,
+                        status="ANALYZED",
+                        processor_provider="openai",
+                        processor_model="gpt-5-mini",
+                        classifier_version="test-classifier",
+                        extractor_version="test-extractor",
+                        analysis_summary={},
+                        processing_errors=[],
+                        review_status="IN_REVIEW",
+                        review_notes=None,
+                        reviewed_at=None,
+                        reviewed_by=None,
+                        created_at=created_at,
+                        created_by="settlement.ops",
+                        updated_at=created_at,
+                        updated_by="settlement.ops",
+                        version=1,
+                    ),
+                ]
+            )
+            session.add_all(
+                [
+                    DocumentIngestionPage(
+                        document_id="doc-invoice-summary",
+                        page_number=1,
+                        classification_status="ANALYZED",
+                        extraction_status="ANALYZED",
+                        document_kind="UNKNOWN",
+                        document_subtype=None,
+                        classification_confidence=0.8,
+                        classification_payload={},
+                        header_fields=[],
+                        table_blocks=[],
+                        raw_text="Settlement invoice.",
+                        processing_warnings=[],
+                        processing_errors=[],
+                        review_status="UNREVIEWED",
+                        review_notes=None,
+                        reviewed_at=None,
+                        reviewed_by=None,
+                        processed_at=created_at,
+                        created_at=created_at,
+                        updated_at=created_at,
+                    ),
+                    DocumentIngestionPage(
+                        document_id="doc-invoice-page",
+                        page_number=1,
+                        classification_status="ANALYZED",
+                        extraction_status="ANALYZED",
+                        document_kind="INVOICE",
+                        document_subtype=None,
+                        classification_confidence=0.93,
+                        classification_payload={},
+                        header_fields=[],
+                        table_blocks=[],
+                        raw_text="Settlement invoice.",
+                        processing_warnings=[],
+                        processing_errors=[],
+                        review_status="UNREVIEWED",
+                        review_notes=None,
+                        reviewed_at=None,
+                        reviewed_by=None,
+                        processed_at=created_at,
+                        created_at=created_at,
+                        updated_at=created_at,
+                    ),
+                ]
+            )
+            session.commit()
+            service = AssistantToolService(session)
+            result, trace = service.execute_tool("get_document_type_counts", {})
+            bar_result, _bar_trace = service.execute_tool("get_document_type_counts", {"chart_type": "bar"})
+
+        segments_by_kind = {
+            segment["document_kind"]: segment for segment in result.output["segments"]
+        }
+        self.assertEqual(result.output["total_count"], 3)
+        self.assertEqual(result.output["type_count"], 2)
+        self.assertEqual(segments_by_kind["INVOICE"]["count"], 2)
+        self.assertEqual(segments_by_kind["TRADE_CONFIRMATION"]["count"], 1)
+        self.assertEqual(result.output["chart"]["artifact_type"], "ectrm.chart")
+        self.assertEqual(result.output["chart"]["chart_type"], "pie")
+        self.assertEqual(result.output["chart"]["segments"][0]["document_kind"], "INVOICE")
+        self.assertEqual(bar_result.output["chart"]["chart_type"], "bar")
+        self.assertEqual(trace.tool_name, "get_document_type_counts")
+        self.assertEqual(trace.record_count, 3)
+        self.assertEqual(trace.output_preview["top_document_kind"], "INVOICE")
+
+    def test_tool_service_reads_home_view_catalog_options_and_visible_instances(self) -> None:
+        now = datetime(2026, 3, 19, 15, 0, tzinfo=timezone.utc)
+        price_card = {
+            "card_id": "prices",
+            "visible": True,
+            "placement": {"order": 0, "column_span": 2, "row_span": 1},
+            "parameters": {"price_sort": "updated_desc"},
+            "filters": {"price_index_code": "WTI_CUSHING_D"},
+            "data_bindings": ["latest_price_marks"],
+        }
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    HomeViewDefinition(
+                        definition_key="home_view_trader_wti",
+                        name="Trader WTI Watch",
+                        name_key="trader wti watch",
+                        scope="PERSONAL",
+                        scope_owner_key="trader_1",
+                        base_template_key="system_home",
+                        base_template_version=1,
+                        persona_hint="trader",
+                        layout_json={"cards": [price_card]},
+                        filters_json={"global": {"commodity_code": "WTI"}},
+                        status="ACTIVE",
+                        created_at=now,
+                        created_by="trader_1",
+                        updated_at=now,
+                        updated_by="trader_1",
+                        version=2,
+                    ),
+                    HomeViewDefinition(
+                        definition_key="home_view_shared_wti",
+                        name="Desk WTI Watch",
+                        name_key="desk wti watch",
+                        scope="ORGANIZATION",
+                        scope_owner_key="organization",
+                        base_template_key="system_home",
+                        base_template_version=1,
+                        persona_hint="trader",
+                        layout_json={"cards": [price_card]},
+                        filters_json={"global": {"commodity_code": "WTI"}},
+                        status="ACTIVE",
+                        created_at=now,
+                        created_by="ops_admin",
+                        updated_at=now,
+                        updated_by="ops_admin",
+                        version=1,
+                    ),
+                    HomeViewDefinition(
+                        definition_key="home_view_retired",
+                        name="Retired Desk Watch",
+                        name_key="retired desk watch",
+                        scope="TEAM",
+                        scope_owner_key="team:default",
+                        base_template_key="system_home",
+                        base_template_version=1,
+                        persona_hint=None,
+                        layout_json={"cards": [price_card]},
+                        filters_json={"global": {}},
+                        status="RETIRED",
+                        created_at=now,
+                        created_by="ops_admin",
+                        updated_at=now,
+                        updated_by="ops_admin",
+                        version=3,
+                    ),
+                    HomeViewDefinition(
+                        definition_key="home_view_other_user",
+                        name="Other User Watch",
+                        name_key="other user watch",
+                        scope="PERSONAL",
+                        scope_owner_key="other_user",
+                        base_template_key="system_home",
+                        base_template_version=1,
+                        persona_hint=None,
+                        layout_json={"cards": [price_card]},
+                        filters_json={"global": {}},
+                        status="ACTIVE",
+                        created_at=now,
+                        created_by="other_user",
+                        updated_at=now,
+                        updated_by="other_user",
+                        version=1,
+                    ),
+                    HomeViewDefinition(
+                        definition_key="home_view_shared_draft",
+                        name="Draft Shared Watch",
+                        name_key="draft shared watch",
+                        scope="ORGANIZATION",
+                        scope_owner_key="organization",
+                        base_template_key="system_home",
+                        base_template_version=1,
+                        persona_hint=None,
+                        layout_json={"cards": [price_card]},
+                        filters_json={"global": {}},
+                        status="DRAFT",
+                        created_at=now,
+                        created_by="ops_admin",
+                        updated_at=now,
+                        updated_by="ops_admin",
+                        version=1,
+                    ),
+                ]
+            )
+            session.commit()
+
+            service = AssistantToolService(session, actor_id="trader_1")
+            cards_result, cards_trace = service.execute_tool("list_home_view_cards", {})
+            template_result, template_trace = service.execute_tool("get_home_system_template", {})
+            options_result, options_trace = service.execute_tool(
+                "get_home_view_filter_options",
+                {"card_id": "prices", "limit": 5},
+            )
+            instances_result, instances_trace = service.execute_tool("list_home_view_instances", {})
+            shared_result, _shared_trace = service.execute_tool(
+                "list_home_view_instances",
+                {"scope": "SHARED", "include_cards": False},
+            )
+
+        self.assertEqual(cards_result.output["card_count"], 6)
+        self.assertIn("prices", cards_trace.output_preview["card_ids"])
+        self.assertEqual(template_result.output["template_key"], "system_home")
+        self.assertTrue(template_result.output["immutable"])
+        self.assertEqual(template_trace.output_preview["card_count"], 6)
+
+        price_options = options_result.output["cards"][0]
+        filters_by_field = {field["field"]: field for field in price_options["filters"]}
+        parameters_by_field = {field["field"]: field for field in price_options["parameters"]}
+        self.assertEqual(filters_by_field["price_index_code"]["options"][0]["code"], "WTI_CUSHING_D")
+        self.assertIn("SPOT", filters_by_field["quote_type"]["options"])
+        self.assertIn("updated_desc", parameters_by_field["price_sort"]["options"])
+        self.assertEqual(options_trace.output_preview["card_id"], "prices")
+
+        visible_names = {item["name"] for item in instances_result.output["items"]}
+        self.assertEqual(visible_names, {"Trader WTI Watch", "Desk WTI Watch"})
+        personal = next(item for item in instances_result.output["items"] if item["scope"] == "PERSONAL")
+        shared = next(item for item in instances_result.output["items"] if item["scope"] == "ORGANIZATION")
+        self.assertEqual(personal["scope_owner_key"], "trader_1")
+        self.assertEqual(personal["version"], 2)
+        self.assertTrue(personal["validation"]["ok"])
+        self.assertEqual(personal["cards"][0]["filters"], {"price_index_code": "WTI_CUSHING_D"})
+        self.assertTrue(shared["is_shared"])
+        self.assertEqual(shared_result.output["count"], 1)
+        self.assertEqual(shared_result.output["items"][0]["name"], "Desk WTI Watch")
+        self.assertNotIn("Retired Desk Watch", visible_names)
+        self.assertNotIn("Draft Shared Watch", visible_names)
+        self.assertNotIn("Other User Watch", visible_names)
+        self.assertEqual(instances_trace.tool_name, "list_home_view_instances")
+        self.assertEqual(instances_trace.output_preview["count"], 2)
 
     def test_tool_service_lists_gmail_messages_and_loads_message_detail(self) -> None:
         browse_result = DocumentGmailInboxBrowseResultOut(

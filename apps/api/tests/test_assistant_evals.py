@@ -388,6 +388,128 @@ MANAGED_AGENT_EVAL_CASES = (
         ),
     ),
     AssistantEvalCase(
+        name="action-agent-stages-hh-ng-home-view-creation",
+        agent=AssistantEvalAgentFixture(
+            agent_id="home-view-stager",
+            name="Home View Stager",
+            capabilities=("ACTION", "EXPLAIN"),
+            allowed_workspaces=("assistant", "dashboard", "reports"),
+            allowed_action_types=("create_home_view_instance",),
+            system_prompt="Stage typed Home view instance requests when the user asks to save a supported Home lens.",
+        ),
+        request_payload={
+            "agent_id": "home-view-stager",
+            "workspace": "assistant",
+            "use_live_tools": False,
+            "messages": [
+                {"role": "user", "content": "Make me a view to see HH NG."},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-home-view-1",
+                "output_text": "I staged a Home view request for review.",
+                "usage": {"input_tokens": 16, "output_tokens": 9},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="home-view-stager",
+            agent_name="Home View Stager",
+            message_contains=("Home view request",),
+            warning_count=0,
+            tool_names=(),
+            action_request_types=("create_home_view_instance",),
+            action_request_statuses=("PENDING",),
+            prompt_section_keys=("managed-agent", "approval-gated-action", "workspace"),
+            prompt_section_content_contains=(
+                ("approval-gated-action", ("create_home_view_instance", "HH NG Watch")),
+            ),
+            provider_request_count=1,
+            provider_tools_key_present=False,
+        ),
+    ),
+    AssistantEvalCase(
+        name="action-agent-stops-ambiguous-home-view-creation",
+        agent=AssistantEvalAgentFixture(
+            agent_id="home-view-ambiguous-stopper",
+            name="Home View Ambiguous Stopper",
+            capabilities=("ACTION", "EXPLAIN"),
+            allowed_workspaces=("assistant", "dashboard"),
+            allowed_action_types=("create_home_view_instance",),
+            system_prompt="Stop Home view creation when the request lacks a supported filter signal.",
+        ),
+        request_payload={
+            "agent_id": "home-view-ambiguous-stopper",
+            "workspace": "assistant",
+            "use_live_tools": False,
+            "messages": [
+                {"role": "user", "content": "Make me a view."},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-home-view-ambiguous-1",
+                "output_text": "I need a supported Home view filter before staging this.",
+                "usage": {"input_tokens": 12, "output_tokens": 11},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="home-view-ambiguous-stopper",
+            agent_name="Home View Ambiguous Stopper",
+            message_contains=("supported Home view filter",),
+            warning_count=1,
+            warning_contains=("couldn't resolve a supported Home view signal",),
+            tool_names=(),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=1,
+            provider_tools_key_present=False,
+        ),
+    ),
+    AssistantEvalCase(
+        name="action-agent-stops-invalid-home-view-filter",
+        agent=AssistantEvalAgentFixture(
+            agent_id="home-view-invalid-filter-stopper",
+            name="Home View Invalid Filter Stopper",
+            capabilities=("ACTION", "EXPLAIN"),
+            allowed_workspaces=("assistant", "dashboard"),
+            allowed_action_types=("create_home_view_instance",),
+            system_prompt="Stop Home view creation when explicit filters are unsupported.",
+        ),
+        request_payload={
+            "agent_id": "home-view-invalid-filter-stopper",
+            "workspace": "assistant",
+            "use_live_tools": False,
+            "context": "surface: home\nprice_index_code: ATLANTIS_GAS",
+            "messages": [
+                {"role": "user", "content": "Make me a Home view for this price index."},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-home-view-invalid-filter-1",
+                "output_text": "I stopped because the requested Home view filter is not supported.",
+                "usage": {"input_tokens": 14, "output_tokens": 12},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="home-view-invalid-filter-stopper",
+            agent_name="Home View Invalid Filter Stopper",
+            message_contains=("not supported",),
+            warning_count=1,
+            warning_contains=("price_index_code must reference an active Home price index",),
+            tool_names=(),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=1,
+            provider_tools_key_present=False,
+        ),
+    ),
+    AssistantEvalCase(
         name="managed-read-agent-lists-trade-attention-candidates",
         agent=AssistantEvalAgentFixture(
             agent_id="attention-candidate-reader",

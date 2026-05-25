@@ -83,6 +83,107 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-25 - Messaging Agent Brevity Is A User Setting
+
+- Type: lesson
+- Domain: messaging collaboration surfaces, assistant response shape, and
+  browser-local operator preferences
+- Applies to: Messages workspace assistant replies, Settings workspace browser
+  preferences, and assistant thread context assembly
+- Status: implemented
+- Source:
+  `apps/web/src/shared/assistantResponseSettings.ts`,
+  `apps/web/src/workspaces/messages/MessagingWorkspace.tsx`,
+  `apps/web/src/workspaces/settings/SettingsWorkspace.tsx`,
+  `apps/web/tests/assistantResponseSettings.test.ts`,
+  `apps/web/tests/messagingWorkspace.test.ts`, and
+  `apps/web/tests/settingsWorkspace.test.ts`
+- Lesson: recurring complaints that messaging agents are too verbose should be
+  handled as an explicit response-shape preference rather than as hidden,
+  one-off prompt edits. The browser-local Messaging Agent Replies setting
+  defaults to Brief and feeds a normalized brevity instruction into the
+  Messages thread context.
+- Deterministic opportunity: if teams need role-, desk-, or workspace-specific
+  reply-shape defaults, promote the same option set into a typed profile or
+  workspace settings API instead of adding ad hoc agent prompt variants.
+- Agent autonomy impact: brevity only changes response shape. It does not
+  widen tool access, action types, permissions, approval policy, external
+  communication authority, or business-record mutation paths.
+- Tests or evidence:
+  `npm test -- assistantResponseSettings.test.ts settingsWorkspace.test.ts messagingWorkspace.test.ts messagingAgentRouter.test.ts`
+  and `npm run build`
+- Follow-up: consider surfacing the effective reply-style preference in prompt
+  preview if Messages-specific context preview becomes an operator-facing
+  debugging flow.
+
+### 2026-05-25 - Messaging Sends Empower The Agent By Default
+
+- Type: lesson
+- Domain: messaging collaboration surfaces, assistant messaging UX, and
+  deterministic routing
+- Applies to: `Messages` channel composer sends, in-thread assistant replies,
+  human-addressed desk messages, and specialist-agent routing
+- Status: implemented
+- Source:
+  `apps/web/src/workspaces/messages/MessagingWorkspace.tsx`,
+  `apps/web/src/workspaces/messages/messagingAgentRouter.ts`,
+  `apps/web/tests/messagingWorkspace.test.ts`, and
+  `apps/web/tests/messagingAgentRouter.test.ts`
+- Lesson: the Messages composer should not require a separate "let the agent
+  decide" affordance. A normal channel send posts the human message, then the
+  deterministic messaging router decides whether the agent should stay quiet,
+  use the default assistant runtime, or target a managed specialist. When the
+  agent replies, it should post as a threaded reply under the triggering human
+  message by default. Seeded/default message examples should use durable desk
+  lanes such as Operations Queue instead of named fake human personas. Direct
+  human-addressed messages should stay in-thread without interrupting unless
+  the agent is explicitly invited.
+- Deterministic opportunity: keep recurring social and workspace routing cues
+  in `messagingAgentRouter.ts` or a future typed messaging-router service
+  instead of scattering them across buttons, prompts, or local component state.
+- Agent autonomy impact: this widens the agent's chance to help, not its
+  business authority. Replies still use the governed assistant runtime and
+  remain in draft/stage lanes; the agent still cannot externally commit the
+  firm or directly mutate business records from the chat surface.
+- Tests or evidence:
+  `npm test -- messagingWorkspace.test.ts messagingAgentRouter.test.ts`
+- Follow-up: once backend-owned messaging routing profiles exist, migrate the
+  same no-reply and specialist-target rules into the typed service while
+  preserving manual chat posting as the fallback.
+
+### 2026-05-25 - Trade Units Are Deterministic Required Data
+
+- Type: algorithm-added
+- Domain: trade lifecycle, reference data, trade projection rebuilds, and
+  scenario seeding
+- Applies to: `TradeCreated` and `TradeAmended` command validation, persisted
+  trade event payloads, trade/leg/price-term projections, and seeded scenario
+  records
+- Status: implemented
+- Source:
+  `apps/api/app/domains/trading/services/trade_unit_defaults.py`,
+  `apps/api/app/domains/trading/services/trade_event_support.py`,
+  `apps/api/app/domains/trading/services/trade_write_validation.py`,
+  `apps/api/app/domains/trading/services/trade_commands.py`,
+  `apps/api/scripts/rebuild_trades_projection.py`, and
+  `apps/api/alembic/versions/m4n5o6p7q8r9_backfill_and_require_trade_units.py`
+- Lesson: trade quantity and price units are required business data, not a UI
+  fallback. When a write omits units, typed trade services resolve them from
+  active unit, commodity, commodity-class, and price-index reference data,
+  persist the resolved values on the event payload, and keep projections,
+  replay, scenario seed data, and database constraints aligned.
+- Deterministic opportunity: move commodity and price-index unit defaults into
+  governed reference-data configuration if desks need additional commodities,
+  aliases, or unit conventions beyond the current encoded rule table.
+- Agent autonomy impact: agents may explain missing-unit repairs or propose
+  reference-data additions, but they should not invent units in freeform output
+  or bypass the typed trade command services.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_trade_event_workflow apps.api.tests.test_admin_seed_api apps.api.tests.test_trades_rebuild apps.api.tests.test_reports_api`
+- Follow-up: keep migration and projection rebuild defaults in sync with
+  `trade_unit_defaults.py` until unit defaults are promoted into reference
+  data.
+
 ### 2026-05-24 - Document AI Assist Uses A Configurable Confidence Gate
 
 - Type: algorithm-added
@@ -385,8 +486,9 @@ proposal form until a human owner approves the domain rule.
 - Status: proposed
 - Source:
   [Home View Instances Work Packages](./home-view-instances-work-packages.md),
-  [User Extensibility Initiative](./user-extensibility-initiative.md), and
-  [Agent Action Request Contract](./agent-action-request-contract.md)
+  [User Extensibility Initiative](./user-extensibility-initiative.md),
+  [Agent Action Request Contract](./agent-action-request-contract.md), and
+  `apps/api/app/domains/assistant/services/tools.py`
 - Lesson: configurable Home should use immutable system templates, typed card
   registries, and persisted view definitions rather than browser-local state or
   freeform assistant JSON. Agents may interpret natural-language requests such
@@ -401,13 +503,17 @@ proposal form until a human owner approves the domain rule.
   proposed, but it must not widen permission, row access, tools, action types,
   or shared-publication authority. Personal Home view creation may become a
   bounded low-risk action only after typed validation, assistant evals, and
-  approval/correction metrics support promotion.
+  approval/correction metrics support promotion. Assistant Home tools should
+  stay observe-only and visibility-scoped until the governed
+  `create_home_view_instance` action exists.
 - Tests or evidence: first implementation should add focused backend tests for
   definition validation and audit, web tests for save/switch/reset behavior,
   assistant evals for prompt-created Home views and stop conditions, and
-  browser smoke for one end-to-end saved Home instance path.
-- Follow-up: implement the Home card registry and personal Home definition
-  service before exposing assistant-created Home instances.
+  browser smoke for one end-to-end saved Home instance path. HVI-07 added
+  focused assistant tooling coverage and `make api-assistant-evals` for
+  read-only Home catalog and visible-instance inspection.
+- Follow-up: implement the governed `create_home_view_instance` action before
+  allowing assistant-created Home instances to persist.
 
 ### 2026-05-22 - OpenAI Structured Outputs Need Explicit Strict Schemas
 
@@ -1240,10 +1346,10 @@ proposal form until a human owner approves the domain rule.
   surface.
 - Tests or evidence:
   `npm test -- messagingWorkspace.test.ts workspaceLoading.test.ts promptHomeWorkspace.test.ts navigation.test.ts workspaceRegistry.test.ts workspaceDescriptors.test.ts workspaceRendererRegistry.test.ts`
-  plus browser checks confirming `Let messaging agent decide` keeps the browser
-  on `?view=messages`, leaves acknowledgement-style notes in-thread without
-  waking an agent, and appends governed assistant replies in the same thread
-  when a response is needed.
+  plus browser checks confirming normal message sends keep the browser on
+  `?view=messages`, leave acknowledgement-style or human-addressed notes
+  in-thread without waking an agent, and append governed assistant replies in
+  the same thread when a response is needed.
 - Follow-up: once message persistence exists, thread replies should reuse the
   same governed assistant runtime while storing thread state as a durable work
   object instead of local UI state.

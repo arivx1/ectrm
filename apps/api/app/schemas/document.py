@@ -358,7 +358,7 @@ class DocumentActionApprovalDecisionRequest(BaseModel):
 
 class DocumentRecordCandidateSelectionRequest(BaseModel):
     record_type: str = Field(min_length=1, max_length=64)
-    record_id: str = Field(min_length=1, max_length=96)
+    record_id: Optional[str] = Field(default=None, min_length=1, max_length=96)
     request_comment: Optional[str] = Field(default=None, max_length=2_000)
 
     @field_validator("record_type")
@@ -368,8 +368,8 @@ class DocumentRecordCandidateSelectionRequest(BaseModel):
 
     @field_validator("record_id")
     @classmethod
-    def normalize_record_id(cls, value: str) -> str:
-        return normalize_required_text(value, field_name="record_id")
+    def normalize_record_id(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="record_id")
 
     @field_validator("request_comment")
     @classmethod

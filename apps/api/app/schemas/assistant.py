@@ -20,6 +20,10 @@ AssistantToolEvidenceKind = Literal[
     "code_file",
     "agent",
     "agent_hierarchy",
+    "home_view_catalog",
+    "home_view_template",
+    "home_view_filter_options",
+    "home_view_instances",
 ]
 AssistantPromptSectionSource = Literal[
     "system",
@@ -120,6 +124,7 @@ AssistantActionType = Literal[
     "amend_trade",
     "cancel_trade",
     "create_settlement_report_preset",
+    "create_home_view_instance",
     "record_delivery_event",
     "reverse_delivery_event",
     "create_manual_accrual_entry",

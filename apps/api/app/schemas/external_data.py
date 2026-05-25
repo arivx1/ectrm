@@ -188,6 +188,43 @@ class ExternalDataSyncStatusOut(BaseModel):
     providers: list[ExternalDataProviderStatusOut]
 
 
+class PriceSourceReviewOut(BaseModel):
+    id: int
+    price_index_code: str
+    price_index_name: Optional[str]
+    commodity_code: Optional[str]
+    quote_type: Optional[str]
+    market: Optional[str]
+    location_code: Optional[str]
+    price_unit_code: Optional[str]
+    price_currency_code: Optional[str]
+    price_index_is_active: Optional[bool]
+    provider: str
+    dataset_code: Optional[str]
+    series_id: str
+    frequency: str
+    source_unit: str
+    source_currency_code: Optional[str]
+    transform_rule: Optional[str]
+    is_active: bool
+    review_status: str
+    provider_health_status: Optional[str]
+    latest_run_status: Optional[str]
+    latest_run_id: Optional[int]
+    last_success_at: Optional[datetime]
+    provider_error_summary: Optional[str]
+    latest_observation_date: Optional[date]
+    latest_value: Optional[float]
+    latest_unit_code: Optional[str]
+    latest_currency_code: Optional[str]
+    latest_source_revision: Optional[str]
+    latest_downloaded_at: Optional[datetime]
+    latest_observation_run_id: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+    version: int
+
+
 class MarketContextPriceOut(BaseModel):
     price_index_code: str
     name: str

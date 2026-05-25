@@ -16,6 +16,7 @@ if REPO_ROOT not in sys.path:
 from apps.api.app.config import settings
 from apps.api.app.db.engine import SessionLocal
 from apps.api.app.domains.reference_data.services.external_data import (
+    sync_bls_ppi_series,
     sync_caiso_series,
     sync_cftc_series,
     sync_eia_fundamental_series,
@@ -35,6 +36,7 @@ DEFAULT_PROVIDERS = (
     "EIA",
     "EIA_FUNDAMENTALS",
     "FRED",
+    "BLS_PPI",
     "WORLD_BANK",
     "EIA_WHOLESALE_POWER",
     "CFTC",
@@ -56,6 +58,7 @@ def main() -> int:
             "eia",
             "eia-fundamentals",
             "fred",
+            "bls-ppi",
             "world-bank",
             "usda-nass",
             "eia-wholesale-power",
@@ -131,6 +134,12 @@ def _sync_provider(*, provider: str, requested_by: str, db):
         return sync_fred_series(
             db,
             lookback_days=settings.FRED_SYNC_DEFAULT_LOOKBACK_DAYS,
+            requested_by=requested_by,
+        )
+    if provider == "BLS_PPI":
+        return sync_bls_ppi_series(
+            db,
+            lookback_days=settings.BLS_PPI_SYNC_DEFAULT_LOOKBACK_DAYS,
             requested_by=requested_by,
         )
     if provider == "WORLD_BANK":

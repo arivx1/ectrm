@@ -75,6 +75,20 @@ ASSISTANT_ACTION_CATALOG: tuple[AssistantActionCatalogEntry, ...] = (
         planner_priority=66,
     ),
     AssistantActionCatalogEntry(
+        name="create_home_view_instance",
+        label="Create Home view instance",
+        description=(
+            "Create a personal Home view instance through the typed Home definition service when the user asks "
+            "to save a named, reusable Home screen configuration."
+        ),
+        policy_key="assistant.actions.home_view_instance_create.v1",
+        risk_level="LOW",
+        max_scope="TEAM",
+        reviewer_roles=("TRADER", "DESK_LEAD", "OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "dashboard", "reports"),
+        planner_priority=67,
+    ),
+    AssistantActionCatalogEntry(
         name="record_delivery_event",
         label="Record delivery event",
         description=(

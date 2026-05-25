@@ -1821,6 +1821,43 @@ export type ExternalDataSyncStatusRecord = {
   providers: ExternalDataProviderStatusRecord[]
 }
 
+export type PriceSourceReviewRecord = {
+  id: number
+  price_index_code: string
+  price_index_name: string | null
+  commodity_code: string | null
+  quote_type: string | null
+  market: string | null
+  location_code: string | null
+  price_unit_code: string | null
+  price_currency_code: string | null
+  price_index_is_active: boolean | null
+  provider: string
+  dataset_code: string | null
+  series_id: string
+  frequency: string
+  source_unit: string
+  source_currency_code: string | null
+  transform_rule: string | null
+  is_active: boolean
+  review_status: string
+  provider_health_status: string | null
+  latest_run_status: string | null
+  latest_run_id: number | null
+  last_success_at: string | null
+  provider_error_summary: string | null
+  latest_observation_date: string | null
+  latest_value: number | null
+  latest_unit_code: string | null
+  latest_currency_code: string | null
+  latest_source_revision: string | null
+  latest_downloaded_at: string | null
+  latest_observation_run_id: number | null
+  created_at: string
+  updated_at: string
+  version: number
+}
+
 export type ExposureSummaryRow = {
   commodity: string
   net_volume: number
@@ -3528,6 +3565,10 @@ export type AssistantToolEvidenceKind =
   | 'code_file'
   | 'agent'
   | 'agent_hierarchy'
+  | 'home_view_catalog'
+  | 'home_view_template'
+  | 'home_view_filter_options'
+  | 'home_view_instances'
 
 export type AssistantToolEvidence = {
   kind: AssistantToolEvidenceKind

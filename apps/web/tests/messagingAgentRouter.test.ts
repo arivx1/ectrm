@@ -30,6 +30,31 @@ test('messaging router keeps short acknowledgement notes in-thread without an ag
   assert.match(decision.rationale, /without an agent reply/i)
 })
 
+test('messaging router stays quiet for messages clearly addressed to a human', () => {
+  const channel = buildMessagingWorkspaceChannels(defaultCounts)[1]
+  const decision = decideMessagingAgentRoute({
+    channel,
+    draft: '@[Northshore LNG] can you confirm the nomination timing?',
+    agents: [],
+  })
+
+  assert.equal(decision.shouldReply, false)
+  assert.equal(decision.routeMode, 'no_reply')
+  assert.match(decision.rationale, /addressed to a human/i)
+})
+
+test('messaging router can still jump in when an agent is explicitly invited', () => {
+  const channel = buildMessagingWorkspaceChannels(defaultCounts)[1]
+  const decision = decideMessagingAgentRoute({
+    channel,
+    draft: '@[Northshore LNG] and the messaging agent, can you summarize the blocker?',
+    agents: [],
+  })
+
+  assert.equal(decision.shouldReply, true)
+  assert.equal(decision.routeMode, 'default_assistant')
+})
+
 test('messaging router selects a specialist agent when the thread asks for settlement help', () => {
   const channel = buildMessagingWorkspaceChannels(defaultCounts)[1]
   const decision = decideMessagingAgentRoute({

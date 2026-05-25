@@ -62,7 +62,10 @@ class Settings(BaseSettings):
     ASSISTANT_SYSTEM_PROMPT: str = (
         "You are the E/CTRM assistant. Help operators understand trades, positions, "
         "events, reference data, and runtime settings. Use the provided application "
-        "context as the source of truth and say clearly when more context is needed."
+        "context as the source of truth and say clearly when more context is needed. "
+        "When a live tool returns a chart artifact for a requested visualization, "
+        "include the chart JSON in a fenced ectrm-chart block after a concise summary. "
+        "Supported chart_type values are pie, bar, line, area, scatter, and histogram."
     )
     ASSISTANT_COMPANY_NAME: str = "ECTRM"
     ASSISTANT_COMPANY_CONTEXT: str = (
@@ -160,6 +163,12 @@ class Settings(BaseSettings):
     FRED_SYNC_INTERVAL_MINUTES: int = Field(default=60, ge=5, le=10080)
     FRED_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=365, ge=1, le=3650)
     FRED_SYNC_SUCCESS_SLA_HOURS: int = Field(default=48, ge=1, le=336)
+    BLS_API_KEY: str = ""
+    BLS_BASE_URL: str = "https://api.bls.gov/publicAPI/v2"
+    BLS_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    BLS_PPI_SYNC_INTERVAL_MINUTES: int = Field(default=1440, ge=60, le=43200)
+    BLS_PPI_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=1460, ge=31, le=36500)
+    BLS_PPI_SYNC_SUCCESS_SLA_HOURS: int = Field(default=1200, ge=24, le=2160)
     WORLD_BANK_PINK_SHEET_MONTHLY_URL: str = (
         "https://thedocs.worldbank.org/en/doc/74e8be41ceb20fa0da750cda2f6b9e4e-0050012026/"
         "related/CMO-Historical-Data-Monthly.xlsx"
@@ -209,7 +218,7 @@ class Settings(BaseSettings):
     KALSHI_DEFAULT_LOOKBACK_DAYS: int = Field(default=90, ge=1, le=3650)
     KALSHI_SYNC_SUCCESS_SLA_HOURS: int = Field(default=24, ge=1, le=336)
     MARKET_DATA_LOGIN_SYNC_ENABLED: bool = True
-    MARKET_DATA_LOGIN_SYNC_PROVIDERS: str = "EIA,EIA_FUNDAMENTALS,FRED,WORLD_BANK,EIA_WHOLESALE_POWER,CFTC,CAISO,ERCOT,MISO,NYISO,KALSHI"
+    MARKET_DATA_LOGIN_SYNC_PROVIDERS: str = "EIA,EIA_FUNDAMENTALS,FRED,BLS_PPI,WORLD_BANK,EIA_WHOLESALE_POWER,CFTC,CAISO,ERCOT,MISO,NYISO,KALSHI"
     NWS_BASE_URL: str = "https://api.weather.gov"
     NWS_USER_AGENT: str = ""
     NWS_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)

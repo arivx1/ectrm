@@ -1425,6 +1425,7 @@ class ReferenceDataApiTests(unittest.TestCase):
 
     def test_trade_create_requires_active_book(self) -> None:
         self._create_commodity("WTI")
+        self._create_unit("BBL")
 
         with self.SessionLocal() as session:
             with self.assertRaisesRegex(Exception, "Book is required and must be selected from reference data"):
@@ -1509,6 +1510,7 @@ class ReferenceDataApiTests(unittest.TestCase):
 
     def test_trade_sell_updates_positions_as_negative_volume(self) -> None:
         self._create_commodity("WTI")
+        self._create_unit("BBL")
         self._create_book("CRUDE_PHYS", is_active=True)
 
         with self.SessionLocal() as session:
@@ -1540,6 +1542,7 @@ class ReferenceDataApiTests(unittest.TestCase):
 
     def test_trade_header_fields_validate_active_counterparty_and_matching_portfolio(self) -> None:
         self._create_commodity("WTI")
+        self._create_unit("BBL")
         self._create_book("CRUDE_PHYS", is_active=True)
 
         with self.SessionLocal() as session:
@@ -1620,6 +1623,7 @@ class ReferenceDataApiTests(unittest.TestCase):
 
     def test_trade_create_rejects_non_tradable_counterparty_credit_status(self) -> None:
         self._create_commodity("WTI")
+        self._create_unit("BBL")
         self._create_book("CRUDE_PHYS", is_active=True)
 
         with self.SessionLocal() as session:
@@ -1661,6 +1665,7 @@ class ReferenceDataApiTests(unittest.TestCase):
 
     def test_trade_amend_rejects_existing_counterparty_that_becomes_non_tradable(self) -> None:
         self._create_commodity("WTI")
+        self._create_unit("BBL")
         self._create_book("CRUDE_PHYS", is_active=True)
 
         with self.SessionLocal() as session:
@@ -1724,6 +1729,7 @@ class ReferenceDataApiTests(unittest.TestCase):
 
     def test_trade_amend_persists_extended_header_fields(self) -> None:
         self._create_commodity("WTI")
+        self._create_unit("BBL")
         self._create_book("CRUDE_PHYS", is_active=True)
 
         with self.SessionLocal() as session:
@@ -1829,6 +1835,7 @@ class ReferenceDataApiTests(unittest.TestCase):
 
     def test_trade_header_fields_reject_invalid_status_values(self) -> None:
         self._create_commodity("WTI")
+        self._create_unit("BBL")
         self._create_book("CRUDE_PHYS", is_active=True)
 
         with self.SessionLocal() as session:
@@ -1883,6 +1890,7 @@ class ReferenceDataApiTests(unittest.TestCase):
     def test_swap_positions_use_trade_legs(self) -> None:
         self._create_commodity("WTI")
         self._create_commodity("BRENT")
+        self._create_unit("BBL")
         self._create_book("CRUDE_PHYS", is_active=True)
 
         with self.SessionLocal() as session:

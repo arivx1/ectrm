@@ -10,8 +10,10 @@ import {
 } from "@dnd-kit/core";
 import {
   SortableContext,
+  arrayMove,
   rectSortingStrategy,
   sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -42,6 +44,11 @@ import {
   AssistantActionRequestList,
   type AssistantActionDecisionPayload,
 } from "../../entities/assistant/AssistantActionRequestList";
+import { AssistantChartArtifactList } from "../../shared/AssistantChartArtifactList";
+import {
+  parseAssistantChartArtifacts,
+  splitAssistantMessageText,
+} from "../../shared/assistantChartArtifacts";
 import {
   loadAssetMapScopeSummary,
   loadInvoiceIssueCandidates,
@@ -106,6 +113,10 @@ import {
   subscribePromptResumeIntent,
 } from "../../shared/promptResumeIntent";
 import {
+  buildPriceIndexBiReportHandoff,
+  PRICE_INDEX_BI_REPORT_ID,
+} from "../reports/reportRouteHandoffs";
+import {
   formatTimeDisplayTimeZonePreferenceLabel,
   getTimeDisplaySettingsSnapshot,
   listTimeDisplayTimeZoneOptions,
@@ -161,11 +172,13 @@ import {
 import {
   buildPromptHomePricesCardViewModel,
   formatPromptHomePriceQuoteTypeCode,
+  normalizePromptHomePriceManualOrder,
   nextPromptHomePriceSortState,
   PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER,
   PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE,
   selectPromptHomePriceIndices,
   type PromptHomePriceMarkFilter,
+  type PromptHomePriceRowViewModel,
   type PromptHomePriceSortField,
   type PromptHomePriceSortState,
 } from "./promptHomePrices";
@@ -204,7 +217,11 @@ type PromptHomeWorkspaceProps = {
   deliveriesDataLoading?: boolean;
   deliveriesDataError?: string;
   onEnsureDeliveriesData?: () => Promise<void>;
-  onOpenView: (view: ViewKey, handoff?: AppRouteHandoff | null) => void;
+  onOpenView: (
+    view: ViewKey,
+    handoff?: AppRouteHandoff | null,
+    options?: { hash?: string | null },
+  ) => void;
   customEventsHref?: string;
   onOpenCustomEvents?: () => void;
   onRefreshData?: () => Promise<void>;
@@ -2129,6 +2146,73 @@ function serializePromptHomePriceSortParameter(
   return sortState ? `${sortState.field}_${sortState.direction}` : "";
 }
 
+function parsePromptHomePriceOrderParameter(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return normalizePromptHomePriceManualOrder(
+      value.filter((item): item is string => typeof item === "string"),
+    );
+  }
+
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return [];
+  }
+
+  try {
+    const parsedValue = JSON.parse(trimmedValue);
+    if (Array.isArray(parsedValue)) {
+      return normalizePromptHomePriceManualOrder(
+        parsedValue.filter((item): item is string => typeof item === "string"),
+      );
+    }
+  } catch {
+    // Fall back to comma-separated legacy/local values.
+  }
+
+  return normalizePromptHomePriceManualOrder(trimmedValue.split(","));
+}
+
+function buildPromptHomePriceOrderAfterDrag({
+  allPriceIndexCodes,
+  visiblePriceIndexCodes,
+  activePriceIndexCode,
+  overPriceIndexCode,
+}: {
+  allPriceIndexCodes: readonly string[];
+  visiblePriceIndexCodes: readonly string[];
+  activePriceIndexCode: string;
+  overPriceIndexCode: string;
+}): string[] {
+  const normalizedAllCodes =
+    normalizePromptHomePriceManualOrder(allPriceIndexCodes);
+  const normalizedVisibleCodes = normalizePromptHomePriceManualOrder(
+    visiblePriceIndexCodes,
+  );
+  const normalizedActiveCode =
+    normalizePromptHomePriceManualOrder([activePriceIndexCode])[0] ?? "";
+  const normalizedOverCode =
+    normalizePromptHomePriceManualOrder([overPriceIndexCode])[0] ?? "";
+  const oldIndex = normalizedVisibleCodes.indexOf(normalizedActiveCode);
+  const newIndex = normalizedVisibleCodes.indexOf(normalizedOverCode);
+  if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) {
+    return normalizedAllCodes;
+  }
+
+  const nextVisibleCodes = arrayMove(normalizedVisibleCodes, oldIndex, newIndex);
+  const visibleCodeSet = new Set(normalizedVisibleCodes);
+  const replacementQueue = [...nextVisibleCodes];
+
+  return normalizedAllCodes.map((priceIndexCode) =>
+    visibleCodeSet.has(priceIndexCode)
+      ? replacementQueue.shift() ?? priceIndexCode
+      : priceIndexCode,
+  );
+}
+
 function normalizePromptHomeMapGeographyFilter(value: unknown): string[] {
   const values = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
   const visibleGeographies = values
@@ -2170,6 +2254,127 @@ function visiblePromptHomeMapGeographiesFromState(
   );
 }
 
+function PromptHomePriceRowFields({
+  row,
+}: {
+  row: PromptHomePriceRowViewModel;
+}) {
+  return (
+    <dl className="prompt-home-price-fields">
+      <div>
+        <dt>Product</dt>
+        <dd>{row.product}</dd>
+      </div>
+      <div>
+        <dt>Location</dt>
+        <dd>{row.location}</dd>
+      </div>
+      <div>
+        <dt>Price</dt>
+        <dd>{row.price}</dd>
+      </div>
+      <div>
+        <dt>Unit</dt>
+        <dd>{row.unit}</dd>
+      </div>
+      <div>
+        <dt>Currency</dt>
+        <dd>{row.currency}</dd>
+      </div>
+      <div>
+        <dt>Date</dt>
+        <dd>{row.date}</dd>
+      </div>
+      <div>
+        <dt>Time</dt>
+        <dd>{row.time}</dd>
+      </div>
+      <div>
+        <dt>Updated</dt>
+        <dd>{row.updated}</dd>
+      </div>
+      <div>
+        <dt>Source</dt>
+        <dd>{row.source}</dd>
+      </div>
+    </dl>
+  );
+}
+
+function PromptHomePriceRow({
+  row,
+  onOpenPriceReport,
+  dragListeners,
+  setNodeRef,
+  style,
+  isDragging = false,
+}: {
+  row: PromptHomePriceRowViewModel;
+  onOpenPriceReport: (priceIndex: PriceIndexRecord) => void;
+  dragListeners?: PromptHomeSortableListeners;
+  setNodeRef?: (element: HTMLElement | null) => void;
+  style?: CSSProperties;
+  isDragging?: boolean;
+}) {
+  return (
+    <article
+      ref={setNodeRef}
+      style={style}
+      className={mergePromptHomeClassNames(
+        "prompt-home-price-row prompt-home-price-row-action",
+        dragListeners ? "prompt-home-price-row-draggable" : undefined,
+        isDragging ? "is-dragging" : undefined,
+      )}
+      role="button"
+      tabIndex={0}
+      aria-label={`Double-click to open the BI report for ${row.priceIndex.name || row.priceIndexCode}`}
+      title={`Drag to reorder. Double-click to open the BI report for ${row.priceIndexCode}`}
+      onDoubleClick={() => onOpenPriceReport(row.priceIndex)}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+          return;
+        }
+        event.preventDefault();
+        onOpenPriceReport(row.priceIndex);
+      }}
+      {...dragListeners}
+    >
+      <PromptHomePriceRowFields row={row} />
+    </article>
+  );
+}
+
+function SortablePromptHomePriceRow({
+  row,
+  onOpenPriceReport,
+}: {
+  row: PromptHomePriceRowViewModel;
+  onOpenPriceReport: (priceIndex: PriceIndexRecord) => void;
+}) {
+  const {
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: row.priceIndexCode });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <PromptHomePriceRow
+      row={row}
+      onOpenPriceReport={onOpenPriceReport}
+      dragListeners={listeners}
+      setNodeRef={setNodeRef}
+      style={style}
+      isDragging={isDragging}
+    />
+  );
+}
+
 function PromptHomePricesCard({
   priceIndices,
   referenceDataLoading,
@@ -2177,6 +2382,7 @@ function PromptHomePricesCard({
   canConfigureHomeCard,
   onHomeCardConfigurationChange,
   onOpenPricesWorkspace,
+  onOpenPriceReport,
 }: {
   priceIndices: PriceIndexRecord[];
   referenceDataLoading?: boolean;
@@ -2189,6 +2395,7 @@ function PromptHomePricesCard({
     },
   ) => void;
   onOpenPricesWorkspace: () => void;
+  onOpenPriceReport: (priceIndex: PriceIndexRecord) => void;
 }) {
   const pricesExpandedState = usePersistentCollapsibleCardState(
     "prompt-home.prices-card",
@@ -2222,6 +2429,17 @@ function PromptHomePricesCard({
   );
   const priceSortState = parsePromptHomePriceSortParameter(
     homeCardParameters.price_sort,
+  );
+  const priceManualOrder = useMemo(
+    () => parsePromptHomePriceOrderParameter(homeCardParameters.price_order),
+    [homeCardParameters.price_order],
+  );
+  const priceRowSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 6,
+      },
+    }),
   );
   const activePriceIndices = useMemo(
     () => selectPromptHomePriceIndices(priceIndices),
@@ -2348,14 +2566,14 @@ function PromptHomePricesCard({
         {
           filters: priceFilters,
           sortState: priceSortState,
+          manualOrder: priceManualOrder,
           referenceDataLoading,
-          pricingSnapshotLoading: latestMarksLoading,
         },
       ),
     [
       latestMarks,
-      latestMarksLoading,
       priceFilters,
+      priceManualOrder,
       priceIndices,
       priceSortState,
       referenceDataLoading,
@@ -2377,16 +2595,57 @@ function PromptHomePricesCard({
   const priceToggleSummary =
     pricesViewModel.status === "reference_loading"
       ? "Loading price indices"
-      : pricesViewModel.status === "pricing_loading"
+      : latestMarksLoading && activePriceIndexCount > 0
         ? `Loading marks · ${activePriceIndexCount} active ${activePriceIndexNoun}`
         : `${latestMarkCount} latest ${latestMarkNoun} · ${activePriceIndexCount} active ${activePriceIndexNoun}`;
   const showPriceFilters =
     pricesViewModel.status === "ready" ||
-    pricesViewModel.status === "filtered_empty" ||
-    pricesViewModel.status === "no_latest_marks";
+    pricesViewModel.status === "filtered_empty";
   const priceFooterSummary = hasActivePriceFilters
     ? `Showing ${pricesViewModel.rows.length} of ${activePriceIndexCount} active ${activePriceIndexNoun}`
     : `${latestMarkCount} latest ${latestMarkNoun} across ${activePriceIndexCount} active ${activePriceIndexNoun}`;
+  const priceRowIds = useMemo(
+    () => pricesViewModel.rows.map((row) => row.priceIndexCode),
+    [pricesViewModel.rows],
+  );
+  const priceRowsMovable = canConfigureHomeCard && priceRowIds.length > 1;
+  const handlePriceRowDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      if (!priceRowsMovable) {
+        return;
+      }
+
+      const activePriceIndexCode = String(event.active.id);
+      const overPriceIndexCode = event.over ? String(event.over.id) : null;
+      if (!overPriceIndexCode || activePriceIndexCode === overPriceIndexCode) {
+        return;
+      }
+
+      const nextPriceOrder = buildPromptHomePriceOrderAfterDrag({
+        allPriceIndexCodes: pricesViewModel.allRows.map(
+          (row) => row.priceIndexCode,
+        ),
+        visiblePriceIndexCodes: priceRowIds,
+        activePriceIndexCode,
+        overPriceIndexCode,
+      });
+      const nextParameters: Record<string, unknown> = {
+        ...homeCardParameters,
+        price_order: nextPriceOrder,
+      };
+      delete nextParameters.price_sort;
+      onHomeCardConfigurationChange({
+        parameters: nextParameters,
+      });
+    },
+    [
+      homeCardParameters,
+      onHomeCardConfigurationChange,
+      priceRowIds,
+      priceRowsMovable,
+      pricesViewModel.allRows,
+    ],
+  );
 
   return (
     <article className="prompt-home-prices-card">
@@ -2435,11 +2694,6 @@ function PromptHomePricesCard({
             <div className="skeleton-block" />
             <div className="skeleton-block" />
             <div className="skeleton-block" />
-          </div>
-        ) : pricesViewModel.status === "pricing_loading" ? (
-          <div className="empty-state">
-            <strong>Loading latest price marks</strong>
-            <p>The Home card is reading the typed market-data snapshot.</p>
           </div>
         ) : pricesViewModel.status === "no_active_indices" ? (
           <div className="empty-state">
@@ -2602,12 +2856,7 @@ function PromptHomePricesCard({
                 ) : null}
               </div>
             ) : null}
-            {pricesViewModel.status === "no_latest_marks" ? (
-              <div className="empty-state">
-                <strong>No latest price marks</strong>
-                <p>The typed pricing snapshot did not return marks for the active price indices yet.</p>
-              </div>
-            ) : pricesViewModel.status === "filtered_empty" ? (
+            {pricesViewModel.status === "filtered_empty" ? (
               <div className="empty-state">
                 <strong>No prices match the current filters</strong>
                 <p>Clear filters to show all active price indices.</p>
@@ -2664,51 +2913,34 @@ function PromptHomePricesCard({
                     );
                   })}
                 </div>
-                {pricesViewModel.rows.map((row) => (
-                  <article
-                    key={row.key}
-                    className="prompt-home-price-row"
+                {priceRowsMovable ? (
+                  <DndContext
+                    sensors={priceRowSensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handlePriceRowDragEnd}
                   >
-                    <dl className="prompt-home-price-fields">
-                      <div>
-                        <dt>Product</dt>
-                        <dd>{row.product}</dd>
-                      </div>
-                      <div>
-                        <dt>Location</dt>
-                        <dd>{row.location}</dd>
-                      </div>
-                      <div>
-                        <dt>Price</dt>
-                        <dd>{row.price}</dd>
-                      </div>
-                      <div>
-                        <dt>Unit</dt>
-                        <dd>{row.unit}</dd>
-                      </div>
-                      <div>
-                        <dt>Currency</dt>
-                        <dd>{row.currency}</dd>
-                      </div>
-                      <div>
-                        <dt>Date</dt>
-                        <dd>{row.date}</dd>
-                      </div>
-                      <div>
-                        <dt>Time</dt>
-                        <dd>{row.time}</dd>
-                      </div>
-                      <div>
-                        <dt>Updated</dt>
-                        <dd>{row.updated}</dd>
-                      </div>
-                      <div>
-                        <dt>Source</dt>
-                        <dd>{row.source}</dd>
-                      </div>
-                    </dl>
-                  </article>
-                ))}
+                    <SortableContext
+                      items={priceRowIds}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      {pricesViewModel.rows.map((row) => (
+                        <SortablePromptHomePriceRow
+                          key={row.key}
+                          row={row}
+                          onOpenPriceReport={onOpenPriceReport}
+                        />
+                      ))}
+                    </SortableContext>
+                  </DndContext>
+                ) : (
+                  pricesViewModel.rows.map((row) => (
+                    <PromptHomePriceRow
+                      key={row.key}
+                      row={row}
+                      onOpenPriceReport={onOpenPriceReport}
+                    />
+                  ))
+                )}
               </div>
             )}
           </>
@@ -5307,6 +5539,16 @@ export function PromptHomeWorkspace({
                       )
                     }
                     onOpenPricesWorkspace={() => onOpenView("dashboard")}
+                    onOpenPriceReport={(priceIndex) =>
+                      onOpenView(
+                        "reports",
+                        buildPriceIndexBiReportHandoff({
+                          priceIndexCode: priceIndex.code,
+                          priceIndexName: priceIndex.name,
+                        }),
+                        { hash: PRICE_INDEX_BI_REPORT_ID },
+                      )
+                    }
                   />
                 ))}
                 {renderHomeCardSlot("map", (
@@ -5568,9 +5810,14 @@ export function PromptHomeWorkspace({
                       </div>
                     ) : (
                       displayedMessages.map((message, index) => {
+                        const renderedMessage =
+                          parseAssistantChartArtifacts(message.content);
+                        const renderedParagraphs = splitAssistantMessageText(
+                          renderedMessage.text,
+                        );
                         const canReadAloud =
                           message.role === "assistant" &&
-                          voicePlayback.canPlay(message.content);
+                          voicePlayback.canPlay(renderedMessage.text);
                         const readingMessage = voicePlayback.isPlaying(
                           message.id,
                         );
@@ -5625,9 +5872,21 @@ export function PromptHomeWorkspace({
                                 <PromptHomeAssistantActivityList
                                   message={message}
                                 />
-                                {message.content ? (
+                                {renderedParagraphs.length > 0 ||
+                                renderedMessage.charts.length > 0 ? (
                                   <div className="assistant-message-bubble">
-                                    <p>{message.content}</p>
+                                    {renderedParagraphs.map(
+                                      (paragraph, paragraphIndex) => (
+                                        <p
+                                          key={`${message.id}-paragraph-${paragraphIndex}`}
+                                        >
+                                          {paragraph}
+                                        </p>
+                                      ),
+                                    )}
+                                    <AssistantChartArtifactList
+                                      charts={renderedMessage.charts}
+                                    />
                                   </div>
                                 ) : null}
                                 {canReadAloud ? (
@@ -5648,7 +5907,7 @@ export function PromptHomeWorkspace({
                                         voiceComposer.cancelListening();
                                         voicePlayback.togglePlayback(
                                           message.id,
-                                          message.content,
+                                          renderedMessage.text,
                                         );
                                       }}
                                     >

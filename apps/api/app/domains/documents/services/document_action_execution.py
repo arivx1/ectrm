@@ -219,9 +219,11 @@ def _apply_document_action(
             invoice_id=int(invoice_id),
             actor_id=actor_id,
             payment_reference=_optional_payload_value(action_plan.payload, "payment_reference"),
+            payment_currency_code=_optional_payload_value(action_plan.payload, "payment_currency_code"),
             payment_amount=action_plan.payload.get("payment_amount"),
             due_at=_parse_datetime_candidate(action_plan.payload.get("due_at")),
             due_calendar_code=_optional_payload_value(action_plan.payload, "due_calendar_code"),
+            received_at=_parse_datetime_candidate(action_plan.payload.get("received_at")),
             notes=_execution_note(document),
             now=now,
         )

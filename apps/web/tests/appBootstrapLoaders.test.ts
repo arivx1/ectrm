@@ -10,6 +10,7 @@ import type {
   LocationRecord,
   PortfolioRecord,
   PriceIndexRecord,
+  PriceSourceReviewRecord,
   RailRouteRecord,
   ReferenceRecord,
   SpatialFeatureRecord,
@@ -246,6 +247,43 @@ const bootstrapExternalDataRun: ExternalDataRunRecord = {
   observation_count: 128,
   error_summary: null,
   created_at: '2026-04-06T00:00:00Z',
+}
+
+const bootstrapPriceSource: PriceSourceReviewRecord = {
+  id: 301,
+  price_index_code: 'WTI_CUSHING_D',
+  price_index_name: 'WTI Cushing Spot Daily',
+  commodity_code: 'WTI',
+  quote_type: 'SPOT',
+  market: 'CUSHING',
+  location_code: null,
+  price_unit_code: 'BBL',
+  price_currency_code: 'USD',
+  price_index_is_active: true,
+  provider: 'EIA',
+  dataset_code: null,
+  series_id: 'PET.RWTC.D',
+  frequency: 'daily',
+  source_unit: 'BBL',
+  source_currency_code: 'USD',
+  transform_rule: null,
+  is_active: true,
+  review_status: 'current',
+  provider_health_status: 'healthy',
+  latest_run_status: 'SUCCEEDED',
+  latest_run_id: 101,
+  last_success_at: '2026-04-06T00:05:00Z',
+  provider_error_summary: null,
+  latest_observation_date: '2026-04-05',
+  latest_value: 66.1,
+  latest_unit_code: 'BBL',
+  latest_currency_code: 'USD',
+  latest_source_revision: 'rev-1',
+  latest_downloaded_at: '2026-04-06T00:05:00Z',
+  latest_observation_run_id: 101,
+  created_at: '2026-04-06T00:00:00Z',
+  updated_at: '2026-04-06T00:00:00Z',
+  version: 1,
 }
 
 const bootstrapTradingSource: TradingSourceRecord = {
@@ -1089,6 +1127,7 @@ test('loadAdminWorkspaceBootstrap returns empty admin data without an authentica
   assert.deepEqual(payload, {
     externalDataRuns: [],
     externalDataSyncStatus: null,
+    externalDataPriceSources: [],
     tradingSources: [],
     weatherLocations: [],
     weatherSyncStatus: null,
@@ -1173,6 +1212,9 @@ test('loadAdminWorkspaceBootstrap tolerates partial admin endpoint failures', as
     if (url.endsWith('/admin/external-data/status')) {
       throw new Error('status unavailable')
     }
+    if (url.endsWith('/admin/external-data/price-sources?limit=1000')) {
+      return [bootstrapPriceSource]
+    }
     if (url.endsWith('/admin/trading-sources?limit=500')) {
       return [bootstrapTradingSource]
     }
@@ -1193,16 +1235,19 @@ test('loadAdminWorkspaceBootstrap tolerates partial admin endpoint failures', as
   assert.deepEqual(payload, {
     externalDataRuns: [bootstrapExternalDataRun],
     externalDataSyncStatus: null,
+    externalDataPriceSources: [bootstrapPriceSource],
     tradingSources: [bootstrapTradingSource],
     weatherLocations: [{ code: 'HOUSTON_GC' }],
     weatherSyncStatus: { latest_run: '2026-04-06T00:00:00Z' },
   })
-  assert.equal(fetchJsonMock.mock.calls.length, 5)
+  assert.equal(fetchJsonMock.mock.calls.length, 6)
   assert.strictEqual(fetchJsonMock.mock.calls[0]?.[1]?.headers, headers)
 
   const firstRun: ExternalDataRunRecord = payload.externalDataRuns[0]!
   const firstSource: TradingSourceRecord = payload.tradingSources[0]!
+  const firstPriceSource: PriceSourceReviewRecord = payload.externalDataPriceSources[0]!
 
   assert.equal(firstRun.id, 101)
   assert.equal(firstSource.source_id, 'SRC-1')
+  assert.equal(firstPriceSource.price_index_code, 'WTI_CUSHING_D')
 })

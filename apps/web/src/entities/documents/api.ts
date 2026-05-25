@@ -104,7 +104,7 @@ export type DecideDocumentActionApprovalRequestInput = {
 
 export type DocumentRecordCandidateSelectionInput = {
   record_type: string
-  record_id: string
+  record_id?: string | null
   request_comment?: string | null
 }
 

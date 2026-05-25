@@ -138,6 +138,10 @@ class MessagingWorkspaceApiTests(unittest.TestCase):
             assistant_conversation["timeline"][1]["attachment"]["title"],
             "AR-204 governed action draft",
         )
+        self.assertNotIn("Mia Chen", str(payload))
+        self.assertNotIn("Scheduler", str(payload))
+        self.assertNotIn("Online", str(payload))
+        self.assertIn("Operations Queue", assistant_conversation["timeline"][1]["thread_participants"])
 
     def test_guest_post_persists_and_reloads(self) -> None:
         post_response = self.client.post(
@@ -168,12 +172,12 @@ class MessagingWorkspaceApiTests(unittest.TestCase):
     def test_signed_in_post_uses_authenticated_display_name(self) -> None:
         self._bootstrap_admin()
         self._create_user(
-            user_id="mia.chen",
-            email="mia@example.com",
-            display_name="Mia Chen",
+            user_id="ops.user",
+            email="ops@example.com",
+            display_name="Ops User",
             role="OPERATIONS",
         )
-        access_token = self._login(identifier="mia.chen")
+        access_token = self._login(identifier="ops.user")
 
         response = self.client.post(
             "/messages/workspace/posts",
@@ -185,9 +189,9 @@ class MessagingWorkspaceApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 201)
         payload = response.json()
-        self.assertEqual(payload["author"]["name"], "Mia Chen")
+        self.assertEqual(payload["author"]["name"], "Ops User")
         self.assertEqual(payload["author"]["title"], "Desk operator")
-        self.assertEqual(payload["created_by_user_id"], "mia.chen")
+        self.assertEqual(payload["created_by_user_id"], "ops.user")
         self.assertEqual(payload["created_by_role"], "OPERATIONS")
 
     def test_post_can_persist_attachment_metadata(self) -> None:
