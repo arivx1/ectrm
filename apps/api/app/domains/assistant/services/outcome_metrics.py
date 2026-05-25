@@ -79,9 +79,13 @@ class AssistantOutcomeMetricCounters:
     executed_action_count: int
     rejected_action_count: int
     failed_action_count: int
+    approved_as_is_count: int
+    approved_with_corrections_count: int
     correction_count: int
     decided_action_count: int
     stale_action_count: int
+    duplicate_action_count: int
+    invalid_action_payload_count: int
     unsupported_attempt_count: int
     policy_drift_count: int
     approval_rate: float | None
@@ -252,8 +256,12 @@ class _ActionAccumulator:
     executed_action_count: int = 0
     rejected_action_count: int = 0
     failed_action_count: int = 0
+    approved_as_is_count: int = 0
+    approved_with_corrections_count: int = 0
     correction_count: int = 0
     stale_action_count: int = 0
+    duplicate_action_count: int = 0
+    invalid_action_payload_count: int = 0
     unsupported_attempt_count: int = 0
     policy_drift_count: int = 0
     decision_seconds: list[float] = field(default_factory=list)
@@ -779,7 +787,11 @@ def _accumulate_action_request(
     elif status == "FAILED":
         accumulator.failed_action_count += 1
 
-    if str(record.review_outcome or "").upper() == "APPROVED_WITH_CORRECTIONS":
+    review_outcome = str(record.review_outcome or "").upper()
+    if review_outcome == "APPROVED_AS_IS":
+        accumulator.approved_as_is_count += 1
+    elif review_outcome == "APPROVED_WITH_CORRECTIONS":
+        accumulator.approved_with_corrections_count += 1
         accumulator.correction_count += 1
 
     if record.decided_at is not None:
@@ -790,6 +802,10 @@ def _accumulate_action_request(
 
     if _action_request_has_stale_outcome(record):
         accumulator.stale_action_count += 1
+    if _action_request_has_duplicate_outcome(record):
+        accumulator.duplicate_action_count += 1
+    if _action_request_has_invalid_payload_outcome(record):
+        accumulator.invalid_action_payload_count += 1
     if _action_request_has_unsupported_attempt(record):
         accumulator.unsupported_attempt_count += 1
     if _action_request_has_policy_drift(record):
@@ -1035,9 +1051,13 @@ def _build_action_counters(accumulator: _ActionAccumulator) -> AssistantOutcomeM
         executed_action_count=accumulator.executed_action_count,
         rejected_action_count=accumulator.rejected_action_count,
         failed_action_count=accumulator.failed_action_count,
+        approved_as_is_count=accumulator.approved_as_is_count,
+        approved_with_corrections_count=accumulator.approved_with_corrections_count,
         correction_count=accumulator.correction_count,
         decided_action_count=decided_action_count,
         stale_action_count=accumulator.stale_action_count,
+        duplicate_action_count=accumulator.duplicate_action_count,
+        invalid_action_payload_count=accumulator.invalid_action_payload_count,
         unsupported_attempt_count=accumulator.unsupported_attempt_count,
         policy_drift_count=accumulator.policy_drift_count,
         approval_rate=_safe_ratio(accumulator.executed_action_count, decided_action_count),
@@ -1229,6 +1249,30 @@ def _action_request_has_unsupported_attempt(record: AssistantActionRequest) -> b
             "unknown action",
             "unknown tool",
             "unregistered action",
+        )
+    )
+
+
+def _action_request_has_duplicate_outcome(record: AssistantActionRequest) -> bool:
+    text = _action_failure_text(record)
+    return "already exists" in text or "duplicate" in text
+
+
+def _action_request_has_invalid_payload_outcome(record: AssistantActionRequest) -> bool:
+    text = _action_failure_text(record)
+    if not text or _action_request_has_policy_drift(record):
+        return False
+    if "unsupported action" in text or "unsupported tool" in text:
+        return False
+    return any(
+        phrase in text
+        for phrase in (
+            "invalid",
+            "missing",
+            "must ",
+            "must not",
+            "not supported for",
+            "validation",
         )
     )
 

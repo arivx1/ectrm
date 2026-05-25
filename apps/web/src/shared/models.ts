@@ -3728,9 +3728,13 @@ export type AssistantOutcomeMetricCounters = {
   executed_action_count: number
   rejected_action_count: number
   failed_action_count: number
+  approved_as_is_count: number
+  approved_with_corrections_count: number
   correction_count: number
   decided_action_count: number
   stale_action_count: number
+  duplicate_action_count: number
+  invalid_action_payload_count: number
   unsupported_attempt_count: number
   policy_drift_count: number
   approval_rate?: number | null

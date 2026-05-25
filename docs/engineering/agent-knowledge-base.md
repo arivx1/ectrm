@@ -516,10 +516,13 @@ proposal form until a human owner approves the domain rule.
   inspection. HVI-08 added action staging/execution coverage for HH NG,
   duplicate-name, invalid-card, ambiguous-request, and invalid-filter paths.
   HVI-09 added `apps/api/tests/test_home_view_recipes.py`, persona-emphasis API
-  coverage, and assistant evals for risk-persona HH NG recipe staging.
-- Follow-up: add recipe outcome review in HVI-10 before broadening autonomous
+  coverage, and assistant evals for risk-persona HH NG recipe staging. HVI-10
+  adds explicit outcome metrics for approved-as-is, corrected, rejected,
+  duplicate, and invalid Home view action outcomes plus browser smoke for
+  prompt-created Home view approval and opening the saved instance.
+- Follow-up: use HVI-10 recipe outcome review before broadening autonomous
   recipe promotion, and keep shared/team Home publication human/API-owned until
-  a separate governed action and approval model exist.
+  a separate governed action and approval model exists.
 
 ### 2026-05-22 - OpenAI Structured Outputs Need Explicit Strict Schemas
 

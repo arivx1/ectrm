@@ -257,9 +257,11 @@ services. Recurring comments that point to stable product behavior should be
 promoted through the deterministic algorithm loop.
 
 Admin outcome metrics include feedback totals, helpful vs. needs-work rates,
-workspace-level feedback rows, and recent run feedback notes so reviewers can
-spot agent or workspace patterns without turning comments into automatic
-authority changes.
+workspace-level feedback rows, explicit action-review outcome counters
+(`APPROVED_AS_IS`, `APPROVED_WITH_CORRECTIONS`, rejected, failed), duplicate
+or invalid action payload failure counters, and recent run feedback notes so
+reviewers can spot agent or workspace patterns without turning comments into
+automatic authority changes.
 
 ## Assistant Evals
 

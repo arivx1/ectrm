@@ -903,6 +903,33 @@ experience.
 - the team has enough evidence to decide whether personal Home view creation
   can move from staged action to bounded execution
 
+### Implementation Notes
+
+HVI-10 adds the verification and review lane around prompt-created Home views.
+The assistant outcome metrics counters now explicitly expose approved-as-is,
+approved-with-corrections, duplicate-action, and invalid-payload counts, so
+`create_home_view_instance` recipe outcomes can be reviewed without inferring
+trust from a generic execution count. Assistant eval coverage now checks HH NG
+no-overclaim wording, personal-scope-only authority, and the registered
+`imminent_shipments` recipe stop while the dedicated shipment Home card is
+absent. Prompt Home browser smoke stages an HH NG Home view from the prompt,
+approves it through the governed action card, reloads, and opens the saved
+instance from the Home view switcher.
+
+Narrow verification lanes for future Home instance changes:
+
+- Home definition schema, ownership, reset, publish, duplicate, or validation:
+  `apps.api.tests.test_home_view_definitions_api`.
+- deterministic recipe resolution, card mix, filters, assumptions, and stop
+  conditions: `apps.api.tests.test_home_view_recipes` plus
+  `make api-assistant-evals` when assistant staging behavior changes.
+- governed `create_home_view_instance` payload, review context, stale-state
+  basis, execution, or outcome metrics: focused assistant API tests plus
+  `make api-assistant-evals`.
+- Prompt Home instance switching, save/reset controls, and filter persistence:
+  focused web tests, with `make web-smoke-test` for prompt-created or
+  approval-path changes.
+
 ## First Implementation Slice
 
 The smallest useful delivery slice is:

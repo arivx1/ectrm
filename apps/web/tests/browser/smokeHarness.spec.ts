@@ -2227,6 +2227,75 @@ test("prompt home stages a governed action with inline review context and syncs 
   }
 });
 
+test("prompt home approves a staged Home view and opens the saved instance", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness({ singleUserAuthEnabled: true });
+
+  try {
+    await seedApiBaseOverride(page, harness);
+    await page.goto(harness.origin, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await signInFromPromptHome(page);
+
+    await page
+      .getByLabel("Operator prompt")
+      .fill("Make me a view to see HH NG.");
+    await page.getByRole("button", { name: "Send Prompt" }).click();
+
+    const assistantMessage = page
+      .locator(".assistant-message-assistant")
+      .last();
+    const actionCard = assistantMessage
+      .locator(".assistant-action-card")
+      .first();
+
+    await expect(
+      assistantMessage.getByText(
+        "I staged a Home view request for HH NG. Review the card mix and filters before anything changes. Approval is still required.",
+      ),
+    ).toBeVisible();
+    await expect(actionCard).toContainText('Create Home view "HH NG Watch"');
+    await expect(actionCard).toContainText("Requester: ops_admin");
+    await expect(actionCard).toContainText("Home view HH NG Watch");
+    await expect(actionCard).toContainText("Dry-run preview");
+
+    await actionCard.getByRole("button", { name: "Approve" }).click();
+
+    await expect(actionCard).toContainText("Executed");
+    await expect(actionCard).toContainText("Review: Approved as-is");
+    await expect(actionCard).toContainText("home_view_definition");
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const viewSwitcher = page.locator(".prompt-home-view-switcher select");
+    await expect(viewSwitcher).toContainText("HH NG Watch");
+    await viewSwitcher.selectOption({ label: "HH NG Watch" });
+    await page.getByRole("button", { name: /Edit cards/ }).click();
+    await expect(page.locator(".prompt-home-view-actions")).toContainText(
+      "HH NG Watch",
+    );
+    await expect(page.locator(".prompt-home-view-actions")).toContainText(
+      "Personal",
+    );
+
+    expect(
+      harness.unexpectedRequests,
+      `Unhandled mock API requests:\n${formatRecordedRequests(harness.unexpectedRequests)}`,
+    ).toHaveLength(0);
+    expect(harness.mutationRequests).toEqual([
+      {
+        method: "POST",
+        path: "/assistant/action-requests/7101/approve",
+        search: "",
+      },
+    ]);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("signed-in smoke captures a trade and selects the created ticket", async ({
   page,
 }) => {

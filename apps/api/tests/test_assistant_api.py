@@ -6343,6 +6343,8 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(workflow_row["run_count"], 1)
         self.assertEqual(workflow_row["staged_action_count"], 10)
         self.assertEqual(workflow_row["executed_action_count"], 10)
+        self.assertEqual(workflow_row["approved_as_is_count"], 9)
+        self.assertEqual(workflow_row["approved_with_corrections_count"], 1)
         self.assertEqual(workflow_row["correction_count"], 1)
         self.assertEqual(workflow_row["correction_rate"], 0.1)
         self.assertEqual(workflow_row["helpful_feedback_count"], 1)
@@ -6438,6 +6440,8 @@ class AssistantApiTests(unittest.TestCase):
 
         action_rows = {row["action_type"]: row for row in payload["by_action_type"]}
         self.assertEqual(action_rows["update_trade_workflow_item"]["executed_action_count"], 10)
+        self.assertEqual(action_rows["update_trade_workflow_item"]["approved_as_is_count"], 9)
+        self.assertEqual(action_rows["update_trade_workflow_item"]["approved_with_corrections_count"], 1)
         self.assertEqual(action_rows["update_trade_workflow_item"]["correction_count"], 1)
         self.assertEqual(
             action_rows["update_trade_workflow_item"]["recommendation"]["recommended_action"],
@@ -6487,6 +6491,133 @@ class AssistantApiTests(unittest.TestCase):
         self.assertTrue(
             all(row["action_type"] == "update_trade_workflow_item" for row in filtered_actions["items"])
         )
+
+    def test_admin_outcome_metrics_distinguish_home_view_recipe_review_outcomes(self) -> None:
+        admin_token = self._create_session_token()
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            home_run = AssistantRun(
+                conversation_id=None,
+                status="COMPLETED",
+                user_id="ops_alpha",
+                session_id="home-view-session",
+                user_role="OPS_ADMIN",
+                workspace="assistant",
+                agent_id="home-view-stager",
+                agent_name="Home View Stager",
+                agent_role_key="home-view-stager",
+                agent_profile_kind="CUSTOM",
+                provider="openai",
+                model="gpt-5-mini",
+                use_live_tools=False,
+                request_messages=[{"role": "user", "content": "Make me a view to see HH NG."}],
+                application_context=None,
+                prompt_sections=[],
+                rendered_system_prompt="System prompt.",
+                warnings=[],
+                tool_calls=[],
+                input_tokens=100,
+                output_tokens=40,
+                latest_user_message="Make me a view to see HH NG.",
+                assistant_message="Staged Home view requests.",
+                error_detail=None,
+                created_at=now - timedelta(hours=1),
+                completed_at=now - timedelta(hours=1),
+            )
+            session.add(home_run)
+            session.flush()
+            action_rows = [
+                ("PENDING", None, None),
+                ("EXECUTED", "APPROVED_AS_IS", None),
+                ("EXECUTED", "APPROVED_WITH_CORRECTIONS", None),
+                ("REJECTED", "REJECTED", None),
+                ("FAILED", None, "Home view 'HH NG Watch' already exists for this user."),
+                ("FAILED", None, "The Home view request is missing card definitions."),
+            ]
+            for index, (status_value, review_outcome, error_detail) in enumerate(action_rows):
+                session.add(
+                    AssistantActionRequest(
+                        run_id=home_run.id,
+                        status=status_value,
+                        user_id="ops_alpha",
+                        session_id="home-view-session",
+                        workspace="assistant",
+                        agent_id="home-view-stager",
+                        agent_name="Home View Stager",
+                        action_type="create_home_view_instance",
+                        summary=f"Create HH NG Home view {index}",
+                        description="Create a personal HH NG Home view.",
+                        payload={
+                            "name": "HH NG Watch",
+                            "scope": "PERSONAL",
+                            "review_context": {
+                                "owning_work_object": {
+                                    "type": "home_view_definition",
+                                    "id": "PERSONAL:hh ng watch",
+                                    "label": "Home view HH NG Watch",
+                                },
+                                "required_reviewer_role": "REQUESTING_USER_OR_ADMIN",
+                                "business_rationale": "User asked for an HH NG Home view.",
+                                "proposed_mutation": {
+                                    "operation": "create_home_view_instance",
+                                    "recipe_key": "hub_basis_watch",
+                                },
+                                "supporting_records": [],
+                                "assumptions": [],
+                                "missing_evidence": [],
+                                "expected_downstream_effects": [],
+                                "stale_state_basis": {"existing_definition_id": None},
+                            },
+                        },
+                        result=(
+                            {"home_view_definition": {"definition_id": index + 1}}
+                            if status_value == "EXECUTED"
+                            else None
+                        ),
+                        error_detail=error_detail,
+                        review_outcome=review_outcome,
+                        decision_note=(
+                            "Reviewer corrected card order."
+                            if review_outcome == "APPROVED_WITH_CORRECTIONS"
+                            else None
+                        ),
+                        correction_summary=(
+                            "Moved the map card below prices."
+                            if review_outcome == "APPROVED_WITH_CORRECTIONS"
+                            else None
+                        ),
+                        correction_fields=(
+                            ["cards"]
+                            if review_outcome == "APPROVED_WITH_CORRECTIONS"
+                            else None
+                        ),
+                        created_at=now - timedelta(minutes=30 + index),
+                        decided_at=None if status_value == "PENDING" else now - timedelta(minutes=20 + index),
+                        decided_by=None if status_value == "PENDING" else "ops_lead",
+                    )
+                )
+            session.commit()
+
+        response = self.client.get(
+            "/admin/assistant/outcome-metrics?action_type=create_home_view_instance",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        action_rows = {row["action_type"]: row for row in payload["by_action_type"]}
+        home_row = action_rows["create_home_view_instance"]
+        self.assertEqual(home_row["staged_action_count"], 6)
+        self.assertEqual(home_row["pending_action_count"], 1)
+        self.assertEqual(home_row["executed_action_count"], 2)
+        self.assertEqual(home_row["approved_as_is_count"], 1)
+        self.assertEqual(home_row["approved_with_corrections_count"], 1)
+        self.assertEqual(home_row["correction_count"], 1)
+        self.assertEqual(home_row["rejected_action_count"], 1)
+        self.assertEqual(home_row["failed_action_count"], 2)
+        self.assertEqual(home_row["duplicate_action_count"], 1)
+        self.assertEqual(home_row["invalid_action_payload_count"], 1)
+        self.assertEqual(home_row["decided_action_count"], 5)
 
     def test_admin_autonomy_review_brief_combines_metrics_eval_and_knowledge_base(self) -> None:
         admin_token = self._create_session_token()

@@ -33,9 +33,13 @@ const baseCounters = {
   executed_action_count: 10,
   rejected_action_count: 1,
   failed_action_count: 1,
+  approved_as_is_count: 9,
+  approved_with_corrections_count: 1,
   correction_count: 1,
   decided_action_count: 12,
   stale_action_count: 0,
+  duplicate_action_count: 1,
+  invalid_action_payload_count: 1,
   unsupported_attempt_count: 1,
   policy_drift_count: 0,
   approval_rate: 0.8333,
@@ -112,12 +116,20 @@ test('assistant outcome agent rows expose recommendations and guardrail metrics'
     { label: 'Approval rate', value: '83%' },
   )
   assert.deepEqual(
+    displayRow?.metrics.find((metric) => metric.label === 'Approved as-is'),
+    { label: 'Approved as-is', value: '9' },
+  )
+  assert.deepEqual(
     displayRow?.metrics.find((metric) => metric.label === 'Tool errors'),
     { label: 'Tool errors', value: '2 (9.5%)' },
   )
   assert.deepEqual(
     displayRow?.metrics.find((metric) => metric.label === 'Unsupported'),
     { label: 'Unsupported', value: '1' },
+  )
+  assert.deepEqual(
+    displayRow?.metrics.find((metric) => metric.label === 'Duplicate'),
+    { label: 'Duplicate', value: '1' },
   )
 })
 
@@ -154,6 +166,10 @@ test('assistant outcome action rows summarize action-type readiness', () => {
   assert.deepEqual(
     displayRow?.metrics.find((metric) => metric.label === 'Avg decision'),
     { label: 'Avg decision', value: '1.5h' },
+  )
+  assert.deepEqual(
+    displayRow?.metrics.find((metric) => metric.label === 'Approved as-is'),
+    { label: 'Approved as-is', value: '9' },
   )
 })
 

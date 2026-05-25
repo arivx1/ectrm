@@ -714,9 +714,13 @@ class AssistantOutcomeMetricCountersOut(BaseModel):
     executed_action_count: int
     rejected_action_count: int
     failed_action_count: int
+    approved_as_is_count: int
+    approved_with_corrections_count: int
     correction_count: int
     decided_action_count: int
     stale_action_count: int
+    duplicate_action_count: int
+    invalid_action_payload_count: int
     unsupported_attempt_count: int
     policy_drift_count: int
     approval_rate: Optional[float] = None

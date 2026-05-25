@@ -61,7 +61,105 @@ import {
 
 type SmokeTradeRow = (typeof trades)[number]
 type SmokeEventRow = (typeof selectedTradeEvents)[number]
-type SmokeAssistantActionRequestRow = (typeof assistantActionRequests)[number]
+type SmokeAssistantActionPreview = {
+  preview_type: string
+  status: string
+  summary: string
+  affected_records: Record<string, unknown>[]
+  field_changes: Record<string, unknown>[]
+  expected_side_effects: string[]
+  warnings: string[]
+  blocking_reasons: string[]
+  assumptions: string[]
+  metadata?: unknown
+}
+type SmokeAssistantReviewContext = {
+  owning_work_object: Record<string, unknown>
+  required_reviewer_role: string
+  business_rationale: string
+  proposed_mutation: Record<string, unknown>
+  supporting_records: Record<string, unknown>[]
+  assumptions: string[]
+  missing_evidence: string[]
+  expected_downstream_effects: string[]
+  stale_state_basis: Record<string, unknown>
+  idempotency_key?: string
+  action_preview?: SmokeAssistantActionPreview | null
+}
+type SmokeAssistantActionLifecycle = {
+  stage: string
+  label: string
+  tone: string
+  is_terminal: boolean
+  can_approve: boolean
+  can_reject: boolean
+  reviewer_action_label: string | null
+  decided_label: string | null
+  review_risk_flags: string[]
+}
+type SmokeAssistantActionRequestRow = {
+  action_request_id: number
+  run_id: number
+  user_id: string
+  status: string
+  workspace: string | null
+  agent_id: string | null
+  agent_name: string | null
+  action_type: string
+  summary: string
+  description: string
+  payload: Record<string, unknown>
+  review_context: SmokeAssistantReviewContext
+  lifecycle: SmokeAssistantActionLifecycle
+  result: Record<string, unknown> | null
+  error_detail: string | null
+  review_outcome: string | null
+  decision_note: string | null
+  correction_summary: string | null
+  correction_fields: string[]
+  created_at: string
+  decided_at: string | null
+  decided_by: string | null
+}
+type SmokeHomeViewCardRow = {
+  card_id: string
+  kind: string
+  label: string
+  visible: boolean
+  placement: {
+    order: number
+    column_span: number
+    row_span: number
+  }
+  parameters: Record<string, unknown>
+  filters: Record<string, unknown>
+  data_bindings: string[]
+}
+type SmokeHomeViewDefinitionRow = {
+  definition_id: number
+  definition_key: string
+  name: string
+  scope: string
+  scope_owner_key: string
+  base_template_key: string
+  base_template_version: number
+  persona_hint: string | null
+  cards: SmokeHomeViewCardRow[]
+  global_filters: Record<string, unknown>
+  status: string
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
+  can_duplicate: boolean
+  can_publish: boolean
+  can_retire: boolean
+  can_restore: boolean
+  is_shared: boolean
+  validation_warnings: string[]
+}
 type SmokeAssistantProfileRequestKind = 'NEW_SPECIALIZATION' | 'EDIT_EXISTING' | 'NARROW_ACCESS'
 type SmokeAssistantProfileRequestStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'ACTIVATED'
 type SmokeAssistantProfileRequestDiffRow = {
@@ -818,16 +916,21 @@ async function startMockApiServer(
             action_preview: request.review_context.action_preview
               ? {
                   ...request.review_context.action_preview,
-                  affected_records: request.review_context.action_preview.affected_records.map(
+                  affected_records: (request.review_context.action_preview.affected_records ?? []).map(
                     (record) => ({ ...record }),
                   ),
-                  field_changes: request.review_context.action_preview.field_changes.map((change) => ({
+                  field_changes: (request.review_context.action_preview.field_changes ?? []).map((change) => ({
                     ...change,
                   })),
-                  expected_side_effects: [...request.review_context.action_preview.expected_side_effects],
-                  warnings: [...request.review_context.action_preview.warnings],
-                  blocking_reasons: [...request.review_context.action_preview.blocking_reasons],
-                  assumptions: [...request.review_context.action_preview.assumptions],
+                  expected_side_effects: [...(request.review_context.action_preview.expected_side_effects ?? [])],
+                  warnings: [...(request.review_context.action_preview.warnings ?? [])],
+                  blocking_reasons: [...(request.review_context.action_preview.blocking_reasons ?? [])],
+                  assumptions: [...(request.review_context.action_preview.assumptions ?? [])],
+                  metadata:
+                    request.review_context.action_preview.metadata &&
+                    typeof request.review_context.action_preview.metadata === 'object'
+                      ? { ...request.review_context.action_preview.metadata }
+                      : request.review_context.action_preview.metadata,
                 }
               : request.review_context.action_preview,
           }
@@ -839,6 +942,331 @@ async function startMockApiServer(
       result: request.result ? { ...request.result } : null,
       correction_fields: [...request.correction_fields],
     }
+  }
+
+  function smokeHomeViewCardDefaults(cardId: string): Omit<SmokeHomeViewCardRow, 'visible' | 'placement' | 'parameters' | 'filters'> {
+    const defaults: Record<string, Omit<SmokeHomeViewCardRow, 'visible' | 'placement' | 'parameters' | 'filters'>> = {
+      timeframe: {
+        card_id: 'timeframe',
+        kind: 'time_context',
+        label: 'Desk Time',
+        data_bindings: ['desk_clock', 'upcoming_calendar_events'],
+      },
+      prices: {
+        card_id: 'prices',
+        kind: 'market_prices',
+        label: 'Market Prices',
+        data_bindings: ['latest_price_marks', 'market_price_indices'],
+      },
+      map: {
+        card_id: 'map',
+        kind: 'asset_map',
+        label: 'Asset map',
+        data_bindings: ['asset_map', 'spatial_features', 'weather_overlays'],
+      },
+      documents: {
+        card_id: 'documents',
+        kind: 'documents',
+        label: 'Upload documents',
+        data_bindings: ['document_ingestion'],
+      },
+      communication: {
+        card_id: 'communication',
+        kind: 'communication',
+        label: 'Communication center',
+        data_bindings: ['message_threads', 'counterparty_contacts'],
+      },
+      prompt: {
+        card_id: 'prompt',
+        kind: 'assistant_prompt',
+        label: 'Ask the desk assistant',
+        data_bindings: ['assistant_conversation', 'operator_attention_counts'],
+      },
+    }
+    return defaults[cardId] ?? defaults.prompt
+  }
+
+  function buildSmokeHomeViewSystemCards(): SmokeHomeViewCardRow[] {
+    return ['timeframe', 'prices', 'map', 'documents', 'communication', 'prompt'].map(
+      (cardId, index) => ({
+        ...smokeHomeViewCardDefaults(cardId),
+        visible: true,
+        placement: {
+          order: index,
+          column_span: cardId === 'prices' || cardId === 'map' || cardId === 'prompt' ? 2 : 1,
+          row_span: cardId === 'map' ? 2 : 1,
+        },
+        parameters: {},
+        filters: {},
+      }),
+    )
+  }
+
+  function normalizeSmokeHomeViewCards(rawCards: unknown): SmokeHomeViewCardRow[] {
+    const rows = Array.isArray(rawCards) ? rawCards : []
+    const normalized: SmokeHomeViewCardRow[] = []
+    const seen = new Set<string>()
+
+    for (const row of rows) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        continue
+      }
+      const record = row as Record<string, unknown>
+      const cardId = normalizeOptionalText(record.card_id) ?? normalizeOptionalText(record.cardId)
+      if (!cardId || seen.has(cardId)) {
+        continue
+      }
+      const defaults = smokeHomeViewCardDefaults(cardId)
+      const placementRecord =
+        record.placement && typeof record.placement === 'object' && !Array.isArray(record.placement)
+          ? (record.placement as Record<string, unknown>)
+          : {}
+      normalized.push({
+        ...defaults,
+        visible: typeof record.visible === 'boolean' ? record.visible : true,
+        placement: {
+          order: normalized.length,
+          column_span: Number(placementRecord.column_span ?? placementRecord.columnSpan ?? 1),
+          row_span: Number(placementRecord.row_span ?? placementRecord.rowSpan ?? 1),
+        },
+        parameters:
+          record.parameters && typeof record.parameters === 'object' && !Array.isArray(record.parameters)
+            ? { ...(record.parameters as Record<string, unknown>) }
+            : {},
+        filters:
+          record.filters && typeof record.filters === 'object' && !Array.isArray(record.filters)
+            ? { ...(record.filters as Record<string, unknown>) }
+            : {},
+        data_bindings: Array.isArray(record.data_bindings)
+          ? record.data_bindings.map((binding) => String(binding))
+          : Array.isArray(record.dataBindings)
+            ? record.dataBindings.map((binding) => String(binding))
+            : [...defaults.data_bindings],
+      })
+      seen.add(cardId)
+    }
+
+    for (const systemCard of buildSmokeHomeViewSystemCards()) {
+      if (seen.has(systemCard.card_id)) {
+        continue
+      }
+      normalized.push({
+        ...systemCard,
+        placement: {
+          ...systemCard.placement,
+          order: normalized.length,
+        },
+      })
+    }
+    return normalized
+  }
+
+  function buildSmokeHomeViewDefinition(args: {
+    definitionId: number
+    name: string
+    cards: SmokeHomeViewCardRow[]
+    personaHint?: string | null
+    globalFilters?: Record<string, unknown>
+    createdBy?: string
+  }): SmokeHomeViewDefinitionRow {
+    const actor = args.createdBy ?? smokeSession.user.user_id
+    return {
+      definition_id: args.definitionId,
+      definition_key: `home_view_smoke_${args.definitionId}`,
+      name: args.name,
+      scope: 'PERSONAL',
+      scope_owner_key: actor,
+      base_template_key: 'system_home',
+      base_template_version: 1,
+      persona_hint: args.personaHint ?? 'trader',
+      cards: args.cards.map((card) => ({
+        ...card,
+        placement: { ...card.placement },
+        parameters: { ...card.parameters },
+        filters: { ...card.filters },
+        data_bindings: [...card.data_bindings],
+      })),
+      global_filters: { ...(args.globalFilters ?? {}) },
+      status: 'ACTIVE',
+      created_at: assistantRunRecordedAt,
+      created_by: actor,
+      updated_at: assistantRunRecordedAt,
+      updated_by: actor,
+      version: 1,
+      can_edit: true,
+      can_duplicate: false,
+      can_publish: true,
+      can_retire: false,
+      can_restore: false,
+      is_shared: false,
+      validation_warnings: [],
+    }
+  }
+
+  function cloneHomeViewDefinition(row: SmokeHomeViewDefinitionRow): SmokeHomeViewDefinitionRow {
+    return {
+      ...row,
+      cards: row.cards.map((card) => ({
+        ...card,
+        placement: { ...card.placement },
+        parameters: { ...card.parameters },
+        filters: { ...card.filters },
+        data_bindings: [...card.data_bindings],
+      })),
+      global_filters: { ...row.global_filters },
+      validation_warnings: [...row.validation_warnings],
+    }
+  }
+
+  function createHomeViewDefinitionFromPayload(payload: Record<string, unknown>): SmokeHomeViewDefinitionRow {
+    const name = normalizeOptionalText(payload.name) ?? 'New Home view'
+    const definition = buildSmokeHomeViewDefinition({
+      definitionId: nextHomeViewDefinitionId++,
+      name,
+      cards: normalizeSmokeHomeViewCards(payload.cards),
+      personaHint: normalizeOptionalText(payload.persona_hint) ?? 'trader',
+      globalFilters:
+        payload.global_filters && typeof payload.global_filters === 'object' && !Array.isArray(payload.global_filters)
+          ? { ...(payload.global_filters as Record<string, unknown>) }
+          : {},
+    })
+    homeViewDefinitionRows.unshift(definition)
+    return cloneHomeViewDefinition(definition)
+  }
+
+  function ensureHomeViewActionRequest(): SmokeAssistantActionRequestRow {
+    const existing = assistantActionRequestRows.find((request) => request.action_request_id === 7101)
+    if (existing) {
+      return cloneAssistantActionRequest(existing)
+    }
+
+    const cards = normalizeSmokeHomeViewCards([
+      {
+        card_id: 'prices',
+        visible: true,
+        placement: { order: 0, column_span: 2, row_span: 1 },
+        parameters: { price_sort: 'updated_desc' },
+        filters: { price_index_code: 'HH_IFERC', commodity_code: 'HENRY_HUB_GAS' },
+        data_bindings: ['latest_price_marks', 'market_price_indices'],
+      },
+      {
+        card_id: 'map',
+        visible: true,
+        placement: { order: 1, column_span: 2, row_span: 2 },
+        parameters: { map_record_limit: 250 },
+        filters: { commodity_code: 'HENRY_HUB_GAS', geography: 'North America' },
+        data_bindings: ['asset_map', 'spatial_features', 'weather_overlays'],
+      },
+      {
+        card_id: 'prompt',
+        visible: true,
+        placement: { order: 2, column_span: 2, row_span: 1 },
+        parameters: { starter_kit: 'market_watch' },
+        filters: { workflow_category: 'market_monitoring' },
+        data_bindings: ['assistant_conversation', 'operator_attention_counts'],
+      },
+    ])
+    const actionRequest: SmokeAssistantActionRequestRow = {
+      action_request_id: 7101,
+      run_id: assistantRunId,
+      user_id: smokeSession.user.user_id,
+      status: 'PENDING',
+      workspace: 'assistant',
+      agent_id: 'home-view-stager',
+      agent_name: 'Home View Stager',
+      action_type: 'create_home_view_instance',
+      summary: 'Create Home view "HH NG Watch"',
+      description: 'Create a personal Home view named "HH NG Watch" with Henry Hub natural gas cards and filters.',
+      payload: {
+        name: 'HH NG Watch',
+        scope: 'PERSONAL',
+        base_template_key: 'system_home',
+        base_template_version: 1,
+        persona_hint: 'trader',
+        cards,
+        global_filters: { commodity_code: 'HENRY_HUB_GAS' },
+      },
+      review_context: {
+        owning_work_object: {
+          type: 'home_view_definition',
+          id: 'PERSONAL:hh ng watch',
+          label: 'Home view HH NG Watch',
+        },
+        required_reviewer_role: 'REQUESTING_USER_OR_ADMIN',
+        business_rationale: 'The user asked to save a personal HH NG Home view from Prompt Home.',
+        proposed_mutation: {
+          operation: 'create_home_view_instance',
+          recipe_key: 'hub_basis_watch',
+          name: 'HH NG Watch',
+          scope: 'PERSONAL',
+          visible_cards: ['prices', 'map', 'prompt'],
+          global_filters: { commodity_code: 'HENRY_HUB_GAS' },
+        },
+        supporting_records: [
+          {
+            type: 'home_system_template',
+            id: 'system_home:v1',
+            label: 'System Home template',
+            summary: 'The immutable System Home template remains unchanged.',
+          },
+        ],
+        assumptions: ['Interpreted HH NG as Henry Hub natural gas.'],
+        missing_evidence: ['No related active natural-gas price indices were available for basis context.'],
+        expected_downstream_effects: [
+          'Create one active personal Home view definition for the requesting user.',
+          'Expose the saved Home view instance in the Home view switcher.',
+          'Leave the immutable System Home template unchanged.',
+        ],
+        stale_state_basis: {
+          scope: 'PERSONAL',
+          name_key: 'hh ng watch',
+          existing_definition_id: null,
+          base_template_key: 'system_home',
+          base_template_version: 1,
+        },
+        idempotency_key: 'assistant-action:create_home_view_instance:PERSONAL:hh ng watch',
+        action_preview: {
+          preview_type: 'home_view_recipe',
+          status: 'READY',
+          summary: 'Henry Hub Natural Gas recipe selected prices, map, prompt for a personal Home view.',
+          affected_records: [],
+          field_changes: [
+            { field: 'recipe_key', current_value: null, proposed_value: 'hub_basis_watch' },
+            { field: 'visible_cards', current_value: [], proposed_value: ['prices', 'map', 'prompt'] },
+          ],
+          expected_side_effects: [
+            'Create a validated personal Home view definition after approval.',
+            'Leave the immutable System Home template unchanged.',
+          ],
+          warnings: ['No related active natural-gas price indices were available for basis context.'],
+          blocking_reasons: [],
+          assumptions: ['Interpreted HH NG as Henry Hub natural gas.'],
+          metadata: { recipe_key: 'hub_basis_watch', recipe_label: 'Henry Hub Natural Gas' },
+        },
+      },
+      lifecycle: {
+        stage: 'AWAITING_REVIEW',
+        label: 'Awaiting review',
+        tone: 'attention',
+        is_terminal: false,
+        can_approve: true,
+        can_reject: true,
+        reviewer_action_label: 'Review evidence, then approve or reject',
+        decided_label: null,
+        review_risk_flags: [],
+      },
+      result: null,
+      error_detail: null,
+      review_outcome: null,
+      decision_note: null,
+      correction_summary: null,
+      correction_fields: [],
+      created_at: assistantRunRecordedAt,
+      decided_at: null,
+      decided_by: null,
+    }
+    assistantActionRequestRows.push(actionRequest)
+    return cloneAssistantActionRequest(actionRequest)
   }
 
   function cloneAssistantAgent(agent: (typeof assistantAdminAgents)[number]) {
@@ -953,13 +1381,21 @@ async function startMockApiServer(
   const assistantActionRequestRows: SmokeAssistantActionRequestRow[] = assistantActionRequests.map(
     cloneAssistantActionRequest,
   )
+  const assistantConversationId = 902
+  const assistantRunId = 8801
+  const assistantRunRecordedAt = '2026-04-11T09:08:00Z'
+  let nextHomeViewDefinitionId = 9100
+  const homeViewDefinitionRows: SmokeHomeViewDefinitionRow[] = [
+    buildSmokeHomeViewDefinition({
+      definitionId: nextHomeViewDefinitionId++,
+      name: 'Default Home',
+      cards: buildSmokeHomeViewSystemCards(),
+    }),
+  ]
   const assistantProfileRequestRows: SmokeAssistantProfileRequestRow[] = []
   let nextAssistantProfileRequestId = 9001
   const assistantRunFeedbackByRunId = new Map<number, SmokeAssistantFeedbackRow>()
   const assistantPromptNavigationOutcomeRows = new Map<string, SmokeAssistantPromptNavigationOutcomeRow>()
-  const assistantConversationId = 902
-  const assistantRunId = 8801
-  const assistantRunRecordedAt = '2026-04-11T09:08:00Z'
   const assistantUserPrompt = 'Where should I handle the confirmation blocker?'
   let nextWikiPageSequence = wikiPageRows.length + 1
   let nextWikiRevisionId = wikiPageRows.length + 1
@@ -972,6 +1408,9 @@ async function startMockApiServer(
 
   function buildAssistantActionRequestsForPrompt(prompt: string): SmokeAssistantActionRequestRow[] {
     const normalizedPrompt = prompt.toLowerCase()
+    if (normalizedPrompt.includes('hh ng') || normalizedPrompt.includes('home view')) {
+      return [ensureHomeViewActionRequest()]
+    }
     if (normalizedPrompt.includes('cancel') || normalizedPrompt.includes('unwind')) {
       return assistantActionRequestRows
         .filter((request) => request.action_request_id === 7001)
@@ -983,6 +1422,9 @@ async function startMockApiServer(
 
   function buildAssistantResponseContentForPrompt(prompt: string): string {
     const normalizedPrompt = prompt.toLowerCase()
+    if (normalizedPrompt.includes('hh ng') || normalizedPrompt.includes('home view')) {
+      return 'I staged a Home view request for HH NG. Review the card mix and filters before anything changes. Approval is still required.'
+    }
     if (normalizedPrompt.includes('cancel') || normalizedPrompt.includes('unwind')) {
       return 'I staged a governed cancellation request for T-AMEND-100. Review the evidence below before anything changes. Approval is still required.'
     }
@@ -1488,6 +1930,7 @@ async function startMockApiServer(
       !(method === 'POST' && url.pathname === '/assistant/context') &&
       !(method === 'POST' && /^\/admin\/assistant\/agents\/[^/]+\/context-preview$/.test(url.pathname)) &&
       !(method === 'POST' && url.pathname === '/assistant/respond') &&
+      !(method === 'POST' && url.pathname === '/assistant/respond/stream') &&
       !(method === 'POST' && url.pathname === '/assistant/prompt-navigation-outcomes') &&
       !(method === 'POST' && /\/assistant\/runs\/\d+\/prompt-navigation-outcomes$/.test(url.pathname)) &&
       !(method === 'PUT' && url.pathname.startsWith('/layout-definitions/'))
@@ -1502,6 +1945,114 @@ async function startMockApiServer(
 
     if (url.pathname === '/settings/public' && method === 'GET') {
       writeJson(response, runtimeSettings)
+      return
+    }
+
+    if (url.pathname === '/home-view-definitions/system-template' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      writeJson(response, {
+        template_key: 'system_home',
+        template_version: 1,
+        label: 'System Home',
+        immutable: true,
+        cards: buildSmokeHomeViewSystemCards(),
+      })
+      return
+    }
+
+    if (url.pathname === '/home-view-definitions' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      writeJson(response, homeViewDefinitionRows.map(cloneHomeViewDefinition))
+      return
+    }
+
+    if (url.pathname === '/home-view-definitions' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const payload = await readJsonBody(request)
+      const record =
+        payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>)
+          : {}
+      writeJson(response, createHomeViewDefinitionFromPayload(record), 201)
+      return
+    }
+
+    const homeViewDefinitionMatch = url.pathname.match(/^\/home-view-definitions\/(\d+)$/)
+    if (homeViewDefinitionMatch && method === 'PATCH') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const definitionId = Number(homeViewDefinitionMatch[1])
+      const definitionIndex = homeViewDefinitionRows.findIndex((row) => row.definition_id === definitionId)
+      if (definitionIndex < 0) {
+        writeJson(response, { detail: 'Home view definition was not found.' }, 404)
+        return
+      }
+      const payload = await readJsonBody(request)
+      const record =
+        payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>)
+          : {}
+      const current = homeViewDefinitionRows[definitionIndex]
+      const next = {
+        ...current,
+        name: normalizeOptionalText(record.name) ?? current.name,
+        cards: record.cards ? normalizeSmokeHomeViewCards(record.cards) : current.cards,
+        global_filters:
+          record.global_filters && typeof record.global_filters === 'object' && !Array.isArray(record.global_filters)
+            ? { ...(record.global_filters as Record<string, unknown>) }
+            : current.global_filters,
+        updated_at: assistantRunRecordedAt,
+        updated_by: smokeSession.user.user_id,
+        version: current.version + 1,
+      }
+      homeViewDefinitionRows[definitionIndex] = next
+      writeJson(response, cloneHomeViewDefinition(next))
+      return
+    }
+
+    if (homeViewDefinitionMatch && method === 'DELETE') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const definitionId = Number(homeViewDefinitionMatch[1])
+      const definitionIndex = homeViewDefinitionRows.findIndex((row) => row.definition_id === definitionId)
+      if (definitionIndex >= 0) {
+        homeViewDefinitionRows.splice(definitionIndex, 1)
+      }
+      response.statusCode = 204
+      response.end()
+      return
+    }
+
+    const homeViewResetMatch = url.pathname.match(/^\/home-view-definitions\/(\d+)\/reset$/)
+    if (homeViewResetMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const definitionId = Number(homeViewResetMatch[1])
+      const definitionIndex = homeViewDefinitionRows.findIndex((row) => row.definition_id === definitionId)
+      if (definitionIndex < 0) {
+        writeJson(response, { detail: 'Home view definition was not found.' }, 404)
+        return
+      }
+      const current = homeViewDefinitionRows[definitionIndex]
+      const next = {
+        ...current,
+        cards: buildSmokeHomeViewSystemCards(),
+        global_filters: {},
+        updated_at: assistantRunRecordedAt,
+        updated_by: smokeSession.user.user_id,
+        version: current.version + 1,
+      }
+      homeViewDefinitionRows[definitionIndex] = next
+      writeJson(response, cloneHomeViewDefinition(next))
       return
     }
 
@@ -3001,19 +3552,32 @@ async function startMockApiServer(
           ? 'APPROVED_WITH_CORRECTIONS'
           : 'APPROVED_AS_IS'
       const correctionFields = normalizedCorrectionFields(decisionRecord.correction_fields)
-      const tradeId =
-        typeof currentRequest.payload.trade_id === 'string' && currentRequest.payload.trade_id.trim()
-          ? currentRequest.payload.trade_id.trim()
-          : 'T-AMEND-100'
-      const eventId = `evt-assistant-cancel-${actionRequestId}`
-      const tradeIndex = tradeRows.findIndex((trade) => trade.trade_id === tradeId)
-      if (tradeIndex >= 0) {
-        tradeRows[tradeIndex] = {
-          ...tradeRows[tradeIndex],
-          status: 'CANCELLED',
-          updated_at: '2026-04-11T09:05:00Z',
-          last_event_id: eventId,
-        } as SmokeTradeRow
+      let result: Record<string, unknown>
+      if (currentRequest.action_type === 'create_home_view_instance') {
+        const homeViewDefinition = createHomeViewDefinitionFromPayload(currentRequest.payload)
+        result = {
+          home_view_definition: homeViewDefinition,
+        }
+      } else {
+        const tradeId =
+          typeof currentRequest.payload.trade_id === 'string' && currentRequest.payload.trade_id.trim()
+            ? currentRequest.payload.trade_id.trim()
+            : 'T-AMEND-100'
+        const eventId = `evt-assistant-cancel-${actionRequestId}`
+        const tradeIndex = tradeRows.findIndex((trade) => trade.trade_id === tradeId)
+        if (tradeIndex >= 0) {
+          tradeRows[tradeIndex] = {
+            ...tradeRows[tradeIndex],
+            status: 'CANCELLED',
+            updated_at: '2026-04-11T09:05:00Z',
+            last_event_id: eventId,
+          } as SmokeTradeRow
+        }
+        result = {
+          event_id: eventId,
+          trade_id: tradeId,
+          trade_status: 'CANCELLED',
+        }
       }
       const updatedRequest = {
         ...currentRequest,
@@ -3029,11 +3593,7 @@ async function startMockApiServer(
           reviewer_action_label: null,
           decided_label: `Executed by ${smokeSession.user.user_id}`,
         },
-        result: {
-          event_id: eventId,
-          trade_id: tradeId,
-          trade_status: 'CANCELLED',
-        },
+        result,
         decided_at: '2026-04-11T09:05:00Z',
         decided_by: smokeSession.user.user_id,
         review_outcome: reviewOutcome,
