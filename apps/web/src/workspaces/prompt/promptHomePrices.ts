@@ -220,9 +220,14 @@ function formatPromptHomeSourceRevisionTime(
 export function formatPromptHomePriceDate(
   observation: PriceIndexObservationRecord | null | undefined,
 ): string {
-  return observation
-    ? formatPromptHomeObservationDate(observation.observation_date)
-    : "—";
+  if (!observation) {
+    return "—";
+  }
+
+  const downloadedAt = promptHomePriceTimestamp(observation.downloaded_at);
+  return downloadedAt
+    ? formatPromptHomeCompactUtcDate(downloadedAt)
+    : formatPromptHomeObservationDate(observation.observation_date);
 }
 
 export function formatPromptHomePriceTime(
@@ -230,6 +235,11 @@ export function formatPromptHomePriceTime(
 ): string {
   if (!observation) {
     return "—";
+  }
+
+  const downloadedAt = promptHomePriceTimestamp(observation.downloaded_at);
+  if (downloadedAt) {
+    return formatPromptHomeObservationTime(downloadedAt);
   }
 
   const sourcePublishedAt = promptHomePriceTimestamp(
@@ -676,8 +686,8 @@ function promptHomePriceSortFieldCompare(
       );
     case "date":
       return comparePromptHomePriceNumber(
-        leftMark ? promptHomePriceMarkTimestamp(leftMark) : null,
-        rightMark ? promptHomePriceMarkTimestamp(rightMark) : null,
+        leftMark ? promptHomePriceDisplayTimestamp(leftMark) : null,
+        rightMark ? promptHomePriceDisplayTimestamp(rightMark) : null,
         sortState.direction,
       );
     case "time":
@@ -740,6 +750,11 @@ function promptHomePriceMarkTimeOfDay(
     return null;
   }
 
+  const downloadedAt = promptHomePriceTimestamp(observation.downloaded_at);
+  if (downloadedAt) {
+    return promptHomeTimeOfDaySeconds(downloadedAt);
+  }
+
   const sourcePublishedAt = promptHomePriceTimestamp(
     observation.source_published_at,
   );
@@ -772,6 +787,13 @@ function promptHomePriceMarkTimeOfDay(
   }
 
   return null;
+}
+
+function promptHomePriceDisplayTimestamp(
+  observation: PriceIndexObservationRecord,
+): number {
+  const downloadedTime = promptHomePriceMarkDownloadedTimestamp(observation);
+  return downloadedTime || promptHomePriceMarkTimestamp(observation);
 }
 
 function promptHomeTimeOfDaySeconds(timestamp: Date): number {

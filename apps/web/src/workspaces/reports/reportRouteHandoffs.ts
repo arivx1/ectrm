@@ -5,7 +5,7 @@ import {
 } from '../../shared/appRouteHandoff'
 
 export const PRICE_INDEX_BI_REPORT_ID = 'reports-price-bi'
-export const PRICE_INDEX_BI_REPORT_TITLE = 'Price Dashboard'
+export const PRICE_INDEX_BI_REPORT_TITLE = 'Price Report'
 
 type PriceIndexBiReportHandoffInput = {
   priceIndexCode: string
@@ -29,9 +29,9 @@ export function buildPriceIndexBiReportHandoff({
     },
     tradeInspectorTab: null,
     eventType: null,
-    label: `Open ${priceIndexLabel} price dashboard`,
+    label: `Open ${priceIndexLabel} price report`,
     rationale:
-      'The Home price card opened the reusable price dashboard filtered to this price index so the analyst can review price observations without creating a separate page per curve.',
+      'The Home price card opened the reusable price report filtered to this price index so the analyst can review price observations without creating a separate page per curve.',
     filter: normalizedCode,
     sourceRunId: null,
     sourceConversationId: null,
@@ -50,4 +50,28 @@ export function resolvePriceIndexBiReportFilter(handoff: AppRouteHandoff | null 
   }
 
   return getAppRouteHandoffFilterValue(normalizedHandoff)
+}
+
+export function resolvePriceIndexReportRouteFocus(
+  handoff: AppRouteHandoff | null | undefined,
+): {
+  priceIndexCode: string
+  heroTitle: string
+  heroBody: string
+  badgeLabel: string
+  badgeDetail: string
+} | null {
+  const priceIndexCode = resolvePriceIndexBiReportFilter(handoff)
+  if (!priceIndexCode) {
+    return null
+  }
+
+  return {
+    priceIndexCode,
+    heroTitle: `Price Report · ${priceIndexCode}`,
+    heroBody:
+      'Review price observation history, latest mark context, source provenance, and freshness for this selected price index.',
+    badgeLabel: 'Price Report',
+    badgeDetail: `Filtered to ${priceIndexCode}`,
+  }
 }

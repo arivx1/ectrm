@@ -1039,7 +1039,7 @@ export function ReportsWorkspace({
         {
           id: 'reports-price-bi',
           eyebrow: 'Prices',
-          title: `Price Dashboard · ${priceIndexReportFilter}`,
+          title: `Price Report · ${priceIndexReportFilter}`,
           description: 'Price observation history, range, source provenance, and freshness for the selected price index.',
           span: 'full',
           availableSpans: ['full', 'wide'],
@@ -1139,7 +1139,7 @@ export function ReportsWorkspace({
           ) : (
             <div className="empty-state">
               <strong>No price observations yet</strong>
-              <p>The selected price index has no loaded observations for the price dashboard.</p>
+              <p>The selected price index has no loaded observations for the price report.</p>
             </div>
           ),
         },
@@ -1150,7 +1150,7 @@ export function ReportsWorkspace({
     return (
       <TileLayout
         workspaceId="reports"
-        workspaceLabel="Price Dashboard"
+        workspaceLabel="Price Report"
         authSession={authSession}
         headerContent={
           <WorkspaceHandoffFocusBanner
@@ -1160,7 +1160,7 @@ export function ReportsWorkspace({
             onClear={onClearHandoff ?? (() => undefined)}
           />
         }
-        toolbarDescription="Price-only dashboard filtered to the selected price index."
+        toolbarDescription="Price-only report section filtered to the selected price index."
         sections={[
           {
             id: 'reports-price-dashboard',

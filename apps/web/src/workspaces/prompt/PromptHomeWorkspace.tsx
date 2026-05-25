@@ -2331,8 +2331,8 @@ function PromptHomePriceRow({
       )}
       role="button"
       tabIndex={0}
-      aria-label={`Double-click to open the price dashboard for ${row.priceIndex.name || row.priceIndexCode}`}
-      title={`Double-click to open the price dashboard for ${row.priceIndexCode}`}
+      aria-label={`Double-click to open the price report for ${row.priceIndex.name || row.priceIndexCode}`}
+      title={`Double-click to open the price report for ${row.priceIndexCode}`}
       onDoubleClick={(event) => {
         event.preventDefault();
         onOpenPriceReport(row.priceIndex);

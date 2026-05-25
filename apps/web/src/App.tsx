@@ -68,6 +68,7 @@ import {
 } from './shared/promptResumeIntent'
 import { commodityClassOrder } from './shared/trading'
 import { PromptHomeAvailableTokenBadge } from './workspaces/prompt/PromptHomeAvailableTokenBadge'
+import { resolvePriceIndexReportRouteFocus } from './workspaces/reports/reportRouteHandoffs'
 
 function WorkspaceLoadState({
   title,
@@ -226,9 +227,12 @@ function AuthenticatedWorkspaceShell({
   const currentWorkspaceOwnsHandoffBanner =
     currentView === 'operations' ||
     currentView === 'settlement' ||
+    currentView === 'reports' ||
     currentView === 'trades' ||
     currentView === 'shipments' ||
     currentView === 'scheduling'
+  const priceReportRouteFocus =
+    currentView === 'reports' ? resolvePriceIndexReportRouteFocus(routeHandoff) : null
 
   const summary = useAppWorkspaceSummary({
     authSession: workspaceData.authSession,
@@ -358,8 +362,16 @@ function AuthenticatedWorkspaceShell({
   })
 
   const showingNavigationSectionLanding = route.activeNavigationSectionKey !== null
-  const heroTitle = showingNavigationSectionLanding ? activePrimarySection.heroTitle : HERO_TITLE_BY_VIEW[currentView]
-  const heroBody = showingNavigationSectionLanding ? activePrimarySection.heroBody : HERO_BODY_BY_VIEW[currentView]
+  const heroTitle = showingNavigationSectionLanding
+    ? activePrimarySection.heroTitle
+    : priceReportRouteFocus
+      ? priceReportRouteFocus.heroTitle
+      : HERO_TITLE_BY_VIEW[currentView]
+  const heroBody = showingNavigationSectionLanding
+    ? activePrimarySection.heroBody
+    : priceReportRouteFocus
+      ? priceReportRouteFocus.heroBody
+      : HERO_BODY_BY_VIEW[currentView]
   const isPromptHomeView = !showingNavigationSectionLanding && currentView === 'prompt'
   const isMessagingWorkspaceView = !showingNavigationSectionLanding && currentView === 'messages'
   const displayedHeroTitle = isMessagingWorkspaceView ? `Messaging: ${heroTitle}` : heroTitle
@@ -388,7 +400,12 @@ function AuthenticatedWorkspaceShell({
       )
     : ''
   const selectedTrade = summary.selectedTrade
-  const currentWorkspaceLabel = APP_VIEWS.find((view) => view.key === route.currentView)?.label ?? workspaceLabel(route.currentView)
+  const currentWorkspaceLabel =
+    priceReportRouteFocus?.badgeLabel ??
+    APP_VIEWS.find((view) => view.key === route.currentView)?.label ??
+    workspaceLabel(route.currentView)
+  const currentWorkspaceDetail =
+    priceReportRouteFocus?.badgeDetail ?? `${workspaceData.events.length} loaded events across the current session`
   const shellModeClassName = appearance.isTerminalMode ? 'app-shell-terminal-mode' : ''
   const [terminalCommandBarOpen, setTerminalCommandBarOpen] = useState(false)
   const [shortcutReferenceOpen, setShortcutReferenceOpen] = useState(false)
@@ -810,6 +827,8 @@ function AuthenticatedWorkspaceShell({
                 <strong>
                   {showingNavigationSectionLanding
                     ? activePrimarySection.label
+                    : priceReportRouteFocus
+                    ? currentWorkspaceLabel
                     : selectedTrade
                     ? selectedTrade.trade_id
                     : currentWorkspaceLabel}
@@ -817,9 +836,11 @@ function AuthenticatedWorkspaceShell({
                 <small>
                   {showingNavigationSectionLanding
                     ? `${activePrimarySection.views.length} workspace${activePrimarySection.views.length === 1 ? '' : 's'} grouped in this section`
+                    : priceReportRouteFocus
+                    ? currentWorkspaceDetail
                     : selectedTrade
                     ? `${selectedTrade.commodity} • ${selectedTrade.book}`
-                    : `${workspaceData.events.length} loaded events across the current session`}
+                    : currentWorkspaceDetail}
                 </small>
                 <div className="hero-badge-actions">
                   {renderTerminalCommandTrigger()}

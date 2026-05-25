@@ -203,7 +203,7 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.match(markup, /aria-label="Sort prices by Updated"/);
   assert.match(
     markup,
-    /aria-label="Double-click to open the price dashboard for Henry Hub Natural Gas"/,
+    /aria-label="Double-click to open the price report for Henry Hub Natural Gas"/,
   );
   assert.match(markup, /No mark yet/);
   assert.match(markup, /Market price marks/);
@@ -660,7 +660,7 @@ test("prompt home prices map pricing service output into a card view model", () 
       unit: "MWH",
       currency: "USD",
       date: "05/22/2026",
-      time: "13:05:00",
+      time: "16:40:00",
       source: "CAISO · SP15",
       hasLatestMark: true,
     },
@@ -919,6 +919,8 @@ test("prompt home price headers can sort display indices by selected field", () 
 });
 
 test("prompt home price marks format the price date and time", () => {
+  const downloadedAt = "2026-05-23T01:02:03Z";
+
   assert.equal(
     formatPromptHomePriceDateTime(
       priceObservation({
@@ -947,13 +949,32 @@ test("prompt home price marks format the price date and time", () => {
     formatPromptHomePriceDate(
       priceObservation({
         observation_date: "2026-05-22",
+        downloaded_at: downloadedAt,
       }),
     ),
-    "05/22/2026",
+    "05/23/2026",
   );
   assert.equal(
     formatPromptHomePriceTime(
       priceObservation({
+        source_published_at: "2026-05-22T13:05:00Z",
+        downloaded_at: downloadedAt,
+      }),
+    ),
+    "01:02:03",
+  );
+  assert.equal(
+    formatPromptHomePriceUpdatedAt(
+      priceObservation({
+        downloaded_at: downloadedAt,
+      }),
+    ),
+    "05/23/2026 01:02:03",
+  );
+  assert.equal(
+    formatPromptHomePriceTime(
+      priceObservation({
+        downloaded_at: "",
         source_published_at: null,
         source_revision: "2026-05-22:HE17:I03",
       }),
@@ -963,6 +984,7 @@ test("prompt home price marks format the price date and time", () => {
   assert.equal(
     formatPromptHomePriceTime(
       priceObservation({
+        downloaded_at: "",
         source_published_at: null,
         source_revision: "2026-05-22:IE16:45",
       }),
@@ -972,6 +994,7 @@ test("prompt home price marks format the price date and time", () => {
   assert.equal(
     formatPromptHomePriceTime(
       priceObservation({
+        downloaded_at: "",
         source_published_at: null,
         source_revision: "2026-05-22T13:05:00:ptid:1",
       }),

@@ -11,7 +11,10 @@ vi.mock('../src/workspaces/reports/useSettlementReportLens.ts', () => ({
 }))
 
 import { ReportsWorkspace } from '../src/workspaces/reports/ReportsWorkspace'
-import { buildPriceIndexBiReportHandoff } from '../src/workspaces/reports/reportRouteHandoffs'
+import {
+  buildPriceIndexBiReportHandoff,
+  resolvePriceIndexReportRouteFocus,
+} from '../src/workspaces/reports/reportRouteHandoffs'
 
 describe('ReportsWorkspace', () => {
   it('renders the Trading EOD tile alongside the reporting overview shell', () => {
@@ -39,15 +42,16 @@ describe('ReportsWorkspace', () => {
     expect(markup).toContain('Desk-wide end-of-day posture rolled up from pricing, workflow, settlement, projection-integrity, and accrual evidence.')
   })
 
-  it('renders a Home-routed price dashboard focus without the general report deck', () => {
+  it('renders a Home-routed price report focus without the general report deck', () => {
+    const routeHandoff = buildPriceIndexBiReportHandoff({
+      priceIndexCode: 'HH_NATGAS',
+      priceIndexName: 'Henry Hub Natural Gas',
+    })
     const markup = renderToStaticMarkup(
       createElement(ReportsWorkspace, {
         activeTrades: [],
         authSession: null,
-        routeHandoff: buildPriceIndexBiReportHandoff({
-          priceIndexCode: 'HH_NATGAS',
-          priceIndexName: 'Henry Hub Natural Gas',
-        }),
+        routeHandoff,
         globalFilter: '',
         counterpartyCreditReport: [],
         portfolios: [],
@@ -62,13 +66,18 @@ describe('ReportsWorkspace', () => {
       }),
     )
 
-    expect(markup).toContain('Open Henry Hub Natural Gas price dashboard')
+    expect(resolvePriceIndexReportRouteFocus(routeHandoff)).toMatchObject({
+      heroTitle: 'Price Report · HH_NATGAS',
+      badgeLabel: 'Price Report',
+      badgeDetail: 'Filtered to HH_NATGAS',
+    })
+    expect(markup).toContain('Open Henry Hub Natural Gas price report')
     expect(markup).toContain('Home')
     expect(markup).toContain('Filter: HH_NATGAS')
-    expect(markup).toContain('Price Dashboard Tiles')
-    expect(markup).toContain('Price Dashboard · HH_NATGAS')
+    expect(markup).toContain('Price Report Tiles')
+    expect(markup).toContain('Price Report · HH_NATGAS')
     expect(markup).toContain('Price observation history, range, source provenance, and freshness for the selected price index.')
-    expect(markup).toContain('The selected price index has no loaded observations for the price dashboard.')
+    expect(markup).toContain('The selected price index has no loaded observations for the price report.')
     expect(markup).not.toContain('Workbook Data Sources')
     expect(markup).not.toContain('Trading EOD')
     expect(markup).not.toContain('Draft Validator')
