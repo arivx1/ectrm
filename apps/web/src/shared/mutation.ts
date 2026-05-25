@@ -6,6 +6,10 @@ export type StoredAuthUser = {
   user_id: string
   email: string
   display_name: string
+  first_name?: string | null
+  last_name?: string | null
+  preferred_timezone?: string | null
+  primary_location?: string | null
   role: string
   default_assistant_persona?: AssistantPersona | null
   assistant_context_blurb?: string | null

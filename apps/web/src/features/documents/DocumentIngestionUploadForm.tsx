@@ -5,6 +5,10 @@ import type {
   DocumentProcessorRuntimeSettingsRecord,
   DocumentSchemaRegistryRecord,
 } from '../../shared/models'
+import {
+  aiConfidenceThresholdPercentFromSettings,
+  normalizeAiConfidenceThresholdPercent,
+} from './documentIngestionThreshold'
 import { formatBytes } from './documentIngestionUtils'
 
 type DocumentIngestionUploadFormProps = {
@@ -17,6 +21,8 @@ type DocumentIngestionUploadFormProps = {
   schemaRegistry: DocumentSchemaRegistryRecord | null
   uploading: boolean
   uploadError: string
+  aiConfidenceThresholdPercent?: number
+  aiConfidenceThresholdIsOverride?: boolean
   gmailInboxSettings: DocumentGmailInboxRuntimeSettingsRecord | null
   gmailImporting: boolean
   gmailImportError: string
@@ -26,6 +32,8 @@ type DocumentIngestionUploadFormProps = {
   onDisplayNameChange: (value: string) => void
   onProcessorProviderChange: (value: 'builtin' | 'openai' | 'anthropic' | 'google' | '') => void
   onProcessorModelChange: (value: string) => void
+  onAiConfidenceThresholdPercentChange?: (value: number) => void
+  onAiConfidenceThresholdReset?: () => void
   onFileChange: (file: File | null) => void
   onOpenFilePicker: () => void
   onDropzoneKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void
@@ -67,6 +75,8 @@ export function DocumentIngestionUploadForm({
   schemaRegistry,
   uploading,
   uploadError,
+  aiConfidenceThresholdPercent,
+  aiConfidenceThresholdIsOverride = false,
   gmailInboxSettings,
   gmailImporting,
   gmailImportError,
@@ -76,6 +86,8 @@ export function DocumentIngestionUploadForm({
   onDisplayNameChange,
   onProcessorProviderChange,
   onProcessorModelChange,
+  onAiConfidenceThresholdPercentChange,
+  onAiConfidenceThresholdReset,
   onFileChange,
   onOpenFilePicker,
   onDropzoneKeyDown,
@@ -99,6 +111,10 @@ export function DocumentIngestionUploadForm({
   const gmailInboxConfigured = Boolean(gmailInboxSettings?.enabled && gmailInboxSettings?.configured)
   const gmailInboxQuery = gmailInboxSettings?.query?.trim() ?? ''
   const placeholderProviderLabels = formatProcessorPlaceholderLabels(unconfiguredProviders)
+  const resolvedAiConfidenceThresholdPercent = normalizeAiConfidenceThresholdPercent(
+    aiConfidenceThresholdPercent ?? aiConfidenceThresholdPercentFromSettings(processorSettings),
+  )
+  const shouldShowAiThreshold = selectedProcessorProvider !== '' && selectedProcessorProvider !== 'builtin'
 
   return (
     <form className={`document-ingestion-form${compact ? ' document-ingestion-form-compact' : ''}`} onSubmit={onSubmit}>
@@ -188,6 +204,39 @@ export function DocumentIngestionUploadForm({
             </select>
           </label>
         ) : null}
+        {shouldShowAiThreshold ? (
+          <div className="document-threshold-control">
+            <div className="document-threshold-control-head">
+              <span>AI Assist Below {resolvedAiConfidenceThresholdPercent}%</span>
+              {aiConfidenceThresholdIsOverride && onAiConfidenceThresholdReset ? (
+                <button
+                  type="button"
+                  className="button button-ghost document-threshold-reset"
+                  onClick={onAiConfidenceThresholdReset}
+                  disabled={uploading}
+                >
+                  Use System Default
+                </button>
+              ) : null}
+            </div>
+            <input
+              className="document-threshold-slider"
+              type="range"
+              name="ai_confidence_threshold_percent"
+              min="0"
+              max="100"
+              step="1"
+              value={resolvedAiConfidenceThresholdPercent}
+              onChange={(event) => onAiConfidenceThresholdPercentChange?.(Number(event.target.value))}
+              disabled={uploading}
+            />
+            <span className="workflow-editor-note">
+              {aiConfidenceThresholdIsOverride
+                ? 'Session override active until logout.'
+                : 'Using the system default for this session.'}
+            </span>
+          </div>
+        ) : null}
       </div>
       <div className="document-ingestion-form-actions">
         <button type="submit" className="button button-primary" disabled={uploading || !selectedFile}>
@@ -208,7 +257,7 @@ export function DocumentIngestionUploadForm({
           {selectedProcessorProvider === 'builtin'
             ? ' Built-in parsing only will run for this upload.'
             : selectedProvider
-            ? ` ${selectedProvider.label}${selectedProcessorModel ? ` (${selectedProcessorModel})` : ''} will be used for document processing when the background job runs.`
+            ? ` ${selectedProvider.label}${selectedProcessorModel ? ` (${selectedProcessorModel})` : ''} will be used when classifier confidence is below ${resolvedAiConfidenceThresholdPercent}%.`
             : ' No document-processing APIs are configured on this API yet, so the built-in parser will run.'}
           {unconfiguredProviders.length > 0
             ? ` ${placeholderProviderLabels} placeholder${unconfiguredProviders.length === 1 ? ' is' : 's are'} visible here and will unlock once those API providers are configured.`

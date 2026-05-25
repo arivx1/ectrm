@@ -52,6 +52,7 @@ DocumentKind = Literal[
     "DEMURRAGE_CLAIM",
     "INVOICE",
     "BILL_OF_LADING",
+    "PACKING_LIST",
     "CERTIFICATE_OF_ANALYSIS",
     "PAYMENT_ADVICE",
     "OUTAGE_NOTICE",
@@ -83,12 +84,22 @@ DocumentRoutingStrategy = Literal[
 DocumentRoutingStatus = Literal["READY", "PARTIAL", "INSUFFICIENT", "MANUAL_REVIEW"]
 DocumentLinkageStatus = Literal["READY", "CANDIDATE", "CREATE", "MANUAL_REVIEW"]
 DocumentLinkageAction = Literal["ATTACH", "REVIEW", "CREATE", "MANUAL_REVIEW"]
+DocumentLinkageCandidateState = Literal[
+    "ATTACH_READY",
+    "ATTACH_REVIEW",
+    "CREATE_CANDIDATE",
+    "OWNER_REQUIRED",
+    "MANUAL_REVIEW",
+    "ALREADY_LINKED",
+]
 DocumentActionPlanStatus = Literal["READY", "REVIEW", "BLOCKED"]
 DocumentActionType = Literal["ATTACH_EXISTING_RECORD", "CREATE_RECORD_FROM_DOCUMENT", "MANUAL_REVIEW"]
 DocumentGmailInboxProvider = Literal["gmail_api"]
 DocumentGmailInboxAuthStatus = Literal["none", "partial", "configured"]
+DocumentWorkflowStatus = Literal["READY", "REVIEW", "BLOCKED", "EXECUTED"]
 DocumentWorkflowExecutionStatus = Literal["EXECUTED"]
 DocumentWorkflowObservationAction = Literal["CREATED", "UPDATED", "UNCHANGED"]
+DocumentActionApprovalRequestStatus = Literal["PENDING", "EXECUTED", "REJECTED"]
 
 FIELD_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 TEMPLATE_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
@@ -273,6 +284,7 @@ class DocumentLinkageCandidateOut(BaseModel):
     record_id: Optional[str] = None
     record_label: str
     role: DocumentTargetRole = "PRIMARY"
+    candidate_state: DocumentLinkageCandidateState = "ATTACH_REVIEW"
     existing_record: bool = True
     score: float = Field(default=0, ge=0, le=1)
     matched_keys: list[str] = Field(default_factory=list)
@@ -304,13 +316,91 @@ class DocumentActionPlanOut(BaseModel):
     status: DocumentActionPlanStatus = "REVIEW"
     action_type: DocumentActionType = "MANUAL_REVIEW"
     operation_type: Optional[str] = None
+    candidate_state: DocumentLinkageCandidateState = "MANUAL_REVIEW"
     title: str
     description: str
     confidence: float = Field(default=0, ge=0, le=1)
     target: Optional[DocumentActionRecordRefOut] = None
     owner: Optional[DocumentActionRecordRefOut] = None
+    required_owner_record_types: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
     payload: dict[str, object] = Field(default_factory=dict)
+
+
+class DocumentActionGovernanceOut(BaseModel):
+    status: str
+    recommended_execution_mode: str
+    manual_execution_allowed: bool = False
+    auto_execution_allowed: bool = False
+    approval_required: bool = False
+    risk_flags: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
+class DocumentActionApprovalRequestCreate(BaseModel):
+    request_comment: Optional[str] = Field(default=None, max_length=2_000)
+
+    @field_validator("request_comment")
+    @classmethod
+    def normalize_request_comment(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="request_comment")
+
+
+class DocumentActionApprovalDecisionRequest(BaseModel):
+    decision_comment: str = Field(min_length=1, max_length=4_000)
+
+    @field_validator("decision_comment")
+    @classmethod
+    def normalize_decision_comment(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="decision_comment")
+
+
+class DocumentRecordCandidateSelectionRequest(BaseModel):
+    record_type: str = Field(min_length=1, max_length=64)
+    record_id: str = Field(min_length=1, max_length=96)
+    request_comment: Optional[str] = Field(default=None, max_length=2_000)
+
+    @field_validator("record_type")
+    @classmethod
+    def normalize_record_type(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="record_type", uppercase=True)
+
+    @field_validator("record_id")
+    @classmethod
+    def normalize_record_id(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="record_id")
+
+    @field_validator("request_comment")
+    @classmethod
+    def normalize_selection_request_comment(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="request_comment")
+
+
+class DocumentActionApprovalRequestOut(BaseModel):
+    request_id: int
+    document_id: str
+    status: DocumentActionApprovalRequestStatus
+    title: str
+    description: str
+    action_type: DocumentActionType
+    operation_type: Optional[str] = None
+    governance_status: str
+    target_record_type: Optional[str] = None
+    target_record_id: Optional[str] = None
+    owner_record_type: Optional[str] = None
+    owner_record_id: Optional[str] = None
+    request_comment: Optional[str] = None
+    decision_comment: Optional[str] = None
+    action_plan_snapshot: dict[str, object] = Field(default_factory=dict)
+    governance_snapshot: dict[str, object] = Field(default_factory=dict)
+    result_snapshot: dict[str, object] = Field(default_factory=dict)
+    error_detail: Optional[str] = None
+    execution_decision_id: Optional[int] = None
+    requested_at: datetime
+    requested_by: str
+    decided_at: Optional[datetime] = None
+    decided_by: Optional[str] = None
 
 
 class DocumentRecordLinkOut(BaseModel):
@@ -330,12 +420,33 @@ class DocumentWorkflowOut(BaseModel):
     document_kind: str
     document_type_label: str
     description: str
+    status: DocumentWorkflowStatus = "READY"
+    recommended: bool = False
+    action_type: Optional[DocumentActionType] = None
+    operation_type: Optional[str] = None
+    candidate_state: Optional[DocumentLinkageCandidateState] = None
+    record_effect: Optional[str] = None
+    target: Optional[DocumentActionRecordRefOut] = None
+    owner: Optional[DocumentActionRecordRefOut] = None
+    required_owner_record_types: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    governance_status: Optional[str] = None
+    recommended_execution_mode: Optional[str] = None
+    approval_required: bool = False
+    risk_flags: list[str] = Field(default_factory=list)
+    disabled_reason: Optional[str] = None
+    reasons: list[str] = Field(default_factory=list)
 
 
 class DocumentWorkflowListOut(BaseModel):
     document_id: str
     document_kind: Optional[str] = None
     document_type_label: Optional[str] = None
+    linkage_assessment: Optional[DocumentLinkageAssessmentOut] = None
+    action_plan: Optional[DocumentActionPlanOut] = None
+    governance: Optional[DocumentActionGovernanceOut] = None
+    pending_approval_request: Optional[DocumentActionApprovalRequestOut] = None
+    record_links: list[DocumentRecordLinkOut] = Field(default_factory=list)
     workflows: list[DocumentWorkflowOut] = Field(default_factory=list)
     empty_message: str = "No workflows assigned to this document type."
 
@@ -394,6 +505,7 @@ class DocumentProcessorRuntimeSettingsOut(BaseModel):
     default_provider: DocumentProcessorProvider
     effective_default_provider: Optional[DocumentProcessorProvider]
     configured_provider_count: int
+    ai_processing_confidence_threshold: float = Field(default=0.46, ge=0, le=1)
     providers: list[DocumentProcessorProviderStatusOut]
     gmail_inbox: Optional[DocumentGmailInboxRuntimeSettingsOut] = None
 
@@ -571,6 +683,8 @@ class DocumentIngestionUnderstandingOut(BaseModel):
 class DocumentIngestionPageOut(BaseModel):
     page_id: int
     page_number: int
+    logical_document_id: Optional[str] = None
+    logical_document_key: Optional[str] = None
     classification_status: DocumentAnalysisStatus
     extraction_status: DocumentAnalysisStatus
     document_kind: DocumentKind | str
@@ -595,6 +709,32 @@ class DocumentIngestionPageOut(BaseModel):
     understanding: DocumentIngestionPageUnderstandingOut = Field(default_factory=DocumentIngestionPageUnderstandingOut)
 
 
+class DocumentLogicalDocumentOut(BaseModel):
+    logical_document_id: str
+    document_id: str
+    logical_document_key: str
+    sequence_number: int
+    page_start: int
+    page_end: int
+    page_count: int
+    page_numbers: list[int] = Field(default_factory=list)
+    document_kind: DocumentKind | str
+    document_subtype: Optional[str] = None
+    classification_status: DocumentAnalysisStatus
+    classification_confidence: Optional[float] = None
+    review_status: DocumentReviewStatus = "UNREVIEWED"
+    review_notes: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    reviewed_by: Optional[str] = None
+    provenance: dict[str, object] = Field(default_factory=dict)
+    routing_assessment: Optional[DocumentRoutingAssessmentOut] = None
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
 class DocumentActivityOut(BaseModel):
     activity_id: str
     event_type: str
@@ -607,6 +747,7 @@ class DocumentActivityOut(BaseModel):
 
 class DocumentIngestionOut(BaseModel):
     document_id: str
+    uploaded_file_id: str
     original_filename: str
     display_name: str
     content_type: str
@@ -638,6 +779,7 @@ class DocumentIngestionOut(BaseModel):
     record_links: list[DocumentRecordLinkOut] = Field(default_factory=list)
     facet_values: list[DocumentFacetAssignmentOut] = Field(default_factory=list)
     activity: list[DocumentActivityOut] = Field(default_factory=list)
+    logical_documents: list[DocumentLogicalDocumentOut] = Field(default_factory=list)
     pages: list[DocumentIngestionPageOut] = Field(default_factory=list)
     understanding: DocumentIngestionUnderstandingOut = Field(default_factory=DocumentIngestionUnderstandingOut)
 
@@ -852,6 +994,7 @@ class DocumentIngestionUpdate(BaseModel):
 class DocumentIngestionProcessRequest(BaseModel):
     processor_provider: Optional[DocumentProcessorSelection] = None
     processor_model: Optional[str] = Field(default=None, max_length=160)
+    ai_confidence_threshold: Optional[float] = Field(default=None, ge=0, le=1)
 
     @field_validator("processor_model")
     @classmethod

@@ -61,9 +61,11 @@ def build_document_action_plan(
             status="BLOCKED",
             action_type="MANUAL_REVIEW",
             operation_type="manual_review_document_linkage",
+            candidate_state="MANUAL_REVIEW",
             title="Manual Review Required",
             description="No pages are available yet, so the document cannot be routed into a downstream record action.",
             confidence=0.0,
+            missing_evidence=["analyzed_pages"],
             reasons=["At least one analyzed page is required before planning a document action."],
             payload={"document_id": document_id},
         )
@@ -145,6 +147,7 @@ def _build_attach_plan(
 ) -> DocumentActionPlanOut:
     status = "READY" if review_status == "VERIFIED" else "REVIEW"
     action_record = _action_record(candidate)
+    candidate_state = _attach_candidate_state(candidate=candidate, status=status)
     reasons = [
         f"{candidate.record_label} is the strongest existing {candidate.record_type.replace('_', ' ').lower()} match.",
         candidate.reason,
@@ -157,6 +160,7 @@ def _build_attach_plan(
         status=status,
         action_type="ATTACH_EXISTING_RECORD",
         operation_type="link_document_to_record",
+        candidate_state=candidate_state,
         title=f"Attach To {candidate.record_label}",
         description=(
             f"Use the current document as supporting evidence for {candidate.record_label}. "
@@ -165,6 +169,7 @@ def _build_attach_plan(
         confidence=round(candidate.score, 3),
         target=action_record,
         owner=None,
+        missing_evidence=_candidate_missing_evidence(candidate),
         reasons=reasons[:4],
         payload={
             "document_id": document_id,
@@ -185,11 +190,13 @@ def _build_create_plan(
 ) -> DocumentActionPlanOut:
     owner_candidate = _resolve_owner_candidate(candidate.record_type, all_candidates=all_candidates)
     owner_required = candidate.record_type in CREATE_OWNER_REQUIRED
+    required_owner_record_types = list(CREATE_OWNER_REQUIREMENTS.get(candidate.record_type, ()))
     if owner_required and owner_candidate is None:
         return DocumentActionPlanOut(
             status="BLOCKED",
             action_type="MANUAL_REVIEW",
             operation_type="manual_review_document_linkage",
+            candidate_state="OWNER_REQUIRED",
             title=f"Resolve Owner Before Creating {candidate.record_label.replace('Create ', '')}",
             description=(
                 f"The document suggests creating a {candidate.record_type.replace('_', ' ').lower()}, "
@@ -198,6 +205,8 @@ def _build_create_plan(
             confidence=round(candidate.score, 3),
             target=_action_record(candidate),
             owner=None,
+            required_owner_record_types=required_owner_record_types,
+            missing_evidence=_owner_missing_evidence(required_owner_record_types, candidate),
             reasons=[
                 f"{candidate.record_label} is the leading creation candidate.",
                 "A confirmed owner record is required before creation can proceed.",
@@ -239,11 +248,14 @@ def _build_create_plan(
         status=status,
         action_type="CREATE_RECORD_FROM_DOCUMENT",
         operation_type=ACTION_OPERATION_BY_TARGET.get(candidate.record_type, "create_record_from_document"),
+        candidate_state="CREATE_CANDIDATE",
         title=title,
         description=description,
         confidence=round(candidate.score, 3),
         target=_action_record(candidate),
         owner=owner_record,
+        required_owner_record_types=required_owner_record_types,
+        missing_evidence=_candidate_missing_evidence(candidate),
         reasons=reasons[:4],
         payload=_build_create_payload(
             document_id=document_id,
@@ -264,9 +276,11 @@ def _manual_review_plan(
         status="BLOCKED",
         action_type="MANUAL_REVIEW",
         operation_type="manual_review_document_linkage",
+        candidate_state="MANUAL_REVIEW",
         title="Manual Review Required",
         description="The document does not yet have a safe attach-or-create action. A reviewer should resolve the linkage first.",
         confidence=round(confidence, 3),
+        missing_evidence=_normalize_missing_evidence(reasons),
         reasons=reasons[:4],
         payload={"document_id": document_id},
     )
@@ -412,6 +426,37 @@ def _action_record(candidate: DocumentLinkageCandidateOut) -> DocumentActionReco
         record_label=candidate.record_label,
         existing_record=candidate.existing_record,
     )
+
+
+def _attach_candidate_state(*, candidate: DocumentLinkageCandidateOut, status: str) -> str:
+    if candidate.candidate_state == "ALREADY_LINKED":
+        return "ALREADY_LINKED"
+    if status == "READY":
+        return "ATTACH_READY"
+    return "ATTACH_REVIEW"
+
+
+def _candidate_missing_evidence(candidate: DocumentLinkageCandidateOut) -> list[str]:
+    return [key for key in candidate.missing_keys if key not in set(candidate.matched_keys)]
+
+
+def _owner_missing_evidence(
+    required_owner_record_types: list[str],
+    candidate: DocumentLinkageCandidateOut,
+) -> list[str]:
+    owner_items = [f"owner:{record_type}" for record_type in required_owner_record_types]
+    return [*owner_items, *_candidate_missing_evidence(candidate)]
+
+
+def _normalize_missing_evidence(reasons: list[str]) -> list[str]:
+    if not reasons:
+        return []
+    normalized: list[str] = []
+    for reason in reasons:
+        text = clean_optional_text(reason)
+        if text and text not in normalized:
+            normalized.append(text)
+    return normalized[:4]
 
 
 def _normalized_amount(value: str | None) -> str | None:

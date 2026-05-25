@@ -15,8 +15,9 @@ from apps.api.app.domains.home_views.services.registry import (
 from apps.api.app.schemas._validation import normalize_required_text
 from apps.api.app.schemas.assistant import AssistantPersona
 
-HomeViewDefinitionScope = Literal["PERSONAL"]
-HomeViewDefinitionStatus = Literal["ACTIVE", "RETIRED"]
+HomeViewDefinitionScope = Literal["PERSONAL", "TEAM", "ORGANIZATION"]
+HomeViewSharedScope = Literal["TEAM", "ORGANIZATION"]
+HomeViewDefinitionStatus = Literal["DRAFT", "ACTIVE", "RETIRED"]
 
 
 class HomeViewCardPlacement(BaseModel):
@@ -106,11 +107,47 @@ class HomeViewDefinitionUpdate(BaseModel):
         return normalized
 
 
+class HomeViewDefinitionPublish(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    scope: HomeViewSharedScope = "ORGANIZATION"
+    team_key: str | None = Field(default=None, min_length=1, max_length=80)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return normalize_required_text(value, field_name="name")
+
+    @field_validator("team_key")
+    @classmethod
+    def normalize_team_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return normalize_required_text(value, field_name="team_key", lowercase=True)
+
+
+class HomeViewDefinitionDuplicate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return normalize_required_text(value, field_name="name")
+
+
 class HomeViewDefinitionOut(BaseModel):
     definition_id: int
     definition_key: str
     name: str
     scope: HomeViewDefinitionScope
+    scope_owner_key: str
     base_template_key: str
     base_template_version: int
     persona_hint: AssistantPersona | None
@@ -123,6 +160,12 @@ class HomeViewDefinitionOut(BaseModel):
     updated_by: str
     version: int
     can_edit: bool
+    can_duplicate: bool
+    can_publish: bool
+    can_retire: bool
+    can_restore: bool
+    is_shared: bool
+    validation_warnings: list[str] = Field(default_factory=list)
 
 
 class HomeViewSystemTemplateOut(BaseModel):

@@ -1002,6 +1002,7 @@ export type DocumentLinkageCandidateRecord = {
   record_id: string | null
   record_label: string
   role: string
+  candidate_state: string
   existing_record: boolean
   score: number
   matched_keys: string[]
@@ -1033,13 +1034,52 @@ export type DocumentActionPlanRecord = {
   status: string
   action_type: string
   operation_type: string | null
+  candidate_state: string
   title: string
   description: string
   confidence: number
   target: DocumentActionRecordRefRecord | null
   owner: DocumentActionRecordRefRecord | null
+  required_owner_record_types: string[]
+  missing_evidence: string[]
   reasons: string[]
   payload: Record<string, unknown>
+}
+
+export type DocumentActionGovernanceRecord = {
+  status: string
+  recommended_execution_mode: string
+  manual_execution_allowed: boolean
+  auto_execution_allowed: boolean
+  approval_required: boolean
+  risk_flags: string[]
+  reasons: string[]
+}
+
+export type DocumentActionApprovalRequestRecord = {
+  request_id: number
+  document_id: string
+  status: 'PENDING' | 'EXECUTED' | 'REJECTED'
+  title: string
+  description: string
+  action_type: string
+  operation_type: string | null
+  governance_status: string
+  target_record_type: string | null
+  target_record_id: string | null
+  owner_record_type: string | null
+  owner_record_id: string | null
+  request_comment: string | null
+  decision_comment: string | null
+  action_plan_snapshot: Record<string, unknown>
+  governance_snapshot: Record<string, unknown>
+  result_snapshot: Record<string, unknown>
+  error_detail: string | null
+  execution_decision_id: number | null
+  requested_at: string
+  requested_by: string
+  decided_at: string | null
+  decided_by: string | null
 }
 
 export type DocumentWorkflowRecord = {
@@ -1048,12 +1088,33 @@ export type DocumentWorkflowRecord = {
   document_kind: string
   document_type_label: string
   description: string
+  status: string
+  recommended: boolean
+  action_type: string | null
+  operation_type: string | null
+  candidate_state: string | null
+  record_effect: string | null
+  target: DocumentActionRecordRefRecord | null
+  owner: DocumentActionRecordRefRecord | null
+  required_owner_record_types: string[]
+  missing_evidence: string[]
+  governance_status: string | null
+  recommended_execution_mode: string | null
+  approval_required: boolean
+  risk_flags: string[]
+  disabled_reason: string | null
+  reasons: string[]
 }
 
 export type DocumentWorkflowListRecord = {
   document_id: string
   document_kind: string | null
   document_type_label: string | null
+  linkage_assessment: DocumentLinkageAssessmentRecord | null
+  action_plan: DocumentActionPlanRecord | null
+  governance: DocumentActionGovernanceRecord | null
+  pending_approval_request: DocumentActionApprovalRequestRecord | null
+  record_links: DocumentRecordLinkRecord[]
   workflows: DocumentWorkflowRecord[]
   empty_message: string
 }
@@ -1367,6 +1428,7 @@ export type DocumentProcessorRuntimeSettingsRecord = {
   default_provider: 'openai' | 'anthropic' | 'google'
   effective_default_provider: 'openai' | 'anthropic' | 'google' | null
   configured_provider_count: number
+  ai_processing_confidence_threshold?: number
   providers: DocumentProcessorProviderStatusRecord[]
   gmail_inbox?: DocumentGmailInboxRuntimeSettingsRecord | null
 }

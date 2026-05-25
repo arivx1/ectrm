@@ -9,15 +9,28 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.documents.services.document_action_governance import build_document_action_governance
+from apps.api.app.domains.documents.services.document_action_approval_requests import (
+    find_pending_document_action_approval_request,
+    to_document_action_approval_request_out,
+)
+from apps.api.app.domains.documents.services.document_action_planning import build_document_action_plan
 from apps.api.app.domains.documents.services.document_activity import append_document_activity_event
 from apps.api.app.domains.documents.services.document_ingestion_common import clean_optional_text
-from apps.api.app.domains.documents.services.document_record_links import create_document_record_link
 from apps.api.app.domains.documents.services.document_ingestion_serialization import load_document_and_pages
+from apps.api.app.domains.documents.services.document_linkage import build_document_linkage_assessment
+from apps.api.app.domains.documents.services.document_record_links import create_document_record_link
+from apps.api.app.domains.documents.services.document_record_links import list_document_record_links
+from apps.api.app.domains.documents.services.document_record_links import to_document_record_link_out
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
+from apps.api.app.schemas.document import DocumentActionGovernanceOut
+from apps.api.app.schemas.document import DocumentActionPlanOut
+from apps.api.app.schemas.document import DocumentLinkageAssessmentOut
+from apps.api.app.schemas.document import DocumentRecordLinkOut
 from apps.api.app.schemas.document import DocumentWorkflowExecutionOut
 from apps.api.app.schemas.document import DocumentWorkflowListOut
 from apps.api.app.schemas.document import DocumentWorkflowOut
@@ -30,6 +43,54 @@ PRICE_PUBLICATION_KIND = "PRICE_PUBLICATION"
 PRICE_PUBLICATION_TYPE_LABEL = "Price Publication Report"
 WORKFLOW_SOURCE = "DOCUMENT_WORKFLOW"
 PRICE_NUMBER_PATTERN = re.compile(r"[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?")
+
+CREATE_WORKFLOW_BY_TARGET: dict[str, tuple[str, str, str]] = {
+    "TRADE": (
+        "create_trade_from_document",
+        "Create Trade From Document",
+        "Stage a reviewed trade-capture request from the document economics.",
+    ),
+    "TRADE_CONFIRMATION": (
+        "create_confirmation_from_document",
+        "Create Confirmation From Document",
+        "Create or stage a trade confirmation under the matched trade owner.",
+    ),
+    "DELIVERY": (
+        "create_delivery_from_document",
+        "Create Delivery From Document",
+        "Stage a delivery or shipment workflow under the matched trade owner.",
+    ),
+    "TRADE_INVOICE": (
+        "create_invoice_from_document",
+        "Create Invoice From Document",
+        "Create or stage a trade invoice under the matched trade owner.",
+    ),
+    "TRADE_PAYMENT": (
+        "create_payment_from_document",
+        "Create Payment From Document",
+        "Create or stage a payment under the matched invoice owner.",
+    ),
+    "QUALITY_RECORD": (
+        "create_quality_record_from_document",
+        "Create Quality Record From Document",
+        "Stage a quality evidence record under the matched trade or delivery owner.",
+    ),
+    "QUALITY_SPECIFICATION": (
+        "create_quality_specification_from_document",
+        "Create Quality Specification From Document",
+        "Stage a quality specification under the matched owner.",
+    ),
+    "COMPLIANCE_RECORD": (
+        "create_compliance_record_from_document",
+        "Create Compliance Record From Document",
+        "Stage a compliance evidence record under the matched trade or delivery owner.",
+    ),
+    "PRICE_INDEX_OBSERVATION": (
+        "load_price_observation_from_publication",
+        "Load Price Observation",
+        "Stage market-data observation loading after the price index is resolved.",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -88,20 +149,232 @@ def list_document_workflows(
     *,
     document_id: str,
 ) -> DocumentWorkflowListOut:
-    _document, pages = load_document_and_pages(db, document_id=document_id)
+    document, pages = load_document_and_pages(db, document_id=document_id)
     document_kind = _resolved_document_kind(pages)
-    workflows = [
-        _to_workflow_out(definition)
-        for definition in WORKFLOW_DEFINITIONS
-        if definition.document_kind == document_kind
+    document_type_label = _document_type_label(document_kind)
+    linkage_assessment = build_document_linkage_assessment(
+        db,
+        pages=pages,
+        review_status=document.review_status,
+        document_id=document.document_id,
+    )
+    action_plan = build_document_action_plan(
+        document_id=document.document_id,
+        pages=pages,
+        review_status=document.review_status,
+        linkage_assessment=linkage_assessment,
+    )
+    record_links = [
+        DocumentRecordLinkOut.model_validate(to_document_record_link_out(link))
+        for link in list_document_record_links(db, document_id=document.document_id)
     ]
+    governance = build_document_action_governance(
+        action_plan=action_plan,
+        linkage_assessment=linkage_assessment,
+        record_links=record_links,
+    )
+    workflows = _planned_workflows(
+        document_kind=document_kind,
+        document_type_label=document_type_label,
+        review_status=document.review_status,
+        action_plan=action_plan,
+        linkage_assessment=linkage_assessment,
+        governance=DocumentActionGovernanceOut.model_validate(governance.to_snapshot()),
+    )
+    workflows.extend(
+        [
+            _to_workflow_out(definition, review_status=document.review_status)
+            for definition in WORKFLOW_DEFINITIONS
+            if definition.document_kind == document_kind
+        ]
+    )
+    workflows = _dedupe_workflows(workflows)
+    pending_approval_request = find_pending_document_action_approval_request(
+        db,
+        document_id=document.document_id,
+    )
     return DocumentWorkflowListOut(
         document_id=document_id,
         document_kind=document_kind,
-        document_type_label=_document_type_label(document_kind),
+        document_type_label=document_type_label,
+        linkage_assessment=DocumentLinkageAssessmentOut.model_validate(linkage_assessment),
+        action_plan=DocumentActionPlanOut.model_validate(action_plan),
+        governance=DocumentActionGovernanceOut.model_validate(governance.to_snapshot()),
+        pending_approval_request=(
+            to_document_action_approval_request_out(pending_approval_request)
+            if pending_approval_request is not None
+            else None
+        ),
+        record_links=record_links,
         workflows=workflows,
         empty_message=NO_WORKFLOWS_MESSAGE,
     )
+
+
+def _planned_workflows(
+    *,
+    document_kind: str | None,
+    document_type_label: str | None,
+    review_status: str,
+    action_plan: DocumentActionPlanOut,
+    linkage_assessment: DocumentLinkageAssessmentOut,
+    governance: DocumentActionGovernanceOut,
+) -> list[DocumentWorkflowOut]:
+    workflows: list[DocumentWorkflowOut] = []
+    if review_status != "VERIFIED":
+        workflows.append(
+            DocumentWorkflowOut(
+                workflow_id="review_extraction",
+                label="Review Extraction",
+                document_kind=document_kind or "UNKNOWN",
+                document_type_label=document_type_label or "Unknown Document",
+                description="Review captured fields, tables, and document type before downstream record actions are executed.",
+                status="READY",
+                recommended=action_plan.status != "READY",
+                action_type="MANUAL_REVIEW",
+                operation_type="review_document_extraction",
+                candidate_state="MANUAL_REVIEW",
+                record_effect="Review only; no business record mutation.",
+                reasons=["Document review is not verified yet."],
+            )
+        )
+
+    primary_workflow = _workflow_for_action_plan(
+        document_kind=document_kind,
+        document_type_label=document_type_label,
+        action_plan=action_plan,
+        governance=governance,
+        recommended=True,
+    )
+    workflows.append(primary_workflow)
+
+    has_existing_candidates = any(candidate.existing_record for candidate in linkage_assessment.candidates)
+    if primary_workflow.workflow_id != "match_existing_record" and has_existing_candidates:
+        workflows.append(
+            DocumentWorkflowOut(
+                workflow_id="match_existing_record",
+                label="Match Existing Record",
+                document_kind=document_kind or "UNKNOWN",
+                document_type_label=document_type_label or "Unknown Document",
+                description="Review ranked record candidates and attach this document to the selected existing record.",
+                status="REVIEW",
+                recommended=False,
+                action_type="ATTACH_EXISTING_RECORD",
+                operation_type="link_document_to_record",
+                candidate_state="ATTACH_REVIEW",
+                record_effect="Attach document evidence to an existing system record.",
+                governance_status=governance.status,
+                recommended_execution_mode=governance.recommended_execution_mode,
+                approval_required=governance.approval_required,
+                risk_flags=list(governance.risk_flags),
+                reasons=linkage_assessment.reasons[:4],
+            )
+        )
+
+    return workflows
+
+
+def _workflow_for_action_plan(
+    *,
+    document_kind: str | None,
+    document_type_label: str | None,
+    action_plan: DocumentActionPlanOut,
+    governance: DocumentActionGovernanceOut,
+    recommended: bool,
+) -> DocumentWorkflowOut:
+    workflow_id, label, fallback_description = _workflow_identity(action_plan)
+    return DocumentWorkflowOut(
+        workflow_id=workflow_id,
+        label=label,
+        document_kind=document_kind or "UNKNOWN",
+        document_type_label=document_type_label or "Unknown Document",
+        description=action_plan.description or fallback_description,
+        status=_workflow_status(action_plan=action_plan, governance=governance),
+        recommended=recommended,
+        action_type=action_plan.action_type,
+        operation_type=action_plan.operation_type,
+        candidate_state=action_plan.candidate_state,
+        record_effect=_record_effect(action_plan),
+        target=action_plan.target,
+        owner=action_plan.owner,
+        required_owner_record_types=list(action_plan.required_owner_record_types),
+        missing_evidence=list(action_plan.missing_evidence),
+        governance_status=governance.status,
+        recommended_execution_mode=governance.recommended_execution_mode,
+        approval_required=governance.approval_required,
+        risk_flags=list(governance.risk_flags),
+        disabled_reason=_disabled_reason(action_plan=action_plan, governance=governance),
+        reasons=action_plan.reasons[:4],
+    )
+
+
+def _workflow_identity(action_plan: DocumentActionPlanOut) -> tuple[str, str, str]:
+    if action_plan.action_type == "ATTACH_EXISTING_RECORD":
+        return (
+            "match_existing_record",
+            "Match Existing Record",
+            "Review ranked record candidates and attach this document to the selected existing record.",
+        )
+    target_type = action_plan.target.record_type if action_plan.target is not None else None
+    if target_type in CREATE_WORKFLOW_BY_TARGET:
+        return CREATE_WORKFLOW_BY_TARGET[target_type]
+    if action_plan.action_type == "CREATE_RECORD_FROM_DOCUMENT":
+        return (
+            "create_record_from_document",
+            "Create Record From Document",
+            "Stage record creation from reviewed document evidence.",
+        )
+    return (
+        "manual_review",
+        "Manual Review",
+        "Route this document to manual review because no safe record action is available yet.",
+    )
+
+
+def _workflow_status(
+    *,
+    action_plan: DocumentActionPlanOut,
+    governance: DocumentActionGovernanceOut,
+) -> str:
+    if governance.status == "ALREADY_APPLIED":
+        return "EXECUTED"
+    return action_plan.status
+
+
+def _record_effect(action_plan: DocumentActionPlanOut) -> str:
+    target = action_plan.target
+    if action_plan.action_type == "ATTACH_EXISTING_RECORD" and target is not None:
+        return f"Attach document evidence to existing {target.record_type.replace('_', ' ').lower()}."
+    if action_plan.action_type == "CREATE_RECORD_FROM_DOCUMENT" and target is not None:
+        return f"Stage creation of a new {target.record_type.replace('_', ' ').lower()} from reviewed document evidence."
+    return "Review only; no business record mutation."
+
+
+def _disabled_reason(
+    *,
+    action_plan: DocumentActionPlanOut,
+    governance: DocumentActionGovernanceOut,
+) -> str | None:
+    if governance.status == "ALREADY_APPLIED":
+        return "This document is already linked to the planned target record."
+    if action_plan.status == "BLOCKED":
+        if action_plan.candidate_state == "OWNER_REQUIRED" and len(action_plan.reasons) > 1:
+            return action_plan.reasons[1]
+        return action_plan.reasons[0] if action_plan.reasons else "The workflow is blocked until missing evidence is resolved."
+    if governance.approval_required:
+        return "Human approval is required before this workflow can mutate records."
+    return None
+
+
+def _dedupe_workflows(workflows: list[DocumentWorkflowOut]) -> list[DocumentWorkflowOut]:
+    deduped: list[DocumentWorkflowOut] = []
+    seen: set[str] = set()
+    for workflow in workflows:
+        if workflow.workflow_id in seen:
+            continue
+        seen.add(workflow.workflow_id)
+        deduped.append(workflow)
+    return deduped
 
 
 def execute_document_workflow(
@@ -533,13 +806,19 @@ def _workflow_definition(
     return None
 
 
-def _to_workflow_out(definition: DocumentWorkflowDefinition) -> DocumentWorkflowOut:
+def _to_workflow_out(definition: DocumentWorkflowDefinition, *, review_status: str) -> DocumentWorkflowOut:
+    is_verified = review_status == "VERIFIED"
     return DocumentWorkflowOut(
         workflow_id=definition.workflow_id,
         label=definition.label,
         document_kind=definition.document_kind,
         document_type_label=definition.document_type_label,
         description=definition.description,
+        status="READY" if is_verified else "BLOCKED",
+        recommended=False,
+        operation_type=definition.workflow_id,
+        record_effect="Load reviewed document rows into a supported system table.",
+        disabled_reason=None if is_verified else "Verify the document before executing this workflow.",
     )
 
 

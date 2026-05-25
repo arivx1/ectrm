@@ -462,6 +462,8 @@ class TradeEventWorkflowTests(unittest.TestCase):
 
         self.assertEqual(trade.pricing_type, "INDEX")
         self.assertEqual(trade.price_index_code, "WTI_M1")
+        self.assertEqual(trade.unit_of_measure, "BBL")
+        self.assertEqual(trade.price_unit_code, "BBL")
         self.assertIsNone(trade.price)
         self.assertEqual(float(trade.volume), 1000.0)
 

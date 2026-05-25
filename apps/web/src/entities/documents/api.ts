@@ -1,6 +1,7 @@
 import { fetchJson, patchJson, postFormData, postJson, requestOk } from '../../shared/api'
 import type { StoredAuthSession } from '../../shared/mutation'
 import type {
+  DocumentActionApprovalRequestRecord,
   DocumentGmailInboxBrowseResultRecord,
   DocumentGmailInboxMessageDetailRecord,
   DocumentIngestionRecord,
@@ -88,8 +89,44 @@ export type ListGmailInboxMessagesInput = {
   page_token?: string | null
 }
 
+export type ListDocumentActionApprovalRequestsInput = {
+  status?: 'PENDING' | 'EXECUTED' | 'REJECTED' | null
+  limit?: number | null
+}
+
+export type StageDocumentActionApprovalRequestInput = {
+  request_comment?: string | null
+}
+
+export type DecideDocumentActionApprovalRequestInput = {
+  decision_comment: string
+}
+
+export type DocumentRecordCandidateSelectionInput = {
+  record_type: string
+  record_id: string
+  request_comment?: string | null
+}
+
 function documentHeaders(session: StoredAuthSession): Headers {
   return new Headers({ Authorization: `Bearer ${session.accessToken}` })
+}
+
+const DOCUMENT_WORKFLOW_LIST_TIMEOUT_MS = 15_000
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs)
+  })
+
+  try {
+    return await Promise.race([promise, timeoutPromise])
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId)
+    }
+  }
 }
 
 export async function listDocumentSchemaRegistry(
@@ -129,6 +166,7 @@ export async function uploadPdfDocument(
   displayName?: string,
   processorProvider?: 'builtin' | 'openai' | 'anthropic' | 'google' | null,
   processorModel?: string | null,
+  aiConfidenceThreshold?: number | null,
 ): Promise<DocumentIngestionRecord> {
   const formData = new FormData()
   formData.append('file', file)
@@ -140,6 +178,9 @@ export async function uploadPdfDocument(
   }
   if (processorModel?.trim()) {
     formData.append('processor_model', processorModel.trim())
+  }
+  if (typeof aiConfidenceThreshold === 'number' && Number.isFinite(aiConfidenceThreshold)) {
+    formData.append('ai_confidence_threshold', String(Math.min(Math.max(aiConfidenceThreshold, 0), 1)))
   }
 
   return postFormData<DocumentIngestionRecord>(`${apiBase}/documents/uploads`, formData, {
@@ -184,6 +225,7 @@ export async function reprocessDocumentIngestion(
   documentId: string,
   processorProvider?: 'builtin' | 'openai' | 'anthropic' | 'google' | null,
   processorModel?: string | null,
+  aiConfidenceThreshold?: number | null,
 ): Promise<DocumentIngestionRecord> {
   const payload: Record<string, unknown> = {}
   if (processorProvider) {
@@ -191,6 +233,9 @@ export async function reprocessDocumentIngestion(
   }
   if (processorModel?.trim()) {
     payload.processor_model = processorModel.trim()
+  }
+  if (typeof aiConfidenceThreshold === 'number' && Number.isFinite(aiConfidenceThreshold)) {
+    payload.ai_confidence_threshold = Math.min(Math.max(aiConfidenceThreshold, 0), 1)
   }
   return postJson<DocumentIngestionRecord>(
     `${apiBase}/documents/${documentId}/reprocess`,
@@ -263,15 +308,117 @@ export async function executeDocumentActionPlan(
   )
 }
 
+export async function listDocumentActionApprovalRequests(
+  apiBase: string,
+  session: StoredAuthSession,
+  payload: ListDocumentActionApprovalRequestsInput = {},
+): Promise<DocumentActionApprovalRequestRecord[]> {
+  const searchParams = new URLSearchParams()
+  if (payload.status?.trim()) {
+    searchParams.set('status', payload.status.trim())
+  }
+  if (typeof payload.limit === 'number' && Number.isFinite(payload.limit)) {
+    searchParams.set('limit', String(payload.limit))
+  }
+  const querySuffix = searchParams.size > 0 ? `?${searchParams.toString()}` : ''
+
+  return fetchJson<DocumentActionApprovalRequestRecord[]>(
+    `${apiBase}/documents/action-approval-requests${querySuffix}`,
+    {
+      headers: documentHeaders(session),
+      cache: 'no-store',
+    },
+  )
+}
+
+export async function stageDocumentActionApprovalRequest(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  payload: StageDocumentActionApprovalRequestInput = {},
+): Promise<DocumentActionApprovalRequestRecord> {
+  return postJson<DocumentActionApprovalRequestRecord>(
+    `${apiBase}/documents/${documentId}/action-approval-requests`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function approveDocumentActionApprovalRequest(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  payload: DecideDocumentActionApprovalRequestInput,
+): Promise<DocumentActionApprovalRequestRecord> {
+  return postJson<DocumentActionApprovalRequestRecord>(
+    `${apiBase}/documents/${documentId}/action-approval-requests/approve`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function rejectDocumentActionApprovalRequest(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  payload: DecideDocumentActionApprovalRequestInput,
+): Promise<DocumentActionApprovalRequestRecord> {
+  return postJson<DocumentActionApprovalRequestRecord>(
+    `${apiBase}/documents/${documentId}/action-approval-requests/reject`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function attachSelectedDocumentRecordCandidate(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  payload: DocumentRecordCandidateSelectionInput,
+): Promise<DocumentIngestionRecord> {
+  return postJson<DocumentIngestionRecord>(
+    `${apiBase}/documents/${documentId}/record-candidate-attachments`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function stageSelectedDocumentRecordCandidateApprovalRequest(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  payload: DocumentRecordCandidateSelectionInput,
+): Promise<DocumentActionApprovalRequestRecord> {
+  return postJson<DocumentActionApprovalRequestRecord>(
+    `${apiBase}/documents/${documentId}/record-candidate-attachments/approval-requests`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
 export async function listDocumentWorkflows(
   apiBase: string,
   session: StoredAuthSession,
   documentId: string,
 ): Promise<DocumentWorkflowListRecord> {
-  return fetchJson<DocumentWorkflowListRecord>(`${apiBase}/documents/${documentId}/workflows`, {
-    headers: documentHeaders(session),
-    cache: 'no-store',
-  })
+  return withTimeout(
+    fetchJson<DocumentWorkflowListRecord>(`${apiBase}/documents/${documentId}/workflows`, {
+      headers: documentHeaders(session),
+      cache: 'no-store',
+    }),
+    DOCUMENT_WORKFLOW_LIST_TIMEOUT_MS,
+    'Document workflows did not respond within 15 seconds. Try again or check the API connection.',
+  )
 }
 
 export async function executeDocumentWorkflow(

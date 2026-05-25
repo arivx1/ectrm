@@ -12,15 +12,22 @@ from apps.api.app.domains.home_views.services.definitions import (
     build_home_system_template,
     create_home_view_definition,
     delete_home_view_definition,
+    duplicate_home_view_definition_to_personal,
     get_visible_home_view_definition,
+    list_admin_home_view_definitions,
     list_visible_home_view_definitions,
+    publish_home_view_definition,
+    restore_home_view_definition,
+    retire_home_view_definition,
     reset_home_view_definition,
     to_home_view_definition_out,
     update_home_view_definition,
 )
 from apps.api.app.schemas.home_view import (
     HomeViewDefinitionCreate,
+    HomeViewDefinitionDuplicate,
     HomeViewDefinitionOut,
+    HomeViewDefinitionPublish,
     HomeViewDefinitionUpdate,
     HomeViewSystemTemplateOut,
 )
@@ -55,7 +62,7 @@ def get_home_view_definitions(
     actor_role = _authenticated_actor_role(request)
     records = list_visible_home_view_definitions(db, actor_id=actor_id)
     return [
-        to_home_view_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+        to_home_view_definition_out(record, db=db, actor_id=actor_id, actor_role=actor_role)
         for record in records
     ]
 
@@ -74,7 +81,24 @@ def create_home_view(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except HomeViewDefinitionValidationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    return to_home_view_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+    return to_home_view_definition_out(record, db=db, actor_id=actor_id, actor_role=actor_role)
+
+
+@router.get("/admin/inventory", response_model=list[HomeViewDefinitionOut])
+def get_home_view_admin_inventory(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[HomeViewDefinitionOut]:
+    actor_id = _require_authenticated_actor(request)
+    actor_role = _authenticated_actor_role(request)
+    try:
+        records = list_admin_home_view_definitions(db, actor_role=actor_role)
+    except HomeViewDefinitionPermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    return [
+        to_home_view_definition_out(record, db=db, actor_id=actor_id, actor_role=actor_role)
+        for record in records
+    ]
 
 
 @router.get("/{definition_id}", response_model=HomeViewDefinitionOut)
@@ -88,7 +112,7 @@ def get_home_view_definition(
     record = get_visible_home_view_definition(db, actor_id=actor_id, definition_id=definition_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Home view definition was not found.")
-    return to_home_view_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+    return to_home_view_definition_out(record, db=db, actor_id=actor_id, actor_role=actor_role)
 
 
 @router.patch("/{definition_id}", response_model=HomeViewDefinitionOut)
@@ -116,7 +140,7 @@ def update_home_view(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except HomeViewDefinitionValidationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    return to_home_view_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+    return to_home_view_definition_out(record, db=db, actor_id=actor_id, actor_role=actor_role)
 
 
 @router.post("/{definition_id}/reset", response_model=HomeViewDefinitionOut)
@@ -138,7 +162,108 @@ def reset_home_view(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except HomeViewDefinitionPermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    return to_home_view_definition_out(record, actor_id=actor_id, actor_role=actor_role)
+    return to_home_view_definition_out(record, db=db, actor_id=actor_id, actor_role=actor_role)
+
+
+@router.post("/{definition_id}/publish", response_model=HomeViewDefinitionOut, status_code=status.HTTP_201_CREATED)
+def publish_home_view(
+    definition_id: int,
+    payload: HomeViewDefinitionPublish,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> HomeViewDefinitionOut:
+    actor_id = _require_authenticated_actor(request)
+    actor_role = _authenticated_actor_role(request)
+    try:
+        record = publish_home_view_definition(
+            db,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            definition_id=definition_id,
+            payload=payload,
+        )
+    except HomeViewDefinitionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except HomeViewDefinitionPermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except HomeViewDefinitionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except HomeViewDefinitionValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return to_home_view_definition_out(record, db=db, actor_id=actor_id, actor_role=actor_role)
+
+
+@router.post("/{definition_id}/duplicate", response_model=HomeViewDefinitionOut, status_code=status.HTTP_201_CREATED)
+def duplicate_home_view(
+    definition_id: int,
+    payload: HomeViewDefinitionDuplicate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> HomeViewDefinitionOut:
+    actor_id = _require_authenticated_actor(request)
+    actor_role = _authenticated_actor_role(request)
+    try:
+        record = duplicate_home_view_definition_to_personal(
+            db,
+            actor_id=actor_id,
+            definition_id=definition_id,
+            payload=payload,
+        )
+    except HomeViewDefinitionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except HomeViewDefinitionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except HomeViewDefinitionValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return to_home_view_definition_out(record, db=db, actor_id=actor_id, actor_role=actor_role)
+
+
+@router.post("/{definition_id}/retire", response_model=HomeViewDefinitionOut)
+def retire_home_view(
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> HomeViewDefinitionOut:
+    actor_id = _require_authenticated_actor(request)
+    actor_role = _authenticated_actor_role(request)
+    try:
+        record = retire_home_view_definition(
+            db,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            definition_id=definition_id,
+        )
+    except HomeViewDefinitionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except HomeViewDefinitionPermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except HomeViewDefinitionValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return to_home_view_definition_out(record, db=db, actor_id=actor_id, actor_role=actor_role)
+
+
+@router.post("/{definition_id}/restore", response_model=HomeViewDefinitionOut)
+def restore_home_view(
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> HomeViewDefinitionOut:
+    actor_id = _require_authenticated_actor(request)
+    actor_role = _authenticated_actor_role(request)
+    try:
+        record = restore_home_view_definition(
+            db,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            definition_id=definition_id,
+        )
+    except HomeViewDefinitionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except HomeViewDefinitionPermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except HomeViewDefinitionValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return to_home_view_definition_out(record, db=db, actor_id=actor_id, actor_role=actor_role)
 
 
 @router.delete("/{definition_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)

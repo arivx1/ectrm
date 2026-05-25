@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime, timezone
 import re
+from typing import get_args
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.schemas.document import DocumentFacetAssignmentOut
 from apps.api.app.schemas.document import DocumentFacetSchemaOut
 from apps.api.app.schemas.document import DocumentFacetValueOut
+from apps.api.app.schemas.document import DocumentKind
 from apps.api.app.shared.enums import TransportMode
 
 from .document_ingestion_common import clean_optional_text
@@ -26,6 +28,17 @@ _CODE_SEPARATOR_PATTERN = re.compile(r"[^A-Z0-9]+")
 def _facet_value(code: str, label: str, description: str | None = None) -> DocumentFacetValueOut:
     return DocumentFacetValueOut(code=code, label=label, description=description)
 
+
+def _document_kind_label(document_kind: str) -> str:
+    if document_kind == "OTHER":
+        return "Other Document"
+    return document_kind.replace("_", " ").title()
+
+
+DOCUMENT_TYPE_VALUES = tuple(
+    _facet_value(str(document_kind), _document_kind_label(str(document_kind)))
+    for document_kind in get_args(DocumentKind)
+)
 
 DOCUMENT_COMMODITY_VALUES = (
     _facet_value("NATURAL_GAS", "Natural Gas"),
@@ -62,6 +75,14 @@ DOCUMENT_ASSET_VALUES = (
 )
 
 DOCUMENT_FACET_SCHEMAS = (
+    DocumentFacetSchemaOut(
+        facet_key="document_type",
+        label="Document Type",
+        description="The page-level document classification assigned by the ingestion classifier or reviewer.",
+        value_type="single_select",
+        repeatable=False,
+        allowed_values=list(DOCUMENT_TYPE_VALUES),
+    ),
     DocumentFacetSchemaOut(
         facet_key="commodity",
         label="Commodity",
@@ -350,7 +371,11 @@ def refresh_system_suggested_page_facets(
 
     suggestions = [
         suggestion
-        for suggestion in suggest_document_facets_from_text(page.raw_text, document_kind=page.document_kind)
+        for suggestion in suggest_document_facets_from_text(
+            page.raw_text,
+            document_kind=page.document_kind,
+            classification_confidence=page.classification_confidence,
+        )
         if (str(suggestion["facet_key"]), str(suggestion["value_code"])) not in blocked_keys
     ]
     now = datetime.now(timezone.utc)
@@ -364,11 +389,30 @@ def refresh_system_suggested_page_facets(
         db.add(facet_value)
 
 
-def suggest_document_facets_from_text(raw_text: str | None, *, document_kind: str | None = None) -> list[dict[str, object]]:
+def suggest_document_facets_from_text(
+    raw_text: str | None,
+    *,
+    document_kind: str | None = None,
+    classification_confidence: float | None = None,
+) -> list[dict[str, object]]:
     text = clean_optional_text(raw_text, lowercase=True)
     suggestions: list[dict[str, object]] = []
     seen: set[tuple[str, str]] = set()
     normalized_document_kind = (clean_optional_text(document_kind) or "").upper()
+    document_type_label = DOCUMENT_FACET_VALUE_LABELS.get("document_type", {}).get(normalized_document_kind)
+    if document_type_label is not None and normalized_document_kind != "UNKNOWN":
+        suggestions.append(
+            {
+                "facet_key": "document_type",
+                "value_code": normalized_document_kind,
+                "value_label": document_type_label,
+                "source": "SYSTEM_DERIVED",
+                "confidence": classification_confidence if classification_confidence is not None else 1.0,
+                "review_status": "SUGGESTED",
+                "evidence": [f"Page classification is {document_type_label}."],
+            }
+        )
+        seen.add(("document_type", normalized_document_kind))
     commercial_side_abstains = normalized_document_kind in DOCUMENT_KIND_COMMERCIAL_SIDE_ABSTAIN
     kind_commercial_side = (
         None

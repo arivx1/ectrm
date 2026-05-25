@@ -231,6 +231,76 @@ class RunMarketDataSchedulerScriptTests(unittest.TestCase):
         eia_wholesale_power_mock.assert_called_once()
         self.assertIn("EIA_WHOLESALE_POWER scheduler run", buffer.getvalue())
 
+    def test_main_runs_world_bank_provider_when_due(self) -> None:
+        session = _FakeSession()
+        with patch.object(run_market_data_scheduler, "SessionLocal", return_value=session), patch.object(
+            run_market_data_scheduler,
+            "build_external_data_sync_status",
+            return_value={"providers": [{"provider": "WORLD_BANK", "due_for_sync": True}]},
+        ), patch.object(
+            run_market_data_scheduler,
+            "sync_world_bank_series",
+            return_value=SimpleNamespace(
+                id=18,
+                status="SUCCEEDED",
+                series_count=17,
+                observation_count=34,
+                error_summary=None,
+            ),
+        ) as world_bank_mock, patch(
+            "sys.argv",
+            [
+                "run_market_data_scheduler.py",
+                "--provider",
+                "world-bank",
+                "--max-cycles",
+                "1",
+            ],
+        ):
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = run_market_data_scheduler.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(session.closed)
+        world_bank_mock.assert_called_once()
+        self.assertIn("WORLD_BANK scheduler run", buffer.getvalue())
+
+    def test_main_runs_usda_nass_provider_when_due(self) -> None:
+        session = _FakeSession()
+        with patch.object(run_market_data_scheduler, "SessionLocal", return_value=session), patch.object(
+            run_market_data_scheduler,
+            "build_external_data_sync_status",
+            return_value={"providers": [{"provider": "USDA_NASS", "due_for_sync": True}]},
+        ), patch.object(
+            run_market_data_scheduler,
+            "sync_usda_nass_series",
+            return_value=SimpleNamespace(
+                id=19,
+                status="SUCCEEDED",
+                series_count=3,
+                observation_count=36,
+                error_summary=None,
+            ),
+        ) as usda_nass_mock, patch(
+            "sys.argv",
+            [
+                "run_market_data_scheduler.py",
+                "--provider",
+                "usda-nass",
+                "--max-cycles",
+                "1",
+            ],
+        ):
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = run_market_data_scheduler.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(session.closed)
+        usda_nass_mock.assert_called_once()
+        self.assertIn("USDA_NASS scheduler run", buffer.getvalue())
+
     def test_main_runs_miso_provider_when_due(self) -> None:
         session = _FakeSession()
         with patch.object(run_market_data_scheduler, "SessionLocal", return_value=session), patch.object(

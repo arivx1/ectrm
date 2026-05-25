@@ -172,6 +172,11 @@ def validate_book_trade_write(
         payload_data.get("volume"),
         field_name="Volume",
     )
+    pricing_type, price_index_code = support.require_active_price_index(
+        db,
+        payload_data.get("pricing_type"),
+        payload_data.get("price_index_code"),
+    )
     external_trade_id = support.normalize_optional_text(payload_data.get("external_trade_id"))
     source_system = (
         support.normalize_optional_text(payload_data.get("source_system"), uppercase=True)
@@ -194,7 +199,13 @@ def validate_book_trade_write(
         field_name="effective_end_date",
     )
     quality_spec = support.normalize_optional_text(payload_data.get("quality_spec"))
-    unit_of_measure = support.require_active_unit(db, payload_data.get("unit_of_measure"))
+    unit_of_measure = support.resolve_trade_quantity_unit(
+        db,
+        payload_data.get("unit_of_measure"),
+        commodity_class=commodity_class,
+        commodity=commodity,
+        price_index_code=price_index_code,
+    )
     trade_currency_code = support.require_active_currency(
         db,
         payload_data.get("trade_currency_code"),
@@ -208,7 +219,13 @@ def validate_book_trade_write(
         payload_data.get("delivery_end"),
         field_name="delivery_end",
     )
-    price_unit_code = support.require_active_unit(db, payload_data.get("price_unit_code"))
+    price_unit_code = support.resolve_trade_price_unit(
+        db,
+        payload_data.get("price_unit_code"),
+        commodity_class=commodity_class,
+        commodity=commodity,
+        price_index_code=price_index_code,
+    )
     counterparty = support.require_active_counterparty(db, payload_data.get("counterparty"))
     portfolio = support.require_active_portfolio(
         db,
@@ -264,11 +281,6 @@ def validate_book_trade_write(
         valid_values={payment_status.value for payment_status in PaymentStatus},
     )
     trader_user = support.normalize_optional_text(payload_data.get("trader_user"))
-    pricing_type, price_index_code = support.require_active_price_index(
-        db,
-        payload_data.get("pricing_type"),
-        payload_data.get("price_index_code"),
-    )
     option_type, option_style, option_strike_price, option_expiration_date = (
         support.validate_option_fields(
             instrument_type=instrument_type,
@@ -531,13 +543,11 @@ def validate_amend_trade_write(
         if "quality_spec" in payload_data
         else trade.quality_spec
     )
-    unit_of_measure = (
-        support.require_active_unit(db, payload_data.get("unit_of_measure"))
+    unit_of_measure_input = (
+        payload_data.get("unit_of_measure")
         if "unit_of_measure" in payload_data
         else trade.unit_of_measure
     )
-    if "unit_of_measure" in payload_data:
-        should_sync_legs = True
     trade_currency_code = (
         support.require_active_currency(db, payload_data.get("trade_currency_code"))
         if "trade_currency_code" in payload_data
@@ -564,8 +574,8 @@ def validate_amend_trade_write(
     )
     if "delivery_end" in payload_data:
         should_sync_legs = True
-    price_unit_code = (
-        support.require_active_unit(db, payload_data.get("price_unit_code"))
+    price_unit_code_input = (
+        payload_data.get("price_unit_code")
         if "price_unit_code" in payload_data
         else trade.price_unit_code
     )
@@ -595,6 +605,24 @@ def validate_amend_trade_write(
             payload_data.get("pricing_type", trade.pricing_type),
             payload_data.get("price_index_code", trade.price_index_code),
         )
+
+    unit_of_measure = support.resolve_trade_quantity_unit(
+        db,
+        unit_of_measure_input,
+        commodity_class=commodity_class,
+        commodity=commodity,
+        price_index_code=price_index_code,
+    )
+    if unit_of_measure != trade.unit_of_measure:
+        should_sync_legs = True
+
+    price_unit_code = support.resolve_trade_price_unit(
+        db,
+        price_unit_code_input,
+        commodity_class=commodity_class,
+        commodity=commodity,
+        price_index_code=price_index_code,
+    )
 
     price = (
         support.normalize_optional_number(payload_data.get("price"), field_name="Price Differential")

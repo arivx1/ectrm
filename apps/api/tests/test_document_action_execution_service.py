@@ -221,7 +221,7 @@ class DocumentActionExecutionServiceTests(unittest.TestCase):
         self.assertEqual(links[0].record_id, invoice_id)
         self.assertTrue(any(link.record_label == "Invoice INV-EXEC-100" for link in result.record_links))
 
-    def test_execute_create_issues_invoice_and_links_owner_trade(self) -> None:
+    def test_direct_execute_blocks_create_invoice_without_approval(self) -> None:
         with self.SessionLocal() as session:
             trade = self._seed_trade(trade_id="TRD-EXEC-200")
             document, page = self._seed_verified_document(
@@ -239,11 +239,12 @@ class DocumentActionExecutionServiceTests(unittest.TestCase):
             session.add_all([trade, document, page])
             session.commit()
 
-            result = execute_document_action_plan(
-                session,
-                document_id=document.document_id,
-                actor_id="tester",
-            )
+            with self.assertRaisesRegex(ValueError, "staged for approval"):
+                execute_document_action_plan(
+                    session,
+                    document_id=document.document_id,
+                    actor_id="tester",
+                )
             session.commit()
 
             invoices = session.execute(
@@ -255,11 +256,8 @@ class DocumentActionExecutionServiceTests(unittest.TestCase):
                 .order_by(DocumentRecordLink.record_type.asc())
             ).scalars().all()
 
-        self.assertEqual(len(invoices), 1)
-        self.assertEqual(invoices[0].invoice_number, "INV-EXEC-200")
-        self.assertEqual({link.record_type for link in links}, {"TRADE", "TRADE_INVOICE"})
-        self.assertTrue(any(link.record_label == "Invoice INV-EXEC-200" for link in result.record_links))
-        self.assertEqual(result.linkage_assessment.primary_record_type, "TRADE_INVOICE")
+        self.assertEqual(invoices, [])
+        self.assertEqual(links, [])
 
 
 if __name__ == "__main__":

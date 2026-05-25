@@ -21,6 +21,9 @@ from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
 from apps.api.app.models import Base
 from apps.api.app.models.home_view_definition import HomeViewDefinition
+from apps.api.app.models.reference_commodity import ReferenceCommodity
+from apps.api.app.models.reference_location import ReferenceLocation
+from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 
@@ -64,6 +67,9 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
             session.query(HomeViewDefinition).delete()
             session.query(UserSession).delete()
             session.query(UserAccount).delete()
+            session.query(ReferencePriceIndex).delete()
+            session.query(ReferenceLocation).delete()
+            session.query(ReferenceCommodity).delete()
             session.commit()
 
     def tearDown(self) -> None:
@@ -101,6 +107,112 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
                     updated_by="ops_admin",
                     version=1,
                 )
+            )
+            session.commit()
+
+    def _seed_home_view_reference_catalog(self) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add_all(
+                [
+                    ReferenceCommodity(
+                        code="NATGAS",
+                        commodity_class="GAS",
+                        allowed_transport_modes=["PIPELINE"],
+                        name="Natural Gas",
+                        description=None,
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=now,
+                        created_by="ops_admin",
+                        updated_at=now,
+                        updated_by="ops_admin",
+                        version=1,
+                    ),
+                    ReferenceCommodity(
+                        code="COAL",
+                        commodity_class="COAL",
+                        allowed_transport_modes=["RAIL"],
+                        name="Coal",
+                        description=None,
+                        is_active=False,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=now,
+                        created_by="ops_admin",
+                        updated_at=now,
+                        updated_by="ops_admin",
+                        version=1,
+                    ),
+                    ReferenceLocation(
+                        code="HENRY_HUB",
+                        parent_location_code=None,
+                        name="Henry Hub",
+                        location_kind="POINT",
+                        location_type="HUB",
+                        market="US",
+                        city=None,
+                        subdivision_code="US-LA",
+                        country_code="US",
+                        continent_code="NA",
+                        latitude=None,
+                        longitude=None,
+                        region="North America",
+                        timezone="America/Chicago",
+                        description=None,
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=now,
+                        created_by="ops_admin",
+                        updated_at=now,
+                        updated_by="ops_admin",
+                        version=1,
+                    ),
+                    ReferencePriceIndex(
+                        code="HH_NATGAS",
+                        name="Henry Hub Natural Gas",
+                        commodity_code="NATGAS",
+                        currency_code="USD",
+                        unit_code="MMBTU",
+                        provider="EIA",
+                        quote_type="SPOT",
+                        market="US",
+                        location_code="HENRY_HUB",
+                        calendar_code=None,
+                        description=None,
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=now,
+                        created_by="ops_admin",
+                        updated_at=now,
+                        updated_by="ops_admin",
+                        version=1,
+                    ),
+                    ReferencePriceIndex(
+                        code="OLD_NG",
+                        name="Retired Natural Gas",
+                        commodity_code="NATGAS",
+                        currency_code="USD",
+                        unit_code="MMBTU",
+                        provider="EIA",
+                        quote_type="SPOT",
+                        market="US",
+                        location_code="HENRY_HUB",
+                        calendar_code=None,
+                        description=None,
+                        is_active=False,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=now,
+                        created_by="ops_admin",
+                        updated_at=now,
+                        updated_by="ops_admin",
+                        version=1,
+                    ),
+                ]
             )
             session.commit()
 
@@ -181,6 +293,7 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
         definition_id = created["definition_id"]
         self.assertEqual(created["name"], "HH NG Watch")
         self.assertEqual(created["scope"], "PERSONAL")
+        self.assertEqual(created["scope_owner_key"], "ops_admin")
         self.assertEqual(created["base_template_key"], "system_home")
         self.assertEqual(created["base_template_version"], 1)
         self.assertEqual(created["persona_hint"], "trader")
@@ -190,6 +303,10 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
         self.assertEqual(created["updated_by"], "ops_admin")
         self.assertEqual(created["version"], 1)
         self.assertEqual(created["can_edit"], True)
+        self.assertEqual(created["can_publish"], True)
+        self.assertEqual(created["can_duplicate"], False)
+        self.assertEqual(created["is_shared"], False)
+        self.assertEqual(created["validation_warnings"], [])
         self.assertTrue(created["definition_key"].startswith("home_view_"))
         self.assertEqual(
             [card["card_id"] for card in created["cards"]],
@@ -371,6 +488,252 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(response.status_code, 422)
+
+    def test_home_view_definition_validation_checks_price_and_map_filter_values(self) -> None:
+        admin_session = self._bootstrap_admin()
+        admin_token = admin_session["access_token"]
+        self._seed_home_view_reference_catalog()
+
+        payload = self._home_view_payload(name="Validated HH NG")
+        payload["cards"] = [
+            {
+                "card_id": "prices",
+                "placement": {"order": 0, "column_span": 2, "row_span": 1},
+                "parameters": {
+                    "price_mark_status": "with_marks",
+                    "price_sort": "updated_desc",
+                },
+                "filters": {
+                    "price_index_code": "hh_natgas",
+                    "commodity_code": "natgas",
+                    "location_code": "henry_hub",
+                    "provider": "EIA",
+                    "quote_type": "spot",
+                },
+            },
+            {
+                "card_id": "map",
+                "placement": {"order": 1, "column_span": 2, "row_span": 2},
+                "parameters": {"map_record_limit": 250},
+                "filters": {"geography": ["North America"], "commodity_code": "NATGAS"},
+            },
+        ]
+        response = self.client.post(
+            "/home-view-definitions",
+            json=payload,
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 201)
+        created = response.json()
+        self.assertEqual(created["cards"][0]["filters"]["price_index_code"], "HH_NATGAS")
+        self.assertEqual(created["cards"][0]["filters"]["commodity_code"], "NATGAS")
+        self.assertEqual(created["cards"][0]["filters"]["location_code"], "HENRY_HUB")
+        self.assertEqual(created["cards"][0]["filters"]["quote_type"], "SPOT")
+        self.assertEqual(created["cards"][0]["parameters"]["price_mark_status"], "with_marks")
+        self.assertEqual(created["cards"][1]["filters"]["geography"], ["North America"])
+        self.assertEqual(created["cards"][1]["parameters"]["map_record_limit"], 250)
+
+        inactive_price_index = self._home_view_payload(name="Inactive Price Index")
+        inactive_price_index["cards"][0]["filters"] = {"price_index_code": "OLD_NG"}
+        response = self.client.post(
+            "/home-view-definitions",
+            json=inactive_price_index,
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("price_index_code", response.text)
+
+        unsupported_geography = self._home_view_payload(name="Unsupported Geography")
+        unsupported_geography["cards"][1]["filters"] = {"geography": ["Atlantis"]}
+        response = self.client.post(
+            "/home-view-definitions",
+            json=unsupported_geography,
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("geography values are not supported", response.text)
+
+        unsupported_parameter = self._home_view_payload(name="Unsupported Parameter Value")
+        unsupported_parameter["cards"][0]["parameters"] = {"price_mark_status": "stale"}
+        response = self.client.post(
+            "/home-view-definitions",
+            json=unsupported_parameter,
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("price_mark_status", response.text)
+
+    def test_shared_home_view_lifecycle_and_personal_duplication(self) -> None:
+        admin_session = self._bootstrap_admin()
+        admin_token = admin_session["access_token"]
+        self._create_user(user_id="trader_1", email="trader@example.com", display_name="Trader One")
+        trader_token = self._login(identifier="trader_1", password="supersecret2")
+
+        create_response = self.client.post(
+            "/home-view-definitions",
+            json=self._home_view_payload(name="Admin HH NG"),
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(create_response.status_code, 201)
+        personal_definition_id = create_response.json()["definition_id"]
+
+        trader_publish_response = self.client.post(
+            f"/home-view-definitions/{personal_definition_id}/publish",
+            json={"name": "Desk HH NG", "scope": "ORGANIZATION"},
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(trader_publish_response.status_code, 403)
+
+        publish_response = self.client.post(
+            f"/home-view-definitions/{personal_definition_id}/publish",
+            json={"name": "Desk HH NG", "scope": "ORGANIZATION"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(publish_response.status_code, 201)
+        shared = publish_response.json()
+        shared_definition_id = shared["definition_id"]
+        self.assertEqual(shared["name"], "Desk HH NG")
+        self.assertEqual(shared["scope"], "ORGANIZATION")
+        self.assertEqual(shared["scope_owner_key"], "organization")
+        self.assertEqual(shared["status"], "ACTIVE")
+        self.assertEqual(shared["can_edit"], False)
+        self.assertEqual(shared["can_retire"], True)
+        self.assertEqual(shared["can_restore"], False)
+        self.assertEqual(shared["can_duplicate"], True)
+        self.assertEqual(shared["is_shared"], True)
+
+        trader_list = self.client.get(
+            "/home-view-definitions",
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(trader_list.status_code, 200)
+        trader_visible = trader_list.json()
+        self.assertEqual([item["definition_id"] for item in trader_visible], [shared_definition_id])
+        self.assertEqual(trader_visible[0]["can_edit"], False)
+        self.assertEqual(trader_visible[0]["can_duplicate"], True)
+
+        trader_edit_response = self.client.patch(
+            f"/home-view-definitions/{shared_definition_id}",
+            json={"name": "Trader Edit Attempt"},
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(trader_edit_response.status_code, 403)
+
+        duplicate_response = self.client.post(
+            f"/home-view-definitions/{shared_definition_id}/duplicate",
+            json={"name": "Trader HH NG"},
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(duplicate_response.status_code, 201)
+        duplicate = duplicate_response.json()
+        self.assertEqual(duplicate["name"], "Trader HH NG")
+        self.assertEqual(duplicate["scope"], "PERSONAL")
+        self.assertEqual(duplicate["scope_owner_key"], "trader_1")
+        self.assertEqual(duplicate["can_edit"], True)
+        self.assertEqual(duplicate["cards"][0]["filters"], shared["cards"][0]["filters"])
+
+        trader_retire_response = self.client.post(
+            f"/home-view-definitions/{shared_definition_id}/retire",
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(trader_retire_response.status_code, 403)
+
+        retire_response = self.client.post(
+            f"/home-view-definitions/{shared_definition_id}/retire",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(retire_response.status_code, 200)
+        retired = retire_response.json()
+        self.assertEqual(retired["status"], "RETIRED")
+        self.assertEqual(retired["can_restore"], True)
+
+        trader_list_after_retire = self.client.get(
+            "/home-view-definitions",
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(trader_list_after_retire.status_code, 200)
+        self.assertNotIn(
+            shared_definition_id,
+            [item["definition_id"] for item in trader_list_after_retire.json()],
+        )
+
+        inventory_response = self.client.get(
+            "/home-view-definitions/admin/inventory",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(inventory_response.status_code, 200)
+        inventory = inventory_response.json()
+        retired_inventory_record = next(
+            item for item in inventory if item["definition_id"] == shared_definition_id
+        )
+        self.assertEqual(retired_inventory_record["status"], "RETIRED")
+        self.assertEqual(retired_inventory_record["scope"], "ORGANIZATION")
+        self.assertEqual(retired_inventory_record["validation_warnings"], [])
+
+        trader_inventory_response = self.client.get(
+            "/home-view-definitions/admin/inventory",
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(trader_inventory_response.status_code, 403)
+
+        restore_response = self.client.post(
+            f"/home-view-definitions/{shared_definition_id}/restore",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(restore_response.status_code, 200)
+        restored = restore_response.json()
+        self.assertEqual(restored["status"], "ACTIVE")
+        self.assertEqual(restored["can_retire"], True)
+
+        trader_list_after_restore = self.client.get(
+            "/home-view-definitions",
+            headers={"Authorization": f"Bearer {trader_token}"},
+        )
+        self.assertEqual(trader_list_after_restore.status_code, 200)
+        self.assertIn(
+            shared_definition_id,
+            [item["definition_id"] for item in trader_list_after_restore.json()],
+        )
+
+    def test_admin_home_view_inventory_reports_reference_validation_warnings(self) -> None:
+        admin_session = self._bootstrap_admin()
+        admin_token = admin_session["access_token"]
+        self._seed_home_view_reference_catalog()
+
+        create_response = self.client.post(
+            "/home-view-definitions",
+            json=self._home_view_payload(name="Validated Admin HH NG"),
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(create_response.status_code, 201)
+        personal_definition_id = create_response.json()["definition_id"]
+        publish_response = self.client.post(
+            f"/home-view-definitions/{personal_definition_id}/publish",
+            json={"name": "Validated Desk HH NG", "scope": "ORGANIZATION"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(publish_response.status_code, 201)
+        shared_definition_id = publish_response.json()["definition_id"]
+
+        with self.SessionLocal() as session:
+            price_index = session.get(ReferencePriceIndex, "HH_NATGAS")
+            self.assertIsNotNone(price_index)
+            price_index.is_active = False
+            replacement_price_index = session.get(ReferencePriceIndex, "OLD_NG")
+            self.assertIsNotNone(replacement_price_index)
+            replacement_price_index.is_active = True
+            session.commit()
+
+        inventory_response = self.client.get(
+            "/home-view-definitions/admin/inventory",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(inventory_response.status_code, 200)
+        shared_inventory_record = next(
+            item for item in inventory_response.json() if item["definition_id"] == shared_definition_id
+        )
+        self.assertTrue(shared_inventory_record["validation_warnings"])
+        self.assertIn("price_index_code", shared_inventory_record["validation_warnings"][0])
 
 
 if __name__ == "__main__":

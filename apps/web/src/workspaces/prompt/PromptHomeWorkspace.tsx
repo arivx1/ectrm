@@ -33,8 +33,8 @@ import {
   listAssistantPromptRouteRecommendations,
   loadAssistantRuntimeSettings,
   rejectAssistantActionRequest,
-  requestAssistantResponse,
   submitAssistantPromptNavigationOutcome,
+  streamAssistantResponse,
   synthesizeAssistantVoice,
   transcribeAssistantVoice,
 } from "../../entities/assistant/api";
@@ -79,20 +79,20 @@ import { appConfig } from "../../shared/config";
 import { usePersistentCollapsibleCardState } from "../../shared/collapsibleCardState";
 import { usePersistentPromptHomeCalendarCardState } from "../../shared/promptHomeCalendarSettings";
 import type { AppRouteHandoff } from "../../shared/appRouteHandoff";
-import { formatNumber } from "../../shared/format";
 import type {
   AssistantActionRequest,
   AssistantPersona,
   AssistantPersonaDefinition,
   AssistantPromptNavigationFocusType,
+  AssistantPromptResponse,
   AssistantProvider,
   AssistantPromptRouteRecommendation,
   AssistantRuntimeSettings,
+  AssistantToolCall,
   AssistantWorkspaceSummaryTarget,
   AssetRecord,
   DeliveryRecord,
   LocationRecord,
-  PriceIndexObservationRecord,
   PriceIndexRecord,
   SpatialFeatureRecord,
   ViewKey,
@@ -148,7 +148,10 @@ import {
   type PromptHomeCardKey,
   usePersistentPromptHomeCardVisibility,
 } from "./promptHomeCardVisibility";
-import { getPromptHomeCardLabel } from "./promptHomeCards";
+import {
+  getPromptHomeCardLabel,
+  type PromptHomeTemplateCard,
+} from "./promptHomeCards";
 import {
   mergePromptHomeClassNames,
   PromptHomeCardDragHandleProvider,
@@ -156,26 +159,19 @@ import {
   type PromptHomeCardDragHandleProps,
 } from "./promptHomeCardDrag.ts";
 import {
-  countPromptHomeLatestMarks,
-  filterPromptHomeDisplayPriceIndices,
-  formatPromptHomePriceDate,
+  buildPromptHomePricesCardViewModel,
   formatPromptHomePriceQuoteTypeCode,
-  formatPromptHomePriceSource,
-  formatPromptHomePriceTime,
-  formatPromptHomePriceUpdatedAt,
-  listPromptHomePriceQuoteTypes,
-  listPromptHomePriceProviders,
   nextPromptHomePriceSortState,
+  PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER,
   PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE,
-  selectPromptHomeDisplayPriceIndices,
   selectPromptHomePriceIndices,
-  sortPromptHomeDisplayPriceIndices,
   type PromptHomePriceMarkFilter,
   type PromptHomePriceSortField,
   type PromptHomePriceSortState,
 } from "./promptHomePrices";
 import {
   getPromptHomeMapRecordLimit,
+  normalizePromptHomeMapRecordLimit,
   PROMPT_HOME_MAP_RECORD_LIMIT_OPTIONS,
   savePromptHomeMapRecordLimit,
 } from "./promptHomeMapRecordLimit";
@@ -185,7 +181,6 @@ import {
   AssetMapCanvas,
   AssetMapRecordsCard,
   syncAssetActivityVisibilityState,
-  setAllAssetGeographyVisibilityState,
   sortedUniqueAssetSubtypes,
   syncAssetGeographyVisibilityState,
   setAllAssetSubtypeVisibilityState,
@@ -229,6 +224,17 @@ type PromptHomeMessage = {
   warnings?: string[];
   actionRequests?: AssistantActionRequest[];
   navigationIntents?: PromptNavigationIntent[];
+  toolCalls?: AssistantToolCall[];
+  activity?: PromptHomeAssistantActivity[];
+  activityState?: "active" | "complete" | "error";
+  activityLabel?: string;
+};
+
+type PromptHomeAssistantActivity = {
+  id: string;
+  label: string;
+  detail?: string;
+  status: "pending" | "active" | "complete" | "error";
 };
 
 type PromptHomeSortableListeners = ReturnType<typeof useSortable>["listeners"];
@@ -259,7 +265,6 @@ const PROMPT_HOME_WEEK_MINUTES =
 const PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING = 7;
 const PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING = 22;
 const PROMPT_HOME_DAY_METER_TICKS = [0, 6, 12, 18, 24];
-const PROMPT_HOME_PRICE_PROVIDER_ALL = "ALL";
 const PROMPT_HOME_PRICE_REFRESH_INTERVAL_MS = 60_000;
 const PROMPT_HOME_PRICE_SORT_HEADERS: {
   field: PromptHomePriceSortField;
@@ -458,6 +463,49 @@ function PromptHomePromptCardChrome({
   );
 }
 
+function PromptHomeAssistantActivityList({
+  message,
+}: {
+  message: PromptHomeMessage;
+}) {
+  const activityItems = message.activity ?? [];
+  if (message.role !== "assistant" || activityItems.length === 0) {
+    return null;
+  }
+
+  const activityState = message.activityState ?? "active";
+  const activityLabel =
+    message.activityLabel ??
+    (activityState === "complete"
+      ? "Ready"
+      : activityState === "error"
+        ? "Stopped"
+        : "Working");
+
+  return (
+    <div
+      className={`prompt-home-assistant-activity is-${activityState}`}
+      aria-live={activityState === "active" ? "polite" : "off"}
+    >
+      <div className="prompt-home-assistant-activity-head">
+        <span aria-hidden="true" />
+        <strong>{activityLabel}</strong>
+      </div>
+      <ol>
+        {activityItems.map((item) => (
+          <li key={item.id} className={`is-${item.status}`}>
+            <span aria-hidden="true" />
+            <div>
+              <strong>{item.label}</strong>
+              {item.detail ? <small>{item.detail}</small> : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 type PromptHomeMeterTick = {
   key: string;
   label: string;
@@ -643,6 +691,132 @@ const PROMPT_HOME_MAJOR_EXCHANGE_SESSIONS: PromptHomeExchangeSessionDefinition[]
 
 function createPromptMessageId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function buildInitialAssistantActivity(): PromptHomeAssistantActivity[] {
+  return [
+    {
+      id: "context",
+      label: "Preparing governed context",
+      status: "active",
+    },
+    {
+      id: "tools",
+      label: "Checking live data access",
+      status: "pending",
+    },
+    {
+      id: "response",
+      label: "Drafting response",
+      status: "pending",
+    },
+  ];
+}
+
+function buildRunningAssistantActivity(): PromptHomeAssistantActivity[] {
+  return [
+    {
+      id: "context",
+      label: "Prepared governed context",
+      status: "complete",
+    },
+    {
+      id: "tools",
+      label: "Checking live data access",
+      status: "active",
+    },
+    {
+      id: "response",
+      label: "Drafting response",
+      status: "pending",
+    },
+  ];
+}
+
+function buildStreamingAssistantActivity(): PromptHomeAssistantActivity[] {
+  return [
+    {
+      id: "context",
+      label: "Prepared governed context",
+      status: "complete",
+    },
+    {
+      id: "tools",
+      label: "Resolved live data access",
+      status: "complete",
+    },
+    {
+      id: "response",
+      label: "Writing response",
+      status: "active",
+    },
+  ];
+}
+
+function formatAssistantToolActivityDetail(toolCalls: AssistantToolCall[]): string {
+  if (toolCalls.length === 0) {
+    return "No live tool calls used.";
+  }
+
+  const summaries = toolCalls
+    .map((toolCall) => toolCall.summary.trim())
+    .filter(Boolean);
+  if (summaries.length === 1) {
+    return summaries[0] ?? "1 live lookup completed.";
+  }
+  if (summaries.length > 1) {
+    return summaries.slice(0, 2).join(" · ");
+  }
+
+  const toolNames = toolCalls.map((toolCall) => toolCall.tool_name).filter(Boolean);
+  return toolNames.length > 0
+    ? toolNames.slice(0, 3).join(", ")
+    : `${toolCalls.length.toLocaleString()} live lookup${toolCalls.length === 1 ? "" : "s"} completed.`;
+}
+
+function buildCompletedAssistantActivity(
+  toolCalls: AssistantToolCall[],
+): PromptHomeAssistantActivity[] {
+  const toolCallCount = toolCalls.length;
+  return [
+    {
+      id: "context",
+      label: "Prepared governed context",
+      status: "complete",
+    },
+    {
+      id: "tools",
+      label:
+        toolCallCount > 0
+          ? `Checked ${toolCallCount.toLocaleString()} live lookup${toolCallCount === 1 ? "" : "s"}`
+          : "Used prompt context",
+      detail: formatAssistantToolActivityDetail(toolCalls),
+      status: "complete",
+    },
+    {
+      id: "response",
+      label: "Response ready",
+      status: "complete",
+    },
+  ];
+}
+
+function buildErroredAssistantActivity(
+  detail: string,
+): PromptHomeAssistantActivity[] {
+  return [
+    {
+      id: "context",
+      label: "Prepared governed context",
+      status: "complete",
+    },
+    {
+      id: "response",
+      label: "Response stopped",
+      detail,
+      status: "error",
+    },
+  ];
 }
 
 function buildMessageInitials(label: string, fallback: string): string {
@@ -1564,6 +1738,16 @@ function mergePromptContexts(
     .join("\n\n");
 }
 
+function updatePromptMessage(
+  currentMessages: PromptHomeMessage[],
+  messageId: string,
+  updater: (message: PromptHomeMessage) => PromptHomeMessage,
+): PromptHomeMessage[] {
+  return currentMessages.map((message) =>
+    message.id === messageId ? updater(message) : message,
+  );
+}
+
 function replacePromptMessageActionRequest(
   currentMessages: PromptHomeMessage[],
   updatedActionRequest: AssistantActionRequest,
@@ -1870,67 +2054,6 @@ function PromptHomeTimeMeterCard({
   );
 }
 
-function priceObservationDigits(
-  observation: PriceIndexObservationRecord | null,
-  priceIndex: PriceIndexRecord,
-): number {
-  const unitCode = observation?.unit_code ?? priceIndex.unit_code;
-  return unitCode === "GAL" ? 3 : 2;
-}
-
-function formatPromptHomePriceNumber(
-  observation: PriceIndexObservationRecord | null,
-  priceIndex: PriceIndexRecord,
-): string {
-  if (!observation) {
-    return "No mark yet";
-  }
-
-  return formatNumber(
-    observation.value,
-    priceObservationDigits(observation, priceIndex),
-  );
-}
-
-function formatPromptHomePriceUnit(
-  observation: PriceIndexObservationRecord | null,
-  priceIndex: PriceIndexRecord,
-): string {
-  return observation?.unit_code || priceIndex.unit_code || "—";
-}
-
-function formatPromptHomePriceCurrency(
-  observation: PriceIndexObservationRecord | null,
-  priceIndex: PriceIndexRecord,
-): string {
-  return observation?.currency_code || priceIndex.currency_code || "—";
-}
-
-function formatPromptHomePriceProduct(priceIndex: PriceIndexRecord): string {
-  return priceIndex.commodity_code || "—";
-}
-
-function formatPromptHomePriceLocation(
-  observation: PriceIndexObservationRecord | null,
-  priceIndex: PriceIndexRecord,
-): string {
-  const locationCode = priceIndex.location_code?.trim();
-  if (locationCode) {
-    return locationCode;
-  }
-
-  const provider = priceIndex.provider.trim().toUpperCase();
-  const sourceSeriesId = observation?.source_series_id.trim();
-  if (
-    sourceSeriesId &&
-    ["CAISO", "ERCOT", "EIA_WHOLESALE_POWER"].includes(provider)
-  ) {
-    return sourceSeriesId;
-  }
-
-  return priceIndex.market?.trim() || "—";
-}
-
 function formatPromptHomePriceSortDirection(
   sortState: PromptHomePriceSortState | null,
   field: PromptHomePriceSortField,
@@ -1942,13 +2065,129 @@ function formatPromptHomePriceSortDirection(
   return sortState.direction === "asc" ? "ascending" : "descending";
 }
 
+function getPromptHomeCardStringValue(
+  values: Record<string, unknown> | undefined,
+  key: string,
+): string {
+  const value = values?.[key];
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (Array.isArray(value) && typeof value[0] === "string") {
+    return value[0].trim();
+  }
+  return "";
+}
+
+function setPromptHomeCardStringValue(
+  values: Record<string, unknown>,
+  key: string,
+  value: string,
+): Record<string, unknown> {
+  const nextValues = { ...values };
+  const normalizedValue = value.trim();
+  if (normalizedValue) {
+    nextValues[key] = normalizedValue;
+  } else {
+    delete nextValues[key];
+  }
+  return nextValues;
+}
+
+function parsePromptHomePriceMarkStatusParameter(
+  value: unknown,
+): PromptHomePriceMarkFilter {
+  return value === "with_marks" || value === "missing_marks" ? value : "all";
+}
+
+function parsePromptHomePriceSortParameter(
+  value: unknown,
+): PromptHomePriceSortState | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const [field, direction] = value.trim().toLowerCase().split("_");
+  if (
+    !field ||
+    !direction ||
+    !PROMPT_HOME_PRICE_SORT_HEADERS.some((header) => header.field === field) ||
+    (direction !== "asc" && direction !== "desc")
+  ) {
+    return null;
+  }
+
+  return {
+    field: field as PromptHomePriceSortField,
+    direction,
+  };
+}
+
+function serializePromptHomePriceSortParameter(
+  sortState: PromptHomePriceSortState | null,
+): string {
+  return sortState ? `${sortState.field}_${sortState.direction}` : "";
+}
+
+function normalizePromptHomeMapGeographyFilter(value: unknown): string[] {
+  const values = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+  const visibleGeographies = values
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) =>
+      ASSET_MAP_GEOGRAPHY_LABELS.includes(
+        item as (typeof ASSET_MAP_GEOGRAPHY_LABELS)[number],
+      ),
+    );
+
+  return Array.from(new Set(visibleGeographies));
+}
+
+function buildPromptHomeMapGeographyVisibility(
+  value: unknown,
+): Record<string, boolean> {
+  const visibleGeographies = normalizePromptHomeMapGeographyFilter(value);
+  if (visibleGeographies.length === 0) {
+    return {};
+  }
+
+  const visibleSet = new Set(visibleGeographies);
+  return Object.fromEntries(
+    ASSET_MAP_GEOGRAPHY_LABELS.map((geographyLabel) => [
+      geographyLabel,
+      visibleSet.has(geographyLabel),
+    ]),
+  );
+}
+
+function visiblePromptHomeMapGeographiesFromState(
+  visibilityState: Record<string, boolean>,
+): string[] {
+  const normalizedVisibility =
+    syncAssetGeographyVisibilityState(visibilityState);
+  return ASSET_MAP_GEOGRAPHY_LABELS.filter(
+    (geographyLabel) => normalizedVisibility[geographyLabel] !== false,
+  );
+}
+
 function PromptHomePricesCard({
   priceIndices,
   referenceDataLoading,
+  homeCard,
+  canConfigureHomeCard,
+  onHomeCardConfigurationChange,
   onOpenPricesWorkspace,
 }: {
   priceIndices: PriceIndexRecord[];
   referenceDataLoading?: boolean;
+  homeCard: PromptHomeTemplateCard | null;
+  canConfigureHomeCard: boolean;
+  onHomeCardConfigurationChange: (
+    patch: {
+      parameters?: Record<string, unknown>;
+      filters?: Record<string, unknown>;
+    },
+  ) => void;
   onOpenPricesWorkspace: () => void;
 }) {
   const pricesExpandedState = usePersistentCollapsibleCardState(
@@ -1956,89 +2195,198 @@ function PromptHomePricesCard({
     true,
   );
   const [priceSearchQuery, setPriceSearchQuery] = useState("");
-  const [priceProviderFilter, setPriceProviderFilter] = useState(
-    PROMPT_HOME_PRICE_PROVIDER_ALL,
+  const homeCardFilters = useMemo(
+    () => homeCard?.filters ?? {},
+    [homeCard],
   );
-  const [priceQuoteTypeFilter, setPriceQuoteTypeFilter] = useState(
-    PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE,
+  const homeCardParameters = useMemo(
+    () => homeCard?.parameters ?? {},
+    [homeCard],
   );
-  const [priceMarkFilter, setPriceMarkFilter] =
-    useState<PromptHomePriceMarkFilter>("all");
-  const [priceSortState, setPriceSortState] =
-    useState<PromptHomePriceSortState | null>(null);
+  const priceCommodityFilter = getPromptHomeCardStringValue(
+    homeCardFilters,
+    "commodity_code",
+  );
+  const priceIndexCodeFilter = getPromptHomeCardStringValue(
+    homeCardFilters,
+    "price_index_code",
+  );
+  const priceProviderFilter =
+    getPromptHomeCardStringValue(homeCardFilters, "provider") ||
+    PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER;
+  const priceQuoteTypeFilter =
+    getPromptHomeCardStringValue(homeCardFilters, "quote_type") ||
+    PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE;
+  const priceMarkFilter = parsePromptHomePriceMarkStatusParameter(
+    homeCardParameters.price_mark_status,
+  );
+  const priceSortState = parsePromptHomePriceSortParameter(
+    homeCardParameters.price_sort,
+  );
   const activePriceIndices = useMemo(
     () => selectPromptHomePriceIndices(priceIndices),
     [priceIndices],
   );
-  const providerOptions = useMemo(
-    () => listPromptHomePriceProviders(activePriceIndices),
+  const commodityOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          activePriceIndices
+            .map((priceIndex) => priceIndex.commodity_code.trim().toUpperCase())
+            .filter(Boolean),
+        ),
+      ).sort((left, right) => left.localeCompare(right)),
     [activePriceIndices],
   );
-  const quoteTypeOptions = useMemo(
-    () => listPromptHomePriceQuoteTypes(activePriceIndices),
-    [activePriceIndices],
+  const priceIndexOptions = useMemo(
+    () =>
+      activePriceIndices
+        .filter((priceIndex) => {
+          if (
+            priceCommodityFilter &&
+            priceIndex.commodity_code.trim().toUpperCase() !==
+              priceCommodityFilter.trim().toUpperCase()
+          ) {
+            return false;
+          }
+          if (
+            priceProviderFilter !== PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER &&
+            priceIndex.provider.trim() !== priceProviderFilter
+          ) {
+            return false;
+          }
+          if (
+            priceQuoteTypeFilter !== PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE &&
+            priceIndex.quote_type?.trim().toUpperCase() !==
+              priceQuoteTypeFilter.trim().toUpperCase()
+          ) {
+            return false;
+          }
+          return true;
+        })
+        .map((priceIndex) => ({
+          code: priceIndex.code,
+          label: `${priceIndex.code} · ${priceIndex.name}`,
+        })),
+    [
+      activePriceIndices,
+      priceCommodityFilter,
+      priceProviderFilter,
+      priceQuoteTypeFilter,
+    ],
   );
-  const effectivePriceProviderFilter =
-    priceProviderFilter === PROMPT_HOME_PRICE_PROVIDER_ALL ||
-    providerOptions.includes(priceProviderFilter)
-      ? priceProviderFilter
-      : PROMPT_HOME_PRICE_PROVIDER_ALL;
-  const effectivePriceQuoteTypeFilter =
-    priceQuoteTypeFilter === PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE ||
-    quoteTypeOptions.includes(priceQuoteTypeFilter as (typeof quoteTypeOptions)[number])
-      ? priceQuoteTypeFilter
-      : PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE;
   const activePriceIndexCodes = useMemo(
     () => activePriceIndices.map((priceIndex) => priceIndex.code),
     [activePriceIndices],
   );
-  const { latestMarksByCode, loading: latestMarksLoading, error } =
+  const { latestMarks, loading: latestMarksLoading, error } =
     useLatestPriceIndexMarks(activePriceIndexCodes, {
       refreshIntervalMs: PROMPT_HOME_PRICE_REFRESH_INTERVAL_MS,
     });
-  const sortedPriceIndices = useMemo(
-    () => selectPromptHomeDisplayPriceIndices(activePriceIndices, latestMarksByCode),
-    [activePriceIndices, latestMarksByCode],
-  );
-  const displayedPriceIndices = useMemo(
-    () => {
-      const filteredPriceIndices = filterPromptHomeDisplayPriceIndices(
-        sortedPriceIndices,
-        latestMarksByCode,
-        {
-          query: priceSearchQuery,
-          provider: effectivePriceProviderFilter,
-          markFilter: priceMarkFilter,
-          quoteType: effectivePriceQuoteTypeFilter,
-        },
-      );
-      return sortPromptHomeDisplayPriceIndices(
-        filteredPriceIndices,
-        latestMarksByCode,
-        priceSortState,
-      );
-    },
+  const priceFilters = useMemo(
+    () => ({
+      query: priceSearchQuery,
+      provider: priceProviderFilter,
+      markFilter: priceMarkFilter,
+      quoteType: priceQuoteTypeFilter,
+      commodityCode: priceCommodityFilter,
+      priceIndexCode: priceIndexCodeFilter,
+    }),
     [
-      effectivePriceProviderFilter,
-      effectivePriceQuoteTypeFilter,
-      latestMarksByCode,
+      priceCommodityFilter,
+      priceIndexCodeFilter,
       priceMarkFilter,
+      priceProviderFilter,
+      priceQuoteTypeFilter,
       priceSearchQuery,
-      priceSortState,
-      sortedPriceIndices,
     ],
   );
-  const latestMarkCount = useMemo(
-    () => countPromptHomeLatestMarks(activePriceIndices, latestMarksByCode),
-    [activePriceIndices, latestMarksByCode],
+  const updatePriceCardFilters = useCallback(
+    (key: string, value: string) => {
+      if (!canConfigureHomeCard) {
+        return;
+      }
+      onHomeCardConfigurationChange({
+        filters: setPromptHomeCardStringValue(homeCardFilters, key, value),
+      });
+    },
+    [canConfigureHomeCard, homeCardFilters, onHomeCardConfigurationChange],
   );
-  const hasActivePriceFilters =
-    priceSearchQuery.trim().length > 0 ||
-    effectivePriceProviderFilter !== PROMPT_HOME_PRICE_PROVIDER_ALL ||
-    effectivePriceQuoteTypeFilter !== PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE ||
-    priceMarkFilter !== "all";
+  const updatePriceCardParameters = useCallback(
+    (key: string, value: string) => {
+      if (!canConfigureHomeCard) {
+        return;
+      }
+      onHomeCardConfigurationChange({
+        parameters: setPromptHomeCardStringValue(homeCardParameters, key, value),
+      });
+    },
+    [canConfigureHomeCard, homeCardParameters, onHomeCardConfigurationChange],
+  );
+  const clearPersistedPriceFilters = useCallback(() => {
+    if (!canConfigureHomeCard) {
+      return;
+    }
+    const nextParameters = { ...homeCardParameters };
+    delete nextParameters.price_mark_status;
+    onHomeCardConfigurationChange({
+      filters: {},
+      parameters: nextParameters,
+    });
+  }, [
+    canConfigureHomeCard,
+    homeCardParameters,
+    onHomeCardConfigurationChange,
+  ]);
+  const pricesViewModel = useMemo(
+    () =>
+      buildPromptHomePricesCardViewModel(
+        {
+          priceIndices,
+          latestMarks,
+        },
+        {
+          filters: priceFilters,
+          sortState: priceSortState,
+          referenceDataLoading,
+          pricingSnapshotLoading: latestMarksLoading,
+        },
+      ),
+    [
+      latestMarks,
+      latestMarksLoading,
+      priceFilters,
+      priceIndices,
+      priceSortState,
+      referenceDataLoading,
+    ],
+  );
+  const effectivePriceProviderFilter =
+    pricesViewModel.effectiveFilters.provider;
+  const effectivePriceQuoteTypeFilter =
+    pricesViewModel.effectiveFilters.quoteType ??
+    PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE;
+  const activePriceIndexCount = pricesViewModel.activePriceIndexCount;
+  const latestMarkCount = pricesViewModel.latestMarkCount;
+  const hasActivePriceFilters = pricesViewModel.hasActiveFilters;
   const { dragHandleAttributes, dragHandleClassName } =
     usePromptHomeCardHeaderDragProps<HTMLDivElement>();
+  const activePriceIndexNoun =
+    activePriceIndexCount === 1 ? "index" : "indices";
+  const latestMarkNoun = latestMarkCount === 1 ? "mark" : "marks";
+  const priceToggleSummary =
+    pricesViewModel.status === "reference_loading"
+      ? "Loading price indices"
+      : pricesViewModel.status === "pricing_loading"
+        ? `Loading marks · ${activePriceIndexCount} active ${activePriceIndexNoun}`
+        : `${latestMarkCount} latest ${latestMarkNoun} · ${activePriceIndexCount} active ${activePriceIndexNoun}`;
+  const showPriceFilters =
+    pricesViewModel.status === "ready" ||
+    pricesViewModel.status === "filtered_empty" ||
+    pricesViewModel.status === "no_latest_marks";
+  const priceFooterSummary = hasActivePriceFilters
+    ? `Showing ${pricesViewModel.rows.length} of ${activePriceIndexCount} active ${activePriceIndexNoun}`
+    : `${latestMarkCount} latest ${latestMarkNoun} across ${activePriceIndexCount} active ${activePriceIndexNoun}`;
 
   return (
     <article className="prompt-home-prices-card">
@@ -2065,17 +2413,7 @@ function PromptHomePricesCard({
             }
           >
             <div className="prompt-home-prices-card-toggle-meta">
-              <small>
-                {latestMarksLoading && latestMarkCount === 0
-                  ? `Loading marks · ${activePriceIndices.length} active ${
-                      activePriceIndices.length === 1 ? "index" : "indices"
-                    }`
-                  : `${latestMarkCount} latest ${
-                      latestMarkCount === 1 ? "mark" : "marks"
-                    } · ${activePriceIndices.length} active ${
-                      activePriceIndices.length === 1 ? "index" : "indices"
-                    }`}
-              </small>
+              <small>{priceToggleSummary}</small>
               <span
                 className="prompt-home-support-toggle-indicator"
                 aria-hidden="true"
@@ -2092,99 +2430,189 @@ function PromptHomePricesCard({
         className="prompt-home-prices-card-body"
         hidden={!pricesExpandedState.expanded}
       >
-        {referenceDataLoading && activePriceIndices.length === 0 ? (
+        {pricesViewModel.status === "reference_loading" ? (
           <div className="prompt-home-prices-skeleton-grid">
             <div className="skeleton-block" />
             <div className="skeleton-block" />
             <div className="skeleton-block" />
           </div>
-        ) : activePriceIndices.length > 0 ? (
+        ) : pricesViewModel.status === "pricing_loading" ? (
+          <div className="empty-state">
+            <strong>Loading latest price marks</strong>
+            <p>The Home card is reading the typed market-data snapshot.</p>
+          </div>
+        ) : pricesViewModel.status === "no_active_indices" ? (
+          <div className="empty-state">
+            <strong>No active price indices</strong>
+            <p>Price marks appear here after reference data includes active indices.</p>
+          </div>
+        ) : (
           <>
             {error ? <p className="form-note form-note-error">{error}</p> : null}
-            <div className="prompt-home-prices-filter-bar" aria-label="Price filters">
-              <label className="prompt-home-prices-filter-field">
-                <span>Search</span>
-                <input
-                  type="search"
-                  value={priceSearchQuery}
-                  placeholder="Code, market, commodity, type"
-                  onChange={(event) => setPriceSearchQuery(event.target.value)}
-                />
-              </label>
-              <label className="prompt-home-prices-filter-field">
-                <span>Provider</span>
-                <select
-                  value={effectivePriceProviderFilter}
-                  onChange={(event) => setPriceProviderFilter(event.target.value)}
-                >
-                  <option value={PROMPT_HOME_PRICE_PROVIDER_ALL}>All providers</option>
-                  {providerOptions.map((provider) => (
-                    <option key={provider} value={provider}>
-                      {provider}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="prompt-home-prices-filter-field">
-                <span>Type</span>
-                <select
-                  value={effectivePriceQuoteTypeFilter}
-                  onChange={(event) => setPriceQuoteTypeFilter(event.target.value)}
-                >
-                  <option value={PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE}>All types</option>
-                  {quoteTypeOptions.map((quoteType) => (
-                    <option key={quoteType} value={quoteType}>
-                      {formatPromptHomePriceQuoteTypeCode(quoteType)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="prompt-home-prices-filter-field">
-                <span>Marks</span>
-                <div
-                  className="prompt-home-prices-filter-segments"
-                  role="group"
-                  aria-label="Filter by mark status"
-                >
-                  {[
-                    ["all", "All"],
-                    ["with_marks", "Marked"],
-                    ["missing_marks", "Missing"],
-                  ].map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      className={
-                        priceMarkFilter === value
-                          ? "is-active"
-                          : undefined
-                      }
-                      aria-pressed={priceMarkFilter === value}
-                      onClick={() =>
-                        setPriceMarkFilter(value as PromptHomePriceMarkFilter)
-                      }
-                    >
-                      {label}
-                    </button>
-                  ))}
+            {showPriceFilters ? (
+              <div className="prompt-home-prices-filter-bar" aria-label="Price filters">
+                <label className="prompt-home-prices-filter-field">
+                  <span>Search</span>
+                  <input
+                    type="search"
+                    value={priceSearchQuery}
+                    placeholder="Code, market, commodity, type"
+                    onChange={(event) => setPriceSearchQuery(event.target.value)}
+                  />
+                </label>
+                <label className="prompt-home-prices-filter-field">
+                  <span>Provider</span>
+                  <select
+                    value={effectivePriceProviderFilter}
+                    disabled={!canConfigureHomeCard}
+                    onChange={(event) =>
+                      updatePriceCardFilters(
+                        "provider",
+                        event.target.value === PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER
+                          ? ""
+                          : event.target.value,
+                      )
+                    }
+                  >
+                    <option value={PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER}>All providers</option>
+                    {pricesViewModel.providerOptions.map((provider) => (
+                      <option key={provider} value={provider}>
+                        {provider}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="prompt-home-prices-filter-field">
+                  <span>Type</span>
+                  <select
+                    value={effectivePriceQuoteTypeFilter}
+                    disabled={!canConfigureHomeCard}
+                    onChange={(event) =>
+                      updatePriceCardFilters(
+                        "quote_type",
+                        event.target.value === PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE
+                          ? ""
+                          : event.target.value,
+                      )
+                    }
+                  >
+                    <option value={PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE}>All types</option>
+                    {pricesViewModel.quoteTypeOptions.map((quoteType) => (
+                      <option key={quoteType} value={quoteType}>
+                        {formatPromptHomePriceQuoteTypeCode(quoteType)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="prompt-home-prices-filter-field">
+                  <span>Commodity</span>
+                  <select
+                    value={priceCommodityFilter}
+                    disabled={!canConfigureHomeCard}
+                    onChange={(event) =>
+                      updatePriceCardFilters("commodity_code", event.target.value)
+                    }
+                  >
+                    <option value="">All commodities</option>
+                    {priceCommodityFilter &&
+                    !commodityOptions.includes(priceCommodityFilter) ? (
+                      <option value={priceCommodityFilter}>
+                        {priceCommodityFilter} (unavailable)
+                      </option>
+                    ) : null}
+                    {commodityOptions.map((commodityCode) => (
+                      <option key={commodityCode} value={commodityCode}>
+                        {commodityCode}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="prompt-home-prices-filter-field">
+                  <span>Index</span>
+                  <select
+                    value={priceIndexCodeFilter}
+                    disabled={!canConfigureHomeCard}
+                    onChange={(event) =>
+                      updatePriceCardFilters("price_index_code", event.target.value)
+                    }
+                  >
+                    <option value="">All indices</option>
+                    {priceIndexCodeFilter &&
+                    !priceIndexOptions.some(
+                      (priceIndexOption) =>
+                        priceIndexOption.code === priceIndexCodeFilter,
+                    ) ? (
+                      <option value={priceIndexCodeFilter}>
+                        {priceIndexCodeFilter} (unavailable)
+                      </option>
+                    ) : null}
+                    {priceIndexOptions.map((priceIndexOption) => (
+                      <option key={priceIndexOption.code} value={priceIndexOption.code}>
+                        {priceIndexOption.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="prompt-home-prices-filter-field">
+                  <span>Marks</span>
+                  <div
+                    className="prompt-home-prices-filter-segments"
+                    role="group"
+                    aria-label="Filter by mark status"
+                  >
+                    {[
+                      ["all", "All"],
+                      ["with_marks", "Marked"],
+                      ["missing_marks", "Missing"],
+                    ].map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={
+                          priceMarkFilter === value
+                            ? "is-active"
+                            : undefined
+                        }
+                        aria-pressed={priceMarkFilter === value}
+                        disabled={!canConfigureHomeCard}
+                        onClick={() =>
+                          updatePriceCardParameters(
+                            "price_mark_status",
+                            value === "all" ? "" : value,
+                          )
+                        }
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+                {hasActivePriceFilters ? (
+                  <button
+                    type="button"
+                    className="button button-secondary prompt-home-prices-filter-clear"
+                    disabled={!canConfigureHomeCard}
+                    onClick={() => {
+                      setPriceSearchQuery("");
+                      clearPersistedPriceFilters();
+                    }}
+                  >
+                    Clear filters
+                  </button>
+                ) : null}
               </div>
-              {hasActivePriceFilters ? (
-                <button
-                  type="button"
-                  className="button button-secondary prompt-home-prices-filter-clear"
-                  onClick={() => {
-                    setPriceSearchQuery("");
-                    setPriceProviderFilter(PROMPT_HOME_PRICE_PROVIDER_ALL);
-                    setPriceQuoteTypeFilter(PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE);
-                    setPriceMarkFilter("all");
-                  }}
-                >
-                  Clear filters
-                </button>
-              ) : null}
-            </div>
-            {displayedPriceIndices.length > 0 ? (
+            ) : null}
+            {pricesViewModel.status === "no_latest_marks" ? (
+              <div className="empty-state">
+                <strong>No latest price marks</strong>
+                <p>The typed pricing snapshot did not return marks for the active price indices yet.</p>
+              </div>
+            ) : pricesViewModel.status === "filtered_empty" ? (
+              <div className="empty-state">
+                <strong>No prices match the current filters</strong>
+                <p>Clear filters to show all active price indices.</p>
+              </div>
+            ) : (
               <div className="prompt-home-prices-grid">
                 <div className="prompt-home-price-header" role="row">
                   {PROMPT_HOME_PRICE_SORT_HEADERS.map(({ field, label }) => {
@@ -2205,9 +2633,16 @@ function PromptHomePricesCard({
                             isActiveSort ? "is-active" : undefined,
                           )}
                           aria-label={`Sort prices by ${label}`}
+                          disabled={!canConfigureHomeCard}
                           onClick={() =>
-                            setPriceSortState((currentSort) =>
-                              nextPromptHomePriceSortState(currentSort, field),
+                            updatePriceCardParameters(
+                              "price_sort",
+                              serializePromptHomePriceSortParameter(
+                                nextPromptHomePriceSortState(
+                                  priceSortState,
+                                  field,
+                                ),
+                              ),
                             )
                           }
                         >
@@ -2229,102 +2664,58 @@ function PromptHomePricesCard({
                     );
                   })}
                 </div>
-                {displayedPriceIndices.map((priceIndex) => {
-                  const latestMark = latestMarksByCode[priceIndex.code] ?? null;
-
-                  return (
-                    <article
-                      key={priceIndex.code}
-                      className="prompt-home-price-row"
-                    >
-                      <dl className="prompt-home-price-fields">
-                        <div>
-                          <dt>Product</dt>
-                          <dd>{formatPromptHomePriceProduct(priceIndex)}</dd>
-                        </div>
-                        <div>
-                          <dt>Location</dt>
-                          <dd>
-                            {formatPromptHomePriceLocation(
-                              latestMark,
-                              priceIndex,
-                            )}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Price</dt>
-                          <dd>
-                            {formatPromptHomePriceNumber(
-                              latestMark,
-                              priceIndex,
-                            )}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Unit</dt>
-                          <dd>
-                            {formatPromptHomePriceUnit(latestMark, priceIndex)}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Currency</dt>
-                          <dd>
-                            {formatPromptHomePriceCurrency(
-                              latestMark,
-                              priceIndex,
-                            )}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Date</dt>
-                          <dd>{formatPromptHomePriceDate(latestMark)}</dd>
-                        </div>
-                        <div>
-                          <dt>Time</dt>
-                          <dd>{formatPromptHomePriceTime(latestMark)}</dd>
-                        </div>
-                        <div>
-                          <dt>Updated</dt>
-                          <dd>{formatPromptHomePriceUpdatedAt(latestMark)}</dd>
-                        </div>
-                        <div>
-                          <dt>Source</dt>
-                          <dd>
-                            {formatPromptHomePriceSource(
-                              latestMark,
-                              priceIndex,
-                            )}
-                          </dd>
-                        </div>
-                      </dl>
-                    </article>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="empty-state">
-                <strong>No prices match the current filters</strong>
-                <p>Clear filters to show all active price indices.</p>
+                {pricesViewModel.rows.map((row) => (
+                  <article
+                    key={row.key}
+                    className="prompt-home-price-row"
+                  >
+                    <dl className="prompt-home-price-fields">
+                      <div>
+                        <dt>Product</dt>
+                        <dd>{row.product}</dd>
+                      </div>
+                      <div>
+                        <dt>Location</dt>
+                        <dd>{row.location}</dd>
+                      </div>
+                      <div>
+                        <dt>Price</dt>
+                        <dd>{row.price}</dd>
+                      </div>
+                      <div>
+                        <dt>Unit</dt>
+                        <dd>{row.unit}</dd>
+                      </div>
+                      <div>
+                        <dt>Currency</dt>
+                        <dd>{row.currency}</dd>
+                      </div>
+                      <div>
+                        <dt>Date</dt>
+                        <dd>{row.date}</dd>
+                      </div>
+                      <div>
+                        <dt>Time</dt>
+                        <dd>{row.time}</dd>
+                      </div>
+                      <div>
+                        <dt>Updated</dt>
+                        <dd>{row.updated}</dd>
+                      </div>
+                      <div>
+                        <dt>Source</dt>
+                        <dd>{row.source}</dd>
+                      </div>
+                    </dl>
+                  </article>
+                ))}
               </div>
             )}
           </>
-        ) : (
-          <div className="empty-state">
-            <strong>No active price indices</strong>
-            <p>Price marks appear here after reference data includes active indices.</p>
-          </div>
         )}
 
         <div className="prompt-home-prices-card-footer">
-          <span>
-            {hasActivePriceFilters
-              ? `Showing ${displayedPriceIndices.length} of ${activePriceIndices.length} active ${
-                  activePriceIndices.length === 1 ? "index" : "indices"
-                }`
-              : `Showing all ${displayedPriceIndices.length} active ${
-                  displayedPriceIndices.length === 1 ? "index" : "indices"
-                }`}
-          </span>
+          <span>{priceFooterSummary}</span>
           <button
             type="button"
             className="button button-secondary"
@@ -2345,6 +2736,9 @@ function PromptHomeMapTile({
   locations,
   spatialFeatures,
   referenceDataLoaded,
+  homeCard,
+  canConfigureHomeCard,
+  onHomeCardConfigurationChange,
   onOpenMapWorkspace,
   initialMapAssetLayerVisible = true,
 }: {
@@ -2354,6 +2748,14 @@ function PromptHomeMapTile({
   locations: LocationRecord[];
   spatialFeatures: SpatialFeatureRecord[];
   referenceDataLoaded?: boolean;
+  homeCard: PromptHomeTemplateCard | null;
+  canConfigureHomeCard: boolean;
+  onHomeCardConfigurationChange: (
+    patch: {
+      parameters?: Record<string, unknown>;
+      filters?: Record<string, unknown>;
+    },
+  ) => void;
   onOpenMapWorkspace: () => void;
   initialMapAssetLayerVisible?: boolean;
 }) {
@@ -2370,16 +2772,21 @@ function PromptHomeMapTile({
   const [assetActivityVisibility, setAssetActivityVisibility] = useState<
     Record<string, boolean>
   >({});
-  const [assetGeographyVisibility, setAssetGeographyVisibility] = useState<
-    Record<string, boolean>
-  >({});
+  const assetGeographyVisibility = useMemo(
+    () => buildPromptHomeMapGeographyVisibility(homeCard?.filters.geography),
+    [homeCard?.filters.geography],
+  );
   const [selectedCountryCode, setSelectedCountryCode] = useState("");
   const [selectedSubdivisionCode, setSelectedSubdivisionCode] = useState("");
   const [assetSubtypeVisibility, setAssetSubtypeVisibility] = useState<
     Record<string, boolean>
   >({});
-  const [mapRecordLimit, setMapRecordLimit] = useState(
-    getPromptHomeMapRecordLimit,
+  const mapRecordLimit = useMemo(
+    () =>
+      normalizePromptHomeMapRecordLimit(
+        homeCard?.parameters.map_record_limit ?? getPromptHomeMapRecordLimit(),
+      ),
+    [homeCard?.parameters.map_record_limit],
   );
   const [showAssetLayer, setShowAssetLayer] = useState(
     initialMapAssetLayerVisible,
@@ -2693,7 +3100,7 @@ function PromptHomeMapTile({
                   assetSubtypeOptions.length > 0
                 ? "Turn at least one asset type back on to restore plotted assets."
                 : "The base map still loads here. Assets appear once they have GeoJSON, direct coordinates, or linked location coordinates."
-      : null;
+              : null;
 
   useEffect(() => {
     if (!authSession || !referenceDataLoaded) {
@@ -2754,17 +3161,36 @@ function PromptHomeMapTile({
   }
 
   function handleToggleAssetGeography(geographyLabel: string) {
-    setAssetGeographyVisibility((currentState) => {
-      const nextState = syncAssetGeographyVisibilityState(currentState);
-      return {
-        ...nextState,
-        [geographyLabel]: nextState[geographyLabel] === false,
-      };
-    });
+    if (!canConfigureHomeCard) {
+      return;
+    }
+    const nextState = syncAssetGeographyVisibilityState(assetGeographyVisibility);
+    const nextVisibilityState = {
+      ...nextState,
+      [geographyLabel]: nextState[geographyLabel] === false,
+    };
+    const visibleGeographies =
+      visiblePromptHomeMapGeographiesFromState(nextVisibilityState);
+    const nextFilters = { ...(homeCard?.filters ?? {}) };
+    if (visibleGeographies.length === ASSET_MAP_GEOGRAPHY_LABELS.length) {
+      delete nextFilters.geography;
+    } else {
+      nextFilters.geography = visibleGeographies;
+    }
+    onHomeCardConfigurationChange({ filters: nextFilters });
   }
 
   function handleSetAllAssetGeographiesVisible(visible: boolean) {
-    setAssetGeographyVisibility(setAllAssetGeographyVisibilityState(visible));
+    if (!canConfigureHomeCard) {
+      return;
+    }
+    const nextFilters = { ...(homeCard?.filters ?? {}) };
+    if (visible) {
+      delete nextFilters.geography;
+    } else {
+      nextFilters.geography = [];
+    }
+    onHomeCardConfigurationChange({ filters: nextFilters });
   }
 
   function handleSelectCountry(countryCode: string) {
@@ -2795,7 +3221,16 @@ function PromptHomeMapTile({
   }
 
   function handleMapRecordLimitChange(nextValue: string) {
-    setMapRecordLimit(savePromptHomeMapRecordLimit(nextValue));
+    const normalizedLimit = savePromptHomeMapRecordLimit(nextValue);
+    if (!canConfigureHomeCard) {
+      return;
+    }
+    onHomeCardConfigurationChange({
+      parameters: {
+        ...(homeCard?.parameters ?? {}),
+        map_record_limit: normalizedLimit,
+      },
+    });
   }
   const { dragHandleAttributes, dragHandleClassName } =
     usePromptHomeCardHeaderDragProps<HTMLDivElement>();
@@ -2885,6 +3320,7 @@ function PromptHomeMapTile({
               className="control"
               aria-label="Home map record limit"
               value={String(mapRecordLimit)}
+              disabled={!canConfigureHomeCard}
               onChange={(event) =>
                 handleMapRecordLimitChange(event.target.value)
               }
@@ -3636,6 +4072,7 @@ export function PromptHomeWorkspace({
   );
   const consumedPromptResumeKeyRef = useRef<string | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const promptChatLogRef = useRef<HTMLDivElement | null>(null);
   const timeZoneOptions = useMemo(() => listTimeDisplayTimeZoneOptions(), []);
 
   useEffect(() => {
@@ -3764,6 +4201,15 @@ export function PromptHomeWorkspace({
     ],
   );
   const displayedMessages = useMemo(() => messages, [messages]);
+
+  useEffect(() => {
+    const chatLog = promptChatLogRef.current;
+    if (!chatLog) {
+      return;
+    }
+
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }, [displayedMessages]);
 
   const resolvePromptMessageAuthorLabel = useCallback(
     (message: PromptHomeMessage): string =>
@@ -4038,12 +4484,24 @@ export function PromptHomeWorkspace({
       content: trimmedPrompt,
       recordedAt: new Date().toISOString(),
     };
-    const nextMessages = [...messages, userMessage];
+    const assistantMessageId = createPromptMessageId();
+    const assistantPlaceholder: PromptHomeMessage = {
+      id: assistantMessageId,
+      role: "assistant",
+      content: "",
+      recordedAt: new Date().toISOString(),
+      activity: buildInitialAssistantActivity(),
+      activityState: "active",
+      activityLabel: "Preparing context",
+    };
+    const promptMessages = [...messages, userMessage];
+    const nextMessages = [...promptMessages, assistantPlaceholder];
 
     setMessages(nextMessages);
     setDraft("");
     setSubmitError("");
     setSubmitting(true);
+    setPendingVoicePlaybackMessage(null);
 
     try {
       const settings = await loadRuntimeSettings();
@@ -4063,7 +4521,16 @@ export function PromptHomeWorkspace({
         );
       }
 
-      const response = await requestAssistantResponse(
+      setMessages((current) =>
+        updatePromptMessage(current, assistantMessageId, (message) => ({
+          ...message,
+          activity: buildRunningAssistantActivity(),
+          activityLabel: "Checking context",
+        })),
+      );
+
+      let completedResponse: AssistantPromptResponse | null = null;
+      await streamAssistantResponse(
         appConfig.apiBase,
         {
           conversation_id: conversationId ?? undefined,
@@ -4073,62 +4540,168 @@ export function PromptHomeWorkspace({
           context: mergePromptContexts(operatorContext, applicationContext),
           summary_targets: summaryTargets,
           use_live_tools: true,
-          messages: nextMessages.map((message) => ({
+          messages: promptMessages.map((message) => ({
             role: message.role,
             content: message.content,
           })),
         },
         {
           accessToken: authSession.accessToken,
-        },
-      );
-      const responseConversationId = response.conversation_id ?? conversationId;
-      const parsedResponse = parsePromptNavigationIntentsFromAssistantContent(
-        response.message.content,
-        {
-          sourceRunId: response.run_id,
-          sourceConversationId: responseConversationId,
-        },
-      );
-      const responseContent =
-        parsedResponse.intents.length > 0 || parsedResponse.warnings.length > 0
-          ? parsedResponse.content
-          : parsedResponse.content || response.message.content;
+          onEvent: (event) => {
+            if (event.event === "status") {
+              setMessages((current) =>
+                updatePromptMessage(current, assistantMessageId, (message) => ({
+                  ...message,
+                  activity: buildRunningAssistantActivity(),
+                  activityLabel: "Working",
+                })),
+              );
+              return;
+            }
 
-      if (parsedResponse.warnings.includes(INVALID_PROMPT_NAVIGATION_WARNING)) {
-        recordPromptNavigationOutcome(response.run_id, {
-          outcome: "FAILED",
-          intentKey: "invalid_navigation_payload",
-          detail: INVALID_PROMPT_NAVIGATION_WARNING,
-        });
+            if (event.event === "conversation") {
+              const nextConversationId = event.data.conversation_id;
+              if (
+                typeof nextConversationId === "number" &&
+                Number.isFinite(nextConversationId)
+              ) {
+                setConversationId(nextConversationId);
+              }
+              return;
+            }
+
+            if (event.event === "assistant.metadata") {
+              const metadata = event.data as Partial<AssistantPromptResponse>;
+              setMessages((current) =>
+                updatePromptMessage(current, assistantMessageId, (message) => ({
+                  ...message,
+                  provider: metadata.provider ?? message.provider,
+                  model: metadata.model ?? message.model,
+                  agentName: metadata.agent_name ?? message.agentName,
+                  runId: metadata.run_id ?? message.runId,
+                  warnings: metadata.warnings ?? message.warnings,
+                  actionRequests:
+                    metadata.action_requests ?? message.actionRequests,
+                  toolCalls: metadata.tool_calls ?? message.toolCalls,
+                  activity: buildStreamingAssistantActivity(),
+                  activityLabel: "Writing",
+                })),
+              );
+              return;
+            }
+
+            if (event.event === "assistant.delta") {
+              const delta =
+                typeof event.data.delta === "string"
+                  ? event.data.delta
+                  : typeof event.data.chunk === "string"
+                    ? event.data.chunk
+                    : "";
+              if (!delta) {
+                return;
+              }
+
+              setMessages((current) =>
+                updatePromptMessage(current, assistantMessageId, (message) => ({
+                  ...message,
+                  content: `${message.content}${delta}`,
+                  activity: buildStreamingAssistantActivity(),
+                  activityLabel: "Writing",
+                })),
+              );
+              return;
+            }
+
+            if (event.event !== "assistant.complete") {
+              return;
+            }
+
+            const response = event.data as AssistantPromptResponse;
+            if (response.message?.role !== "assistant") {
+              return;
+            }
+
+            completedResponse = response;
+            const responseConversationId =
+              response.conversation_id ?? conversationId;
+            const parsedResponse =
+              parsePromptNavigationIntentsFromAssistantContent(
+                response.message.content,
+                {
+                  sourceRunId: response.run_id,
+                  sourceConversationId: responseConversationId,
+                },
+              );
+            const responseContent =
+              parsedResponse.intents.length > 0 ||
+              parsedResponse.warnings.length > 0
+                ? parsedResponse.content
+                : parsedResponse.content || response.message.content;
+
+            if (
+              parsedResponse.warnings.includes(
+                INVALID_PROMPT_NAVIGATION_WARNING,
+              )
+            ) {
+              recordPromptNavigationOutcome(response.run_id, {
+                outcome: "FAILED",
+                intentKey: "invalid_navigation_payload",
+                detail: INVALID_PROMPT_NAVIGATION_WARNING,
+              });
+            }
+
+            const assistantMessage: PromptHomeMessage = {
+              id: assistantMessageId,
+              role: "assistant",
+              content: responseContent,
+              recordedAt:
+                response.run_recorded_at ?? assistantPlaceholder.recordedAt,
+              provider: response.provider,
+              model: response.model,
+              agentName: response.agent_name,
+              runId: response.run_id,
+              warnings: [...response.warnings, ...parsedResponse.warnings],
+              actionRequests: response.action_requests,
+              navigationIntents: parsedResponse.intents,
+              toolCalls: response.tool_calls,
+              activity: buildCompletedAssistantActivity(response.tool_calls),
+              activityState: "complete",
+              activityLabel: "Ready",
+            };
+
+            setConversationId(responseConversationId);
+            setDraftApplicationContext("");
+            setDraftSummaryTargets([]);
+            setMessages((current) =>
+              updatePromptMessage(
+                current,
+                assistantMessageId,
+                () => assistantMessage,
+              ),
+            );
+            setPendingVoicePlaybackMessage(
+              verbalizeResponses ? assistantMessage : null,
+            );
+          },
+        },
+      );
+
+      if (!completedResponse) {
+        throw new Error("Assistant stream ended before a response was ready.");
       }
-
-      const assistantMessage: PromptHomeMessage = {
-        id: createPromptMessageId(),
-        role: "assistant",
-        content: responseContent,
-        recordedAt: response.run_recorded_at ?? new Date().toISOString(),
-        provider: response.provider,
-        model: response.model,
-        agentName: response.agent_name,
-        runId: response.run_id,
-        warnings: [...response.warnings, ...parsedResponse.warnings],
-        actionRequests: response.action_requests,
-        navigationIntents: parsedResponse.intents,
-      };
-
-      setConversationId(responseConversationId);
-      setDraftApplicationContext("");
-      setDraftSummaryTargets([]);
-      setMessages((current) => [...current, assistantMessage]);
-      setPendingVoicePlaybackMessage(
-        verbalizeResponses ? assistantMessage : null,
-      );
     } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Assistant request failed.";
       setPendingVoicePlaybackMessage(null);
-      setSubmitError(
-        error instanceof Error ? error.message : "Assistant request failed.",
+      setMessages((current) =>
+        updatePromptMessage(current, assistantMessageId, (promptMessage) => ({
+          ...promptMessage,
+          activity: buildErroredAssistantActivity(message),
+          activityState: "error",
+          activityLabel: "Stopped",
+        })),
       );
+      setSubmitError(message);
     } finally {
       setSubmitting(false);
     }
@@ -4362,7 +4935,13 @@ export function PromptHomeWorkspace({
     !homeCardPersistenceBusy &&
     normalizedHomeViewNameDraft.length > 0 &&
     normalizedHomeViewNameDraft !== cardVisibilityState.activeHomeViewName;
+  const canPublishHomeView =
+    cardVisibilityState.canPublishActiveHomeView && !homeCardPersistenceBusy;
+  const canRetireHomeView =
+    cardVisibilityState.canRetireActiveHomeView && !homeCardPersistenceBusy;
   const visibleHomeCardKeys = cardVisibilityState.visibleCardKeys;
+  const canConfigureActiveHomeCards =
+    cardVisibilityState.canEditCards && !homeCardPersistenceBusy;
   const homeCardsMovable =
     cardVisibilityState.canEditCards && visibleHomeCardKeys.length > 1;
   const homeCardOrderIndexByKey = useMemo(
@@ -4488,6 +5067,7 @@ export function PromptHomeWorkspace({
                     <option key={option.value} value={option.value}>
                       {option.label}
                       {option.kind === "system" ? " (System)" : ""}
+                      {option.kind === "shared" ? " (Shared)" : ""}
                     </option>
                   ))}
                 </select>
@@ -4567,6 +5147,37 @@ export function PromptHomeWorkspace({
                       disabled={!canRenameHomeView}
                     >
                       Rename
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() =>
+                        cardVisibilityState.publishActiveHomeView(
+                          normalizedHomeViewNameDraft || undefined,
+                        )
+                      }
+                      disabled={!canPublishHomeView}
+                    >
+                      Publish
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-ghost"
+                      onClick={() => {
+                        if (
+                          typeof window !== "undefined" &&
+                          !window.confirm(
+                            `Retire ${cardVisibilityState.activeHomeViewName}?`,
+                          )
+                        ) {
+                          return;
+                        }
+
+                        cardVisibilityState.retireActiveHomeView();
+                      }}
+                      disabled={!canRetireHomeView}
+                    >
+                      Retire
                     </button>
                     <button
                       type="button"
@@ -4687,6 +5298,14 @@ export function PromptHomeWorkspace({
                   <PromptHomePricesCard
                     priceIndices={priceIndices}
                     referenceDataLoading={referenceDataLoading}
+                    homeCard={cardVisibilityState.getCard("prices")}
+                    canConfigureHomeCard={canConfigureActiveHomeCards}
+                    onHomeCardConfigurationChange={(patch) =>
+                      cardVisibilityState.updateCardConfiguration(
+                        "prices",
+                        patch,
+                      )
+                    }
                     onOpenPricesWorkspace={() => onOpenView("dashboard")}
                   />
                 ))}
@@ -4698,6 +5317,11 @@ export function PromptHomeWorkspace({
                     locations={locations}
                     spatialFeatures={spatialFeatures}
                     referenceDataLoaded={referenceDataLoaded}
+                    homeCard={cardVisibilityState.getCard("map")}
+                    canConfigureHomeCard={canConfigureActiveHomeCards}
+                    onHomeCardConfigurationChange={(patch) =>
+                      cardVisibilityState.updateCardConfiguration("map", patch)
+                    }
                     onOpenMapWorkspace={() => onOpenView("map")}
                     initialMapAssetLayerVisible={initialMapAssetLayerVisible}
                   />
@@ -4933,7 +5557,7 @@ export function PromptHomeWorkspace({
                     </p>
                   </div>
 
-                  <div className="prompt-home-chat-log">
+                  <div className="prompt-home-chat-log" ref={promptChatLogRef}>
                     {displayedMessages.length === 0 ? (
                       <div className="empty-state prompt-home-empty">
                         <strong>No prompt yet</strong>
@@ -4998,6 +5622,9 @@ export function PromptHomeWorkspace({
                                     </span>
                                   ) : null}
                                 </div>
+                                <PromptHomeAssistantActivityList
+                                  message={message}
+                                />
                                 {message.content ? (
                                   <div className="assistant-message-bubble">
                                     <p>{message.content}</p>

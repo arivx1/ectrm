@@ -5,7 +5,12 @@ import { test } from "vitest";
 import {
   createHomeViewDefinition,
   deleteHomeViewDefinition,
+  duplicateHomeViewDefinition,
+  listAdminHomeViewDefinitions,
   listHomeViewDefinitions,
+  publishHomeViewDefinition,
+  restoreHomeViewDefinition,
+  retireHomeViewDefinition,
   resetHomeViewDefinition,
   toHomeViewCardPayload,
   updateHomeViewDefinition,
@@ -23,6 +28,7 @@ function homeViewResponse() {
     definition_key: "home_view_7",
     name: "My Home",
     scope: "PERSONAL",
+    scope_owner_key: "trader_1",
     base_template_key: "system_home",
     base_template_version: 1,
     persona_hint: "trader",
@@ -46,6 +52,12 @@ function homeViewResponse() {
     updated_by: "trader_1",
     version: 1,
     can_edit: true,
+    can_duplicate: false,
+    can_publish: true,
+    can_retire: false,
+    can_restore: false,
+    is_shared: false,
+    validation_warnings: [],
   };
 }
 
@@ -71,6 +83,7 @@ test("home view API uses authenticated typed definition endpoints", async () => 
     const cardPayload = cards.map(toHomeViewCardPayload);
 
     await listHomeViewDefinitions("http://localhost:8000", "token-1");
+    await listAdminHomeViewDefinitions("http://localhost:8000", "token-1");
     await createHomeViewDefinition("http://localhost:8000", "token-1", {
       name: "My Home",
       scope: "PERSONAL",
@@ -84,28 +97,42 @@ test("home view API uses authenticated typed definition endpoints", async () => 
       cards: cardPayload,
     });
     await resetHomeViewDefinition("http://localhost:8000", "token-1", 7);
+    await publishHomeViewDefinition("http://localhost:8000", "token-1", 7, {
+      name: "Desk Home",
+      scope: "ORGANIZATION",
+    });
+    await duplicateHomeViewDefinition("http://localhost:8000", "token-1", 7, {
+      name: "Desk Home Copy",
+    });
+    await retireHomeViewDefinition("http://localhost:8000", "token-1", 7);
+    await restoreHomeViewDefinition("http://localhost:8000", "token-1", 7);
     await deleteHomeViewDefinition("http://localhost:8000", "token-1", 7);
 
     assert.deepEqual(
       calls.map((call) => call.url),
       [
         "http://localhost:8000/home-view-definitions",
+        "http://localhost:8000/home-view-definitions/admin/inventory",
         "http://localhost:8000/home-view-definitions",
         "http://localhost:8000/home-view-definitions/7",
         "http://localhost:8000/home-view-definitions/7/reset",
+        "http://localhost:8000/home-view-definitions/7/publish",
+        "http://localhost:8000/home-view-definitions/7/duplicate",
+        "http://localhost:8000/home-view-definitions/7/retire",
+        "http://localhost:8000/home-view-definitions/7/restore",
         "http://localhost:8000/home-view-definitions/7",
       ],
     );
     assert.deepEqual(
       calls.map((call) => call.init?.method ?? "GET"),
-      ["GET", "POST", "PATCH", "POST", "DELETE"],
+      ["GET", "GET", "POST", "PATCH", "POST", "POST", "POST", "POST", "POST", "DELETE"],
     );
 
     for (const call of calls) {
       assert.equal(new Headers(call.init?.headers).get("Authorization"), "Bearer token-1");
     }
 
-    const createBody = JSON.parse(String(calls[1]?.init?.body)) as {
+    const createBody = JSON.parse(String(calls[2]?.init?.body)) as {
       cards: Array<{
         card_id: string;
         visible: boolean;

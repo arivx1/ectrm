@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime
 from typing import Any
 
 from apps.api.app.domains.documents.services.schema_registry import get_document_kind_schema
@@ -19,10 +20,23 @@ def build_document_summary(
     pages: list[DocumentIngestionPage],
     *,
     review_status: DocumentReviewStatus | str,
+    logical_documents: list[object] | None = None,
 ) -> dict[str, object]:
     routing_assessment = build_document_routing_assessment(pages, review_status=str(review_status))
     kind_counts = Counter(page.document_kind for page in pages)
-    classification_profile = build_document_classification_profile(pages, kind_counts=kind_counts)
+    raw_logical_documents = (
+        logical_documents
+        if logical_documents is not None
+        else build_logical_document_estimates(pages)
+    )
+    logical_document_payloads = [
+        _coerce_logical_document_payload(document) for document in raw_logical_documents
+    ]
+    classification_profile = build_document_classification_profile(
+        pages,
+        kind_counts=kind_counts,
+        logical_documents=logical_document_payloads,
+    )
     dominant_document_kind = str(classification_profile["dominant_document_kind"])
 
     reviewed_page_count = sum(1 for page in pages if page.review_status == "REVIEWED")
@@ -51,6 +65,7 @@ def build_document_summary(
         pages,
         artifact_profile=artifact_profile,
         dominant_document_kind=dominant_document_kind,
+        logical_documents=logical_document_payloads,
     )
 
     return {
@@ -85,12 +100,27 @@ def build_document_classification_profile(
     pages: list[DocumentIngestionPage],
     *,
     kind_counts: Counter[str] | None = None,
+    logical_documents: list[object] | None = None,
 ) -> dict[str, object]:
     counts = kind_counts or Counter(page.document_kind for page in pages)
     page_kinds = [page.document_kind or "UNKNOWN" for page in sorted(pages, key=lambda page: page.page_number)]
     distinct_page_kinds = set(page_kinds)
     concrete_page_kinds = [kind for kind in page_kinds if kind != "UNKNOWN"]
     distinct_concrete_page_kinds = set(concrete_page_kinds)
+    raw_logical_documents = (
+        logical_documents
+        if logical_documents is not None
+        else build_logical_document_estimates(pages)
+    )
+    logical_document_payloads = [
+        _coerce_logical_document_payload(document) for document in raw_logical_documents
+    ]
+    logical_document_kinds = [
+        str(document.get("document_kind") or "UNKNOWN")
+        for document in logical_document_payloads
+    ]
+    concrete_logical_document_kinds = [kind for kind in logical_document_kinds if kind != "UNKNOWN"]
+    distinct_concrete_logical_document_kinds = set(concrete_logical_document_kinds)
     representative_page_kind = "UNKNOWN"
     for kind, _count in counts.most_common():
         if kind != "UNKNOWN":
@@ -98,7 +128,8 @@ def build_document_classification_profile(
             break
 
     document_type_homogeneous = bool(page_kinds) and len(distinct_page_kinds) == 1 and page_kinds[0] != "UNKNOWN"
-    if document_type_homogeneous:
+    logical_document_count = len(logical_document_payloads)
+    if document_type_homogeneous and logical_document_count <= 1:
         document_kind = page_kinds[0]
         return {
             "document_classification_scope": "DOCUMENT",
@@ -106,8 +137,28 @@ def build_document_classification_profile(
             "dominant_document_kind": document_kind,
             "representative_page_document_kind": document_kind,
             "page_level_classification_required": False,
+            "logical_document_classification_required": False,
+            "logical_document_count": logical_document_count,
+            "logical_document_kinds": [document_kind],
             "document_type_homogeneous": True,
             "page_document_kinds": [document_kind],
+        }
+
+    if logical_document_count > 1:
+        dominant_kind = "MIXED" if len(distinct_concrete_logical_document_kinds) > 1 else (
+            concrete_logical_document_kinds[0] if concrete_logical_document_kinds else "UNKNOWN"
+        )
+        return {
+            "document_classification_scope": "LOGICAL_DOCUMENT",
+            "document_classification_kind": None,
+            "dominant_document_kind": dominant_kind,
+            "representative_page_document_kind": representative_page_kind,
+            "page_level_classification_required": False,
+            "logical_document_classification_required": True,
+            "logical_document_count": logical_document_count,
+            "logical_document_kinds": sorted(distinct_concrete_logical_document_kinds),
+            "document_type_homogeneous": False,
+            "page_document_kinds": sorted(distinct_concrete_page_kinds),
         }
 
     mixed_page_kinds = len(distinct_page_kinds) > 1
@@ -117,6 +168,9 @@ def build_document_classification_profile(
         "dominant_document_kind": "MIXED" if mixed_page_kinds else "UNKNOWN",
         "representative_page_document_kind": representative_page_kind,
         "page_level_classification_required": bool(pages),
+        "logical_document_classification_required": False,
+        "logical_document_count": logical_document_count,
+        "logical_document_kinds": sorted(distinct_concrete_logical_document_kinds),
         "document_type_homogeneous": False,
         "page_document_kinds": sorted(distinct_concrete_page_kinds),
     }
@@ -184,19 +238,28 @@ def build_structure_profile(
     *,
     artifact_profile: dict[str, object],
     dominant_document_kind: str,
+    logical_documents: list[object] | None = None,
 ) -> dict[str, object]:
     table_profiles = _build_table_profiles(pages)
-    logical_documents = _build_logical_document_estimates(pages)
+    raw_logical_documents = (
+        logical_documents
+        if logical_documents is not None
+        else build_logical_document_estimates(pages)
+    )
+    logical_document_payloads = [
+        _coerce_logical_document_payload(document) for document in raw_logical_documents
+    ]
     extractable_table_count = sum(1 for table in table_profiles if table.get("extract_as_dataset"))
     has_required_deep_schema = any(
         _schema_requires_deep_extraction(str(document.get("document_kind") or "UNKNOWN"))
-        for document in logical_documents
+        for document in logical_document_payloads
     )
 
     return {
         "content_mode": artifact_profile.get("content_mode") or "unknown",
-        "logical_document_count_estimate": len(logical_documents),
-        "logical_documents": logical_documents,
+        "logical_document_count": len(logical_document_payloads),
+        "logical_document_count_estimate": len(logical_document_payloads),
+        "logical_documents": logical_document_payloads,
         "has_key_value_fields": any(page.header_fields for page in pages),
         "has_tables": bool(table_profiles),
         "table_count": len(table_profiles),
@@ -262,22 +325,26 @@ def build_extraction_plan(
     return plan
 
 
-def _build_logical_document_estimates(pages: list[DocumentIngestionPage]) -> list[dict[str, object]]:
+def build_logical_document_estimates(
+    pages: list[DocumentIngestionPage],
+    *,
+    document_id: str | None = None,
+) -> list[dict[str, object]]:
     ordered_pages = sorted(pages, key=lambda page: page.page_number)
     if not ordered_pages:
         return []
 
     groups: list[list[DocumentIngestionPage]] = []
     current_group: list[DocumentIngestionPage] = [ordered_pages[0]]
-    current_kind = ordered_pages[0].document_kind or "UNKNOWN"
+    current_key = _logical_document_group_key(ordered_pages[0])
     for page in ordered_pages[1:]:
-        page_kind = page.document_kind or "UNKNOWN"
-        if page_kind == current_kind:
+        page_key = _logical_document_group_key(page)
+        if page_key == current_key:
             current_group.append(page)
             continue
         groups.append(current_group)
         current_group = [page]
-        current_kind = page_kind
+        current_key = page_key
     groups.append(current_group)
 
     logical_documents: list[dict[str, object]] = []
@@ -285,25 +352,180 @@ def _build_logical_document_estimates(pages: list[DocumentIngestionPage]) -> lis
         page_start = group[0].page_number
         page_end = group[-1].page_number
         document_kind = group[0].document_kind or "UNKNOWN"
+        document_subtype = clean_optional_text(group[0].document_subtype)
         confidences = [
             page.classification_confidence
             for page in group
             if isinstance(page.classification_confidence, (int, float))
         ]
         table_count = sum(len(page.table_blocks or []) for page in group)
+        logical_document_key = f"LD-{index:03d}"
+        page_numbers = [page.page_number for page in group]
+        page_ids = [page.page_id for page in group if page.page_id is not None]
         logical_documents.append(
             {
-                "logical_document_id": f"LD-{index:03d}",
+                "logical_document_id": (
+                    f"{document_id}:{logical_document_key}"
+                    if document_id is not None
+                    else logical_document_key
+                ),
+                "logical_document_key": logical_document_key,
+                "sequence_number": index,
                 "document_kind": document_kind,
+                "document_subtype": document_subtype,
                 "page_start": page_start,
                 "page_end": page_end,
+                "page_numbers": page_numbers,
                 "page_count": len(group),
-                "classification_confidence": round(sum(confidences) / len(confidences), 2) if confidences else None,
+                "classification_status": _merged_analysis_status(page.classification_status for page in group),
+                "classification_confidence": round(sum(confidences) / len(confidences), 4) if confidences else None,
+                "review_status": _logical_document_review_status(group),
+                "reviewed_at": _logical_document_reviewed_at(group),
+                "reviewed_by": _logical_document_reviewed_by(group),
                 "table_count": table_count,
                 "deep_extraction_required": bool(table_count or _schema_requires_deep_extraction(document_kind)),
+                "provenance": {
+                    "source": "system_page_classification",
+                    "split_strategy": "contiguous_page_classification_run",
+                    "split_reason": (
+                        "Contiguous pages with matching document kind and subtype are grouped as one logical document."
+                    ),
+                    "source_file_id": document_id,
+                    "source_page_numbers": page_numbers,
+                    "source_page_ids": page_ids,
+                    "page_range": {
+                        "start": page_start,
+                        "end": page_end,
+                    },
+                    "classification_sources": [
+                        _page_classification_source_snapshot(page)
+                        for page in group
+                    ],
+                    "review_sources": [
+                        _page_review_source_snapshot(page)
+                        for page in group
+                    ],
+                },
             }
         )
     return logical_documents
+
+
+def _logical_document_group_key(page: DocumentIngestionPage) -> tuple[str, str | None]:
+    return page.document_kind or "UNKNOWN", clean_optional_text(page.document_subtype)
+
+
+def _coerce_logical_document_payload(document: object) -> dict[str, object]:
+    if isinstance(document, dict):
+        payload = dict(document)
+    else:
+        payload = {
+            "logical_document_id": getattr(document, "logical_document_id", None),
+            "logical_document_key": getattr(document, "logical_document_key", None),
+            "sequence_number": getattr(document, "sequence_number", None),
+            "document_kind": getattr(document, "document_kind", None),
+            "document_subtype": getattr(document, "document_subtype", None),
+            "page_start": getattr(document, "page_start", None),
+            "page_end": getattr(document, "page_end", None),
+            "page_count": getattr(document, "page_count", None),
+            "classification_status": getattr(document, "classification_status", None),
+            "classification_confidence": getattr(document, "classification_confidence", None),
+            "review_status": getattr(document, "review_status", None),
+            "reviewed_at": getattr(document, "reviewed_at", None),
+            "reviewed_by": getattr(document, "reviewed_by", None),
+            "provenance": getattr(document, "provenance", None),
+        }
+
+    page_start = _coerce_int(payload.get("page_start"))
+    page_end = _coerce_int(payload.get("page_end"))
+    page_numbers = payload.get("page_numbers")
+    if not isinstance(page_numbers, list) and page_start is not None and page_end is not None:
+        page_numbers = list(range(page_start, page_end + 1))
+    reviewed_at = payload.get("reviewed_at")
+    if isinstance(reviewed_at, datetime):
+        reviewed_at = reviewed_at.isoformat()
+
+    return {
+        "logical_document_id": clean_optional_text(payload.get("logical_document_id")) or "LD-UNKNOWN",
+        "logical_document_key": clean_optional_text(payload.get("logical_document_key")) or "LD-UNKNOWN",
+        "sequence_number": _coerce_int(payload.get("sequence_number")) or 0,
+        "document_kind": (clean_optional_text(payload.get("document_kind")) or "UNKNOWN").upper(),
+        "document_subtype": clean_optional_text(payload.get("document_subtype")),
+        "page_start": page_start,
+        "page_end": page_end,
+        "page_numbers": page_numbers if isinstance(page_numbers, list) else [],
+        "page_count": _coerce_int(payload.get("page_count")) or 0,
+        "classification_status": (clean_optional_text(payload.get("classification_status")) or "PENDING").upper(),
+        "classification_confidence": payload.get("classification_confidence"),
+        "review_status": (clean_optional_text(payload.get("review_status")) or "UNREVIEWED").upper(),
+        "reviewed_at": reviewed_at,
+        "reviewed_by": clean_optional_text(payload.get("reviewed_by")),
+        "provenance": payload.get("provenance") if isinstance(payload.get("provenance"), dict) else {},
+    }
+
+
+def _merged_analysis_status(statuses: object) -> str:
+    normalized = [
+        (clean_optional_text(status) or "PENDING").upper()
+        for status in statuses
+    ]
+    if not normalized:
+        return "PENDING"
+    if any(status == "FAILED" for status in normalized):
+        return "FAILED"
+    if all(status == "ANALYZED" for status in normalized):
+        return "ANALYZED"
+    return "PENDING"
+
+
+def _logical_document_review_status(pages: list[DocumentIngestionPage]) -> str:
+    if pages and all(page.review_status == "REVIEWED" for page in pages):
+        return "VERIFIED"
+    if any(page.review_status == "REVIEWED" for page in pages):
+        return "IN_REVIEW"
+    return "UNREVIEWED"
+
+
+def _logical_document_reviewed_at(pages: list[DocumentIngestionPage]) -> object | None:
+    reviewed_dates = [page.reviewed_at for page in pages if page.reviewed_at is not None]
+    return max(reviewed_dates) if reviewed_dates and all(page.review_status == "REVIEWED" for page in pages) else None
+
+
+def _logical_document_reviewed_by(pages: list[DocumentIngestionPage]) -> str | None:
+    reviewers = {
+        clean_optional_text(page.reviewed_by)
+        for page in pages
+        if page.review_status == "REVIEWED" and clean_optional_text(page.reviewed_by)
+    }
+    if len(reviewers) == 1 and all(page.review_status == "REVIEWED" for page in pages):
+        return next(iter(reviewers))
+    return None
+
+
+def _page_classification_source_snapshot(page: DocumentIngestionPage) -> dict[str, object]:
+    classification_payload = dict(page.classification_payload or {})
+    return {
+        "page_number": page.page_number,
+        "page_id": page.page_id,
+        "document_kind": page.document_kind,
+        "document_subtype": page.document_subtype,
+        "classification_status": page.classification_status,
+        "confidence": page.classification_confidence,
+        "source": classification_payload.get("system_classification_source")
+        or classification_payload.get("classification_source")
+        or ("processor" if classification_payload.get("processor_applied") else "deterministic"),
+        "matched_by": classification_payload.get("matched_by"),
+    }
+
+
+def _page_review_source_snapshot(page: DocumentIngestionPage) -> dict[str, object]:
+    return {
+        "page_number": page.page_number,
+        "page_id": page.page_id,
+        "review_status": page.review_status,
+        "reviewed_at": page.reviewed_at.isoformat() if page.reviewed_at is not None else None,
+        "reviewed_by": page.reviewed_by,
+    }
 
 
 def _build_table_profiles(pages: list[DocumentIngestionPage]) -> list[dict[str, object]]:

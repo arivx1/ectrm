@@ -150,6 +150,8 @@ function PromptHomeDocumentUploadCardContent({
         schemaRegistry={controller.schemaRegistry}
         uploading={controller.uploading}
         uploadError={controller.uploadError}
+        aiConfidenceThresholdPercent={controller.effectiveAiConfidenceThresholdPercent}
+        aiConfidenceThresholdIsOverride={controller.aiConfidenceThresholdOverridePercent !== null}
         gmailInboxSettings={controller.processorSettings?.gmail_inbox ?? null}
         gmailImporting={controller.gmailImporting}
         gmailImportError={controller.gmailImportError}
@@ -159,6 +161,8 @@ function PromptHomeDocumentUploadCardContent({
         onDisplayNameChange={controller.setDisplayName}
         onProcessorProviderChange={controller.setSelectedProcessorProvider}
         onProcessorModelChange={controller.setSelectedProcessorModel}
+        onAiConfidenceThresholdPercentChange={controller.setAiConfidenceThresholdOverridePercent}
+        onAiConfidenceThresholdReset={() => controller.setAiConfidenceThresholdOverridePercent(null)}
         onFileChange={controller.updateSelectedFile}
         onOpenFilePicker={controller.openFilePicker}
         onDropzoneKeyDown={controller.handleDropzoneKeyDown}

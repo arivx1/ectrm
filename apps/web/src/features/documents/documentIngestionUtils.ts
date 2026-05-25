@@ -288,10 +288,12 @@ export function actionPlanExecutable(plan: DocumentActionPlanRecord | null | und
   return Boolean(
     plan &&
       plan.status === 'READY' &&
-      plan.operation_type &&
-      ['link_document_to_record', 'create_trade_confirmation', 'issue_trade_invoice', 'create_trade_payment'].includes(
-        plan.operation_type,
-      ),
+      plan.action_type === 'ATTACH_EXISTING_RECORD' &&
+      plan.operation_type === 'link_document_to_record' &&
+      plan.candidate_state === 'ATTACH_READY' &&
+      plan.target?.existing_record === true &&
+      plan.target.record_id &&
+      plan.confidence >= 0.9,
   )
 }
 

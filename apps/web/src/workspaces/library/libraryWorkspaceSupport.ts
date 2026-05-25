@@ -5,7 +5,7 @@ import {
   formatDocumentFacetLabel,
   reviewReady,
 } from '../../features/documents/documentIngestionUtils'
-import type { DocumentIngestionRecord, DocumentKindSchemaRecord } from '../../shared/models'
+import type { DocumentIngestionRecord, DocumentKindSchemaRecord, DocumentWorkflowRecord } from '../../shared/models'
 import type { DocumentLibraryCustomFolder } from './libraryFolderState'
 
 export const DOCUMENT_LIBRARY_COLLECTIONS = [
@@ -44,6 +44,7 @@ export const DOCUMENT_LIBRARY_COLLECTIONS = [
 export type DocumentLibraryCollectionKey = (typeof DOCUMENT_LIBRARY_COLLECTIONS)[number]['key']
 export type DocumentLibraryViewMode = 'grid' | 'list'
 export type DocumentLibrarySortMode = 'updated' | 'name'
+const EXECUTABLE_DOCUMENT_WORKFLOW_IDS = new Set(['process_prices'])
 
 export type DocumentLibraryCollectionCounts = Record<DocumentLibraryCollectionKey, number>
 export type DocumentLibraryFolderCounts = Record<string, number>
@@ -54,6 +55,78 @@ export type DocumentLibraryFolderTreeItem = {
   depth: number
   pathIds: string[]
   pathLabel: string
+}
+
+export function canExecuteDocumentWorkflow(workflow: DocumentWorkflowRecord): boolean {
+  return (
+    EXECUTABLE_DOCUMENT_WORKFLOW_IDS.has(workflow.workflow_id) &&
+    workflow.status === 'READY' &&
+    !workflow.approval_required &&
+    !workflow.disabled_reason
+  )
+}
+
+export function canExecuteDocumentActionPlanWorkflow(workflow: DocumentWorkflowRecord): boolean {
+  return (
+    workflow.workflow_id === 'match_existing_record' &&
+    workflow.status === 'READY' &&
+    workflow.action_type === 'ATTACH_EXISTING_RECORD' &&
+    workflow.operation_type === 'link_document_to_record' &&
+    workflow.candidate_state === 'ATTACH_READY' &&
+    workflow.governance_status === 'AUTO_EXECUTION_ELIGIBLE' &&
+    workflow.target?.existing_record === true &&
+    Boolean(workflow.target.record_id) &&
+    !workflow.approval_required &&
+    !workflow.disabled_reason
+  )
+}
+
+export function canExecuteWorkflowAction(workflow: DocumentWorkflowRecord): boolean {
+  return canExecuteDocumentWorkflow(workflow) || canExecuteDocumentActionPlanWorkflow(workflow)
+}
+
+export function canRequestDocumentActionApproval(workflow: DocumentWorkflowRecord): boolean {
+  return (
+    workflow.recommended &&
+    workflow.status === 'READY' &&
+    workflow.approval_required &&
+    Boolean(workflow.operation_type)
+  )
+}
+
+export function workflowActionButtonLabel(workflow: DocumentWorkflowRecord): string {
+  if (canExecuteDocumentActionPlanWorkflow(workflow)) {
+    return 'Attach'
+  }
+  if (canExecuteDocumentWorkflow(workflow)) {
+    return 'Execute'
+  }
+  if (workflow.status === 'EXECUTED') {
+    return 'Executed'
+  }
+  if (workflow.status === 'BLOCKED') {
+    return 'Blocked'
+  }
+  if (workflow.approval_required) {
+    return 'Approval Required'
+  }
+  return 'Review'
+}
+
+export function workflowDisabledReason(workflow: DocumentWorkflowRecord): string | null {
+  if (canExecuteDocumentActionPlanWorkflow(workflow)) {
+    return null
+  }
+  if (workflow.disabled_reason) {
+    return workflow.disabled_reason
+  }
+  if (workflow.approval_required) {
+    return 'Human approval is required before this workflow can mutate records.'
+  }
+  if (!EXECUTABLE_DOCUMENT_WORKFLOW_IDS.has(workflow.workflow_id)) {
+    return 'This workflow is staged for review and is not executable from the Library yet.'
+  }
+  return null
 }
 
 export function documentHasErrors(document: DocumentIngestionRecord): boolean {

@@ -28,6 +28,35 @@
   gap: 0.5rem;
 }
 
+.document-threshold-control {
+  display: grid;
+  gap: 0.45rem;
+  align-content: start;
+}
+
+.document-threshold-control-head {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.document-threshold-control-head span {
+  color: var(--color-copy-muted);
+  font-size: 0.82rem;
+}
+
+.document-threshold-slider {
+  width: 100%;
+  accent-color: rgb(var(--theme-highlight-rgb));
+}
+
+.document-threshold-reset {
+  min-height: 0;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.72rem;
+}
+
 .document-dropzone {
   position: relative;
   display: grid;

@@ -570,6 +570,14 @@ Full-stack engineer with admin/governance workflow experience.
 - retired shared instances no longer appear as selectable defaults
 - Admin can inspect owner, scope, status, version, and validation warnings
 
+### Implementation Note
+
+HVI-06 is implemented through typed Home view definition lifecycle operations:
+admins can publish personal views into shared organization/team scopes, retire
+or restore shared definitions, and inspect the full inventory with validation
+warnings. Active shared definitions appear in Prompt Home as read-only options
+and can be duplicated back into personal editable views.
+
 ## HVI-07: Assistant Tools For Home Templates, Cards, And Visible Instances
 
 ### Priority

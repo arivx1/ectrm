@@ -165,6 +165,7 @@ class DocumentActionPlanningServiceTests(unittest.TestCase):
 
         self.assertEqual(plan.status, "READY")
         self.assertEqual(plan.action_type, "ATTACH_EXISTING_RECORD")
+        self.assertEqual(plan.candidate_state, "ATTACH_READY")
         self.assertEqual(plan.target.record_type, "TRADE_INVOICE")
         self.assertEqual(plan.target.record_id, str(invoice.id))
         self.assertEqual(plan.operation_type, "link_document_to_record")
@@ -196,10 +197,12 @@ class DocumentActionPlanningServiceTests(unittest.TestCase):
 
         self.assertEqual(plan.status, "READY")
         self.assertEqual(plan.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+        self.assertEqual(plan.candidate_state, "CREATE_CANDIDATE")
         self.assertEqual(plan.operation_type, "issue_trade_invoice")
         self.assertEqual(plan.target.record_type, "TRADE_INVOICE")
         self.assertFalse(plan.target.existing_record)
         self.assertEqual(plan.owner.record_type, "TRADE")
+        self.assertEqual(plan.required_owner_record_types, ["TRADE"])
         self.assertEqual(plan.owner.record_id, "TRD-ACT-200")
         self.assertEqual(plan.payload["trade_id"], "TRD-ACT-200")
         self.assertEqual(plan.payload["invoice_number"], "INV-ACT-200")
@@ -231,6 +234,7 @@ class DocumentActionPlanningServiceTests(unittest.TestCase):
 
         self.assertEqual(plan.status, "READY")
         self.assertEqual(plan.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+        self.assertEqual(plan.candidate_state, "CREATE_CANDIDATE")
         self.assertEqual(plan.operation_type, "create_trade_confirmation")
         self.assertEqual(plan.target.record_type, "TRADE_CONFIRMATION")
         self.assertEqual(plan.owner.record_type, "TRADE")
@@ -260,7 +264,10 @@ class DocumentActionPlanningServiceTests(unittest.TestCase):
 
         self.assertEqual(plan.status, "BLOCKED")
         self.assertEqual(plan.action_type, "MANUAL_REVIEW")
+        self.assertEqual(plan.candidate_state, "OWNER_REQUIRED")
         self.assertEqual(plan.target.record_type, "TRADE_INVOICE")
+        self.assertEqual(plan.required_owner_record_types, ["TRADE"])
+        self.assertIn("owner:TRADE", plan.missing_evidence)
 
 
 if __name__ == "__main__":

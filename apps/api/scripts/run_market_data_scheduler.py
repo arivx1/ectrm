@@ -26,6 +26,8 @@ from apps.api.app.domains.reference_data.services.external_data import (
     sync_kalshi_series,
     sync_miso_series,
     sync_nyiso_series,
+    sync_usda_nass_series,
+    sync_world_bank_series,
 )
 from apps.api.app.domains.reference_data.services.external_data.sync_status import build_external_data_sync_status
 
@@ -33,6 +35,7 @@ DEFAULT_PROVIDERS = (
     "EIA",
     "EIA_FUNDAMENTALS",
     "FRED",
+    "WORLD_BANK",
     "EIA_WHOLESALE_POWER",
     "CFTC",
     "CAISO",
@@ -53,6 +56,8 @@ def main() -> int:
             "eia",
             "eia-fundamentals",
             "fred",
+            "world-bank",
+            "usda-nass",
             "eia-wholesale-power",
             "cftc",
             "caiso",
@@ -126,6 +131,18 @@ def _sync_provider(*, provider: str, requested_by: str, db):
         return sync_fred_series(
             db,
             lookback_days=settings.FRED_SYNC_DEFAULT_LOOKBACK_DAYS,
+            requested_by=requested_by,
+        )
+    if provider == "WORLD_BANK":
+        return sync_world_bank_series(
+            db,
+            lookback_days=settings.WORLD_BANK_SYNC_DEFAULT_LOOKBACK_DAYS,
+            requested_by=requested_by,
+        )
+    if provider == "USDA_NASS":
+        return sync_usda_nass_series(
+            db,
+            lookback_days=settings.USDA_NASS_SYNC_DEFAULT_LOOKBACK_DAYS,
             requested_by=requested_by,
         )
     if provider == "EIA_WHOLESALE_POWER":

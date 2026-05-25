@@ -144,6 +144,13 @@ def build_document_linkage_assessment(
         review_status=review_status,
         linked_records=linked_records,
     )
+    _apply_candidate_states(
+        candidates,
+        best_candidate=best_candidate,
+        status=status,
+        recommended_action=recommended_action,
+        linked_records=linked_records,
+    )
 
     return DocumentLinkageAssessmentOut(
         status=status,
@@ -201,6 +208,7 @@ def _build_existing_candidate(
         record_id=match.record_id,
         record_label=match.record_label,
         role=routing_candidate.role,
+        candidate_state="ATTACH_REVIEW",
         existing_record=True,
         score=score,
         matched_keys=match.matched_keys,
@@ -217,6 +225,7 @@ def _build_linked_candidate(link: ResolvedDocumentRecordLink) -> DocumentLinkage
         record_id=link.record_id,
         record_label=link.record_label,
         role=link.role,
+        candidate_state="ALREADY_LINKED",
         existing_record=True,
         score=1.0,
         matched_keys=[],
@@ -234,6 +243,7 @@ def _build_create_candidate(routing_candidate: DocumentRoutingCandidateOut) -> D
         record_id=None,
         record_label=f"Create {routing_candidate.label}",
         role=routing_candidate.role,
+        candidate_state="CREATE_CANDIDATE",
         existing_record=False,
         score=round(score, 3),
         matched_keys=list(routing_candidate.matched_keys),
@@ -319,6 +329,28 @@ def _select_best_candidate(candidates: list[DocumentLinkageCandidateOut]) -> Doc
     if best_primary.score >= best_overall.score - 0.08:
         return best_primary
     return best_overall
+
+
+def _apply_candidate_states(
+    candidates: list[DocumentLinkageCandidateOut],
+    *,
+    best_candidate: DocumentLinkageCandidateOut | None,
+    status: str,
+    recommended_action: str,
+    linked_records: list[ResolvedDocumentRecordLink],
+) -> None:
+    linked_keys = {(link.record_type, link.record_id) for link in linked_records}
+    for candidate in candidates:
+        if candidate.record_id is not None and (candidate.record_type, candidate.record_id) in linked_keys:
+            candidate.candidate_state = "ALREADY_LINKED"
+            continue
+        if not candidate.existing_record:
+            candidate.candidate_state = "CREATE_CANDIDATE"
+            continue
+        if candidate is best_candidate and status == "READY" and recommended_action == "ATTACH":
+            candidate.candidate_state = "ATTACH_READY"
+            continue
+        candidate.candidate_state = "ATTACH_REVIEW"
 
 
 def _build_assessment_reasons(

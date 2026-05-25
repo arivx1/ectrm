@@ -58,6 +58,10 @@ WIKI_PAGE_LINK_PATTERN = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 class AssistantPromptUser:
     user_id: str
     display_name: str
+    first_name: str | None
+    last_name: str | None
+    preferred_timezone: str | None
+    primary_location: str | None
     role: str
     email: str
     default_persona: str | None
@@ -461,6 +465,14 @@ def _build_user_section(user: AssistantPromptUser) -> AssistantPromptSection:
         f"session_id: {user.session_id or 'unknown'}",
         f"session_expires_at: {expires_at}",
     ]
+    if user.first_name:
+        lines.append(f"first_name: {user.first_name}")
+    if user.last_name:
+        lines.append(f"last_name: {user.last_name}")
+    if user.preferred_timezone:
+        lines.append(f"preferred_timezone: {user.preferred_timezone}")
+    if user.primary_location:
+        lines.append(f"primary_location: {user.primary_location}")
     if user.assistant_context_blurb:
         lines.extend(
             [

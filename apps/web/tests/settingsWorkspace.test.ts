@@ -28,6 +28,10 @@ function renderSettingsWorkspace() {
           user_id: 'ops.user',
           email: 'ops@example.com',
           display_name: 'Ops User',
+          first_name: 'Ops',
+          last_name: 'User',
+          preferred_timezone: 'America/New_York',
+          primary_location: 'New York desk',
           role: 'OPS_ADMIN',
           default_assistant_persona: 'risk',
           assistant_context_blurb: 'I cover morning operations and prefer exposure risk first.',
@@ -118,6 +122,14 @@ test('settings workspace renders persistent user profile controls', () => {
     /aria-expanded="true" aria-controls="settings-user-profile-card-panel"/,
   )
   assert.match(markup, /User Profile/)
+  assert.match(markup, /First name/)
+  assert.match(markup, /Last name/)
+  assert.match(markup, /Preferred time zone/)
+  assert.match(markup, /Primary location/)
+  assert.match(markup, /Ops/)
+  assert.match(markup, /User/)
+  assert.match(markup, /America\/New York/)
+  assert.match(markup, /New York desk/)
   assert.match(markup, /Default persona/)
   assert.match(markup, /Risk/)
   assert.match(markup, /AI context/)

@@ -15,9 +15,12 @@ from apps.api.app.domains.documents.services.document_action_governance import (
 from apps.api.app.domains.documents.services.document_action_planning import build_document_action_plan
 from apps.api.app.domains.documents.services.document_ingestion_serialization import load_document_and_pages
 from apps.api.app.domains.documents.services.document_linkage import build_document_linkage_assessment
+from apps.api.app.domains.documents.services.document_record_links import list_document_record_links
+from apps.api.app.domains.documents.services.document_record_links import to_document_record_link_out
 from apps.api.app.models.document_action_approval_request import DocumentActionApprovalRequest
 from apps.api.app.models.document_action_decision import DocumentActionDecision
 from apps.api.app.models.event import Event
+from apps.api.app.schemas.document import DocumentActionApprovalRequestOut
 from apps.api.app.schemas.document import DocumentActionPlanOut
 
 
@@ -28,7 +31,6 @@ def stage_document_action_approval_request(
     actor_id: str,
     request_comment: str | None = None,
 ) -> DocumentActionApprovalRequest:
-    now = datetime.now(timezone.utc)
     document, pages = load_document_and_pages(db, document_id=document_id)
     if document.review_status != "VERIFIED":
         raise ValueError("Only verified documents can be staged for action approval.")
@@ -42,8 +44,37 @@ def stage_document_action_approval_request(
     if not governance.manual_execution_allowed:
         raise ValueError("The current document action plan is not eligible for manual approval.")
 
-    request = DocumentActionApprovalRequest(
+    return stage_document_action_approval_request_for_plan(
+        db,
         document_id=document.document_id,
+        actor_id=actor_id,
+        action_plan=action_plan,
+        governance=governance,
+        request_comment=request_comment,
+    )
+
+
+def stage_document_action_approval_request_for_plan(
+    db: Session,
+    *,
+    document_id: str,
+    actor_id: str,
+    action_plan: DocumentActionPlanOut,
+    governance: DocumentActionGovernance,
+    request_comment: str | None = None,
+) -> DocumentActionApprovalRequest:
+    existing_request = find_pending_document_action_approval_request(db, document_id=document_id)
+    if existing_request is not None:
+        if _request_has_action_plan_signature(existing_request, action_plan):
+            return existing_request
+        raise ValueError(
+            "A pending document action approval request already exists for this document. "
+            "Approve or reject it before staging another action."
+        )
+
+    now = datetime.now(timezone.utc)
+    request = DocumentActionApprovalRequest(
+        document_id=document_id,
         status="PENDING",
         title=action_plan.title,
         description=action_plan.description,
@@ -71,12 +102,74 @@ def stage_document_action_approval_request(
     _append_document_action_event(
         db,
         event_type="DocumentActionApprovalRequested",
-        document_id=document.document_id,
+        document_id=document_id,
         actor_id=actor_id,
         request=request,
         now=now,
     )
     return request
+
+
+def list_document_action_approval_requests(
+    db: Session,
+    *,
+    status_filter: str | None = "PENDING",
+    limit: int = 50,
+) -> list[DocumentActionApprovalRequestOut]:
+    statement = select(DocumentActionApprovalRequest)
+    if status_filter:
+        statement = statement.where(DocumentActionApprovalRequest.status == status_filter)
+    statement = statement.order_by(
+        DocumentActionApprovalRequest.requested_at.desc(),
+        DocumentActionApprovalRequest.request_id.desc(),
+    ).limit(limit)
+    requests = db.execute(statement).scalars().all()
+    return [to_document_action_approval_request_out(request) for request in requests]
+
+
+def find_pending_document_action_approval_request(
+    db: Session,
+    *,
+    document_id: str,
+) -> DocumentActionApprovalRequest | None:
+    return db.execute(
+        select(DocumentActionApprovalRequest)
+        .where(
+            DocumentActionApprovalRequest.document_id == document_id,
+            DocumentActionApprovalRequest.status == "PENDING",
+        )
+        .order_by(DocumentActionApprovalRequest.requested_at.desc(), DocumentActionApprovalRequest.request_id.desc())
+    ).scalars().first()
+
+
+def to_document_action_approval_request_out(
+    request: DocumentActionApprovalRequest,
+) -> DocumentActionApprovalRequestOut:
+    return DocumentActionApprovalRequestOut(
+        request_id=request.request_id,
+        document_id=request.document_id,
+        status=request.status,
+        title=request.title,
+        description=request.description,
+        action_type=request.action_type,
+        operation_type=request.operation_type,
+        governance_status=request.governance_status,
+        target_record_type=request.target_record_type,
+        target_record_id=request.target_record_id,
+        owner_record_type=request.owner_record_type,
+        owner_record_id=request.owner_record_id,
+        request_comment=request.request_comment,
+        decision_comment=request.decision_comment,
+        action_plan_snapshot=dict(request.action_plan_snapshot or {}),
+        governance_snapshot=dict(request.governance_snapshot or {}),
+        result_snapshot=dict(request.result_snapshot or {}),
+        error_detail=request.error_detail,
+        execution_decision_id=request.execution_decision_id,
+        requested_at=request.requested_at,
+        requested_by=request.requested_by,
+        decided_at=request.decided_at,
+        decided_by=request.decided_by,
+    )
 
 
 def approve_document_action_approval_request(
@@ -88,7 +181,31 @@ def approve_document_action_approval_request(
 ) -> DocumentActionApprovalRequest:
     now = datetime.now(timezone.utc)
     request = _load_pending_request(db, document_id=document_id)
-    result = execute_document_action_plan(db, document_id=document_id, actor_id=actor_id)
+    document, pages = load_document_and_pages(db, document_id=document_id)
+    action_plan, _governance = _build_current_action_context(
+        db,
+        document_id=document.document_id,
+        review_status=document.review_status,
+        pages=pages,
+    )
+    approved_plan = DocumentActionPlanOut.model_validate(request.action_plan_snapshot)
+    if _is_selected_candidate_plan(approved_plan):
+        _ensure_selected_candidate_plan_still_current(
+            db,
+            document_id=document.document_id,
+            review_status=document.review_status,
+            pages=pages,
+            action_plan=approved_plan,
+        )
+    else:
+        _ensure_request_matches_action_plan(request, action_plan)
+    result = execute_document_action_plan(
+        db,
+        document_id=document_id,
+        actor_id=actor_id,
+        require_safe_direct_execution=False,
+        action_plan_override=approved_plan,
+    )
     decision = DocumentActionDecision(
         document_id=document_id,
         decision="APPROVED",
@@ -180,6 +297,10 @@ def _build_current_action_context(
     governance = build_document_action_governance(
         action_plan=action_plan,
         linkage_assessment=linkage,
+        record_links=[
+            to_document_record_link_out(link)
+            for link in list_document_record_links(db, document_id=document_id)
+        ],
     )
     return action_plan, governance
 
@@ -189,17 +310,73 @@ def _load_pending_request(
     *,
     document_id: str,
 ) -> DocumentActionApprovalRequest:
-    request = db.execute(
-        select(DocumentActionApprovalRequest)
-        .where(
-            DocumentActionApprovalRequest.document_id == document_id,
-            DocumentActionApprovalRequest.status == "PENDING",
-        )
-        .order_by(DocumentActionApprovalRequest.requested_at.desc(), DocumentActionApprovalRequest.request_id.desc())
-    ).scalars().first()
+    request = find_pending_document_action_approval_request(db, document_id=document_id)
     if request is None:
         raise LookupError(f"No pending document action approval request exists for document '{document_id}'.")
     return request
+
+
+def _ensure_request_matches_action_plan(
+    request: DocumentActionApprovalRequest,
+    action_plan: DocumentActionPlanOut,
+) -> None:
+    if not _request_has_action_plan_signature(request, action_plan):
+        raise ValueError(
+            "The pending document action approval no longer matches the current document action plan. "
+            "Reject this request and stage a new approval."
+        )
+
+
+def _request_has_action_plan_signature(
+    request: DocumentActionApprovalRequest,
+    action_plan: DocumentActionPlanOut,
+) -> bool:
+    target = action_plan.target
+    owner = action_plan.owner
+    return (
+        request.action_type == action_plan.action_type
+        and request.operation_type == action_plan.operation_type
+        and request.target_record_type == (target.record_type if target is not None else None)
+        and request.target_record_id == (target.record_id if target is not None else None)
+        and request.owner_record_type == (owner.record_type if owner is not None else None)
+        and request.owner_record_id == (owner.record_id if owner is not None else None)
+    )
+
+
+def _is_selected_candidate_plan(action_plan: DocumentActionPlanOut) -> bool:
+    selected_candidate = action_plan.payload.get("selected_candidate")
+    return isinstance(selected_candidate, dict)
+
+
+def _ensure_selected_candidate_plan_still_current(
+    db: Session,
+    *,
+    document_id: str,
+    review_status: str,
+    pages,
+    action_plan: DocumentActionPlanOut,
+) -> None:
+    target = action_plan.target
+    if target is None or target.record_id is None:
+        raise ValueError("The selected document approval no longer has a concrete target record.")
+
+    linkage = build_document_linkage_assessment(
+        db,
+        pages=pages,
+        review_status=review_status,
+        document_id=document_id,
+    )
+    if not any(
+        candidate.existing_record
+        and candidate.record_type == target.record_type
+        and candidate.record_id == target.record_id
+        and candidate.candidate_state != "ALREADY_LINKED"
+        for candidate in linkage.candidates
+    ):
+        raise ValueError(
+            "The selected document action approval no longer matches a current record candidate. "
+            "Reject this request and stage a new approval."
+        )
 
 
 def _append_document_action_event(

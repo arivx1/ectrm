@@ -9,6 +9,10 @@ from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
+from apps.api.app.domains.trading.services.trade_unit_defaults import (
+    default_price_unit_code,
+    default_quantity_unit_code,
+)
 from apps.api.app.shared.enums import (
     AllocationStatus,
     ConfirmationStatus,
@@ -74,6 +78,48 @@ COMMODITY_CLASS_BY_CODE = {
     "FUEL_OIL": "REFINED_PRODUCTS",
     "NAPHTHA": "REFINED_PRODUCTS",
 }
+
+
+def resolve_quantity_unit_code(
+    unit_code,
+    *,
+    commodity_class,
+    commodity,
+    price_index_code=None,
+):
+    return (
+        normalize_optional_text(unit_code, uppercase=True)
+        or default_quantity_unit_code(
+            commodity_class=commodity_class,
+            commodity=commodity,
+        )
+        or default_price_unit_code(
+            commodity_class=commodity_class,
+            commodity=commodity,
+            price_index_code=price_index_code,
+        )
+    )
+
+
+def resolve_price_unit_code(
+    unit_code,
+    *,
+    commodity_class,
+    commodity,
+    price_index_code=None,
+):
+    return (
+        normalize_optional_text(unit_code, uppercase=True)
+        or default_price_unit_code(
+            commodity_class=commodity_class,
+            commodity=commodity,
+            price_index_code=price_index_code,
+        )
+        or default_quantity_unit_code(
+            commodity_class=commodity_class,
+            commodity=commodity,
+        )
+    )
 
 LEGACY_COMMODITY_CODE_BY_VALUE = {
     "CRUDE": "WTI",
@@ -416,6 +462,24 @@ def main() -> None:
                         end_field="delivery_end",
                     )
                     pricing_type = normalize_pricing_type(payload.get("pricing_type"))
+                    commodity_class = normalize_commodity_class(
+                        payload.get("commodity_class"),
+                        payload.get("commodity"),
+                    )
+                    commodity = normalize_commodity_code(payload.get("commodity"))
+                    price_index_code = normalize_price_index_code(payload.get("price_index_code"))
+                    unit_of_measure = resolve_quantity_unit_code(
+                        payload.get("unit_of_measure"),
+                        commodity_class=commodity_class,
+                        commodity=commodity,
+                        price_index_code=price_index_code,
+                    )
+                    price_unit_code = resolve_price_unit_code(
+                        payload.get("price_unit_code"),
+                        commodity_class=commodity_class,
+                        commodity=commodity,
+                        price_index_code=price_index_code,
+                    )
                     (
                         option_type,
                         option_style,
@@ -450,7 +514,7 @@ def main() -> None:
                         "effective_start_date": effective_start_date,
                         "effective_end_date": effective_end_date,
                         "quality_spec": normalize_optional_text(payload.get("quality_spec")),
-                        "unit_of_measure": normalize_optional_text(payload.get("unit_of_measure"), uppercase=True),
+                        "unit_of_measure": unit_of_measure,
                         "trade_currency_code": normalize_optional_text(
                             payload.get("trade_currency_code"),
                             uppercase=True,
@@ -458,10 +522,7 @@ def main() -> None:
                         "location_code": normalize_optional_text(payload.get("location_code"), uppercase=True),
                         "delivery_start": delivery_start,
                         "delivery_end": delivery_end,
-                        "price_unit_code": normalize_optional_text(
-                            payload.get("price_unit_code"),
-                            uppercase=True,
-                        ),
+                        "price_unit_code": price_unit_code,
                         "instrument_type": instrument_type,
                         "option_type": option_type,
                         "option_style": option_style,
@@ -479,11 +540,8 @@ def main() -> None:
                         "portfolio": normalized_portfolio,
                         "portfolio_book": normalized_book if normalized_portfolio else None,
                         "counterparty": normalize_optional_text(payload.get("counterparty"), uppercase=True),
-                        "commodity_class": normalize_commodity_class(
-                            payload.get("commodity_class"),
-                            payload.get("commodity"),
-                        ),
-                        "commodity": normalize_commodity_code(payload.get("commodity")),
+                        "commodity_class": commodity_class,
+                        "commodity": commodity,
                         "pricing_type": pricing_type,
                         "pricing_status": normalize_trade_header_status(
                             payload.get("pricing_status"),
@@ -516,7 +574,7 @@ def main() -> None:
                                 allocation_status.value for allocation_status in AllocationStatus
                             },
                         ),
-                        "price_index_code": normalize_price_index_code(payload.get("price_index_code")),
+                        "price_index_code": price_index_code,
                         "price": to_decimal_or_none(payload.get("price")),
                         "volume": to_decimal_or_none(payload.get("volume")),
                         "invoice_status": normalize_trade_header_status(
@@ -665,6 +723,18 @@ def main() -> None:
                         existing["price_index_code"] = normalize_price_index_code(
                             payload.get("price_index_code")
                         )
+                    existing["unit_of_measure"] = resolve_quantity_unit_code(
+                        existing.get("unit_of_measure"),
+                        commodity_class=existing.get("commodity_class"),
+                        commodity=existing.get("commodity"),
+                        price_index_code=existing.get("price_index_code"),
+                    )
+                    existing["price_unit_code"] = resolve_price_unit_code(
+                        existing.get("price_unit_code"),
+                        commodity_class=existing.get("commodity_class"),
+                        commodity=existing.get("commodity"),
+                        price_index_code=existing.get("price_index_code"),
+                    )
                     if "price" in payload:
                         existing["price"] = to_decimal_or_none(payload.get("price"))
                     if "volume" in payload:
@@ -881,6 +951,18 @@ def main() -> None:
                     existing["price_index_code"] = normalize_price_index_code(
                         payload.get("price_index_code")
                     )
+                existing["unit_of_measure"] = resolve_quantity_unit_code(
+                    existing.get("unit_of_measure"),
+                    commodity_class=existing.get("commodity_class"),
+                    commodity=existing.get("commodity"),
+                    price_index_code=existing.get("price_index_code"),
+                )
+                existing["price_unit_code"] = resolve_price_unit_code(
+                    existing.get("price_unit_code"),
+                    commodity_class=existing.get("commodity_class"),
+                    commodity=existing.get("commodity"),
+                    price_index_code=existing.get("price_index_code"),
+                )
                 if "price" in payload:
                     existing["price"] = to_decimal_or_none(payload.get("price"))
                 if "volume" in payload:

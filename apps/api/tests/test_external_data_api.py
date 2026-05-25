@@ -38,6 +38,8 @@ from apps.api.app.routes.external_data import (
     trigger_fred_sync,
     trigger_miso_sync,
     trigger_nyiso_sync,
+    trigger_usda_nass_sync,
+    trigger_world_bank_sync,
     update_external_series_definition,
 )
 from apps.api.app.schemas.external_data import (
@@ -824,10 +826,12 @@ class ExternalDataApiTests(unittest.TestCase):
             payload = get_external_data_sync_status(db=session)
 
         providers = {row.provider: row for row in payload.providers}
-        self.assertEqual(payload.provider_count, 10)
+        self.assertEqual(payload.provider_count, 12)
         self.assertEqual(providers["EIA"].health_status, "healthy")
         self.assertEqual(providers["EIA_FUNDAMENTALS"].health_status, "healthy")
         self.assertEqual(providers["FRED"].health_status, "healthy")
+        self.assertEqual(providers["WORLD_BANK"].health_status, "unknown")
+        self.assertEqual(providers["USDA_NASS"].health_status, "unknown")
         self.assertEqual(providers["EIA_WHOLESALE_POWER"].health_status, "unknown")
         self.assertEqual(providers["CFTC"].health_status, "failed")
         self.assertEqual(providers["CAISO"].health_status, "healthy")
@@ -917,6 +921,50 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(payload.id, 2)
         self.assertEqual(payload.status, "SUCCEEDED")
         sync_mock.assert_called_once()
+
+    def test_trigger_world_bank_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch(
+                "apps.api.app.routes.external_data.sync_world_bank_series",
+                return_value=expected_run,
+            ) as sync_mock:
+                payload = trigger_world_bank_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="BRENT_WORLD_BANK_M",
+                        lookback_days=900,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+        self.assertEqual(sync_mock.call_args.kwargs["price_index_code"], "BRENT_WORLD_BANK_M")
+
+    def test_trigger_usda_nass_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch(
+                "apps.api.app.routes.external_data.sync_usda_nass_series",
+                return_value=expected_run,
+            ) as sync_mock:
+                payload = trigger_usda_nass_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="CORN_US_NASS_M",
+                        lookback_days=1095,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+        self.assertEqual(sync_mock.call_args.kwargs["price_index_code"], "CORN_US_NASS_M")
 
     def test_trigger_cftc_sync_returns_run_payload(self) -> None:
         self._seed_rows()

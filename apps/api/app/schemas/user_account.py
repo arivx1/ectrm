@@ -9,6 +9,7 @@ from apps.api.app.schemas.assistant import AssistantPersona
 from apps.api.app.schemas._validation import (
     normalize_optional_blankable_text,
     normalize_optional_text,
+    normalize_optional_timezone,
     normalize_required_text,
     validate_password_not_blank,
 )
@@ -20,6 +21,10 @@ class UserAccountCreate(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=64)
     email: str = Field(..., min_length=3, max_length=255)
     display_name: str = Field(..., min_length=1, max_length=160)
+    first_name: Optional[str] = Field(None, max_length=80)
+    last_name: Optional[str] = Field(None, max_length=80)
+    preferred_timezone: Optional[str] = Field(None, max_length=64)
+    primary_location: Optional[str] = Field(None, max_length=160)
     role: str = Field(..., min_length=1, max_length=50)
     default_assistant_persona: Optional[AssistantPersona] = None
     assistant_context_blurb: Optional[str] = Field(None, max_length=ASSISTANT_CONTEXT_BLURB_MAX_LENGTH)
@@ -41,6 +46,16 @@ class UserAccountCreate(BaseModel):
     @classmethod
     def normalize_display_name(cls, value: str) -> str:
         return normalize_required_text(value, field_name="display_name")
+
+    @field_validator("first_name", "last_name", "primary_location")
+    @classmethod
+    def normalize_profile_text(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_blankable_text(value)
+
+    @field_validator("preferred_timezone")
+    @classmethod
+    def normalize_preferred_timezone(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_timezone(value, field_name="preferred_timezone")
 
     @field_validator("role")
     @classmethod
@@ -74,6 +89,10 @@ class UserAccountCreate(BaseModel):
 class UserAccountUpdate(BaseModel):
     email: Optional[str] = Field(None, min_length=3, max_length=255)
     display_name: Optional[str] = Field(None, min_length=1, max_length=160)
+    first_name: Optional[str] = Field(None, max_length=80)
+    last_name: Optional[str] = Field(None, max_length=80)
+    preferred_timezone: Optional[str] = Field(None, max_length=64)
+    primary_location: Optional[str] = Field(None, max_length=160)
     role: Optional[str] = Field(None, min_length=1, max_length=50)
     default_assistant_persona: Optional[AssistantPersona] = None
     assistant_context_blurb: Optional[str] = Field(None, max_length=ASSISTANT_CONTEXT_BLURB_MAX_LENGTH)
@@ -90,6 +109,16 @@ class UserAccountUpdate(BaseModel):
     @classmethod
     def normalize_display_name(cls, value: Optional[str]) -> Optional[str]:
         return normalize_optional_text(value, field_name="display_name")
+
+    @field_validator("first_name", "last_name", "primary_location")
+    @classmethod
+    def normalize_profile_text(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_blankable_text(value)
+
+    @field_validator("preferred_timezone")
+    @classmethod
+    def normalize_preferred_timezone(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_timezone(value, field_name="preferred_timezone")
 
     @field_validator("role")
     @classmethod
@@ -135,6 +164,10 @@ class UserAccountOut(BaseModel):
     user_id: str
     email: str
     display_name: str
+    first_name: Optional[str]
+    last_name: Optional[str]
+    preferred_timezone: Optional[str]
+    primary_location: Optional[str]
     role: str
     default_assistant_persona: AssistantPersona
     assistant_context_blurb: Optional[str]

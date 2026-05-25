@@ -46,6 +46,7 @@ from apps.api.app.models import Base
 from apps.api.app.models.document_facet_value import DocumentFacetValue
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
+from apps.api.app.models.document_logical_document import DocumentLogicalDocument
 from apps.api.app.models.document_record_link import DocumentRecordLink
 from apps.api.app.models.event import Event
 from apps.api.app.models.gmail_inbox_import_receipt import GmailInboxImportReceipt
@@ -152,6 +153,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self._previous_document_max_upload_bytes = settings.DOCUMENT_MAX_UPLOAD_BYTES
         self._previous_document_ai_enabled = settings.DOCUMENT_AI_ENABLED
         self._previous_document_ai_default_provider = settings.DOCUMENT_AI_DEFAULT_PROVIDER
+        self._previous_document_ai_confidence_threshold = settings.DOCUMENT_AI_CONFIDENCE_THRESHOLD
         self._previous_document_ai_openai_model = settings.DOCUMENT_AI_OPENAI_MODEL
         self._previous_document_ai_anthropic_model = settings.DOCUMENT_AI_ANTHROPIC_MODEL
         self._previous_document_ai_google_model = settings.DOCUMENT_AI_GOOGLE_MODEL
@@ -174,6 +176,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
         settings.DOCUMENT_MAX_UPLOAD_BYTES = 5 * 1024 * 1024
         settings.DOCUMENT_AI_ENABLED = True
         settings.DOCUMENT_AI_DEFAULT_PROVIDER = "openai"
+        settings.DOCUMENT_AI_CONFIDENCE_THRESHOLD = 0.46
         settings.DOCUMENT_AI_OPENAI_MODEL = ""
         settings.DOCUMENT_AI_ANTHROPIC_MODEL = ""
         settings.DOCUMENT_AI_GOOGLE_MODEL = ""
@@ -200,6 +203,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
             session.query(DocumentRecordLink).delete()
             session.query(DocumentFacetValue).delete()
             session.query(GmailInboxImportReceipt).delete()
+            session.query(DocumentLogicalDocument).delete()
             session.query(DocumentIngestionPage).delete()
             session.query(DocumentIngestion).delete()
             session.query(UserSession).delete()
@@ -212,6 +216,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
         settings.DOCUMENT_MAX_UPLOAD_BYTES = self._previous_document_max_upload_bytes
         settings.DOCUMENT_AI_ENABLED = self._previous_document_ai_enabled
         settings.DOCUMENT_AI_DEFAULT_PROVIDER = self._previous_document_ai_default_provider
+        settings.DOCUMENT_AI_CONFIDENCE_THRESHOLD = self._previous_document_ai_confidence_threshold
         settings.DOCUMENT_AI_OPENAI_MODEL = self._previous_document_ai_openai_model
         settings.DOCUMENT_AI_ANTHROPIC_MODEL = self._previous_document_ai_anthropic_model
         settings.DOCUMENT_AI_GOOGLE_MODEL = self._previous_document_ai_google_model
@@ -499,16 +504,32 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(facets[("commercial_side", "BUY")]["value_label"], "Purchase")
         self.assertEqual(facets[("transport_mode", "PIPELINE")]["value_label"], "Pipeline")
         self.assertEqual(facets[("asset", "POWER_GENERATION")]["value_label"], "Power Generation")
-        self.assertTrue(all(facet["page_id"] is None for facet in body["facet_values"]))
-        self.assertTrue(all(facet["source"] == "MANUAL" for facet in body["facet_values"]))
-        self.assertTrue(all(facet["review_status"] == "CONFIRMED" for facet in body["facet_values"]))
+        manual_document_facets = [
+            facet
+            for facet in body["facet_values"]
+            if facet["facet_key"] in {"commodity", "commercial_side", "transport_mode", "asset"}
+        ]
+        self.assertTrue(all(facet["page_id"] is None for facet in manual_document_facets))
+        self.assertTrue(all(facet["source"] == "MANUAL" for facet in manual_document_facets))
+        self.assertTrue(all(facet["review_status"] == "CONFIRMED" for facet in manual_document_facets))
 
         fetched = self.client.get(
             f"/documents/{uploaded['document_id']}",
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(fetched.status_code, 200)
-        self.assertEqual(len(fetched.json()["facet_values"]), 4)
+        fetched_facets = {
+            (facet["facet_key"], facet["value_code"])
+            for facet in fetched.json()["facet_values"]
+        }
+        self.assertTrue(
+            {
+                ("commodity", "NATURAL_GAS"),
+                ("commercial_side", "BUY"),
+                ("transport_mode", "PIPELINE"),
+                ("asset", "POWER_GENERATION"),
+            }.issubset(fetched_facets)
+        )
 
     def test_document_patch_tracks_human_added_and_system_added_tag_changes(self) -> None:
         admin_token = self._bootstrap_admin()
@@ -609,12 +630,17 @@ class DocumentIngestionApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["facet_values"][0]["page_id"], page_id)
-        self.assertEqual(body["facet_values"][0]["facet_key"], "transport_mode")
-        self.assertEqual(body["facet_values"][0]["value_code"], "TRUCK")
-        self.assertEqual(body["facet_values"][0]["source"], "AI_SUGGESTED")
-        self.assertEqual(body["pages"][0]["facet_values"][0]["value_label"], "Truck")
-        self.assertEqual(body["pages"][0]["facet_values"][0]["evidence"], ["Matched truck reference."])
+        transport_facet = next(
+            facet for facet in body["facet_values"] if facet["facet_key"] == "transport_mode"
+        )
+        page_transport_facet = next(
+            facet for facet in body["pages"][0]["facet_values"] if facet["facet_key"] == "transport_mode"
+        )
+        self.assertEqual(transport_facet["page_id"], page_id)
+        self.assertEqual(transport_facet["value_code"], "TRUCK")
+        self.assertEqual(transport_facet["source"], "AI_SUGGESTED")
+        self.assertEqual(page_transport_facet["value_label"], "Truck")
+        self.assertEqual(page_transport_facet["evidence"], ["Matched truck reference."])
 
     def test_document_patch_rejects_invalid_facet_values(self) -> None:
         admin_token = self._bootstrap_admin()
@@ -654,9 +680,17 @@ class DocumentIngestionApiTests(unittest.TestCase):
         purchase_order_pairs = {
             (suggestion["facet_key"], suggestion["value_code"]) for suggestion in purchase_order_suggestions
         }
+        self.assertIn(("document_type", "PURCHASE_ORDER"), purchase_order_pairs)
         self.assertIn(("commercial_side", "BUY"), purchase_order_pairs)
         self.assertNotIn(("commercial_side", "SELL"), purchase_order_pairs)
         self.assertIn(("transport_mode", "VESSEL"), purchase_order_pairs)
+        self.assertTrue(
+            any(
+                suggestion["value_label"] == "Purchase Order"
+                for suggestion in purchase_order_suggestions
+                if suggestion["facet_key"] == "document_type"
+            )
+        )
         self.assertTrue(
             any(
                 "Document kind PURCHASE_ORDER" in " ".join(suggestion["evidence"])
@@ -678,6 +712,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
         sales_order_pairs = {
             (suggestion["facet_key"], suggestion["value_code"]) for suggestion in sales_order_suggestions
         }
+        self.assertIn(("document_type", "SALES_ORDER"), sales_order_pairs)
         self.assertIn(("commercial_side", "SELL"), sales_order_pairs)
         self.assertNotIn(("commercial_side", "BUY"), sales_order_pairs)
         self.assertIn(("transport_mode", "VESSEL"), sales_order_pairs)
@@ -686,7 +721,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
             (suggestion["facet_key"], suggestion["value_code"])
             for suggestion in suggest_document_facets_from_text(None, document_kind="PURCHASE_ORDER")
         }
-        self.assertEqual(empty_text_pairs, {("commercial_side", "BUY")})
+        self.assertEqual(empty_text_pairs, {("document_type", "PURCHASE_ORDER"), ("commercial_side", "BUY")})
 
     def test_document_facet_suggester_abstains_from_price_publication_side_and_tags_products(self) -> None:
         suggestions = suggest_document_facets_from_text(
@@ -706,6 +741,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
         )
 
         pairs = {(suggestion["facet_key"], suggestion["value_code"]) for suggestion in suggestions}
+        self.assertIn(("document_type", "PRICE_PUBLICATION"), pairs)
         self.assertIn(("commodity", "CRUDE_OIL"), pairs)
         self.assertIn(("commodity", "DIESEL"), pairs)
         self.assertIn(("commodity", "SOYBEAN_MEAL"), pairs)
@@ -748,6 +784,24 @@ class DocumentIngestionApiTests(unittest.TestCase):
                     version=1,
                 )
             )
+            session.add(
+                DocumentFacetValue(
+                    document_id=document_id,
+                    page_id=page.page_id,
+                    facet_key="document_type",
+                    value_code="WEIGH_TICKET",
+                    value_label_snapshot="Weigh Ticket",
+                    source="SYSTEM_DERIVED",
+                    confidence=0.68,
+                    review_status="SUGGESTED",
+                    evidence=["Stale system classification."],
+                    created_at=now,
+                    created_by="document_facet_suggester",
+                    updated_at=now,
+                    updated_by="document_facet_suggester",
+                    version=1,
+                )
+            )
             session.commit()
 
         response = self.client.patch(
@@ -760,6 +814,10 @@ class DocumentIngestionApiTests(unittest.TestCase):
         commercial_side_codes = {
             facet["value_code"] for facet in page_facets if facet["facet_key"] == "commercial_side"
         }
+        document_type_codes = {
+            facet["value_code"] for facet in page_facets if facet["facet_key"] == "document_type"
+        }
+        self.assertEqual(document_type_codes, {"PURCHASE_ORDER"})
         self.assertEqual(commercial_side_codes, {"BUY"})
         self.assertTrue(
             any("Document kind PURCHASE_ORDER" in " ".join(facet["evidence"]) for facet in page_facets)
@@ -789,16 +847,152 @@ class DocumentIngestionApiTests(unittest.TestCase):
 
         summary = build_document_summary(pages, review_status="UNREVIEWED")
 
-        self.assertEqual(summary["document_classification_scope"], "PAGE")
+        self.assertEqual(summary["document_classification_scope"], "LOGICAL_DOCUMENT")
         self.assertIsNone(summary["document_classification_kind"])
         self.assertEqual(summary["dominant_document_kind"], "MIXED")
         self.assertEqual(summary["representative_page_document_kind"], "INVOICE")
-        self.assertTrue(summary["page_level_classification_required"])
+        self.assertFalse(summary["page_level_classification_required"])
+        self.assertTrue(summary["logical_document_classification_required"])
         self.assertFalse(summary["document_type_homogeneous"])
         self.assertEqual(summary["page_document_kinds"], ["BILL_OF_LADING", "INVOICE"])
         self.assertEqual(summary["structure_profile"]["logical_document_count_estimate"], 2)
         self.assertEqual(summary["routing_strategy"], "MANUAL_REVIEW")
-        self.assertIn("multiple page-level document kinds", " ".join(summary["routing_assessment"]["reasons"]))
+        self.assertIn("multiple logical document kinds", " ".join(summary["routing_assessment"]["reasons"]))
+
+    def test_packet_upload_persists_logical_documents_with_page_range_provenance(self) -> None:
+        admin_token = self._bootstrap_admin()
+        invoice_text = "\n".join(
+            [
+                "Invoice",
+                "Invoice Number: INV-PACKET-100",
+                "Trade ID: TRD-PACKET-100",
+                "Invoice Date: 2026-04-14",
+                "Due Date: 2026-04-20",
+                "Counterparty: Shell Trading",
+                "Total Amount: USD 125000",
+            ]
+        )
+        bol_text = "\n".join(
+            [
+                "Bill of Lading",
+                "BOL Number: BOL-PACKET-200",
+                "Delivery ID: DLV-PACKET-200",
+                "Carrier: Acme Logistics",
+                "Load Date: 2026-04-14",
+                "Origin: HOUSTON",
+                "Destination: NEW ORLEANS",
+            ]
+        )
+
+        with patch(
+            "apps.api.app.domains.documents.services.ingestion._extract_page_text",
+            side_effect=[(invoice_text, []), (bol_text, [])],
+        ):
+            response = self.client.post(
+                "/documents/uploads",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                files={"file": ("packet.pdf", self._build_pdf_bytes(page_count=2), "application/pdf")},
+                data={"processor_provider": "builtin"},
+            )
+            self.assertEqual(response.status_code, 201)
+            uploaded = response.json()
+            document = self._wait_for_document(admin_token, uploaded["document_id"])
+
+        self.assertEqual(document["uploaded_file_id"], document["document_id"])
+        self.assertEqual(document["analysis_summary"]["document_classification_scope"], "LOGICAL_DOCUMENT")
+        self.assertTrue(document["analysis_summary"]["logical_document_classification_required"])
+        self.assertEqual(document["analysis_summary"]["structure_profile"]["logical_document_count"], 2)
+        self.assertEqual(len(document["logical_documents"]), 2)
+        self.assertEqual(document["logical_documents"][0]["document_kind"], "INVOICE")
+        self.assertEqual(document["logical_documents"][0]["page_start"], 1)
+        self.assertEqual(document["logical_documents"][0]["page_end"], 1)
+        self.assertEqual(document["logical_documents"][0]["page_numbers"], [1])
+        self.assertEqual(document["logical_documents"][1]["document_kind"], "BILL_OF_LADING")
+        self.assertEqual(document["logical_documents"][1]["page_start"], 2)
+        self.assertEqual(document["logical_documents"][1]["page_end"], 2)
+        self.assertEqual(document["pages"][0]["logical_document_key"], "LD-001")
+        self.assertEqual(document["pages"][1]["logical_document_key"], "LD-002")
+
+        with self.SessionLocal() as session:
+            rows = (
+                session.query(DocumentLogicalDocument)
+                .filter(DocumentLogicalDocument.document_id == document["document_id"])
+                .order_by(DocumentLogicalDocument.sequence_number)
+                .all()
+            )
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0].page_start, 1)
+            self.assertEqual(rows[0].page_end, 1)
+            self.assertEqual(rows[0].provenance["source"], "system_page_classification")
+            self.assertEqual(rows[0].provenance["split_strategy"], "contiguous_page_classification_run")
+            self.assertEqual(rows[0].provenance["source_page_numbers"], [1])
+            self.assertEqual(rows[1].provenance["source_page_numbers"], [2])
+
+    def test_packet_split_activity_records_auditable_page_ranges(self) -> None:
+        admin_token = self._bootstrap_admin()
+        texts = [
+            (
+                "\n".join(
+                    [
+                        "Invoice",
+                        "Invoice Number: INV-AUDIT-1",
+                        "Trade ID: TRD-AUDIT-1",
+                        "Invoice Date: 2026-04-14",
+                        "Total Amount: USD 125000",
+                    ]
+                ),
+                [],
+            ),
+            (
+                "\n".join(
+                    [
+                        "Trade Confirmation",
+                        "Confirmation Number: CONF-AUDIT-2",
+                        "Trade ID: TRD-AUDIT-2",
+                        "Trade Date: 2026-04-14",
+                        "Counterparty: Shell Trading",
+                    ]
+                ),
+                [],
+            ),
+        ]
+
+        with patch(
+            "apps.api.app.domains.documents.services.ingestion._extract_page_text",
+            side_effect=texts,
+        ):
+            response = self.client.post(
+                "/documents/uploads",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                files={"file": ("audit-packet.pdf", self._build_pdf_bytes(page_count=2), "application/pdf")},
+                data={"processor_provider": "builtin"},
+            )
+            self.assertEqual(response.status_code, 201)
+            document = self._wait_for_document(admin_token, response.json()["document_id"])
+
+        packet_events = [
+            entry for entry in document["activity"] if entry["event_type"] == "DocumentPacketSplitUpdated"
+        ]
+        self.assertTrue(packet_events)
+        latest_packet_event = packet_events[0]
+        self.assertEqual(latest_packet_event["payload"]["logical_document_count"], 2)
+        event_ranges = latest_packet_event["payload"]["logical_documents"]
+        self.assertEqual(event_ranges[0]["page_start"], 1)
+        self.assertEqual(event_ranges[0]["page_end"], 1)
+        self.assertEqual(event_ranges[0]["provenance"]["source_page_numbers"], [1])
+        self.assertEqual(event_ranges[1]["page_start"], 2)
+        self.assertEqual(event_ranges[1]["page_end"], 2)
+        self.assertEqual(event_ranges[1]["provenance"]["source_page_numbers"], [2])
+
+        classified_events = [
+            entry for entry in document["activity"] if entry["event_type"] == "DocumentClassified"
+        ]
+        self.assertEqual(len(classified_events), 1)
+        classification = classified_events[0]["payload"]["classification"]
+        self.assertEqual(classification["classification_scope"], "LOGICAL_DOCUMENT")
+        self.assertEqual(classification["logical_document_count"], 2)
+        self.assertEqual(classification["logical_document_classifications"][0]["page_start"], 1)
+        self.assertEqual(classification["logical_document_classifications"][1]["page_start"], 2)
 
     def test_upload_requires_pdf(self) -> None:
         admin_token = self._bootstrap_admin()
@@ -945,6 +1139,16 @@ class DocumentIngestionApiTests(unittest.TestCase):
                 for facet in page["facet_values"]
             )
         )
+        self.assertTrue(
+            any(
+                facet["facet_key"] == "document_type"
+                and facet["value_code"] == "INVOICE"
+                and facet["value_label"] == "Invoice"
+                and facet["source"] == "SYSTEM_DERIVED"
+                and facet["review_status"] == "SUGGESTED"
+                for facet in page["facet_values"]
+            )
+        )
 
     def test_heuristics_extract_fields_and_multiple_table_blocks(self) -> None:
         text = """
@@ -1063,6 +1267,131 @@ class DocumentIngestionApiTests(unittest.TestCase):
             any("Matched required sales order fields" in evidence for evidence in assessment.supporting_evidence)
         )
 
+    def test_certificate_of_analysis_quality_table_beats_sales_order_field_noise(self) -> None:
+        text = """
+        KLK OLEO
+        INTERATLAS CHEMICAL INC
+
+        Product          PALMERA DM-10 (LIQUID) DIMER ACID
+        Quantity (kg)    19700
+        Customer-Ref.    111064
+        Delivery No.     8010842123000010
+        Batch No.        EM0583-2604050303
+        Shipped by       SIMU 251872-6
+        Date of Despatch 07.04.2026
+        Manufacturing Date 05.04.2026
+
+        We certify, that we have examined a sample of the above mentioned goods with the following results;
+
+        Test Description       Unit       Min.       Max.       Result       Method
+        Acid value             mgKOH/g    190        197        192          ISO 660
+        Colour Gardner         Gardner    0          8.0        6.2          ISO4630-2
+        Monomer                %          1          3          1            In-house method
+        1,5-Mer                %          4          6          5            In-house method
+        Trimer                 %          18         22         20           In-house method
+        Dyn. Viscosity at 25C  mPa s      7700       8700       8019         ISO 3219
+
+        Andre Jansen / Quality Control Team Lead
+        """
+        classification = classify_document_page("page-6.pdf", text)
+        self.assertEqual(classification.document_kind, "CERTIFICATE_OF_ANALYSIS")
+
+        table_blocks = extract_document_table_blocks(text)
+        assessment = score_document_page_classification(
+            filename="page-6.pdf",
+            raw_text=text,
+            text_source="pdf_text",
+            table_blocks=table_blocks,
+        )
+        self.assertEqual(assessment.document_kind, "CERTIFICATE_OF_ANALYSIS")
+        self.assertGreaterEqual(assessment.confidence, 0.46)
+        self.assertTrue(
+            any(
+                "Parsed table columns align with the assay results layout" in evidence
+                for evidence in assessment.supporting_evidence
+            )
+        )
+
+        sales_order_fields = extract_document_header_fields("SALES_ORDER", text)
+        self.assertFalse(any(field["field_key"] == "buyer" for field in sales_order_fields))
+
+    def test_packing_list_title_line_provides_strong_classification_evidence(self) -> None:
+        text = """
+        KLK Emmerich GmbH
+
+        PACKING LIST
+
+        To
+        INTERATLAS CHEMICAL INC
+        63 CHURCH ST. SUITE 203
+        ST CATHARINES, ONTARIO
+
+        Loading Address
+        4200 KLK Emmerich GmbH
+        Wardstrasse
+
+        Quantity and Description of Goods     Package     Weight
+        """
+        assessment = score_document_page_classification(
+            filename="page-4.pdf",
+            raw_text=text,
+            text_source="pdf_text",
+            table_blocks=extract_document_table_blocks(text),
+        )
+
+        self.assertEqual(assessment.document_kind, "PACKING_LIST")
+        self.assertGreaterEqual(assessment.confidence, 0.70)
+        self.assertTrue(
+            any("Detected packing list title line" in evidence for evidence in assessment.supporting_evidence)
+        )
+
+    def test_packing_list_title_and_delivery_order_classify_as_packing_list(self) -> None:
+        text = """
+        PACKING LIST
+        Delivery Order No. : 8010842123
+        Date : 07-April-2026
+        Haulier : SHIPPING POINT => SEE NEXT PAGE
+        Loading Date : 07-Apr-2026
+        Delivery Date : 07-Apr-2026
+        Cust. Ref No : 411064
+
+        Quantity and Description of Goods    Package    Gross Wt.    Net Wt.    Tare Wt.
+        01010 10101765 PALMERA DM-10 (LIQUID) DIMER ACID    1    19,700 MT    19,700 MT    0,000 MT
+
+        SHIPPER: KLK Emmerich GmbH
+        """
+        classification = classify_document_page("klk-packing-list.pdf", text)
+        self.assertEqual(classification.document_kind, "PACKING_LIST")
+
+        table_blocks = extract_document_table_blocks(text)
+        assessment = score_document_page_classification(
+            filename="klk-packing-list.pdf",
+            raw_text=text,
+            text_source="pdf_text",
+            table_blocks=table_blocks,
+        )
+        self.assertEqual(assessment.document_kind, "PACKING_LIST")
+        self.assertGreaterEqual(assessment.confidence, 0.85)
+        self.assertTrue(
+            any("Detected packing list terminology" in evidence for evidence in assessment.supporting_evidence)
+        )
+        self.assertTrue(
+            any("Matched required packing list fields" in evidence for evidence in assessment.supporting_evidence)
+        )
+        facet_suggestions = suggest_document_facets_from_text(
+            text,
+            document_kind=assessment.document_kind,
+            classification_confidence=assessment.confidence,
+        )
+        self.assertTrue(
+            any(
+                suggestion["facet_key"] == "document_type"
+                and suggestion["value_code"] == "PACKING_LIST"
+                and suggestion["value_label"] == "Packing List"
+                for suggestion in facet_suggestions
+            )
+        )
+
     def test_filename_only_document_type_hint_falls_back_to_other(self) -> None:
         assessment = score_document_page_classification(
             filename="invoice-batch.pdf",
@@ -1088,10 +1417,17 @@ class DocumentIngestionApiTests(unittest.TestCase):
         body = response.json()
         self.assertTrue(body["version"])
         document_facets = {facet["facet_key"]: facet for facet in body["document_facets"]}
+        self.assertIn("document_type", document_facets)
         self.assertIn("commodity", document_facets)
         self.assertIn("commercial_side", document_facets)
         self.assertIn("transport_mode", document_facets)
         self.assertIn("asset", document_facets)
+        self.assertTrue(
+            any(
+                value["code"] == "PACKING_LIST" and value["label"] == "Packing List"
+                for value in document_facets["document_type"]["allowed_values"]
+            )
+        )
         self.assertTrue(
             any(value["code"] == "NATURAL_GAS" for value in document_facets["commodity"]["allowed_values"])
         )
@@ -1105,6 +1441,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertIn("SALES_ORDER", kinds)
         self.assertIn("LETTER_OF_CREDIT", kinds)
         self.assertIn("BILL_OF_LADING", kinds)
+        self.assertIn("PACKING_LIST", kinds)
         self.assertIn("PIPELINE_STATEMENT", kinds)
         self.assertIn("PRICE_PUBLICATION", kinds)
         self.assertIn("QUALITY_SPECIFICATION", kinds)
@@ -1115,6 +1452,8 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertTrue(any(field["field_key"] == "sales_order_number" for field in kinds["SALES_ORDER"]["header_fields"]))
         self.assertTrue(any(template["template_key"] == "order_lines" for template in kinds["SALES_ORDER"]["table_templates"]))
         self.assertTrue(any(field["field_key"] == "letter_of_credit_number" for field in kinds["LETTER_OF_CREDIT"]["header_fields"]))
+        self.assertTrue(any(field["field_key"] == "delivery_order_number" for field in kinds["PACKING_LIST"]["header_fields"]))
+        self.assertTrue(any(template["template_key"] == "packing_lines" for template in kinds["PACKING_LIST"]["table_templates"]))
         self.assertTrue(any(template["template_key"] == "line_items" for template in kinds["INVOICE"]["table_templates"]))
         self.assertEqual(kinds["INVOICE"]["extraction_schema_code"], "INVOICE.v1")
         self.assertTrue(kinds["INVOICE"]["deep_extraction_required"])
@@ -1148,6 +1487,14 @@ class DocumentIngestionApiTests(unittest.TestCase):
         }
         self.assertIn("cargo_lines", bol_extraction_objects)
         self.assertEqual(bol_extraction_objects["cargo_lines"]["canonical_table"], "bol_cargo")
+        self.assertEqual(kinds["PACKING_LIST"]["extraction_schema_code"], "PACKING_LIST.v1")
+        packing_list_facets = {facet["facet_key"]: facet for facet in kinds["PACKING_LIST"]["facets"]}
+        self.assertIn("transport_mode", packing_list_facets)
+        packing_list_extraction_objects = {
+            entry["object_key"]: entry for entry in kinds["PACKING_LIST"]["extraction_objects"]
+        }
+        self.assertIn("packing_lines", packing_list_extraction_objects)
+        self.assertEqual(packing_list_extraction_objects["packing_lines"]["canonical_table"], "packing_list_line")
         self.assertEqual(kinds["UNKNOWN"]["facets"], [])
         self.assertIsNone(kinds["UNKNOWN"]["extraction_schema_code"])
         self.assertEqual(kinds["TRADE_CONFIRMATION"]["document_family"], "TRADE_EXECUTION")
@@ -1277,6 +1624,18 @@ class DocumentIngestionApiTests(unittest.TestCase):
                 Truck Ticket Number: TT-45
                 Carrier: Fleet Hauling
                 Load Date: 2026-04-10
+                """,
+            ),
+            "packing-list.pdf": (
+                "PACKING_LIST",
+                """
+                Packing List
+                Delivery Order No. 8010842123
+                Loading Date: 2026-04-07
+                Delivery Date: 2026-04-07
+                Cust. Ref No: 411064
+                Quantity and Description of Goods    Package    Gross Wt.    Net Wt.
+                PALMERA DM-10 DIMER ACID    1    19,700 MT    19,700 MT
                 """,
             ),
             "quality-specification.pdf": (
@@ -1420,6 +1779,7 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["default_provider"], "anthropic")
         self.assertEqual(payload["effective_default_provider"], "openai")
         self.assertEqual(payload["configured_provider_count"], 2)
+        self.assertEqual(payload["ai_processing_confidence_threshold"], 0.46)
 
         providers = {row["provider"]: row for row in payload["providers"]}
         self.assertTrue(providers["openai"]["configured"])
@@ -2301,6 +2661,65 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(page["document_kind"], "INVOICE")
         self.assertGreaterEqual(page["classification_confidence"], 0.46)
         self.assertFalse(page["classification_payload"].get("processor_applied", False))
+        self.assertEqual(page["classification_payload"]["ai_processing_confidence_threshold"], 0.46)
+        self.assertFalse(page["classification_payload"]["ai_processing_required"])
+
+    def test_upload_can_raise_ai_fallback_threshold_for_high_confidence_pages(self) -> None:
+        admin_token = self._bootstrap_admin()
+        settings.OPENAI_API_KEY = "openai-test-key"
+        settings.OPENAI_MODEL = "gpt-5-mini"
+        raw_text = "\n".join(
+            [
+                "INVOICE",
+                "Invoice Number: INV-9002",
+                "Invoice Date: 2026-04-06",
+                "Due Date: 2026-04-15",
+                "Counterparty: Shell Trading",
+                "Total Amount: USD 79250",
+            ]
+        )
+        fake_processor_outcome = (
+            DocumentProcessorOutcome(
+                provider="openai",
+                model="gpt-5-mini",
+                pages=[
+                    DocumentProcessorPageResult(
+                        page_number=1,
+                        document_kind="INVOICE",
+                        document_subtype="AI_THRESHOLD",
+                        confidence=0.97,
+                        header_fields=[],
+                        table_blocks=[],
+                        warnings=["AI threshold selected this high-confidence page."],
+                    )
+                ],
+            ),
+            [],
+        )
+
+        with patch(
+            "apps.api.app.domains.documents.services.ingestion._extract_page_text",
+            return_value=(raw_text, []),
+        ), patch(
+            "apps.api.app.domains.documents.services.ingestion.run_document_processor_analysis",
+            return_value=fake_processor_outcome,
+        ) as processor_mock:
+            response = self.client.post(
+                "/documents/uploads",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                files={"file": ("invoice-packet.pdf", self._build_pdf_bytes(page_count=1), "application/pdf")},
+                data={"processor_provider": "openai", "ai_confidence_threshold": "1"},
+            )
+            self.assertEqual(response.status_code, 201)
+            uploaded = response.json()
+            analyzed = self._wait_for_document(admin_token, uploaded["document_id"])
+
+        processor_mock.assert_called_once()
+        page = analyzed["pages"][0]
+        self.assertEqual(page["document_subtype"], "AI_THRESHOLD")
+        self.assertTrue(page["classification_payload"]["ai_processing_required"])
+        self.assertEqual(page["classification_payload"]["ai_processing_confidence_threshold"], 1.0)
+        self.assertIn("AI threshold selected this high-confidence page.", page["processing_warnings"])
 
     def test_activity_log_preserves_original_classification_and_reprocess_history(self) -> None:
         admin_token = self._bootstrap_admin()

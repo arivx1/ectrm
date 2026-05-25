@@ -101,6 +101,48 @@ class ProviderSyncTests(unittest.TestCase):
             settings.EIA_WHOLESALE_POWER_SYNC_DEFAULT_LOOKBACK_DAYS,
         )
 
+    def test_sync_external_data_provider_runs_world_bank_provider(self) -> None:
+        db = object()
+        with patch.object(
+            provider_sync,
+            "sync_world_bank_series",
+            return_value=SimpleNamespace(id=15),
+        ) as sync_mock:
+            run = provider_sync.sync_external_data_provider(
+                db,
+                provider="world-bank",
+                requested_by="login-user",
+            )
+
+        self.assertEqual(run.id, 15)
+        sync_mock.assert_called_once()
+        self.assertEqual(sync_mock.call_args.kwargs["requested_by"], "login-user")
+        self.assertEqual(
+            sync_mock.call_args.kwargs["lookback_days"],
+            settings.WORLD_BANK_SYNC_DEFAULT_LOOKBACK_DAYS,
+        )
+
+    def test_sync_external_data_provider_runs_usda_nass_provider(self) -> None:
+        db = object()
+        with patch.object(
+            provider_sync,
+            "sync_usda_nass_series",
+            return_value=SimpleNamespace(id=16),
+        ) as sync_mock:
+            run = provider_sync.sync_external_data_provider(
+                db,
+                provider="usda-nass",
+                requested_by="login-user",
+            )
+
+        self.assertEqual(run.id, 16)
+        sync_mock.assert_called_once()
+        self.assertEqual(sync_mock.call_args.kwargs["requested_by"], "login-user")
+        self.assertEqual(
+            sync_mock.call_args.kwargs["lookback_days"],
+            settings.USDA_NASS_SYNC_DEFAULT_LOOKBACK_DAYS,
+        )
+
     def test_sync_external_data_provider_runs_miso_provider(self) -> None:
         db = object()
         with patch.object(

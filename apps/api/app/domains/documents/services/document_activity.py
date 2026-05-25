@@ -14,6 +14,8 @@ from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.event import Event
 from apps.api.app.schemas.document import DocumentActivityOut
 
+from .document_ingestion_review import build_logical_document_estimates
+
 
 DOCUMENT_ACTIVITY_AGGREGATE_TYPE = "document"
 
@@ -103,6 +105,10 @@ def build_document_classification_snapshot(
     pages: list[DocumentIngestionPage],
 ) -> dict[str, object]:
     page_snapshots = [_page_classification_snapshot(page) for page in pages]
+    logical_document_snapshots = [
+        _logical_document_classification_snapshot(document)
+        for document in build_logical_document_estimates(pages)
+    ]
     kind_counts = Counter(str(page["document_kind"]) for page in page_snapshots)
     known_kinds = {kind for kind in kind_counts if kind not in {"", "UNKNOWN"}}
     if not page_snapshots:
@@ -127,10 +133,13 @@ def build_document_classification_snapshot(
     processor_provider = provider_counts.most_common(1)[0][0] if provider_counts else None
     return {
         "document_kind": document_kind,
+        "classification_scope": "LOGICAL_DOCUMENT" if len(logical_document_snapshots) > 1 else "DOCUMENT",
+        "logical_document_count": len(logical_document_snapshots),
         "page_count": len(page_snapshots),
         "classified_page_count": sum(1 for page in page_snapshots if page["document_kind"] != "UNKNOWN"),
         "average_confidence": round(sum(confidences) / len(confidences), 4) if confidences else None,
         "processor_provider": processor_provider,
+        "logical_document_classifications": logical_document_snapshots,
         "page_classifications": page_snapshots,
     }
 
@@ -139,11 +148,13 @@ def build_document_processing_snapshot(
     document: DocumentIngestion,
     pages: list[DocumentIngestionPage],
 ) -> dict[str, object]:
+    logical_documents = build_logical_document_estimates(pages)
     return {
         "status": document.status,
         "processor_provider": document.processor_provider,
         "processor_model": document.processor_model,
         "page_count": document.page_count,
+        "logical_document_count": len(logical_documents),
         "processed_page_count": sum(1 for page in pages if page.processed_at is not None),
         "processor_applied_page_count": sum(
             1 for page in pages if bool((page.classification_payload or {}).get("processor_applied"))
@@ -151,6 +162,27 @@ def build_document_processing_snapshot(
         "processing_error_count": len(document.processing_errors or []),
         "page_error_count": sum(1 for page in pages if page.processing_errors),
         "page_warning_count": sum(1 for page in pages if page.processing_warnings),
+    }
+
+
+def _logical_document_classification_snapshot(document: dict[str, object]) -> dict[str, object]:
+    return {
+        "logical_document_id": document.get("logical_document_id"),
+        "logical_document_key": document.get("logical_document_key"),
+        "sequence_number": document.get("sequence_number"),
+        "document_kind": document.get("document_kind"),
+        "document_subtype": document.get("document_subtype"),
+        "page_start": document.get("page_start"),
+        "page_end": document.get("page_end"),
+        "page_count": document.get("page_count"),
+        "classification_status": document.get("classification_status"),
+        "classification_confidence": document.get("classification_confidence"),
+        "review_status": document.get("review_status"),
+        "provenance": {
+            "source": dict(document.get("provenance") or {}).get("source"),
+            "split_strategy": dict(document.get("provenance") or {}).get("split_strategy"),
+            "source_page_numbers": dict(document.get("provenance") or {}).get("source_page_numbers"),
+        },
     }
 
 
@@ -201,6 +233,14 @@ def _activity_label_and_detail(
         label = "Original Classification" if classification_sequence == 1 else "Reclassified"
         prefix = "Originally classified" if classification_sequence == 1 else "Reclassified"
         return label, _classification_detail(prefix, classification)
+    if event.event_type == "DocumentPacketSplitUpdated":
+        logical_document_count = _coerce_int(payload.get("logical_document_count"))
+        count_text = (
+            f"{logical_document_count} logical document{'' if logical_document_count == 1 else 's'}"
+            if logical_document_count is not None
+            else "logical document page ranges"
+        )
+        return "Packet Split Updated", f"{actor} updated packet metadata for {count_text}."
     if event.event_type == "DocumentReprocessRequested":
         previous = _dict_payload(payload.get("previous_classification"))
         processor = _processor_detail(payload, provider_key="processor_provider", model_key="processor_model")

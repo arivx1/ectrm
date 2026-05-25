@@ -50,6 +50,7 @@ export function DocumentIngestionDocumentCard({
     document.processor_provider ||
     controller.processorSettings?.effective_default_provider ||
     ''
+  const reprocessUsesAiProvider = reprocessProviderValue !== '' && reprocessProviderValue !== 'builtin'
   const isExpanded = controller.expandedDocumentIds[document.document_id] ?? false
   const documentSaveTarget = `document:${document.document_id}`
   const reprocessTarget = `reprocess:${document.document_id}`
@@ -325,7 +326,13 @@ export function DocumentIngestionDocumentCard({
               </span>
               {configuredProviders.length > 0 ? (
                 <span className="workflow-editor-note">
-                  Reprocess will use {processorLabel((reprocessProviderValue || null) as DocumentIngestionRecord['processor_provider'])}.
+                  Reprocess will use {processorLabel((reprocessProviderValue || null) as DocumentIngestionRecord['processor_provider'])}
+                  {reprocessUsesAiProvider
+                    ? ` when classifier confidence is below ${controller.effectiveAiConfidenceThresholdPercent}%.`
+                    : '.'}
+                  {reprocessUsesAiProvider && controller.aiConfidenceThresholdOverridePercent !== null
+                    ? ' The session override is active until logout.'
+                    : ''}
                 </span>
               ) : null}
             </div>

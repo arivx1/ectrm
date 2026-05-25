@@ -24,6 +24,8 @@ from apps.api.app.domains.reference_data.services.external_data import (
     sync_kalshi_series,
     sync_miso_series,
     sync_nyiso_series,
+    sync_usda_nass_series,
+    sync_world_bank_series,
 )
 from apps.api.app.domains.reference_data.services.external_data.market_context import build_market_context
 from apps.api.app.domains.reference_data.services.external_data.sync_status import build_external_data_sync_status
@@ -106,6 +108,30 @@ def trigger_fred_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(
     run = sync_fred_series(
         db,
         series_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/world-bank/sync", response_model=ExternalDataRunOut)
+def trigger_world_bank_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_world_bank_series(
+        db,
+        price_index_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/usda-nass/sync", response_model=ExternalDataRunOut)
+def trigger_usda_nass_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_usda_nass_series(
+        db,
+        price_index_code=payload.series_code,
         lookback_days=payload.lookback_days,
         requested_by=actor_id,
     )

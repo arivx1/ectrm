@@ -3,6 +3,7 @@ import type {
   PriceIndexRecord,
   PriceIndexQuoteType,
 } from "../../shared/models";
+import { formatNumber } from "../../shared/format";
 
 export type PromptHomePriceMarkFilter = "all" | "with_marks" | "missing_marks";
 
@@ -11,6 +12,10 @@ export type PromptHomePriceFilters = {
   provider: string;
   markFilter: PromptHomePriceMarkFilter;
   quoteType?: string;
+  commodityCode?: string;
+  locationCode?: string;
+  priceIndexCode?: string;
+  region?: string;
 };
 
 export type PromptHomePriceSortField =
@@ -31,7 +36,50 @@ export type PromptHomePriceSortState = {
   direction: PromptHomePriceSortDirection;
 };
 
-const PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER = "ALL";
+export type PromptHomePricingSnapshotSource = {
+  priceIndices: readonly PriceIndexRecord[];
+  latestMarks: readonly PriceIndexObservationRecord[];
+};
+
+export type PromptHomePricesCardStatus =
+  | "reference_loading"
+  | "pricing_loading"
+  | "no_active_indices"
+  | "no_latest_marks"
+  | "filtered_empty"
+  | "ready";
+
+export type PromptHomePriceRowViewModel = {
+  key: string;
+  priceIndexCode: string;
+  product: string;
+  location: string;
+  price: string;
+  unit: string;
+  currency: string;
+  date: string;
+  time: string;
+  updated: string;
+  source: string;
+  hasLatestMark: boolean;
+  priceIndex: PriceIndexRecord;
+  latestMark: PriceIndexObservationRecord | null;
+};
+
+export type PromptHomePricesCardViewModel = {
+  status: PromptHomePricesCardStatus;
+  activePriceIndexCount: number;
+  latestMarkCount: number;
+  providerOptions: string[];
+  quoteTypeOptions: PriceIndexQuoteType[];
+  effectiveFilters: PromptHomePriceFilters;
+  hasActiveFilters: boolean;
+  allRows: PromptHomePriceRowViewModel[];
+  rows: PromptHomePriceRowViewModel[];
+  latestMarksByCode: Record<string, PriceIndexObservationRecord>;
+};
+
+export const PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER = "ALL";
 export const PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE = "ALL";
 
 const PROMPT_HOME_PRICE_QUOTE_TYPE_LABELS: Record<PriceIndexQuoteType, string> = {
@@ -48,6 +96,36 @@ const PROMPT_HOME_PRICE_NUMERIC_SORT_FIELDS = new Set<PromptHomePriceSortField>(
   "time",
   "updated",
 ]);
+
+function normalizePromptHomePriceIndexCode(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim().toUpperCase() ?? "";
+  return normalized === "" ? null : normalized;
+}
+
+export function buildPromptHomeLatestMarksByCode(
+  latestMarks: readonly PriceIndexObservationRecord[],
+): Record<string, PriceIndexObservationRecord> {
+  const latestMarksByCode: Record<string, PriceIndexObservationRecord> = {};
+  for (const latestMark of latestMarks) {
+    const normalizedCode = normalizePromptHomePriceIndexCode(
+      latestMark.price_index_code,
+    );
+    if (!normalizedCode) {
+      continue;
+    }
+
+    const existingMark = latestMarksByCode[normalizedCode];
+    if (
+      !existingMark ||
+      comparePromptHomePriceMarkRecency(latestMark, existingMark) > 0
+    ) {
+      latestMarksByCode[normalizedCode] = latestMark;
+    }
+  }
+  return latestMarksByCode;
+}
 
 function formatPromptHomeObservationDate(value: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
@@ -184,6 +262,67 @@ export function formatPromptHomePriceSource(
     return `${provider} · ${seriesId}`;
   }
   return provider || "—";
+}
+
+function priceObservationDigits(
+  observation: PriceIndexObservationRecord | null,
+  priceIndex: PriceIndexRecord,
+): number {
+  const unitCode = observation?.unit_code ?? priceIndex.unit_code;
+  return unitCode === "GAL" ? 3 : 2;
+}
+
+export function formatPromptHomePriceNumber(
+  observation: PriceIndexObservationRecord | null,
+  priceIndex: PriceIndexRecord,
+): string {
+  if (!observation) {
+    return "No mark yet";
+  }
+
+  return formatNumber(
+    observation.value,
+    priceObservationDigits(observation, priceIndex),
+  );
+}
+
+export function formatPromptHomePriceUnit(
+  observation: PriceIndexObservationRecord | null,
+  priceIndex: PriceIndexRecord,
+): string {
+  return observation?.unit_code || priceIndex.unit_code || "—";
+}
+
+export function formatPromptHomePriceCurrency(
+  observation: PriceIndexObservationRecord | null,
+  priceIndex: PriceIndexRecord,
+): string {
+  return observation?.currency_code || priceIndex.currency_code || "—";
+}
+
+export function formatPromptHomePriceProduct(priceIndex: PriceIndexRecord): string {
+  return priceIndex.commodity_code || "—";
+}
+
+export function formatPromptHomePriceLocation(
+  observation: PriceIndexObservationRecord | null,
+  priceIndex: PriceIndexRecord,
+): string {
+  const locationCode = priceIndex.location_code?.trim();
+  if (locationCode) {
+    return locationCode;
+  }
+
+  const provider = priceIndex.provider.trim().toUpperCase();
+  const sourceSeriesId = observation?.source_series_id.trim();
+  if (
+    sourceSeriesId &&
+    ["CAISO", "ERCOT", "EIA_WHOLESALE_POWER"].includes(provider)
+  ) {
+    return sourceSeriesId;
+  }
+
+  return priceIndex.market?.trim() || "—";
 }
 
 export function formatPromptHomePriceFrequency(
@@ -337,6 +476,26 @@ function promptHomePriceMarkDownloadedTimestamp(
 
   const downloadedTime = Date.parse(observation.downloaded_at);
   return Number.isFinite(downloadedTime) ? downloadedTime : 0;
+}
+
+function comparePromptHomePriceMarkRecency(
+  left: PriceIndexObservationRecord,
+  right: PriceIndexObservationRecord,
+): number {
+  const observationCompare =
+    promptHomePriceMarkTimestamp(left) - promptHomePriceMarkTimestamp(right);
+  if (observationCompare !== 0) {
+    return observationCompare;
+  }
+
+  const downloadedCompare =
+    promptHomePriceMarkDownloadedTimestamp(left) -
+    promptHomePriceMarkDownloadedTimestamp(right);
+  if (downloadedCompare !== 0) {
+    return downloadedCompare;
+  }
+
+  return left.id - right.id;
 }
 
 export function selectPromptHomePriceIndices(
@@ -684,8 +843,36 @@ export function filterPromptHomeDisplayPriceIndices(
   )
     .trim()
     .toUpperCase();
+  const normalizedCommodityCode = filters.commodityCode?.trim().toUpperCase();
+  const normalizedLocationCode = filters.locationCode?.trim().toUpperCase();
+  const normalizedPriceIndexCode = filters.priceIndexCode?.trim().toUpperCase();
+  const normalizedRegion = filters.region?.trim().toUpperCase();
 
   return priceIndices.filter((priceIndex) => {
+    if (
+      normalizedPriceIndexCode &&
+      priceIndex.code.trim().toUpperCase() !== normalizedPriceIndexCode
+    ) {
+      return false;
+    }
+    if (
+      normalizedCommodityCode &&
+      priceIndex.commodity_code.trim().toUpperCase() !== normalizedCommodityCode
+    ) {
+      return false;
+    }
+    if (
+      normalizedLocationCode &&
+      priceIndex.location_code?.trim().toUpperCase() !== normalizedLocationCode
+    ) {
+      return false;
+    }
+    if (
+      normalizedRegion &&
+      priceIndex.market?.trim().toUpperCase() !== normalizedRegion
+    ) {
+      return false;
+    }
     if (
       normalizedProvider !== PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER &&
       priceIndex.provider.trim().toUpperCase() !== normalizedProvider
@@ -718,6 +905,24 @@ export function filterPromptHomeDisplayPriceIndices(
   });
 }
 
+export function promptHomePriceFiltersAreActive(
+  filters: PromptHomePriceFilters,
+): boolean {
+  return (
+    filters.query.trim().length > 0 ||
+    Boolean(filters.priceIndexCode?.trim()) ||
+    Boolean(filters.commodityCode?.trim()) ||
+    Boolean(filters.locationCode?.trim()) ||
+    Boolean(filters.region?.trim()) ||
+    filters.provider.trim().toUpperCase() !==
+      PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER ||
+    (filters.quoteType ?? PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE)
+      .trim()
+      .toUpperCase() !== PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE ||
+    filters.markFilter !== "all"
+  );
+}
+
 export function countPromptHomeLatestMarks(
   priceIndices: PriceIndexRecord[],
   latestMarksByCode: Record<string, PriceIndexObservationRecord>,
@@ -726,4 +931,140 @@ export function countPromptHomeLatestMarks(
     (count, priceIndex) => count + (latestMarksByCode[priceIndex.code] ? 1 : 0),
     0,
   );
+}
+
+function buildPromptHomePriceRowViewModel(
+  priceIndex: PriceIndexRecord,
+  latestMark: PriceIndexObservationRecord | null,
+): PromptHomePriceRowViewModel {
+  return {
+    key: priceIndex.code,
+    priceIndexCode: priceIndex.code,
+    product: formatPromptHomePriceProduct(priceIndex),
+    location: formatPromptHomePriceLocation(latestMark, priceIndex),
+    price: formatPromptHomePriceNumber(latestMark, priceIndex),
+    unit: formatPromptHomePriceUnit(latestMark, priceIndex),
+    currency: formatPromptHomePriceCurrency(latestMark, priceIndex),
+    date: formatPromptHomePriceDate(latestMark),
+    time: formatPromptHomePriceTime(latestMark),
+    updated: formatPromptHomePriceUpdatedAt(latestMark),
+    source: formatPromptHomePriceSource(latestMark, priceIndex),
+    hasLatestMark: Boolean(latestMark),
+    priceIndex,
+    latestMark,
+  };
+}
+
+function resolvePromptHomePriceFilters(
+  filters: PromptHomePriceFilters,
+  providerOptions: readonly string[],
+  quoteTypeOptions: readonly PriceIndexQuoteType[],
+): PromptHomePriceFilters {
+  const provider = filters.provider.trim();
+  const quoteType = (
+    filters.quoteType ?? PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE
+  ).trim();
+  return {
+    query: filters.query,
+    provider:
+      provider === PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER ||
+      providerOptions.includes(provider)
+        ? provider
+        : PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER,
+    quoteType:
+      quoteType === PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE ||
+      quoteTypeOptions.includes(quoteType as PriceIndexQuoteType)
+        ? quoteType
+        : PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE,
+    commodityCode: filters.commodityCode?.trim().toUpperCase() || undefined,
+    locationCode: filters.locationCode?.trim().toUpperCase() || undefined,
+    priceIndexCode: filters.priceIndexCode?.trim().toUpperCase() || undefined,
+    region: filters.region?.trim() || undefined,
+    markFilter: filters.markFilter,
+  };
+}
+
+export function buildPromptHomePricesCardViewModel(
+  source: PromptHomePricingSnapshotSource,
+  options: {
+    filters: PromptHomePriceFilters;
+    sortState: PromptHomePriceSortState | null;
+    referenceDataLoading?: boolean;
+    pricingSnapshotLoading?: boolean;
+  },
+): PromptHomePricesCardViewModel {
+  const activePriceIndices = selectPromptHomePriceIndices([
+    ...source.priceIndices,
+  ]);
+  const providerOptions = listPromptHomePriceProviders(activePriceIndices);
+  const quoteTypeOptions = listPromptHomePriceQuoteTypes(activePriceIndices);
+  const effectiveFilters = resolvePromptHomePriceFilters(
+    options.filters,
+    providerOptions,
+    quoteTypeOptions,
+  );
+  const hasActiveFilters = promptHomePriceFiltersAreActive(effectiveFilters);
+  const latestMarksByCode = buildPromptHomeLatestMarksByCode(
+    source.latestMarks,
+  );
+  const sortedPriceIndices = selectPromptHomeDisplayPriceIndices(
+    activePriceIndices,
+    latestMarksByCode,
+  );
+  const filteredPriceIndices = filterPromptHomeDisplayPriceIndices(
+    sortedPriceIndices,
+    latestMarksByCode,
+    effectiveFilters,
+  );
+  const displayedPriceIndices = sortPromptHomeDisplayPriceIndices(
+    filteredPriceIndices,
+    latestMarksByCode,
+    options.sortState,
+  );
+  const latestMarkCount = countPromptHomeLatestMarks(
+    activePriceIndices,
+    latestMarksByCode,
+  );
+  const allRows = sortedPriceIndices.map((priceIndex) =>
+    buildPromptHomePriceRowViewModel(
+      priceIndex,
+      latestMarksByCode[priceIndex.code] ?? null,
+    ),
+  );
+  const rows = displayedPriceIndices.map((priceIndex) =>
+    buildPromptHomePriceRowViewModel(
+      priceIndex,
+      latestMarksByCode[priceIndex.code] ?? null,
+    ),
+  );
+
+  let status: PromptHomePricesCardStatus = "ready";
+  if (options.referenceDataLoading && activePriceIndices.length === 0) {
+    status = "reference_loading";
+  } else if (
+    options.pricingSnapshotLoading &&
+    activePriceIndices.length > 0 &&
+    latestMarkCount === 0
+  ) {
+    status = "pricing_loading";
+  } else if (activePriceIndices.length === 0) {
+    status = "no_active_indices";
+  } else if (latestMarkCount === 0 && !hasActiveFilters) {
+    status = "no_latest_marks";
+  } else if (rows.length === 0) {
+    status = "filtered_empty";
+  }
+
+  return {
+    status,
+    activePriceIndexCount: activePriceIndices.length,
+    latestMarkCount,
+    providerOptions,
+    quoteTypeOptions,
+    effectiveFilters,
+    hasActiveFilters,
+    allRows,
+    rows,
+    latestMarksByCode,
+  };
 }

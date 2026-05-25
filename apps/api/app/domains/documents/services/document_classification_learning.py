@@ -136,6 +136,7 @@ def initialize_page_classification_payload(
     provider: str | None = None,
     model: str | None = None,
     deterministic_assessment: dict[str, object] | None = None,
+    ai_processing_confidence_threshold: float | None = None,
 ) -> dict[str, object]:
     content_features = build_document_content_features(raw_text)
     payload: dict[str, object] = {
@@ -161,6 +162,8 @@ def initialize_page_classification_payload(
     }
     if deterministic_assessment is not None:
         payload["deterministic_assessment"] = deterministic_assessment
+    if ai_processing_confidence_threshold is not None:
+        payload["ai_processing_confidence_threshold"] = ai_processing_confidence_threshold
     if provider is not None:
         payload["system_classification_provider"] = provider
     if model is not None:

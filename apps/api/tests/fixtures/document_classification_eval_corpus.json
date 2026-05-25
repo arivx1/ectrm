@@ -163,6 +163,56 @@
       }
     },
     {
+      "case_id": "packing_list_delivery_order_goods_weights",
+      "filename": "klk-packing-list.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "PACKING LIST\nDelivery Order No. : 8010842123\nDate : 07-April-2026\nHaulier : SHIPPING POINT => SEE NEXT PAGE\nLoading Date : 07-Apr-2026\nDelivery Date : 07-Apr-2026\nCust. Ref No : 411064\n\nQuantity and Description of Goods    Package    Gross Wt.    Net Wt.    Tare Wt.\n01010 10101765 PALMERA DM-10 (LIQUID) DIMER ACID    1    19,700 MT    19,700 MT    0,000 MT\n\nSHIPPER: KLK Emmerich GmbH",
+      "expectations": {
+        "expected_document_kind": "PACKING_LIST",
+        "min_confidence": 0.85,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected packing list terminology",
+          "Matched required packing list fields"
+        ]
+      }
+    },
+    {
+      "case_id": "packing_list_title_line_scanned_form",
+      "filename": "klk-packing-list-page-4.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "KLK Emmerich GmbH\n\nPACKING LIST\n\nTo\nINTERATLAS CHEMICAL INC\n63 CHURCH ST. SUITE 203\nST CATHARINES, ONTARIO\n\nLoading Address\n4200 KLK Emmerich GmbH\nWardstrasse\n\nQuantity and Description of Goods     Package     Weight",
+      "expectations": {
+        "expected_document_kind": "PACKING_LIST",
+        "min_confidence": 0.70,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected packing list title line"
+        ]
+      }
+    },
+    {
+      "case_id": "certificate_of_analysis_quality_results_table",
+      "filename": "klk-quality-certificate-page-6.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "KLK OLEO\nINTERATLAS CHEMICAL INC\n\nProduct          PALMERA DM-10 (LIQUID) DIMER ACID\nQuantity (kg)    19700\nCustomer-Ref.    111064\nDelivery No.     8010842123000010\nBatch No.        EM0583-2604050303\nShipped by       SIMU 251872-6\nDate of Despatch 07.04.2026\nManufacturing Date 05.04.2026\n\nWe certify, that we have examined a sample of the above mentioned goods with the following results;\n\nTest Description       Unit       Min.       Max.       Result       Method\nAcid value             mgKOH/g    190        197        192          ISO 660\nColour Gardner         Gardner    0          8.0        6.2          ISO4630-2\nMonomer                %          1          3          1            In-house method\n1,5-Mer                %          4          6          5            In-house method\nTrimer                 %          18         22         20           In-house method\nDyn. Viscosity at 25C  mPa s      7700       8700       8019         ISO 3219\n\nAndre Jansen / Quality Control Team Lead",
+      "expectations": {
+        "expected_document_kind": "CERTIFICATE_OF_ANALYSIS",
+        "min_confidence": 0.46,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Matched required certificate of analysis fields",
+          "Parsed table columns align with the assay results layout"
+        ]
+      }
+    },
+    {
       "case_id": "letter_of_credit_bank_instrument",
       "filename": "letter-of-credit-lc-4488.pdf",
       "text_source": "pdf_text",

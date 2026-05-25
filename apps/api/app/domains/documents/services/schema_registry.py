@@ -14,7 +14,7 @@ from apps.api.app.schemas.document import DocumentTableTemplateSchemaOut
 
 from .document_facets import DOCUMENT_FACET_SCHEMAS
 
-DOCUMENT_SCHEMA_REGISTRY_VERSION = "2026-05-22.review-v9"
+DOCUMENT_SCHEMA_REGISTRY_VERSION = "2026-05-24.review-v11"
 
 
 def _field(
@@ -542,6 +542,53 @@ EXTRACTION_SCHEMA_PROFILES: dict[str, ExtractionSchemaProfile] = {
             "require_review_if_transport_mode_unknown",
             "require_review_if_product_missing",
         ),
+    ),
+    "PACKING_LIST": ExtractionSchemaProfile(
+        schema_code="PACKING_LIST.v1",
+        deep_extraction_required=True,
+        objects=(
+            _extraction_object(
+                "header",
+                "Packing List Header",
+                canonical_table="packing_list_header",
+                description="Shipment packing identity, dates, parties, carrier or haulier, and delivery references.",
+                field_keys=(
+                    "packing_list_number",
+                    "delivery_order_number",
+                    "packing_date",
+                    "loading_date",
+                    "delivery_date",
+                    "customer_reference",
+                    "carrier",
+                    "shipper",
+                    "consignee",
+                    "trade_id",
+                    "delivery_id",
+                ),
+                child_object_keys=("packing_lines", "references"),
+            ),
+            _extraction_object(
+                "packing_lines",
+                "Packing Lines",
+                cardinality="many",
+                source_object_type="table",
+                canonical_table="packing_list_line",
+                description="Packed product, package count, quantity, and gross, net, and tare weight rows.",
+                field_keys=("description", "product", "package_count", "quantity", "gross_weight", "net_weight", "tare_weight"),
+                table_template_keys=("packing_lines",),
+            ),
+            _extraction_object(
+                "references",
+                "Packing List References",
+                cardinality="many",
+                source_object_type="reference",
+                canonical_table="document_reference",
+                description="Trade, delivery, customer, carrier, shipment, order, and packing references.",
+                field_keys=("reference_type", "raw_reference", "normalized_reference", "linked_entity_type", "linked_entity_id"),
+            ),
+        ),
+        validation_rules=("delivery_order_or_packing_list_number_required", "packed_goods_required", "quantity_requires_unit_when_present"),
+        review_rules=("require_review_if_no_delivery_reference", "require_review_if_packed_goods_missing"),
     ),
     "CERTIFICATE_OF_ANALYSIS": ExtractionSchemaProfile(
         schema_code="QUALITY.COA.v1",
@@ -1449,6 +1496,72 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         ],
     ),
     DocumentKindSchemaOut(
+        document_kind="PACKING_LIST",
+        label="Packing List",
+        document_family="LOGISTICS",
+        description="Shipment packing list or packing slip identifying packed goods, package counts, weights, and delivery references.",
+        review_guidance="Confirm the delivery order or packing list reference, packed goods, package details, weights, shipper, consignee, and carrier before linking it to a delivery.",
+        linkage_summary="Links primarily to delivery and trade records using delivery order number, packing list number, customer reference, dates, carrier, parties, product, and weights.",
+        record_targets=[
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Match using delivery ID when present, otherwise delivery order number, customer reference, dates, carrier, parties, product, and packed quantities.",
+            ),
+            _target(
+                "TRADE",
+                "Trade",
+                "Use trade ID or commercial party and product context as secondary evidence for the movement.",
+                role="SECONDARY",
+            ),
+        ],
+        matching_keys=[
+            "delivery_order_number",
+            "packing_list_number",
+            "delivery_id",
+            "trade_id",
+            "customer_reference",
+            "loading_date",
+            "delivery_date",
+            "carrier",
+            "shipper",
+            "consignee",
+            "product",
+        ],
+        header_fields=[
+            _field("packing_list_number", "Packing List Number", value_type="identifier"),
+            _field("delivery_order_number", "Delivery Order Number", value_type="identifier", required=True),
+            _field("packing_date", "Packing List Date", value_type="date"),
+            _field("loading_date", "Loading Date", value_type="date"),
+            _field("delivery_date", "Delivery Date", value_type="date"),
+            _field("delivery_id", "Delivery ID", value_type="identifier"),
+            _field("trade_id", "Trade ID", value_type="identifier"),
+            _field("customer_reference", "Customer Reference", value_type="identifier"),
+            _field("carrier", "Carrier"),
+            _field("shipper", "Shipper"),
+            _field("consignee", "Consignee"),
+            _field("product", "Product"),
+            _field("gross_weight", "Gross Weight", value_type="quantity"),
+            _field("net_weight", "Net Weight", value_type="quantity"),
+            _field("tare_weight", "Tare Weight", value_type="quantity"),
+        ],
+        table_templates=[
+            DocumentTableTemplateSchemaOut(
+                template_key="packing_lines",
+                label="Packing Lines",
+                description="Packed goods, packages, and gross, net, or tare weight rows.",
+                min_occurrences=0,
+                columns=[
+                    _column("quantity_and_description_of_goods", "Quantity and Description of Goods", required=True),
+                    _column("package", "Package"),
+                    _column("gross_wt", "Gross Weight", value_type="quantity"),
+                    _column("net_wt", "Net Weight", value_type="quantity"),
+                    _column("tare_wt", "Tare Weight", value_type="quantity"),
+                ],
+            )
+        ],
+    ),
+    DocumentKindSchemaOut(
         document_kind="DELIVERY_CONFIRMATION",
         label="Delivery Confirmation",
         document_family="LOGISTICS",
@@ -2022,6 +2135,7 @@ def _controlled_facets_for_kind(document_kind: str) -> tuple[DocumentFacetSchema
         "DELIVERY_CONFIRMATION",
         "DISPATCH_NOTICE",
         "NOTICE_OF_READINESS",
+        "PACKING_LIST",
         "RAILCAR_TICKET",
         "TRUCK_TICKET",
         "WEIGH_TICKET",

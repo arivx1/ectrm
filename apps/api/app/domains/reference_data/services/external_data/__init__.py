@@ -20,6 +20,8 @@ from apps.api.app.domains.reference_data.services.external_data.fred_sync import
 from apps.api.app.domains.reference_data.services.external_data.kalshi_sync import sync_kalshi_series
 from apps.api.app.domains.reference_data.services.external_data.miso_sync import sync_miso_series
 from apps.api.app.domains.reference_data.services.external_data.nyiso_sync import sync_nyiso_series
+from apps.api.app.domains.reference_data.services.external_data.usda_nass_sync import sync_usda_nass_series
+from apps.api.app.domains.reference_data.services.external_data.world_bank_sync import sync_world_bank_series
 
 __all__ = [
     "sync_caiso_series",
@@ -34,4 +36,6 @@ __all__ = [
     "sync_kalshi_series",
     "sync_miso_series",
     "sync_nyiso_series",
+    "sync_usda_nass_series",
+    "sync_world_bank_series",
 ]

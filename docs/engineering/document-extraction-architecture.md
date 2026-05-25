@@ -49,13 +49,23 @@ Keep four ideas separate:
 The current runtime is intentionally narrower than the target model:
 
 - uploads accept validated PDFs only
-- one `DocumentIngestion` currently represents the uploaded PDF packet
+- `DocumentIngestion` represents the uploaded PDF file or packet, not
+  necessarily one business document
+- `DocumentLogicalDocument` stores the first persisted packet split: sequence,
+  logical-document key, page range, classification status, review status, and
+  split provenance back to source page ids and page numbers
 - `DocumentIngestionPage` stores page-level classification, header fields,
   table blocks, raw text, review state, and processor provenance
 - the schema registry exposes document-kind fields, table templates, facets,
   extraction objects, validation rules, and review rules
+- document AI assistance is gated by a configurable classifier-confidence
+  threshold; deterministic page scoring runs first and pages below the
+  effective threshold are eligible for the selected AI processor; the Library
+  uploader can hold a temporary session override over the system default until
+  logout
 - `analysis_summary` now includes the first artifact/structure handoff:
-  `artifact_profile`, `structure_profile`, and `extraction_plan`
+  `artifact_profile`, `structure_profile`, logical-document packet metadata,
+  and `extraction_plan`
 
 That is enough to make the next steps explicit without adding premature
 database tables for every canonical output shape.
@@ -569,8 +579,9 @@ increase straight-through processing, but only with audit and rollback.
 ## Next Work Packages
 
 1. Persist artifact profiles and structure objects outside `analysis_summary`.
-2. Introduce logical documents so one PDF, email, or workbook can contain many
-   classified business documents.
+2. Extend the logical-document foundation beyond PDF page ranges so email,
+   workbook sheets, Word sections, and attachments can each contribute
+   classified business-document boundaries.
 3. Add extraction-run, extracted-field, extracted-table, and extracted-cell
    audit tables.
 4. Add document-reference rows and deterministic reference resolvers.

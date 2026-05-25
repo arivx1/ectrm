@@ -6,6 +6,10 @@ export type AuthenticatedUser = {
   user_id: string
   email: string
   display_name: string
+  first_name: string | null
+  last_name: string | null
+  preferred_timezone: string | null
+  primary_location: string | null
   role: string
   default_assistant_persona: AssistantPersona
   assistant_context_blurb: string | null
@@ -13,6 +17,10 @@ export type AuthenticatedUser = {
 
 export type UpdateCurrentUserProfileInput = {
   display_name?: string
+  first_name?: string | null
+  last_name?: string | null
+  preferred_timezone?: string | null
+  primary_location?: string | null
   default_assistant_persona?: AssistantPersona
   assistant_context_blurb?: string | null
 }

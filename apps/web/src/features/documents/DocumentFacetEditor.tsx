@@ -69,6 +69,7 @@ const FALLBACK_DOCUMENT_FACETS: DocumentFacetSchemaRecord[] = [
     ],
   },
 ]
+const SYSTEM_ONLY_FACET_KEYS = new Set(['document_type'])
 
 type DocumentFacetEditorProps = {
   documentId: string
@@ -88,6 +89,7 @@ export function DocumentFacetEditor({
   onChange,
 }: DocumentFacetEditorProps) {
   const schemas = facetSchemas?.length ? facetSchemas : FALLBACK_DOCUMENT_FACETS
+  const editableSchemas = schemas.filter((schema) => !SYSTEM_ONLY_FACET_KEYS.has(schema.facet_key))
   const activeValues = activeDocumentFacetValues(values)
 
   function selectedCodesFor(facetKey: string): Set<string> {
@@ -158,7 +160,7 @@ export function DocumentFacetEditor({
       </div>
 
       <div className="document-facet-grid">
-        {schemas.map((schema) => {
+        {editableSchemas.map((schema) => {
           const selectedCodes = selectedCodesFor(schema.facet_key)
           return (
             <fieldset key={schema.facet_key} className="document-facet-group">

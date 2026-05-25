@@ -217,6 +217,10 @@ def resolve_prompt_user(
     return AssistantPromptUser(
         user_id=record.user_id,
         display_name=record.display_name,
+        first_name=record.first_name,
+        last_name=record.last_name,
+        preferred_timezone=record.preferred_timezone,
+        primary_location=record.primary_location,
         role=record.role,
         email=record.email,
         default_persona=normalize_assistant_persona_key(record.default_assistant_persona),

@@ -9,6 +9,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from apps.api.app.domains.documents.services.document_action_approval_requests import (
+    list_document_action_approval_requests,
+)
+from apps.api.app.domains.documents.services.document_action_approval_requests import (
     approve_document_action_approval_request,
 )
 from apps.api.app.domains.documents.services.document_action_approval_requests import (
@@ -16,6 +19,10 @@ from apps.api.app.domains.documents.services.document_action_approval_requests i
 )
 from apps.api.app.domains.documents.services.document_action_approval_requests import (
     stage_document_action_approval_request,
+)
+from apps.api.app.domains.documents.services.document_candidate_actions import (
+    execute_selected_document_record_candidate_attach,
+    stage_selected_document_record_candidate_approval_request,
 )
 from apps.api.app.models import Base
 from apps.api.app.models.document_action_approval_request import DocumentActionApprovalRequest
@@ -222,6 +229,175 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
         self.assertEqual(len(requests), 1)
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].payload["request"]["status"], "PENDING")
+
+    def test_stage_approval_request_is_idempotent_while_pending(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-APR-150")
+            document, page = self._seed_verified_document(
+                document_id="DOC-APR-150",
+                document_kind="INVOICE",
+                header_fields=[
+                    {"field_key": "invoice_number", "value": "INV-APR-150"},
+                    {"field_key": "trade_id", "value": "TRD-APR-150"},
+                    {"field_key": "invoice_date", "value": "2026-04-14"},
+                    {"field_key": "due_date", "value": "2026-04-20"},
+                    {"field_key": "counterparty", "value": "Shell Trading"},
+                    {"field_key": "total_amount", "value": "99000"},
+                ],
+            )
+            session.add_all([trade, document, page])
+            session.commit()
+
+            first = stage_document_action_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                request_comment="Please confirm.",
+            )
+            second = stage_document_action_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                request_comment="Duplicate click.",
+            )
+            listed = list_document_action_approval_requests(session, status_filter="PENDING")
+            first_request_id = first.request_id
+            second_request_id = second.request_id
+            session.commit()
+
+        self.assertEqual(first_request_id, second_request_id)
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0].request_comment, "Please confirm.")
+
+    def test_execute_selected_candidate_attach_links_high_confidence_invoice(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-SEL-100")
+            invoice = TradeInvoice(
+                trade_id=trade.trade_id,
+                delivery_id=None,
+                leg_no=None,
+                invoice_number="INV-SEL-100",
+                invoice_currency_code="USD",
+                billed_quantity=None,
+                quantity_unit_code=None,
+                invoice_amount=Decimal("125000"),
+                status="ISSUED",
+                issued_at=datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc),
+                due_at=datetime(2026, 4, 20, 0, 0, tzinfo=timezone.utc),
+                dispute_reason=None,
+                notes=None,
+                created_at=datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc),
+                created_by="tester",
+                updated_at=datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc),
+                updated_by="tester",
+                version=1,
+            )
+            document, page = self._seed_verified_document(
+                document_id="DOC-SEL-100",
+                document_kind="INVOICE",
+                header_fields=[
+                    {"field_key": "invoice_number", "value": "INV-SEL-100"},
+                    {"field_key": "trade_id", "value": "TRD-SEL-100"},
+                    {"field_key": "invoice_date", "value": "2026-04-14"},
+                    {"field_key": "due_date", "value": "2026-04-20"},
+                    {"field_key": "counterparty", "value": "Shell Trading"},
+                    {"field_key": "total_amount", "value": "125000"},
+                ],
+            )
+            session.add_all([trade, invoice, document, page])
+            session.commit()
+            session.refresh(invoice)
+            invoice_id = str(invoice.id)
+
+            result = execute_selected_document_record_candidate_attach(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                record_type="TRADE_INVOICE",
+                record_id=invoice_id,
+            )
+            session.commit()
+            links = session.execute(
+                select(DocumentRecordLink).where(DocumentRecordLink.document_id == document.document_id)
+            ).scalars().all()
+
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0].record_type, "TRADE_INVOICE")
+        self.assertEqual(links[0].record_id, invoice_id)
+        self.assertTrue(any(link.record_label == "Invoice INV-SEL-100" for link in result.record_links))
+
+    def test_selected_low_confidence_candidate_can_be_approved_and_attached(self) -> None:
+        invoice_id: str | None = None
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-APR-175")
+            invoice = TradeInvoice(
+                trade_id=trade.trade_id,
+                delivery_id=None,
+                leg_no=None,
+                invoice_number="INV-APR-175",
+                invoice_currency_code="USD",
+                billed_quantity=None,
+                quantity_unit_code=None,
+                invoice_amount=Decimal("99000"),
+                status="ISSUED",
+                issued_at=datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc),
+                due_at=datetime(2026, 4, 20, 0, 0, tzinfo=timezone.utc),
+                dispute_reason=None,
+                notes=None,
+                created_at=datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc),
+                created_by="tester",
+                updated_at=datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc),
+                updated_by="tester",
+                version=1,
+            )
+            document, page = self._seed_verified_document(
+                document_id="DOC-APR-175",
+                document_kind="INVOICE",
+                header_fields=[
+                    {"field_key": "trade_id", "value": "TRD-APR-175"},
+                    {"field_key": "counterparty", "value": "Shell Trading"},
+                    {"field_key": "total_amount", "value": "99000"},
+                ],
+            )
+            session.add_all([trade, invoice, document, page])
+            session.commit()
+            session.refresh(invoice)
+            invoice_id = str(invoice.id)
+
+            with self.assertRaisesRegex(ValueError, "requires approval"):
+                execute_selected_document_record_candidate_attach(
+                    session,
+                    document_id=document.document_id,
+                    actor_id="reviewer",
+                    record_type="TRADE_INVOICE",
+                    record_id=invoice_id,
+                )
+
+            staged = stage_selected_document_record_candidate_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                record_type="TRADE_INVOICE",
+                record_id=invoice_id,
+                request_comment="Reviewer selected the matching invoice.",
+            )
+            self.assertEqual(staged.target_record_type, "TRADE_INVOICE")
+            self.assertEqual(staged.target_record_id, invoice_id)
+            self.assertIn("selected_candidate", staged.action_plan_snapshot["payload"])
+
+            approve_document_action_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="approver",
+                decision_comment="Approved selected invoice attachment.",
+            )
+            links = session.execute(
+                select(DocumentRecordLink).where(DocumentRecordLink.document_id == document.document_id)
+            ).scalars().all()
+            linked_records = [(link.record_type, link.record_id) for link in links]
+            session.commit()
+
+        self.assertEqual(linked_records, [("TRADE_INVOICE", invoice_id)])
 
     def test_approve_request_executes_action_and_marks_request_executed(self) -> None:
         with self.SessionLocal() as session:

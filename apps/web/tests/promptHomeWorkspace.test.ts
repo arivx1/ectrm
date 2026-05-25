@@ -13,6 +13,7 @@ import type {
 import { shouldAutoEnsurePromptHomeData } from "../src/workspaces/prompt/promptHomeAutoLoad";
 import { summarizePromptHomeAvailableTokens } from "../src/workspaces/prompt/promptHomeAvailableTokens";
 import {
+  buildPromptHomePricesCardViewModel,
   filterPromptHomeDisplayPriceIndices,
   formatPromptHomePriceDate,
   formatPromptHomePriceDateTime,
@@ -23,6 +24,7 @@ import {
   listPromptHomePriceQuoteTypes,
   listPromptHomePriceProviders,
   nextPromptHomePriceSortState,
+  PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER,
   selectPromptHomeDisplayPriceIndices,
   sortPromptHomeDisplayPriceIndices,
 } from "../src/workspaces/prompt/promptHomePrices";
@@ -196,29 +198,22 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     markup,
     /id="prompt-home-prices-panel" class="prompt-home-prices-card-body"/,
   );
-  assert.match(markup, /Product/);
-  assert.match(markup, /Location/);
-  assert.match(markup, /Price/);
-  assert.match(markup, /Unit/);
-  assert.match(markup, /Currency/);
-  assert.match(markup, /Date/);
-  assert.match(markup, /Time/);
-  assert.match(markup, /Updated/);
-  assert.match(markup, /Source/);
-  assert.match(markup, /aria-label="Sort prices by Product"/);
-  assert.match(markup, /aria-label="Sort prices by Updated"/);
-  assert.match(markup, /NATGAS/);
-  assert.match(markup, /HENRY_HUB/);
-  assert.match(markup, /No mark yet/);
-  assert.match(markup, /MMBTU/);
-  assert.match(markup, /USD/);
-  assert.doesNotMatch(markup, /HH_NATGAS/);
+  assert.match(markup, /No latest price marks/);
+  assert.match(
+    markup,
+    /The typed pricing snapshot did not return marks for the active price indices yet\./,
+  );
+  assert.doesNotMatch(markup, /aria-label="Sort prices by Product"/);
+  assert.doesNotMatch(markup, /aria-label="Sort prices by Updated"/);
+  assert.doesNotMatch(markup, /No mark yet/);
   assert.match(markup, /Market price marks/);
   assert.match(markup, /0 latest marks · 1 active index/);
   assert.match(markup, /Code, market, commodity/);
   assert.match(markup, /All providers/);
+  assert.match(markup, /All commodities/);
+  assert.match(markup, /All indices/);
   assert.match(markup, /Filter by mark status/);
-  assert.match(markup, /Showing all 1 active index/);
+  assert.match(markup, /0 latest marks across 1 active index/);
   assert.match(markup, /Open Dashboard/);
   assert.doesNotMatch(markup, /Desk clocks and calendars/);
   assert.match(
@@ -553,6 +548,125 @@ test("prompt home prices prefer indices with latest synced marks", () => {
   );
 });
 
+test("prompt home prices map pricing service output into a card view model", () => {
+  const indices: PriceIndexRecord[] = [
+    {
+      code: "BRENT_SPOT_D",
+      name: "Brent Spot Daily",
+      description: null,
+      is_active: true,
+      commodity_code: "BRENT",
+      currency_code: "USD",
+      unit_code: "BBL",
+      provider: "EIA",
+      market: "EUROPE",
+      location_code: null,
+    },
+    {
+      code: "CAISO_SP15_RT5M",
+      name: "CAISO SP15 Real-Time 5-Minute Hub LMP",
+      description: null,
+      is_active: true,
+      commodity_code: "POWER",
+      currency_code: "USD",
+      unit_code: "MWH",
+      provider: "CAISO",
+      market: "CAISO",
+      location_code: null,
+    },
+    {
+      code: "INACTIVE_INDEX",
+      name: "Inactive Index",
+      description: null,
+      is_active: false,
+      commodity_code: "POWER",
+      currency_code: "USD",
+      unit_code: "MWH",
+      provider: "CAISO",
+      market: "CAISO",
+      location_code: null,
+    },
+  ];
+
+  const viewModel = buildPromptHomePricesCardViewModel(
+    {
+      priceIndices: indices,
+      latestMarks: [
+        priceObservation({
+          id: 1,
+          price_index_code: "BRENT_SPOT_D",
+          observation_date: "2026-05-16",
+          value: 72.25,
+        }),
+        priceObservation({
+          id: 2,
+          price_index_code: "BRENT_SPOT_D",
+          observation_date: "2026-05-18",
+          value: 73.44,
+        }),
+        priceObservation({
+          id: 3,
+          price_index_code: "CAISO_SP15_RT5M",
+          observation_date: "2026-05-22",
+          value: -6.75,
+          unit_code: "MWH",
+          source_provider: "CAISO",
+          source_series_id: "SP15",
+          source_revision: "2026-05-22T13:05:00:ptid:1",
+          downloaded_at: "2026-05-22T16:40:00Z",
+        }),
+        priceObservation({
+          id: 4,
+          price_index_code: "UNKNOWN_INDEX",
+          observation_date: "2026-05-23",
+          value: 99,
+        }),
+      ],
+    },
+    {
+      filters: {
+        query: "",
+        provider: PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER,
+        markFilter: "all",
+      },
+      sortState: null,
+    },
+  );
+
+  assert.equal(viewModel.status, "ready");
+  assert.equal(viewModel.activePriceIndexCount, 2);
+  assert.equal(viewModel.latestMarkCount, 2);
+  assert.equal(viewModel.latestMarksByCode.BRENT_SPOT_D?.id, 2);
+  assert.deepEqual(
+    viewModel.rows.map((row) => row.priceIndexCode),
+    ["CAISO_SP15_RT5M", "BRENT_SPOT_D"],
+  );
+  assert.deepEqual(
+    {
+      product: viewModel.rows[0]?.product,
+      location: viewModel.rows[0]?.location,
+      price: viewModel.rows[0]?.price,
+      unit: viewModel.rows[0]?.unit,
+      currency: viewModel.rows[0]?.currency,
+      date: viewModel.rows[0]?.date,
+      time: viewModel.rows[0]?.time,
+      source: viewModel.rows[0]?.source,
+      hasLatestMark: viewModel.rows[0]?.hasLatestMark,
+    },
+    {
+      product: "POWER",
+      location: "SP15",
+      price: "-6.75",
+      unit: "MWH",
+      currency: "USD",
+      date: "May 22, 2026",
+      time: "1:05 PM UTC",
+      source: "CAISO · SP15",
+      hasLatestMark: true,
+    },
+  );
+});
+
 test("prompt home price filters narrow by query provider and mark state", () => {
   const indices: PriceIndexRecord[] = [
     {
@@ -634,6 +748,24 @@ test("prompt home price filters narrow by query provider and mark state", () => 
       quoteType: "FUTURE",
     }).map((priceIndex) => priceIndex.code),
     ["CAISO_NP15_RT5M"],
+  );
+  assert.deepEqual(
+    filterPromptHomeDisplayPriceIndices(indices, latestMarksByCode, {
+      query: "",
+      provider: "ALL",
+      markFilter: "all",
+      commodityCode: "POWER",
+    }).map((priceIndex) => priceIndex.code),
+    ["CAISO_NP15_RT5M"],
+  );
+  assert.deepEqual(
+    filterPromptHomeDisplayPriceIndices(indices, latestMarksByCode, {
+      query: "",
+      provider: "ALL",
+      markFilter: "all",
+      priceIndexCode: "BRENT_SPOT_D",
+    }).map((priceIndex) => priceIndex.code),
+    ["BRENT_SPOT_D"],
   );
   assert.deepEqual(
     filterPromptHomeDisplayPriceIndices(indices, latestMarksByCode, {
@@ -854,7 +986,7 @@ test("prompt home price marks format the price date and time", () => {
   );
 });
 
-test("prompt home renders every active price index in the prices card", () => {
+test("prompt home prices view model can show every active missing mark", () => {
   const priceIndices = Array.from({ length: 8 }, (_, index) => ({
     code: `PRICE_INDEX_${index + 1}`,
     name: `Price Index ${index + 1}`,
@@ -868,21 +1000,34 @@ test("prompt home renders every active price index in the prices card", () => {
     location_code: `LOC_${index + 1}`,
   }));
 
-  const markup = renderToStaticMarkup(
-    createElement(PromptHomeWorkspace, {
-      authSession: null,
-      health: "ok",
-      counts: defaultCounts,
+  const viewModel = buildPromptHomePricesCardViewModel(
+    {
       priceIndices,
-      onOpenView: () => undefined,
-    }),
+      latestMarks: [],
+    },
+    {
+      filters: {
+        query: "",
+        provider: PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER,
+        markFilter: "missing_marks",
+      },
+      sortState: null,
+    },
   );
 
+  assert.equal(viewModel.status, "ready");
+  assert.equal(viewModel.latestMarkCount, 0);
+  assert.equal(viewModel.rows.length, 8);
   for (const priceIndex of priceIndices) {
-    assert.match(markup, new RegExp(priceIndex.location_code ?? ""));
-    assert.doesNotMatch(markup, new RegExp(priceIndex.code));
+    assert.ok(
+      viewModel.rows.some(
+        (row) =>
+          row.priceIndexCode === priceIndex.code &&
+          row.location === priceIndex.location_code &&
+          row.price === "No mark yet",
+      ),
+    );
   }
-  assert.match(markup, /Showing all 8 active indices/);
 });
 
 function priceObservation(

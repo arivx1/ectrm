@@ -2096,6 +2096,10 @@ async def _consult_managed_agent(
     prompt_user = AssistantPromptUser(
         user_id=actor.user_id,
         display_name=actor.display_name,
+        first_name=actor.first_name,
+        last_name=actor.last_name,
+        preferred_timezone=actor.preferred_timezone,
+        primary_location=actor.primary_location,
         role=actor.role,
         email=actor.email,
         default_persona=actor.default_assistant_persona,
@@ -2196,6 +2200,10 @@ async def _enlist_managed_agent(
     delegated_user = AssistantPromptUser(
         user_id=actor.user_id,
         display_name=actor.display_name,
+        first_name=actor.first_name,
+        last_name=actor.last_name,
+        preferred_timezone=actor.preferred_timezone,
+        primary_location=actor.primary_location,
         role=delegated_role,
         email=actor.email,
         default_persona=actor.default_assistant_persona,

@@ -210,3 +210,39 @@ test("prompt home reset cards resolve to the immutable system card order", () =>
     },
   );
 });
+
+test("prompt home card rebuilds preserve saved card parameters and filters", () => {
+  const cards = buildPromptHomeCardsFromOrderAndHidden(
+    ["prices", "map"],
+    [],
+    [
+      {
+        cardId: "prices",
+        visible: true,
+        placement: { order: 0, columnSpan: 2, rowSpan: 1 },
+        parameters: { price_mark_status: "with_marks", price_sort: "updated_desc" },
+        filters: { price_index_code: "HH_NATGAS", commodity_code: "NATGAS" },
+        dataBindings: ["latest_price_marks", "market_price_indices"],
+      },
+      {
+        cardId: "map",
+        visible: true,
+        placement: { order: 1, columnSpan: 2, rowSpan: 2 },
+        parameters: { map_record_limit: 250 },
+        filters: { geography: ["North America"] },
+        dataBindings: ["asset_map", "spatial_features", "weather_overlays"],
+      },
+    ],
+  );
+
+  assert.deepEqual(cards[0]?.parameters, {
+    price_mark_status: "with_marks",
+    price_sort: "updated_desc",
+  });
+  assert.deepEqual(cards[0]?.filters, {
+    price_index_code: "HH_NATGAS",
+    commodity_code: "NATGAS",
+  });
+  assert.deepEqual(cards[1]?.parameters, { map_record_limit: 250 });
+  assert.deepEqual(cards[1]?.filters, { geography: ["North America"] });
+});

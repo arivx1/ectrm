@@ -7,8 +7,15 @@ import type {
   DocumentFacetAssignmentRecord,
   DocumentIngestionRecord,
   DocumentIngestionUnderstandingRecord,
+  DocumentProcessorRuntimeSettingsRecord,
+  DocumentWorkflowRecord,
 } from '../src/shared/models'
 import { LibraryWorkspace } from '../src/workspaces/library/LibraryWorkspace'
+import {
+  canExecuteDocumentActionPlanWorkflow,
+  canRequestDocumentActionApproval,
+  workflowActionButtonLabel,
+} from '../src/workspaces/library/libraryWorkspaceSupport'
 
 const {
   usePersistentCollapsibleCardStateMock,
@@ -31,6 +38,36 @@ vi.mock('../src/features/documents/useDocumentIngestionController', () => ({
 vi.mock('../src/workspaces/library/libraryFolderState', () => ({
   useDocumentLibraryFolderState: useDocumentLibraryFolderStateMock,
 }))
+
+const PROCESSOR_SETTINGS = {
+  enabled: true,
+  default_provider: 'openai',
+  effective_default_provider: 'openai',
+  configured_provider_count: 1,
+  ai_processing_confidence_threshold: 0.62,
+  gmail_inbox: {
+    enabled: true,
+    configured: true,
+    provider: 'gmail_api',
+    account_email: 'ops-inbox@example.com',
+    query: 'has:attachment filename:pdf in:inbox',
+    max_messages_per_import: 10,
+    auth_status: 'configured',
+  },
+  providers: [
+    {
+      provider: 'openai',
+      label: 'OpenAI API',
+      enabled: true,
+      configured: true,
+      is_default: true,
+      default_model: 'gpt-5-mini',
+      available_models: ['gpt-5-mini', 'gpt-5'],
+      base_url: 'https://api.openai.com/v1',
+      setup_env_var: 'OPENAI_API_KEY',
+    },
+  ],
+} satisfies DocumentProcessorRuntimeSettingsRecord
 
 function buildDocumentUnderstanding(
   overrides: Partial<DocumentIngestionUnderstandingRecord> = {},
@@ -238,11 +275,51 @@ function buildFacetValue(overrides: Partial<DocumentFacetAssignmentRecord> = {})
   }
 }
 
+function buildWorkflow(overrides: Partial<DocumentWorkflowRecord> = {}): DocumentWorkflowRecord {
+  return {
+    workflow_id: 'match_existing_record',
+    label: 'Match Existing Record',
+    document_kind: 'INVOICE',
+    document_type_label: 'Invoice',
+    description: 'Attach this document to a matched invoice.',
+    status: 'READY',
+    recommended: true,
+    action_type: 'ATTACH_EXISTING_RECORD',
+    operation_type: 'link_document_to_record',
+    candidate_state: 'ATTACH_READY',
+    record_effect: 'Attach document evidence to existing trade invoice.',
+    target: {
+      record_type: 'TRADE_INVOICE',
+      record_id: '42',
+      record_label: 'Invoice INV-42',
+      existing_record: true,
+    },
+    owner: {
+      record_type: 'TRADE',
+      record_id: 'TRD-42',
+      record_label: 'Trade TRD-42',
+      existing_record: true,
+    },
+    required_owner_record_types: [],
+    missing_evidence: [],
+    governance_status: 'AUTO_EXECUTION_ELIGIBLE',
+    recommended_execution_mode: 'AUTO',
+    approval_required: false,
+    risk_flags: [],
+    disabled_reason: null,
+    reasons: ['The document is verified and linked to a high-confidence existing record.'],
+    ...overrides,
+  }
+}
+
 function buildController(overrides: Partial<DocumentIngestionController> = {}): DocumentIngestionController {
   return {
     documents: [buildDocument()],
     processorSettings: null,
     reprocessProviderByDocument: {},
+    systemAiConfidenceThresholdPercent: 46,
+    aiConfidenceThresholdOverridePercent: null,
+    effectiveAiConfidenceThresholdPercent: 46,
     schemaRegistry: {
       version: 'doc-schema-v1',
       document_kinds: [
@@ -319,6 +396,7 @@ function buildController(overrides: Partial<DocumentIngestionController> = {}): 
     setDisplayName: () => undefined,
     setSelectedProcessorProvider: () => undefined,
     setSelectedProcessorModel: () => undefined,
+    setAiConfidenceThresholdOverridePercent: () => undefined,
     setDocumentReprocessProvider: () => undefined,
     toggleDocumentExpanded: () => undefined,
     updateSelectedFile: () => undefined,
@@ -360,16 +438,21 @@ function buildController(overrides: Partial<DocumentIngestionController> = {}): 
   }
 }
 
+function mockLibraryCollapsibleCards(expandedByKey: Record<string, boolean> = {}) {
+  usePersistentCollapsibleCardStateMock.mockImplementation((cardKey: string, defaultExpanded: boolean) => ({
+    expanded: expandedByKey[cardKey] ?? defaultExpanded,
+    hasPersistedValue: Object.prototype.hasOwnProperty.call(expandedByKey, cardKey),
+    setExpanded: () => undefined,
+  }))
+}
+
 describe('LibraryWorkspace', () => {
   beforeEach(() => {
     usePersistentCollapsibleCardStateMock.mockReset()
     useDocumentIngestionControllerMock.mockReset()
     useDocumentLibraryFolderStateMock.mockReset()
 
-    usePersistentCollapsibleCardStateMock.mockReturnValue({
-      expanded: false,
-      setExpanded: () => undefined,
-    })
+    mockLibraryCollapsibleCards()
     useDocumentLibraryFolderStateMock.mockReturnValue({
       folders: [],
       assignments: {},
@@ -383,7 +466,127 @@ describe('LibraryWorkspace', () => {
     })
   })
 
+  it('labels only high-confidence existing-record action plans as attachable', () => {
+    const attachWorkflow = buildWorkflow()
+    const approvalWorkflow = buildWorkflow({
+      workflow_id: 'create_invoice_from_document',
+      label: 'Create Invoice From Document',
+      action_type: 'CREATE_RECORD_FROM_DOCUMENT',
+      operation_type: 'issue_trade_invoice',
+      candidate_state: 'CREATE_CANDIDATE',
+      governance_status: 'HUMAN_CONFIRMATION_REQUIRED',
+      recommended_execution_mode: 'MANUAL',
+      approval_required: true,
+      risk_flags: ['CREATES_NEW_RECORD', 'FINANCIAL_MUTATION'],
+      disabled_reason: 'Human approval is required before this workflow can mutate records.',
+    })
+
+    expect(canExecuteDocumentActionPlanWorkflow(attachWorkflow)).toBe(true)
+    expect(workflowActionButtonLabel(attachWorkflow)).toBe('Attach')
+    expect(canExecuteDocumentActionPlanWorkflow(approvalWorkflow)).toBe(false)
+    expect(canRequestDocumentActionApproval(approvalWorkflow)).toBe(true)
+    expect(workflowActionButtonLabel(approvalWorkflow)).toBe('Approval Required')
+  })
+
+  it('surfaces document load failures in the main empty state', () => {
+    mockLibraryCollapsibleCards({ 'library.document-list-card': true })
+    useDocumentIngestionControllerMock.mockReturnValue(
+      buildController({
+        documents: [],
+        loadError: 'Unexpected server error.',
+      }),
+    )
+
+    const markup = renderToStaticMarkup(
+      createElement(LibraryWorkspace, {
+        authSession: {
+          accessToken: 'token',
+          refreshToken: 'refresh',
+          expiresAt: '2026-05-16T22:00:00Z',
+          user: {
+            id: 'doc_admin',
+            email: 'doc_admin@example.com',
+            name: 'Doc Admin',
+            role: 'OPS_ADMIN',
+          },
+        },
+        formatDate: (value: string | null | undefined) => value ?? '',
+        onOpenOperationsWorkspace: () => undefined,
+      }),
+    )
+
+    expect(markup).toContain('Unable to load uploaded documents')
+    expect(markup).toContain('Unexpected server error.')
+    expect(markup).not.toContain('Open the uploader card to add the first PDF into the library.')
+  })
+
+  it('hides the document list behind a collapsed card by default', () => {
+    useDocumentIngestionControllerMock.mockReturnValue(buildController())
+
+    const markup = renderToStaticMarkup(
+      createElement(LibraryWorkspace, {
+        authSession: {
+          accessToken: 'token',
+          refreshToken: 'refresh',
+          expiresAt: '2026-05-16T22:00:00Z',
+          user: {
+            id: 'doc_admin',
+            email: 'doc_admin@example.com',
+            name: 'Doc Admin',
+            role: 'OPS_ADMIN',
+          },
+        },
+        formatDate: (value: string | null | undefined) => value ?? '',
+        onOpenOperationsWorkspace: () => undefined,
+      }),
+    )
+
+    expect(markup).toContain('Document list')
+    expect(markup).toContain('library-document-list-card-panel')
+    expect(markup).toContain('aria-expanded="false"')
+    expect(markup).not.toContain('Set document type for 225186 VESSEL NOMINATION')
+    expect(markup).not.toContain('Resize Name column')
+  })
+
+  it('renders the temporary session threshold setting in the upload card', () => {
+    mockLibraryCollapsibleCards({ 'library.upload-card': true })
+    useDocumentIngestionControllerMock.mockReturnValue(
+      buildController({
+        processorSettings: PROCESSOR_SETTINGS,
+        selectedProcessorProvider: 'openai',
+        selectedProcessorModel: 'gpt-5-mini',
+        systemAiConfidenceThresholdPercent: 62,
+        aiConfidenceThresholdOverridePercent: 74,
+        effectiveAiConfidenceThresholdPercent: 74,
+      }),
+    )
+
+    const markup = renderToStaticMarkup(
+      createElement(LibraryWorkspace, {
+        authSession: {
+          accessToken: 'token',
+          refreshToken: 'refresh',
+          expiresAt: '2026-05-16T22:00:00Z',
+          user: {
+            id: 'doc_admin',
+            email: 'doc_admin@example.com',
+            name: 'Doc Admin',
+            role: 'OPS_ADMIN',
+          },
+        },
+        formatDate: (value: string | null | undefined) => value ?? '',
+        onOpenOperationsWorkspace: () => undefined,
+      }),
+    )
+
+    expect(markup).toContain('AI Assist Below 74%')
+    expect(markup).toContain('Temporary session override. It clears when you log out.')
+    expect(markup).toContain('Use System Default')
+    expect(markup).toContain('OpenAI API (gpt-5-mini) will handle document analysis when classifier confidence is below 74%.')
+  })
+
   it('renders an inline type picker in the library list for uploaded documents', () => {
+    mockLibraryCollapsibleCards({ 'library.document-list-card': true })
     useDocumentIngestionControllerMock.mockReturnValue(
       buildController({
         documents: [

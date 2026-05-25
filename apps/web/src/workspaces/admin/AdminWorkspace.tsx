@@ -16,6 +16,7 @@ import { AssistantApprovalInboxPanel } from './AssistantApprovalInboxPanel'
 import { AssistantControlTowerPanel } from './AssistantControlTowerPanel'
 import { AssistantOutcomeMetricsPanel } from './AssistantOutcomeMetricsPanel'
 import { CodexTaskPanel } from './CodexTaskPanel'
+import { HomeViewAdminPanel } from './HomeViewAdminPanel'
 import { ProjectionMonitoringPanel } from './ProjectionMonitoringPanel'
 import { RoadmapAdminPanel } from './RoadmapAdminPanel'
 import { UserManagementPanel } from './UserManagementPanel'
@@ -1630,6 +1631,12 @@ export function AdminWorkspace({
         formatDate={formatDate}
         onOpenSettings={onOpenSettings}
         onRoadmapPublished={onRoadmapPublished}
+      />
+
+      <HomeViewAdminPanel
+        authSession={authSession}
+        formatDate={formatDate}
+        onOpenSettings={onOpenSettings}
       />
 
       <AssistantControlTowerPanel

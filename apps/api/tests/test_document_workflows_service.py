@@ -19,6 +19,7 @@ from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
+from apps.api.app.models.trade import Trade
 
 
 class DocumentWorkflowsServiceTests(unittest.TestCase):
@@ -46,6 +47,7 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
             session.query(ExternalDataRun).delete()
             session.query(DocumentIngestionPage).delete()
             session.query(DocumentIngestion).delete()
+            session.query(Trade).delete()
             session.query(ReferencePriceIndex).delete()
             session.commit()
 
@@ -81,6 +83,7 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
         *,
         document_id: str = "DOC-PRICE-1",
         document_kind: str = "PRICE_PUBLICATION",
+        header_fields: list[dict[str, object]] | None = None,
         table_blocks: list[dict[str, object]] | None = None,
     ) -> DocumentIngestion:
         now = datetime(2026, 4, 15, 10, 0, tzinfo=timezone.utc)
@@ -119,7 +122,7 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
             document_subtype=None,
             classification_confidence=0.99,
             classification_payload={},
-            header_fields=[
+            header_fields=header_fields or [
                 {
                     "field_key": "publication_date",
                     "label": "Publication Date",
@@ -192,8 +195,61 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
         session.add_all([document, page])
         return document
 
+    def _seed_trade(self, session, *, trade_id: str = "TRD-WF-100") -> Trade:
+        now = datetime(2026, 4, 14, 12, 0, tzinfo=timezone.utc)
+        record = Trade(
+            trade_id=trade_id,
+            originating_option_trade_id=None,
+            external_trade_id=None,
+            source_system="ICE",
+            created_at=now,
+            updated_at=now,
+            execution_timestamp=now,
+            trade_date=date(2026, 4, 14),
+            effective_start_date=date(2026, 4, 15),
+            effective_end_date=date(2026, 4, 30),
+            quality_spec="ULSD 10 PPM",
+            unit_of_measure="BBL",
+            trade_currency_code="USD",
+            location_code="HOUSTON",
+            delivery_start=date(2026, 4, 15),
+            delivery_end=date(2026, 4, 30),
+            price_unit_code="USD/BBL",
+            instrument_type="LINEAR",
+            option_type=None,
+            option_style=None,
+            option_strike_price=None,
+            option_expiration_date=None,
+            trade_nature="PHYSICAL",
+            trade_structure="SINGLE",
+            trade_side="BUY",
+            book="GULF_PRODUCTS",
+            portfolio="DISTILLATES",
+            counterparty="Shell Trading",
+            commodity_class="REFINED_PRODUCTS",
+            commodity="ULSD",
+            pricing_type="FIXED",
+            pricing_status="PRICED",
+            confirmation_status="PENDING",
+            nomination_status="PENDING",
+            allocation_status="PENDING",
+            actualization_status="PENDING",
+            price_index_code=None,
+            price=Decimal("2.750000"),
+            volume=Decimal("1000.000000"),
+            invoice_status="PENDING",
+            payment_status="PENDING",
+            settlement_status="PENDING",
+            trader_user="trader@example.com",
+            status="ACTIVE",
+            last_event_id="evt-wf-100",
+        )
+        session.add(record)
+        return record
+
     def test_workflow_registry_assigns_process_prices_to_price_publication_report(self) -> None:
         with self.SessionLocal() as session:
+            self._seed_price_index(session)
             document = self._seed_verified_document(session)
             invoice = self._seed_verified_document(
                 session,
@@ -206,10 +262,73 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
             invoice_workflows = list_document_workflows(session, document_id=invoice.document_id)
 
         self.assertEqual(price_workflows.document_type_label, "Price Publication Report")
-        self.assertEqual([workflow.workflow_id for workflow in price_workflows.workflows], ["process_prices"])
-        self.assertEqual(price_workflows.workflows[0].label, "Process Prices")
-        self.assertEqual(invoice_workflows.workflows, [])
+        self.assertEqual([workflow.workflow_id for workflow in price_workflows.workflows], ["match_existing_record", "process_prices"])
+        self.assertEqual(price_workflows.workflows[0].label, "Match Existing Record")
+        self.assertEqual(price_workflows.workflows[0].candidate_state, "ATTACH_READY")
+        self.assertEqual(price_workflows.workflows[1].label, "Process Prices")
+        self.assertEqual(price_workflows.linkage_assessment.primary_record_type, "PRICE_INDEX")
+        self.assertEqual([workflow.workflow_id for workflow in invoice_workflows.workflows], ["create_invoice_from_document"])
+        self.assertEqual(invoice_workflows.workflows[0].status, "BLOCKED")
         self.assertEqual(invoice_workflows.empty_message, "No workflows assigned to this document type.")
+
+    def test_workflow_summary_exposes_create_invoice_candidate_under_trade(self) -> None:
+        with self.SessionLocal() as session:
+            self._seed_trade(session, trade_id="TRD-WF-200")
+            document = self._seed_verified_document(
+                session,
+                document_id="DOC-INVOICE-WF-200",
+                document_kind="INVOICE",
+                header_fields=[
+                    {"field_key": "invoice_number", "value": "INV-WF-200"},
+                    {"field_key": "trade_id", "value": "TRD-WF-200"},
+                    {"field_key": "invoice_date", "value": "2026-04-14"},
+                    {"field_key": "due_date", "value": "2026-04-20"},
+                    {"field_key": "counterparty", "value": "Shell Trading"},
+                    {"field_key": "total_amount", "value": "99000"},
+                ],
+            )
+            session.commit()
+
+            workflows = list_document_workflows(session, document_id=document.document_id)
+
+        self.assertEqual(workflows.action_plan.candidate_state, "CREATE_CANDIDATE")
+        self.assertEqual(workflows.governance.status, "HUMAN_CONFIRMATION_REQUIRED")
+        self.assertEqual([workflow.workflow_id for workflow in workflows.workflows], ["create_invoice_from_document", "match_existing_record"])
+        create_workflow = workflows.workflows[0]
+        self.assertEqual(create_workflow.status, "READY")
+        self.assertEqual(create_workflow.target.record_type, "TRADE_INVOICE")
+        self.assertEqual(create_workflow.owner.record_type, "TRADE")
+        self.assertEqual(create_workflow.owner.record_id, "TRD-WF-200")
+        self.assertTrue(create_workflow.approval_required)
+        self.assertIn("CREATES_NEW_RECORD", create_workflow.risk_flags)
+        self.assertIn("FINANCIAL_MUTATION", create_workflow.risk_flags)
+
+    def test_workflow_summary_blocks_invoice_creation_without_owner_trade(self) -> None:
+        with self.SessionLocal() as session:
+            document = self._seed_verified_document(
+                session,
+                document_id="DOC-INVOICE-WF-300",
+                document_kind="INVOICE",
+                header_fields=[
+                    {"field_key": "invoice_number", "value": "INV-WF-300"},
+                    {"field_key": "invoice_date", "value": "2026-04-14"},
+                    {"field_key": "due_date", "value": "2026-04-20"},
+                    {"field_key": "counterparty", "value": "Shell Trading"},
+                    {"field_key": "total_amount", "value": "125000"},
+                ],
+            )
+            session.commit()
+
+            workflows = list_document_workflows(session, document_id=document.document_id)
+
+        self.assertEqual(workflows.action_plan.candidate_state, "OWNER_REQUIRED")
+        self.assertEqual([workflow.workflow_id for workflow in workflows.workflows], ["create_invoice_from_document"])
+        create_workflow = workflows.workflows[0]
+        self.assertEqual(create_workflow.status, "BLOCKED")
+        self.assertEqual(create_workflow.candidate_state, "OWNER_REQUIRED")
+        self.assertEqual(create_workflow.required_owner_record_types, ["TRADE"])
+        self.assertIn("owner:TRADE", create_workflow.missing_evidence)
+        self.assertIn("confirmed owner record", create_workflow.disabled_reason)
 
     def test_execute_process_prices_writes_price_observation_and_links_document(self) -> None:
         with self.SessionLocal() as session:

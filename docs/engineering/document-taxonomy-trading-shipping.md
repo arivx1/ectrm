@@ -40,6 +40,11 @@ Use these concepts separately:
    as trade, delivery, invoice, payment, settlement, inventory lot, LC, claim,
    or workflow item.
 
+The `document_type` tag mirrors the current page-level document kind so the
+Library tag surface shows the classification alongside other controlled tags.
+It is system-derived from the classifier or reviewer-selected kind; change the
+classification itself rather than editing this tag independently.
+
 Create a new document kind only when the distinction changes behavior:
 
 - different extraction schema
@@ -67,9 +72,9 @@ the relevant document-kind contracts:
   party role, dispute state, and line charge type.
 - `BILL_OF_LADING`: transport mode, legal role, cargo status, and
   original/copy status.
-- movement evidence such as truck tickets, railcar tickets, dispatch notices,
-  delivery confirmations, notices of readiness, and weigh tickets: transport
-  mode and quantity basis.
+- movement evidence such as packing lists, truck tickets, railcar tickets,
+  dispatch notices, delivery confirmations, notices of readiness, and weigh
+  tickets: transport mode and quantity basis.
 - quality documents: quality document role.
 
 Future persisted document-facet values should be typed rows with confidence,
@@ -109,7 +114,7 @@ trades.
 | --- | --- | --- | --- |
 | Trade execution | Trade communication, deal recap, purchase order, sales order, trade confirmation, trade contract, broker confirmation | `Trade` | These documents prove or discuss the economics that should exist on a booked trade. |
 | Trade reconciliation | Broker statement | `Position` then `Trade` | These documents usually summarize many trades and are better treated as reconciliation evidence before one-to-one linkage. |
-| Logistics | Bill of lading, truck ticket, weigh ticket, delivery confirmation | `DeliveryObligation` or `DeliveryEvent` | These documents prove movement, route, timing, and actual delivered quantities. |
+| Logistics | Bill of lading, packing list, truck ticket, weigh ticket, delivery confirmation | `DeliveryObligation` or `DeliveryEvent` | These documents prove movement, route, timing, packed goods, and actual delivered quantities. |
 | Network flow | Pipeline statement | `DeliveryObligation` | Pipeline docs attach most naturally to scheduled or flowed delivery obligations keyed by nomination and path references. |
 | Market data | Price publication | `PriceIndexObservation`, then `ReferencePriceIndex` | These documents preserve the publisher evidence behind loaded commodity price observations and index definitions. |
 | Quality | Quality statement, sampling analysis, certificate of analysis, quality specification | `DeliveryObligation` or `Trade` | These documents govern delivered quality, disputes, and trade-specific quality tolerances. |
@@ -162,6 +167,7 @@ Two routing rules matter early:
 | `PRICE_PUBLICATION` | `PriceIndexObservation`, then `ReferencePriceIndex` | Preserve the publisher, index code, observation date, unit, currency, and assessed price behind loaded market-data observations. |
 | `PIPELINE_STATEMENT` | `DeliveryObligation` | Match by nomination, contract, pipeline, and path, then derive trade linkage through the delivery. |
 | `BILL_OF_LADING` | `DeliveryObligation`, then `DeliveryEvent` | Treat as shipment evidence that can later spawn a movement event. |
+| `PACKING_LIST` | `DeliveryObligation`, then `DeliveryEvent` | Treat delivery order numbers, customer references, packed goods, packages, and weights as shipment evidence for movement matching and actualization support. |
 | `TRUCK_TICKET` | `DeliveryObligation`, then `DeliveryEvent` | Use as load or unload evidence and later actualization support. |
 | `WEIGH_TICKET` | `DeliveryEvent`, then `DeliveryObligation` | Support measured-quantity actualization for a physical movement. |
 | `DELIVERY_CONFIRMATION` | `DeliveryEvent`, then `DeliveryObligation` | Mark physical completion or proof of delivery. |

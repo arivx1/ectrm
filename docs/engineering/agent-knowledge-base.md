@@ -83,6 +83,37 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-24 - Document AI Assist Uses A Configurable Confidence Gate
+
+- Type: algorithm-added
+- Domain: document ingestion, deterministic classification, and AI-assisted
+  extraction
+- Applies to: PDF uploads, document reprocessing, page-level classifier
+  confidence, and document AI processor selection
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/ingestion.py`,
+  `apps/api/app/domains/documents/services/document_processor.py`,
+  `apps/api/app/routes/documents.py`, and
+  `apps/web/src/features/documents/DocumentIngestionUploadForm.tsx`
+- Lesson: deterministic classification still runs first, and the selected
+  document AI processor is only a fallback for pages whose deterministic
+  classifier confidence is below the effective AI-assist threshold. Operators
+  can choose that threshold as a 0-100% upload control, and the Library
+  uploader keeps that value as a temporary session override over the system
+  default until logout. The backend stores the effective threshold and
+  AI-required decision in page classification payload provenance.
+- Deterministic opportunity: as reviewed outcomes accumulate, compare AI
+  assist rates, corrections, and confidence bands before changing the default
+  threshold; the threshold should remain typed configuration, not prompt text.
+- Agent autonomy impact: agents may explain why AI assistance was or was not
+  applied, but threshold changes do not let model output mutate business
+  records directly or bypass document review.
+- Tests or evidence:
+  focused document-ingestion API regressions and upload-form/API tests.
+- Follow-up: consider persisting per-user or per-workspace defaults if
+  operators need different thresholds by desk or document family.
+
 ### 2026-05-24 - Codex Solution Map Is A Routing Helper
 
 - Type: lesson
@@ -162,6 +193,154 @@ proposal form until a human owner approves the domain rule.
   separate governed action.
 - Tests or evidence:
   `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_ocr_fallback_is_used_when_native_text_is_missing apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_facet_suggester_extracts_starter_tags_from_text apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_document_facet_suggester_abstains_from_price_publication_side_and_tags_products`
+
+### 2026-05-24 - Packing Lists Are Shipment Evidence
+
+- Type: algorithm-added
+- Domain: document ingestion, deterministic classification, schema registry,
+  logistics routing, and Library review
+- Applies to: `PACKING_LIST` uploads, delivery order references, customer
+  references, packed goods tables, package counts, gross/net/tare weights, and
+  movement-document routing
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_ingestion_analysis.py`,
+  `apps/api/app/domains/documents/services/schema_registry.py`,
+  `apps/api/app/domains/documents/services/document_routing.py`,
+  `apps/api/tests/test_document_ingestion_api.py`, and
+  `apps/api/tests/fixtures/document_classification_eval_corpus.json`
+- Lesson: packing lists are a distinct logistics document kind rather than an
+  `OTHER` fallback or a weak bill-of-lading proxy. They identify packed goods,
+  packages, weights, delivery order numbers, customer references, and movement
+  dates, which changes extraction and delivery matching enough to justify a
+  first-class `PACKING_LIST` kind.
+- Deterministic opportunity: as reviewed examples accumulate, map recurring
+  delivery order and customer reference fields to governed delivery reference
+  fields instead of relying on ad hoc freeform linkage.
+- Agent autonomy impact: agents may explain packing-list evidence and suggest
+  delivery linkage, but shipment updates, actualization, or record creation
+  still require typed services and governed review paths.
+- Tests or evidence: `make api-document-classification-evals` and focused
+  ingestion tests.
+- Follow-up: add reviewed replay examples for multi-page packing lists and
+  scanned/poor-OCR packing slips before increasing routing autonomy.
+
+### 2026-05-24 - COA Assay Tables Override Sales Order Field Noise
+
+- Type: algorithm-added
+- Domain: document ingestion, deterministic classification, quality evidence,
+  and Library review
+- Applies to: `CERTIFICATE_OF_ANALYSIS` pages with assay-result tables,
+  customer-reference fields, product fields, delivery numbers, batch numbers,
+  and weak or missing title OCR
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_classification_scoring.py`,
+  `apps/api/app/domains/documents/services/document_ingestion_analysis.py`,
+  `apps/api/tests/test_document_ingestion_api.py`, and
+  `apps/api/tests/fixtures/document_classification_eval_corpus.json`
+- Lesson: a quality-results table with columns such as Test Description, Unit,
+  Min, Max, Result, and Method is Certificate of Analysis evidence even when
+  OCR misses the title line. Product, quantity, and customer-reference text
+  alone must not promote the page to `SALES_ORDER` unless sales-order identity
+  evidence is present.
+- Deterministic opportunity: keep expanding assay-column aliases from reviewed
+  COA examples, and promote recurring quality fields such as batch number,
+  manufacturing date, and despatch date into governed quality extraction when
+  downstream quality records are introduced.
+- Agent autonomy impact: agents may explain COA evidence and suggest quality
+  linkage, but creating or updating quality, delivery, or trade records still
+  requires typed services and governed review paths.
+- Tests or evidence: focused ingestion regression plus
+  `make api-document-classification-evals`.
+- Follow-up: add reviewed replay examples for scanned COAs where the title is
+  OCR-noisy but assay tables are legible.
+
+### 2026-05-24 - Document Title Lines Are Strong Type Evidence
+
+- Type: algorithm-added
+- Domain: document ingestion, deterministic classification, OCR text handling,
+  and Library review
+- Applies to: extracted title lines in the first page text lines, including
+  scanned forms where the title is visible but downstream fields or table
+  headers are fragmented
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_classification_scoring.py`,
+  `apps/api/tests/test_document_ingestion_api.py`, and
+  `apps/api/tests/fixtures/document_classification_eval_corpus.json`
+- Lesson: when a supported document kind keyword appears as a standalone title
+  line near the top of extracted text, the classifier should treat it as
+  stronger evidence than an ordinary in-body keyword. The title still does not
+  bypass structured field, table, ambiguity, OCR, or review checks.
+- Deterministic opportunity: if the processor starts preserving OCR bounding
+  boxes or font/layout cues, promote this from exact extracted-line matching to
+  a layout-aware title detector with auditable evidence.
+- Agent autonomy impact: agents may explain that a visible title materially
+  supports classification, but downstream record creation or linkage remains
+  governed by typed services and review.
+- Tests or evidence: focused packing-list title regression plus
+  `make api-document-classification-evals`.
+- Follow-up: add reviewed replay examples for titles split across OCR lines or
+  title text embedded in logos/stamps.
+
+### 2026-05-24 - Document Type Tags Mirror Classification
+
+- Type: algorithm-added
+- Domain: document ingestion, deterministic facet suggestion, classification
+  review, and Library tags
+- Applies to: page-level document kind classification, `document_type` facet
+  values, classifier output, reviewer classification corrections, and tag
+  display in document review surfaces
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_facets.py`,
+  `apps/api/app/domains/documents/services/ingestion.py`,
+  `apps/api/tests/test_document_ingestion_api.py`, and
+  `apps/web/src/features/documents/DocumentFacetEditor.tsx`
+- Lesson: the classifier's page-level document kind should be visible as a
+  system-derived tag. The durable classification remains `page.document_kind`;
+  the `document_type` facet mirrors that value for review and filtering
+  alongside commodity, purchase/sale, transport mode, and asset tags.
+- Deterministic opportunity: if operators repeatedly filter or route by
+  document type tags, keep the tag as a deterministic mirror of classification
+  rather than letting tag edits diverge from `document_kind`.
+- Agent autonomy impact: agents may explain the classification tag, but should
+  change document type through the governed classification correction path, not
+  by editing the derived tag alone.
+- Tests or evidence: focused document facet and ingestion tests.
+- Follow-up: include reviewed examples in replay exports if document-type tag
+  behavior becomes part of broader document review analytics.
+
+### 2026-05-24 - Packet Splits Are Persisted Logical Documents
+
+- Type: algorithm-added
+- Domain: document ingestion, logical document segmentation, classification,
+  review, and audit provenance
+- Applies to: uploaded PDF packets, `DocumentLogicalDocument`,
+  `analysis_summary.document_classification_scope`, page-range attribution,
+  packet split activity events, and Library review serialization
+- Status: implemented
+- Source:
+  `apps/api/app/models/document_logical_document.py`,
+  `apps/api/app/domains/documents/services/document_logical_documents.py`,
+  `apps/api/app/domains/documents/services/document_ingestion_review.py`,
+  and `apps/api/tests/test_document_ingestion_api.py`
+- Lesson: an uploaded file is only the source artifact. Classification and
+  review should address persisted logical documents inside that file, with each
+  logical document carrying a stable key, page range, source page ids/page
+  numbers, classification status, review status, and split provenance.
+- Deterministic opportunity: replace the first contiguous page-kind grouping
+  rule with richer structure objects once reviewed packets reveal separators,
+  cover pages, repeated same-kind documents, attachments, sheets, or sections.
+- Agent autonomy impact: agents may explain or triage packet splits, but they
+  should not collapse a packet back to one file-level business document or
+  mutate downstream records without the logical-document evidence and governed
+  action path.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_packet_upload_persists_logical_documents_with_page_range_provenance apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_packet_split_activity_records_auditable_page_ranges`
+- Follow-up: add logical-document-specific extraction/review endpoints before
+  increasing routing or approval autonomy for mixed packets.
 
 ### 2026-05-23 - User AI Context Is Preference Context Only
 
@@ -552,6 +731,38 @@ proposal form until a human owner approves the domain rule.
   `./.venv/bin/python -m unittest apps.api.tests.test_layout_definitions_api.LayoutDefinitionsApiTests.test_layout_definitions_are_scoped_to_user_and_workspace`
 - Follow-up: build the definition list/editor UI over these persisted records,
   then add immutable run records that can only reference published definitions.
+
+### 2026-05-24 - Workbook Assembly Starts From Registered Typed Reports
+
+- Type: algorithm-added
+- Domain: reporting, workbook generation, semantic dependency resolution, and
+  projection-backed report outputs
+- Applies to:
+  `apps/api/app/domains/reports/services/report_registry.py`,
+  `apps/api/app/domains/reports/services/workbook_runtime.py`, and future
+  report/workbook run services
+- Status: implemented
+- Source:
+  `apps/api/app/domains/reports/services/report_registry.py`,
+  `apps/api/app/domains/reports/services/workbook_runtime.py`, and
+  `apps/api/tests/test_report_workbook_runtime.py`
+- Lesson: executable Excel-style report slices should start as code-owned,
+  registered report definitions with declared workbook sheets, columns,
+  parameters, and semantic dataset dependencies. Renderers may load governed
+  in-system data, but the workbook assembler must reject undeclared sheets,
+  columns, parameters, or unsupported cell value types before producing a
+  workbook snapshot.
+- Deterministic opportunity: extend the registry-backed runtime into immutable
+  workbook/report runs and artifacts after the contract, dependency graph, and
+  row-boundary checks are stable.
+- Agent autonomy impact: agents may request or summarize registered workbook
+  outputs, but they should not invent workbook cells or formula values outside
+  the typed registry and assembly contract.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_report_workbook_runtime`
+- Follow-up: add persisted run snapshots and artifact generation that reuse the
+  same contract before widening report execution to assistant-drafted workbook
+  definitions or formula sheets.
 
 ### 2026-05-17 - Mixed Document Packets Require Page-Level Classification
 

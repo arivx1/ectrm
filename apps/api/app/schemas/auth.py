@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 from apps.api.app.schemas._validation import (
     normalize_optional_blankable_text,
     normalize_optional_text,
+    normalize_optional_timezone,
     normalize_required_text,
     validate_password_not_blank,
 )
@@ -76,6 +77,10 @@ class AuthenticatedUserOut(BaseModel):
     user_id: str
     email: str
     display_name: str
+    first_name: str | None = None
+    last_name: str | None = None
+    preferred_timezone: str | None = None
+    primary_location: str | None = None
     role: str
     default_assistant_persona: AssistantPersona
     assistant_context_blurb: str | None = None
@@ -83,6 +88,10 @@ class AuthenticatedUserOut(BaseModel):
 
 class AuthenticatedUserProfileUpdate(BaseModel):
     display_name: str | None = Field(None, min_length=1, max_length=160)
+    first_name: str | None = Field(None, max_length=80)
+    last_name: str | None = Field(None, max_length=80)
+    preferred_timezone: str | None = Field(None, max_length=64)
+    primary_location: str | None = Field(None, max_length=160)
     default_assistant_persona: AssistantPersona | None = None
     assistant_context_blurb: str | None = Field(None, max_length=ASSISTANT_CONTEXT_BLURB_MAX_LENGTH)
 
@@ -90,6 +99,16 @@ class AuthenticatedUserProfileUpdate(BaseModel):
     @classmethod
     def normalize_display_name(cls, value: str | None) -> str | None:
         return normalize_optional_text(value, field_name="display_name")
+
+    @field_validator("first_name", "last_name", "primary_location")
+    @classmethod
+    def normalize_profile_text(cls, value: str | None) -> str | None:
+        return normalize_optional_blankable_text(value)
+
+    @field_validator("preferred_timezone")
+    @classmethod
+    def normalize_preferred_timezone(cls, value: str | None) -> str | None:
+        return normalize_optional_timezone(value, field_name="preferred_timezone")
 
     @field_validator("default_assistant_persona", mode="before")
     @classmethod

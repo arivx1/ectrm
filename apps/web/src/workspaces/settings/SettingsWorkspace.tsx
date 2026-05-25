@@ -81,6 +81,10 @@ type AuthAction = 'logout' | 'profile' | null
 
 type UserProfileForm = {
   displayName: string
+  firstName: string
+  lastName: string
+  preferredTimeZone: string
+  primaryLocation: string
   defaultAssistantPersona: AssistantPersona
   assistantContextBlurb: string
 }
@@ -197,9 +201,23 @@ function formatAssistantPersona(persona: AssistantPersona | string | null | unde
   return USER_PERSONA_OPTIONS.find((option) => option.value === persona)?.label ?? 'Operator'
 }
 
+function formatOptionalProfileValue(value: string | null | undefined, fallback: string): string {
+  const normalizedValue = value?.trim()
+  return normalizedValue || fallback
+}
+
+function formatProfileTimeZone(value: string | null | undefined): string {
+  const normalizedValue = value?.trim()
+  return normalizedValue ? normalizedValue.replaceAll('_', ' ') : 'No timezone preference'
+}
+
 function buildUserProfileForm(user: StoredAuthSession['user'] | null | undefined): UserProfileForm {
   return {
     displayName: user?.display_name ?? '',
+    firstName: user?.first_name ?? '',
+    lastName: user?.last_name ?? '',
+    preferredTimeZone: user?.preferred_timezone ?? '',
+    primaryLocation: user?.primary_location ?? '',
     defaultAssistantPersona: normalizeAssistantPersona(user?.default_assistant_persona),
     assistantContextBlurb: user?.assistant_context_blurb ?? '',
   }
@@ -413,6 +431,10 @@ export function SettingsWorkspace({
     try {
       const updatedUser = await updateCurrentUserProfile(appConfig.apiBase, {
         display_name: profileForm.displayName,
+        first_name: profileForm.firstName,
+        last_name: profileForm.lastName,
+        preferred_timezone: profileForm.preferredTimeZone || null,
+        primary_location: profileForm.primaryLocation,
         default_assistant_persona: profileForm.defaultAssistantPersona,
         assistant_context_blurb: profileForm.assistantContextBlurb,
       })
@@ -611,6 +633,7 @@ export function SettingsWorkspace({
     (rule) => rule.visibility.optionDetails !== 'inherit' || rule.visibility.priceIndex !== 'inherit',
   ).length
   const availableCommodityClassOptions = commodityClassOptions.length > 0 ? commodityClassOptions : [...commodityClassOrder]
+  const profileTimeZoneOptions = listTimeDisplayTimeZoneOptions().filter((option) => option.value !== 'system')
   const appearancePreviewMode = appearanceForm.colorMode === 'system' ? resolvedColorMode : appearanceForm.colorMode
   const appearancePreviewPalette = resolveAppearancePalette(appearanceForm, appearancePreviewMode)
   const activeSessionSummary = authSession
@@ -618,6 +641,8 @@ export function SettingsWorkspace({
     : 'Signed out in this browser'
   const profileSummary = authSession
     ? `${formatAssistantPersona(authSession.user.default_assistant_persona)} persona · ${
+        authSession.user.primary_location?.trim() ? authSession.user.primary_location.trim() : 'No primary location'
+      } · ${
         authSession.user.assistant_context_blurb?.trim() ? 'AI context saved' : 'No AI context saved'
       }`
     : 'Sign in to edit your profile'
@@ -671,7 +696,23 @@ export function SettingsWorkspace({
                 <div className="settings-kv">
                   <SettingsValueRow label="User ID" value={authSession.user.user_id} />
                   <SettingsValueRow label="Display name" value={authSession.user.display_name} />
+                  <SettingsValueRow
+                    label="First name"
+                    value={formatOptionalProfileValue(authSession.user.first_name, 'Not set')}
+                  />
+                  <SettingsValueRow
+                    label="Last name"
+                    value={formatOptionalProfileValue(authSession.user.last_name, 'Not set')}
+                  />
                   <SettingsValueRow label="Email" value={authSession.user.email} />
+                  <SettingsValueRow
+                    label="Preferred timezone"
+                    value={formatProfileTimeZone(authSession.user.preferred_timezone)}
+                  />
+                  <SettingsValueRow
+                    label="Primary location"
+                    value={formatOptionalProfileValue(authSession.user.primary_location, 'Not set')}
+                  />
                   <SettingsValueRow label="Role" value={authSession.user.role} />
                   <SettingsValueRow label="Session expires" value={new Date(authSession.expiresAt).toLocaleString()} />
                   <SettingsValueRow
@@ -718,6 +759,21 @@ export function SettingsWorkspace({
             <>
               <div className="settings-summary-grid">
                 <article className="settings-summary-card">
+                  <span>Profile name</span>
+                  <strong>{formatOptionalProfileValue(authSession.user.display_name, 'Unnamed user')}</strong>
+                  <p>
+                    {[authSession.user.first_name, authSession.user.last_name]
+                      .map((value) => value?.trim())
+                      .filter(Boolean)
+                      .join(' ') || 'First and last name are not set.'}
+                  </p>
+                </article>
+                <article className="settings-summary-card">
+                  <span>Desk context</span>
+                  <strong>{formatOptionalProfileValue(authSession.user.primary_location, 'No primary location')}</strong>
+                  <p>{formatProfileTimeZone(authSession.user.preferred_timezone)}</p>
+                </article>
+                <article className="settings-summary-card">
                   <span>Assistant persona</span>
                   <strong>{formatAssistantPersona(authSession.user.default_assistant_persona)}</strong>
                   <p>Default interpretation lens for new assistant requests.</p>
@@ -741,6 +797,64 @@ export function SettingsWorkspace({
                       onChange={(event) => {
                         setProfileFlash(null)
                         setProfileForm((current) => ({ ...current, displayName: event.target.value }))
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>First name</span>
+                    <input
+                      className="control"
+                      type="text"
+                      value={profileForm.firstName}
+                      maxLength={80}
+                      onChange={(event) => {
+                        setProfileFlash(null)
+                        setProfileForm((current) => ({ ...current, firstName: event.target.value }))
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Last name</span>
+                    <input
+                      className="control"
+                      type="text"
+                      value={profileForm.lastName}
+                      maxLength={80}
+                      onChange={(event) => {
+                        setProfileFlash(null)
+                        setProfileForm((current) => ({ ...current, lastName: event.target.value }))
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Preferred time zone</span>
+                    <select
+                      className="control"
+                      value={profileForm.preferredTimeZone}
+                      onChange={(event) => {
+                        setProfileFlash(null)
+                        setProfileForm((current) => ({ ...current, preferredTimeZone: event.target.value }))
+                      }}
+                    >
+                      <option value="">No preference</option>
+                      {profileTimeZoneOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Primary location</span>
+                    <input
+                      className="control"
+                      type="text"
+                      value={profileForm.primaryLocation}
+                      maxLength={160}
+                      placeholder="Houston desk, London office, remote"
+                      onChange={(event) => {
+                        setProfileFlash(null)
+                        setProfileForm((current) => ({ ...current, primaryLocation: event.target.value }))
                       }}
                     />
                   </label>

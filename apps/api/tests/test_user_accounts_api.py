@@ -54,6 +54,10 @@ class UserAccountsApiTests(unittest.TestCase):
                     user_id="ops_lead",
                     email="ops@example.com",
                     display_name="Ops Lead",
+                    first_name="  Ops  ",
+                    last_name="  Lead  ",
+                    preferred_timezone="America/New_York",
+                    primary_location="  New York desk  ",
                     role="ops_admin",
                     assistant_context_blurb="Prefers queue risk before market color.",
                     password="supersecret1",
@@ -62,6 +66,10 @@ class UserAccountsApiTests(unittest.TestCase):
                 db=session,
             )
             self.assertEqual(created.role, "OPS_ADMIN")
+            self.assertEqual(created.first_name, "Ops")
+            self.assertEqual(created.last_name, "Lead")
+            self.assertEqual(created.preferred_timezone, "America/New_York")
+            self.assertEqual(created.primary_location, "New York desk")
             self.assertEqual(created.default_assistant_persona, "admin")
             self.assertEqual(created.assistant_context_blurb, "Prefers queue risk before market color.")
             self.assertTrue(created.password_set)
@@ -70,6 +78,10 @@ class UserAccountsApiTests(unittest.TestCase):
                 "ops_lead",
                 UserAccountUpdate(
                     display_name="Operations Lead",
+                    first_name="Operations",
+                    last_name="Lead",
+                    preferred_timezone="America/Chicago",
+                    primary_location="Houston desk",
                     default_assistant_persona="risk",
                     assistant_context_blurb="Focus on settlement blockers first.",
                     updated_by="admin",
@@ -77,6 +89,10 @@ class UserAccountsApiTests(unittest.TestCase):
                 db=session,
             )
             self.assertEqual(updated.display_name, "Operations Lead")
+            self.assertEqual(updated.first_name, "Operations")
+            self.assertEqual(updated.last_name, "Lead")
+            self.assertEqual(updated.preferred_timezone, "America/Chicago")
+            self.assertEqual(updated.primary_location, "Houston desk")
             self.assertEqual(updated.default_assistant_persona, "risk")
             self.assertEqual(updated.assistant_context_blurb, "Focus on settlement blockers first.")
 
@@ -84,10 +100,18 @@ class UserAccountsApiTests(unittest.TestCase):
                 "ops_lead",
                 UserAccountUpdate(
                     assistant_context_blurb="   ",
+                    first_name="   ",
+                    last_name="   ",
+                    preferred_timezone="   ",
+                    primary_location="   ",
                     updated_by="admin",
                 ),
                 db=session,
             )
+            self.assertIsNone(cleared.first_name)
+            self.assertIsNone(cleared.last_name)
+            self.assertIsNone(cleared.preferred_timezone)
+            self.assertIsNone(cleared.primary_location)
             self.assertIsNone(cleared.assistant_context_blurb)
 
             inactive = deactivate_user(
@@ -161,6 +185,9 @@ class UserAccountsApiTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             UserAccountUpdate(default_assistant_persona="unknown", updated_by="admin")
+
+        with self.assertRaises(ValidationError):
+            UserAccountUpdate(preferred_timezone="Mars/Olympus", updated_by="admin")
 
     def test_password_hash_requires_exact_non_blank_input(self) -> None:
         encoded = hash_password("supersecret1 ")

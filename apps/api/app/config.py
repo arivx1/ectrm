@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     DOCUMENT_OCR_ENABLED: bool = True
     DOCUMENT_AI_ENABLED: bool = True
     DOCUMENT_AI_DEFAULT_PROVIDER: str = "openai"
+    DOCUMENT_AI_CONFIDENCE_THRESHOLD: float = Field(default=0.46, ge=0, le=1)
     DOCUMENT_AI_TIMEOUT_SECONDS: int = Field(default=120, ge=5, le=600)
     DOCUMENT_AI_MAX_OUTPUT_TOKENS: int = Field(default=3200, ge=256, le=8192)
     DOCUMENT_AI_OPENAI_INLINE_FILE_MAX_BYTES: int = Field(default=8 * 1024 * 1024, ge=0, le=50 * 1024 * 1024)
@@ -159,6 +160,20 @@ class Settings(BaseSettings):
     FRED_SYNC_INTERVAL_MINUTES: int = Field(default=60, ge=5, le=10080)
     FRED_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=365, ge=1, le=3650)
     FRED_SYNC_SUCCESS_SLA_HOURS: int = Field(default=48, ge=1, le=336)
+    WORLD_BANK_PINK_SHEET_MONTHLY_URL: str = (
+        "https://thedocs.worldbank.org/en/doc/74e8be41ceb20fa0da750cda2f6b9e4e-0050012026/"
+        "related/CMO-Historical-Data-Monthly.xlsx"
+    )
+    WORLD_BANK_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    WORLD_BANK_SYNC_INTERVAL_MINUTES: int = Field(default=1440, ge=60, le=43200)
+    WORLD_BANK_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=900, ge=31, le=36500)
+    WORLD_BANK_SYNC_SUCCESS_SLA_HOURS: int = Field(default=1200, ge=24, le=2160)
+    USDA_NASS_API_KEY: str = ""
+    USDA_NASS_BASE_URL: str = "https://quickstats.nass.usda.gov/api"
+    USDA_NASS_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    USDA_NASS_SYNC_INTERVAL_MINUTES: int = Field(default=1440, ge=60, le=43200)
+    USDA_NASS_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=1095, ge=31, le=36500)
+    USDA_NASS_SYNC_SUCCESS_SLA_HOURS: int = Field(default=1200, ge=24, le=2160)
     EIA_WHOLESALE_POWER_BASE_URL: str = "https://www.eia.gov/electricity/wholesale/xls"
     EIA_WHOLESALE_POWER_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
     EIA_WHOLESALE_POWER_SYNC_INTERVAL_MINUTES: int = Field(default=60, ge=5, le=10080)
@@ -194,7 +209,7 @@ class Settings(BaseSettings):
     KALSHI_DEFAULT_LOOKBACK_DAYS: int = Field(default=90, ge=1, le=3650)
     KALSHI_SYNC_SUCCESS_SLA_HOURS: int = Field(default=24, ge=1, le=336)
     MARKET_DATA_LOGIN_SYNC_ENABLED: bool = True
-    MARKET_DATA_LOGIN_SYNC_PROVIDERS: str = "EIA,EIA_FUNDAMENTALS,FRED,EIA_WHOLESALE_POWER,CFTC,CAISO,ERCOT,MISO,NYISO,KALSHI"
+    MARKET_DATA_LOGIN_SYNC_PROVIDERS: str = "EIA,EIA_FUNDAMENTALS,FRED,WORLD_BANK,EIA_WHOLESALE_POWER,CFTC,CAISO,ERCOT,MISO,NYISO,KALSHI"
     NWS_BASE_URL: str = "https://api.weather.gov"
     NWS_USER_AGENT: str = ""
     NWS_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)

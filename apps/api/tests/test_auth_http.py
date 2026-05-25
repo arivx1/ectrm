@@ -580,6 +580,10 @@ class AuthHttpTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {access_token}"},
             json={
                 "display_name": "Operations Context Owner",
+                "first_name": "  Operations  ",
+                "last_name": "  Owner  ",
+                "preferred_timezone": "America/Chicago",
+                "primary_location": "  Houston desk  ",
                 "default_assistant_persona": "risk",
                 "assistant_context_blurb": "  I cover the morning queue and prefer exposure risk first.  ",
             },
@@ -588,6 +592,10 @@ class AuthHttpTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["display_name"], "Operations Context Owner")
+        self.assertEqual(payload["first_name"], "Operations")
+        self.assertEqual(payload["last_name"], "Owner")
+        self.assertEqual(payload["preferred_timezone"], "America/Chicago")
+        self.assertEqual(payload["primary_location"], "Houston desk")
         self.assertEqual(payload["default_assistant_persona"], "risk")
         self.assertEqual(payload["assistant_context_blurb"], "I cover the morning queue and prefer exposure risk first.")
 
@@ -597,14 +605,28 @@ class AuthHttpTests(unittest.TestCase):
         )
         self.assertEqual(current_response.status_code, 200)
         current_user = current_response.json()["user"]
+        self.assertEqual(current_user["first_name"], "Operations")
+        self.assertEqual(current_user["last_name"], "Owner")
+        self.assertEqual(current_user["preferred_timezone"], "America/Chicago")
+        self.assertEqual(current_user["primary_location"], "Houston desk")
         self.assertEqual(current_user["assistant_context_blurb"], "I cover the morning queue and prefer exposure risk first.")
 
         clear_response = self.client.patch(
             "/auth/me/profile",
             headers={"Authorization": f"Bearer {access_token}"},
-            json={"assistant_context_blurb": "   "},
+            json={
+                "first_name": "   ",
+                "last_name": "   ",
+                "preferred_timezone": "   ",
+                "primary_location": "   ",
+                "assistant_context_blurb": "   ",
+            },
         )
         self.assertEqual(clear_response.status_code, 200)
+        self.assertIsNone(clear_response.json()["first_name"])
+        self.assertIsNone(clear_response.json()["last_name"])
+        self.assertIsNone(clear_response.json()["preferred_timezone"])
+        self.assertIsNone(clear_response.json()["primary_location"])
         self.assertIsNone(clear_response.json()["assistant_context_blurb"])
 
         with self.SessionLocal() as session:
@@ -612,8 +634,25 @@ class AuthHttpTests(unittest.TestCase):
             self.assertIsNotNone(user)
             assert user is not None
             self.assertEqual(user.display_name, "Operations Context Owner")
+            self.assertIsNone(user.first_name)
+            self.assertIsNone(user.last_name)
+            self.assertIsNone(user.preferred_timezone)
+            self.assertIsNone(user.primary_location)
             self.assertEqual(user.default_assistant_persona, "risk")
             self.assertIsNone(user.assistant_context_blurb)
+
+    def test_current_user_profile_rejects_unknown_timezone(self) -> None:
+        session_payload = self._bootstrap_admin()
+        access_token = session_payload["access_token"]
+
+        response = self.client.patch(
+            "/auth/me/profile",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"preferred_timezone": "Mars/Olympus"},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("preferred_timezone", str(response.json()["detail"]))
 
     def test_password_session_only_requests_start_here_for_first_login(self) -> None:
         now = datetime.now(timezone.utc)

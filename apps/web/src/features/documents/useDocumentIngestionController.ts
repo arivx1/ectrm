@@ -40,6 +40,11 @@ import type {
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import {
+  aiConfidenceThresholdFractionFromPercent,
+  aiConfidenceThresholdPercentFromSettings,
+  normalizeAiConfidenceThresholdPercent,
+} from './documentIngestionThreshold'
+import {
   buildBlankRow,
   buildBlankTableBlock,
   documentNeedsProcessing,
@@ -101,6 +106,9 @@ export type DocumentIngestionController = {
   documents: DocumentIngestionRecord[]
   processorSettings: DocumentProcessorRuntimeSettingsRecord | null
   reprocessProviderByDocument: Record<string, DocumentProcessorSelectionValue>
+  systemAiConfidenceThresholdPercent: number
+  aiConfidenceThresholdOverridePercent: number | null
+  effectiveAiConfidenceThresholdPercent: number
   schemaRegistry: DocumentSchemaRegistryRecord | null
   schemaByKind: Record<string, DocumentKindSchemaRecord>
   loading: boolean
@@ -137,6 +145,7 @@ export type DocumentIngestionController = {
   setDisplayName: (value: string) => void
   setSelectedProcessorProvider: (value: DocumentProcessorSelectionValue) => void
   setSelectedProcessorModel: (value: string) => void
+  setAiConfidenceThresholdOverridePercent: (value: number | null) => void
   setDocumentReprocessProvider: (documentId: string, value: DocumentProcessorSelectionValue) => void
   toggleDocumentExpanded: (documentId: string) => void
   updateSelectedFile: (file: File | null) => void
@@ -188,6 +197,9 @@ export function useDocumentIngestionController({
   const [reprocessProviderByDocument, setReprocessProviderByDocument] = useState<
     Record<string, 'builtin' | 'openai' | 'anthropic' | 'google' | ''>
   >({})
+  const [aiConfidenceThresholdOverridePercent, setAiConfidenceThresholdOverridePercentState] = useState<number | null>(
+    null,
+  )
   const [schemaRegistry, setSchemaRegistry] = useState<DocumentSchemaRegistryRecord | null>(null)
   const [expandedDocumentIds, setExpandedDocumentIds] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(false)
@@ -219,6 +231,12 @@ export function useDocumentIngestionController({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const dragDepthRef = useRef(0)
   const selectedProcessorProvider = selectedProcessorProviderState
+  const systemAiConfidenceThresholdPercent = useMemo(
+    () => aiConfidenceThresholdPercentFromSettings(processorSettings),
+    [processorSettings],
+  )
+  const effectiveAiConfidenceThresholdPercent =
+    aiConfidenceThresholdOverridePercent ?? systemAiConfidenceThresholdPercent
 
   function documentExpansionCardKey(documentId: string): string {
     return `document-ingestion.review.${documentId}`
@@ -344,6 +362,7 @@ export function useDocumentIngestionController({
       setDocuments([])
       setProcessorSettings(null)
       setReprocessProviderByDocument({})
+      setAiConfidenceThresholdOverridePercentState(null)
       setSchemaRegistry(null)
       setLoadError('')
       setLoading(false)
@@ -576,6 +595,12 @@ export function useDocumentIngestionController({
     setSelectedProcessorModelState(value)
   }
 
+  function setAiConfidenceThresholdOverridePercent(value: number | null) {
+    setAiConfidenceThresholdOverridePercentState(
+      typeof value === 'number' ? normalizeAiConfidenceThresholdPercent(value) : null,
+    )
+  }
+
   function updateDocumentDraft(documentId: string, updater: DocumentDraftUpdater) {
     setDocuments((current) =>
       current.map((document) => (document.document_id === documentId ? updater(document) : document)),
@@ -730,6 +755,9 @@ export function useDocumentIngestionController({
         displayName,
         selectedProcessorProvider || null,
         selectedProcessorProvider === 'builtin' ? null : selectedProcessorModel || null,
+        selectedProcessorProvider === 'builtin'
+          ? null
+          : aiConfidenceThresholdFractionFromPercent(effectiveAiConfidenceThresholdPercent),
       )
       replaceDocument(uploaded)
       setExpandedDocumentIds((current) => ({ ...current, [uploaded.document_id]: true }))
@@ -938,6 +966,10 @@ export function useDocumentIngestionController({
         authSession,
         documentId,
         reprocessProvider,
+        null,
+        reprocessProvider === 'builtin'
+          ? null
+          : aiConfidenceThresholdFractionFromPercent(effectiveAiConfidenceThresholdPercent),
       )
       replaceDocument(updated)
       setExpandedDocumentIds((current) => ({ ...current, [documentId]: true }))
@@ -1245,6 +1277,9 @@ export function useDocumentIngestionController({
     documents,
     processorSettings,
     reprocessProviderByDocument,
+    systemAiConfidenceThresholdPercent,
+    aiConfidenceThresholdOverridePercent,
+    effectiveAiConfidenceThresholdPercent,
     schemaRegistry,
     schemaByKind,
     loading,
@@ -1281,6 +1316,7 @@ export function useDocumentIngestionController({
     setDisplayName,
     setSelectedProcessorProvider,
     setSelectedProcessorModel,
+    setAiConfidenceThresholdOverridePercent,
     setDocumentReprocessProvider,
     toggleDocumentExpanded,
     updateSelectedFile,

@@ -30,6 +30,7 @@ export function useLatestPriceIndexMarks(
     pauseWhenHidden?: boolean
   } = {},
 ): {
+  latestMarks: PriceIndexObservationRecord[]
   latestMarksByCode: Record<string, PriceIndexObservationRecord>
   loading: boolean
   error: string
@@ -48,6 +49,7 @@ export function useLatestPriceIndexMarks(
     [priceIndexCodes],
   )
   const [latestMarksByCode, setLatestMarksByCode] = useState<Record<string, PriceIndexObservationRecord>>({})
+  const [latestMarks, setLatestMarks] = useState<PriceIndexObservationRecord[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -85,6 +87,7 @@ export function useLatestPriceIndexMarks(
     async function load({ background = false }: { background?: boolean } = {}) {
       if (normalizedCodes.length === 0) {
         clearRefreshTimer()
+        setLatestMarks([])
         setLatestMarksByCode({})
         setError('')
         setLoading(false)
@@ -98,6 +101,7 @@ export function useLatestPriceIndexMarks(
       try {
         const payload = await loadLatestPriceIndexObservations(appConfig.apiBase, normalizedCodes)
         if (!cancelled) {
+          setLatestMarks(payload)
           setLatestMarksByCode(buildMarksMap(payload))
         }
       } catch (nextError) {
@@ -144,6 +148,7 @@ export function useLatestPriceIndexMarks(
   }, [normalizedCodes, pauseWhenHidden, refreshIntervalMs])
 
   return {
+    latestMarks,
     latestMarksByCode,
     loading,
     error,

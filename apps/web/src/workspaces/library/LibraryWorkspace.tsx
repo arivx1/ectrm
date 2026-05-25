@@ -12,9 +12,13 @@ import {
 } from 'react'
 
 import {
+  attachSelectedDocumentRecordCandidate,
+  executeDocumentActionPlan,
   executeDocumentWorkflow,
   fetchDocumentSource,
   listDocumentWorkflows,
+  stageDocumentActionApprovalRequest,
+  stageSelectedDocumentRecordCandidateApprovalRequest,
 } from '../../entities/documents/api'
 import { DocumentFacetEditor } from '../../features/documents/DocumentFacetEditor'
 import {
@@ -42,9 +46,11 @@ import { useDocumentIngestionController } from '../../features/documents/useDocu
 import { usePersistentCollapsibleCardState } from '../../shared/collapsibleCardState'
 import { appConfig } from '../../shared/config'
 import type {
+  DocumentActionRecordRefRecord,
   DocumentFacetAssignmentRecord,
   DocumentIngestionPageRecord,
   DocumentIngestionRecord,
+  DocumentLinkageCandidateRecord,
   DocumentWorkflowExecutionRecord,
   DocumentWorkflowListRecord,
   DocumentWorkflowRecord,
@@ -52,6 +58,9 @@ import type {
 import type { StoredAuthSession } from '../../shared/mutation'
 import {
   buildDocumentLibraryCollectionCounts,
+  canRequestDocumentActionApproval,
+  canExecuteDocumentActionPlanWorkflow,
+  canExecuteWorkflowAction,
   documentCanBeVerified,
   documentHasErrors,
   documentHasExecutedWorkflows,
@@ -60,6 +69,8 @@ import {
   filterDocumentLibraryDocuments,
   formatDocumentLibraryLabel,
   sortDocumentLibraryKindOptions,
+  workflowActionButtonLabel,
+  workflowDisabledReason,
   type DocumentLibrarySortMode,
   type DocumentLibraryViewMode,
 } from './libraryWorkspaceSupport'
@@ -80,6 +91,7 @@ type LibraryDocumentActivityEntry = {
 }
 
 const LIBRARY_UPLOAD_CARD_PANEL_ID = 'library-upload-card-panel'
+const LIBRARY_DOCUMENT_LIST_CARD_PANEL_ID = 'library-document-list-card-panel'
 const LIBRARY_FILE_COLUMNS = [
   { key: 'name', label: 'Name', minWidth: 240, defaultWidth: 320 },
   { key: 'type', label: 'Type', minWidth: 150, defaultWidth: 180 },
@@ -122,6 +134,85 @@ function uploadMethodLabel(document: DocumentIngestionRecord): string {
     return 'System import'
   }
   return 'Authenticated PDF upload'
+}
+
+function formatWorkflowValue(value: string | null | undefined, fallback = 'None'): string {
+  const cleaned = value?.trim()
+  if (!cleaned) {
+    return fallback
+  }
+  return cleaned
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b[a-z]/g, (match) => match.toUpperCase())
+}
+
+function formatWorkflowPercent(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return '0%'
+  }
+  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`
+}
+
+function workflowStatusTone(status: string | null | undefined): string {
+  switch ((status ?? '').trim().toUpperCase()) {
+    case 'READY':
+    case 'ATTACH_READY':
+    case 'AUTO_EXECUTION_ELIGIBLE':
+      return 'active'
+    case 'REVIEW':
+    case 'ATTACH_REVIEW':
+    case 'CREATE_CANDIDATE':
+    case 'HUMAN_CONFIRMATION_REQUIRED':
+      return 'in-progress'
+    case 'BLOCKED':
+    case 'OWNER_REQUIRED':
+    case 'MANUAL_REVIEW':
+    case 'MANUAL_REVIEW_REQUIRED':
+      return 'blocked'
+    case 'EXECUTED':
+    case 'ALREADY_LINKED':
+    case 'ALREADY_APPLIED':
+      return 'shipped'
+    default:
+      return 'planned'
+  }
+}
+
+function workflowRecordLabel(record: DocumentActionRecordRefRecord | null | undefined): string {
+  if (!record) {
+    return 'Not resolved'
+  }
+  const typeLabel = formatWorkflowValue(record.record_type)
+  const idLabel = record.record_id ? ` ${record.record_id}` : ''
+  return `${typeLabel}${idLabel} • ${record.record_label}`
+}
+
+function workflowCandidateLabel(candidate: DocumentLinkageCandidateRecord): string {
+  const stateLabel = formatWorkflowValue(candidate.candidate_state)
+  const scoreLabel = formatWorkflowPercent(candidate.score)
+  return `${candidate.record_label} • ${stateLabel} • ${scoreLabel}`
+}
+
+function workflowCandidateKey(candidate: DocumentLinkageCandidateRecord): string {
+  return `${candidate.record_type}:${candidate.record_id ?? candidate.record_label}`
+}
+
+function canAttachSelectedWorkflowCandidate(candidate: DocumentLinkageCandidateRecord): boolean {
+  return (
+    candidate.existing_record &&
+    Boolean(candidate.record_id) &&
+    candidate.candidate_state === 'ATTACH_READY' &&
+    candidate.score >= 0.9
+  )
+}
+
+function canRequestSelectedWorkflowCandidateApproval(candidate: DocumentLinkageCandidateRecord): boolean {
+  return (
+    candidate.existing_record &&
+    Boolean(candidate.record_id) &&
+    candidate.candidate_state !== 'ALREADY_LINKED'
+  )
 }
 
 function sameTimestamp(left: string | null | undefined, right: string | null | undefined): boolean {
@@ -423,6 +514,9 @@ export function LibraryWorkspace({
     loadError,
     uploading,
     uploadError,
+    systemAiConfidenceThresholdPercent,
+    aiConfidenceThresholdOverridePercent,
+    effectiveAiConfidenceThresholdPercent,
     gmailImporting,
     gmailImportError,
     gmailImportSummary,
@@ -440,6 +534,7 @@ export function LibraryWorkspace({
     setDisplayName,
     setSelectedProcessorProvider,
     setSelectedProcessorModel,
+    setAiConfidenceThresholdOverridePercent,
     updateSelectedFile,
     openFilePicker,
     handleDropzoneKeyDown,
@@ -476,7 +571,9 @@ export function LibraryWorkspace({
   const [workflowLoading, setWorkflowLoading] = useState(false)
   const [workflowError, setWorkflowError] = useState('')
   const [workflowExecution, setWorkflowExecution] = useState<DocumentWorkflowExecutionRecord | null>(null)
+  const [workflowActionMessage, setWorkflowActionMessage] = useState('')
   const [executingWorkflowId, setExecutingWorkflowId] = useState<string | null>(null)
+  const [selectedWorkflowCandidateKey, setSelectedWorkflowCandidateKey] = useState<string | null>(null)
   const [executedWorkflowDocumentIds, setExecutedWorkflowDocumentIds] = useState<Record<string, boolean>>({})
   const [pendingReprocessDocumentId, setPendingReprocessDocumentId] = useState<string | null>(null)
   const [editingTagScope, setEditingTagScope] = useState<'document' | 'page' | null>(null)
@@ -485,6 +582,9 @@ export function LibraryWorkspace({
   const uploadCardState = usePersistentCollapsibleCardState('library.upload-card', false)
   const setUploadCardExpanded = uploadCardState.setExpanded
   const showUploadComposer = uploadCardState.expanded
+  const documentListCardState = usePersistentCollapsibleCardState('library.document-list-card', false)
+  const setDocumentListCardExpanded = documentListCardState.setExpanded
+  const showDocumentList = documentListCardState.expanded
   const deferredSearchQuery = useDeferredValue(searchQuery)
 
   const scopedDocuments = filterDocumentLibraryDocuments({
@@ -531,6 +631,8 @@ export function LibraryWorkspace({
     processorSettings?.gmail_inbox?.enabled && processorSettings?.gmail_inbox?.configured,
   )
   const uploadProviderLabel = selectedProvider ? selectedProvider.label : 'Built-in Parser'
+  const aiConfidenceThresholdIsOverride = aiConfidenceThresholdOverridePercent !== null
+  const shouldShowAiThresholdControl = selectedProcessorProvider !== '' && selectedProcessorProvider !== 'builtin'
   const resolvedSelectedDocumentId =
     visibleDocuments.length === 0
       ? null
@@ -551,6 +653,15 @@ export function LibraryWorkspace({
   const workflowDialogDocument = workflowDialogDocumentId
     ? documents.find((document) => document.document_id === workflowDialogDocumentId) ?? null
     : null
+  const recommendedWorkflow =
+    workflowList?.workflows.find((workflow) => workflow.recommended) ?? workflowList?.workflows[0] ?? null
+  const workflowPrimaryCandidate = workflowList?.linkage_assessment?.candidates?.[0] ?? null
+  const workflowExistingLinkCount = workflowList?.record_links?.length ?? 0
+  const workflowPendingApprovalRequest = workflowList?.pending_approval_request ?? null
+  const selectedWorkflowCandidate =
+    workflowList?.linkage_assessment?.candidates.find(
+      (candidate) => workflowCandidateKey(candidate) === selectedWorkflowCandidateKey,
+    ) ?? null
   const pendingReprocessDocument = pendingReprocessDocumentId
     ? documents.find((document) => document.document_id === pendingReprocessDocumentId) ?? null
     : null
@@ -580,6 +691,16 @@ export function LibraryWorkspace({
   const fileTableStyle = {
     '--library-file-table-columns': fileColumnTemplate,
   } as CSSProperties
+  const emptyStateTitle = loadError
+    ? 'Unable to load uploaded documents'
+    : documents.length === 0
+      ? 'No uploaded documents yet'
+      : 'No files match this view'
+  const emptyStateMessage = loadError
+    ? loadError
+    : documents.length === 0
+      ? 'Open the uploader card to add the first PDF into the library.'
+      : 'Try another workflow view, clear the search box, or change the type filter.'
 
   useEffect(() => {
     if (
@@ -601,6 +722,12 @@ export function LibraryWorkspace({
   ])
 
   useEffect(() => {
+    if (loadError) {
+      setDocumentListCardExpanded(true)
+    }
+  }, [loadError, setDocumentListCardExpanded])
+
+  useEffect(() => {
     if (documentPageId) {
       setSelectedDocumentId(documentPageId)
     }
@@ -618,6 +745,18 @@ export function LibraryWorkspace({
   }, [documentPageId, expandedDocumentIds, toggleDocumentExpanded])
 
   useEffect(() => {
+    if (!selectedWorkflowCandidateKey || !workflowList) {
+      return
+    }
+    const candidateStillVisible = workflowList.linkage_assessment?.candidates.some(
+      (candidate) => workflowCandidateKey(candidate) === selectedWorkflowCandidateKey,
+    )
+    if (!candidateStillVisible) {
+      setSelectedWorkflowCandidateKey(null)
+    }
+  }, [selectedWorkflowCandidateKey, workflowList])
+
+  useEffect(() => {
     if (!documentPage) {
       setSelectedDetailPageId(null)
       return
@@ -632,7 +771,7 @@ export function LibraryWorkspace({
   }, [documentPage])
 
   useEffect(() => {
-    if (viewMode !== 'list') {
+    if (!showDocumentList || viewMode !== 'list') {
       return undefined
     }
 
@@ -665,7 +804,7 @@ export function LibraryWorkspace({
       resizeObserver?.disconnect()
       window.removeEventListener('resize', updateScrollWidth)
     }
-  }, [fileColumnTemplate, viewMode, visibleDocuments.length])
+  }, [fileColumnTemplate, showDocumentList, viewMode, visibleDocuments.length])
 
   function handleOpenDocumentPage(documentId: string) {
     setSelectedDocumentId(documentId)
@@ -810,6 +949,8 @@ export function LibraryWorkspace({
     setWorkflowDialogDocumentId(document.document_id)
     setWorkflowList(null)
     setWorkflowExecution(null)
+    setWorkflowActionMessage('')
+    setSelectedWorkflowCandidateKey(null)
     setWorkflowError('')
     if (!authSession) {
       setWorkflowError('Sign in before opening document workflows.')
@@ -831,11 +972,155 @@ export function LibraryWorkspace({
     setWorkflowDialogDocumentId(null)
     setWorkflowList(null)
     setWorkflowExecution(null)
+    setWorkflowActionMessage('')
+    setSelectedWorkflowCandidateKey(null)
     setWorkflowError('')
     setExecutingWorkflowId(null)
   }
 
+  async function handleRequestWorkflowApproval(workflow: DocumentWorkflowRecord) {
+    if (!authSession || !workflowDialogDocumentId) {
+      setWorkflowError('Sign in before requesting document action approval.')
+      return
+    }
+
+    const documentId = workflowDialogDocumentId
+    setExecutingWorkflowId(workflow.workflow_id)
+    setWorkflowError('')
+    setWorkflowExecution(null)
+    setWorkflowActionMessage('')
+    try {
+      const approvalRequest = await stageDocumentActionApprovalRequest(
+        appConfig.apiBase,
+        authSession,
+        documentId,
+        {
+          request_comment: `Requested from Library workflow: ${workflow.label}`,
+        },
+      )
+      setWorkflowActionMessage(`Approval request ${approvalRequest.request_id} is pending.`)
+      const nextWorkflows = await listDocumentWorkflows(appConfig.apiBase, authSession, documentId)
+      setWorkflowList(nextWorkflows)
+    } catch (error) {
+      setWorkflowError(error instanceof Error ? error.message : 'Unable to request document action approval.')
+    } finally {
+      setExecutingWorkflowId((current) =>
+        current === workflow.workflow_id ? null : current,
+      )
+    }
+  }
+
+  async function handleAttachSelectedWorkflowCandidate(candidate: DocumentLinkageCandidateRecord) {
+    if (!authSession || !workflowDialogDocumentId || !candidate.record_id) {
+      setWorkflowError('Select a concrete record candidate before attaching.')
+      return
+    }
+
+    const documentId = workflowDialogDocumentId
+    const actionKey = `candidate:${workflowCandidateKey(candidate)}`
+    setExecutingWorkflowId(actionKey)
+    setWorkflowError('')
+    setWorkflowExecution(null)
+    setWorkflowActionMessage('')
+    try {
+      const updated = await attachSelectedDocumentRecordCandidate(
+        appConfig.apiBase,
+        authSession,
+        documentId,
+        {
+          record_type: candidate.record_type,
+          record_id: candidate.record_id,
+        },
+      )
+      updateDocumentDraft(documentId, () => updated)
+      setWorkflowActionMessage(`Attached document to ${candidate.record_label}.`)
+      setExecutedWorkflowDocumentIds((current) => ({
+        ...current,
+        [documentId]: true,
+      }))
+      const nextWorkflows = await listDocumentWorkflows(appConfig.apiBase, authSession, documentId)
+      setWorkflowList(nextWorkflows)
+      setSelectedWorkflowCandidateKey(null)
+    } catch (error) {
+      setWorkflowError(error instanceof Error ? error.message : 'Unable to attach the selected record candidate.')
+    } finally {
+      setExecutingWorkflowId((current) => (current === actionKey ? null : current))
+    }
+  }
+
+  async function handleRequestSelectedWorkflowCandidateApproval(candidate: DocumentLinkageCandidateRecord) {
+    if (!authSession || !workflowDialogDocumentId || !candidate.record_id) {
+      setWorkflowError('Select a concrete record candidate before requesting approval.')
+      return
+    }
+
+    const documentId = workflowDialogDocumentId
+    const actionKey = `candidate:${workflowCandidateKey(candidate)}`
+    setExecutingWorkflowId(actionKey)
+    setWorkflowError('')
+    setWorkflowExecution(null)
+    setWorkflowActionMessage('')
+    try {
+      const approvalRequest = await stageSelectedDocumentRecordCandidateApprovalRequest(
+        appConfig.apiBase,
+        authSession,
+        documentId,
+        {
+          record_type: candidate.record_type,
+          record_id: candidate.record_id,
+          request_comment: `Requested from Library candidate selection: ${candidate.record_label}`,
+        },
+      )
+      setWorkflowActionMessage(`Approval request ${approvalRequest.request_id} is pending for ${candidate.record_label}.`)
+      const nextWorkflows = await listDocumentWorkflows(appConfig.apiBase, authSession, documentId)
+      setWorkflowList(nextWorkflows)
+    } catch (error) {
+      setWorkflowError(error instanceof Error ? error.message : 'Unable to request approval for the selected candidate.')
+    } finally {
+      setExecutingWorkflowId((current) => (current === actionKey ? null : current))
+    }
+  }
+
+  async function handleExecuteActionPlanWorkflow(workflow: DocumentWorkflowRecord) {
+    if (!authSession || !workflowDialogDocumentId) {
+      setWorkflowError('Sign in before executing document workflows.')
+      return
+    }
+
+    const documentId = workflowDialogDocumentId
+    setExecutingWorkflowId(workflow.workflow_id)
+    setWorkflowError('')
+    setWorkflowExecution(null)
+    setWorkflowActionMessage('')
+    try {
+      const updated = await executeDocumentActionPlan(
+        appConfig.apiBase,
+        authSession,
+        documentId,
+      )
+      updateDocumentDraft(documentId, () => updated)
+      setWorkflowActionMessage(`Attached document to ${workflow.target?.record_label ?? 'the selected record'}.`)
+      setExecutedWorkflowDocumentIds((current) => ({
+        ...current,
+        [documentId]: true,
+      }))
+      const nextWorkflows = await listDocumentWorkflows(appConfig.apiBase, authSession, documentId)
+      setWorkflowList(nextWorkflows)
+    } catch (error) {
+      setWorkflowError(error instanceof Error ? error.message : 'Unable to attach the document to the matched record.')
+    } finally {
+      setExecutingWorkflowId((current) =>
+        current === workflow.workflow_id ? null : current,
+      )
+    }
+  }
+
   async function handleExecuteWorkflow(workflow: DocumentWorkflowRecord) {
+    if (canExecuteDocumentActionPlanWorkflow(workflow)) {
+      await handleExecuteActionPlanWorkflow(workflow)
+      return
+    }
+
     if (!authSession || !workflowDialogDocumentId) {
       setWorkflowError('Sign in before executing document workflows.')
       return
@@ -844,6 +1129,7 @@ export function LibraryWorkspace({
     setExecutingWorkflowId(workflow.workflow_id)
     setWorkflowError('')
     setWorkflowExecution(null)
+    setWorkflowActionMessage('')
     try {
       const result = await executeDocumentWorkflow(
         appConfig.apiBase,
@@ -1725,6 +2011,42 @@ export function LibraryWorkspace({
                       </label>
                     ) : null}
 
+                    {shouldShowAiThresholdControl ? (
+                      <div className="library-upload-field library-upload-threshold-field">
+                        <div className="document-threshold-control-head">
+                          <span>AI Assist Below {effectiveAiConfidenceThresholdPercent}%</span>
+                          {aiConfidenceThresholdIsOverride ? (
+                            <button
+                              type="button"
+                              className="button button-ghost document-threshold-reset"
+                              onClick={() => setAiConfidenceThresholdOverridePercent(null)}
+                              disabled={uploading}
+                            >
+                              Use System Default
+                            </button>
+                          ) : null}
+                        </div>
+                        <input
+                          className="document-threshold-slider"
+                          type="range"
+                          name="ai_confidence_threshold_percent"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={effectiveAiConfidenceThresholdPercent}
+                          onChange={(event) =>
+                            setAiConfidenceThresholdOverridePercent(Number(event.target.value))
+                          }
+                          disabled={uploading}
+                        />
+                        <span className="library-upload-threshold-note">
+                          {aiConfidenceThresholdIsOverride
+                            ? 'Temporary session override. It clears when you log out.'
+                            : `Using the system default of ${systemAiConfidenceThresholdPercent}%.`}
+                        </span>
+                      </div>
+                    ) : null}
+
                   </div>
 
                   <div className="library-upload-inline-actions">
@@ -1760,8 +2082,11 @@ export function LibraryWorkspace({
                       {selectedProcessorProvider === 'builtin'
                         ? 'Built-in parsing only will run for this upload.'
                         : selectedProvider
-                          ? `${selectedProvider.label}${selectedProcessorModel ? ` (${selectedProcessorModel})` : ''} will handle document analysis.`
+                          ? `${selectedProvider.label}${selectedProcessorModel ? ` (${selectedProcessorModel})` : ''} will handle document analysis when classifier confidence is below ${effectiveAiConfidenceThresholdPercent}%.`
                           : 'The built-in parser will be used until an external provider is configured.'}
+                      {aiConfidenceThresholdIsOverride && shouldShowAiThresholdControl
+                        ? ' This temporary Library setting is active until logout.'
+                        : ''}
                       {unconfiguredProviders.length > 0
                         ? ` ${placeholderProviderLabels} placeholder${unconfiguredProviders.length === 1 ? ' is' : 's are'} visible here and will unlock once those API providers are configured.`
                         : ''}
@@ -1777,15 +2102,48 @@ export function LibraryWorkspace({
           </div>
         </article>
 
-        <section className="library-browser-main surface">
+        <article className="library-document-list-card prompt-home-document-upload-card">
+          <div className="prompt-home-document-upload-card-head">
+            <div className="prompt-home-document-upload-card-copy">
+              <span className="eyebrow">Files</span>
+              <strong>Document list</strong>
+            </div>
+
+            <div className="prompt-home-document-upload-card-side library-document-list-card-side">
+              <div className="library-document-list-card-summary" aria-label="Document list summary">
+                <span>{visibleDocuments.length} visible</span>
+                <span>{formatBytes(visibleStoredBytes)}</span>
+                <span>{viewMode === 'list' ? 'List view' : 'Grid view'}</span>
+              </div>
+              <button
+                type="button"
+                className="prompt-home-document-upload-card-toggle"
+                aria-label={showDocumentList ? 'Hide document list card' : 'Show document list card'}
+                aria-expanded={showDocumentList}
+                aria-controls={LIBRARY_DOCUMENT_LIST_CARD_PANEL_ID}
+                onClick={() => setDocumentListCardExpanded((current) => !current)}
+              >
+                <div className="prompt-home-document-upload-card-toggle-meta">
+                  <small>{showDocumentList ? 'Hide card' : 'Show card'}</small>
+                  <span className="prompt-home-support-toggle-indicator" aria-hidden="true">
+                    {showDocumentList ? '−' : '+'}
+                  </span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <div
+            id={LIBRARY_DOCUMENT_LIST_CARD_PANEL_ID}
+            className="prompt-home-document-upload-card-body library-document-list-card-body"
+            hidden={!showDocumentList}
+          >
+            {showDocumentList ? (
+              <section className="library-browser-main" aria-label="Document list">
             {visibleDocuments.length === 0 ? (
               <div className="empty-state library-empty-state">
-                <strong>{documents.length === 0 ? 'No uploaded documents yet' : 'No files match this view'}</strong>
-                <p>
-                  {documents.length === 0
-                    ? 'Open the uploader card to add the first PDF into the library.'
-                    : 'Try another workflow view, clear the search box, or change the type filter.'}
-                </p>
+                <strong>{emptyStateTitle}</strong>
+                <p>{emptyStateMessage}</p>
               </div>
             ) : viewMode === 'list' ? (
               <>
@@ -1993,7 +2351,10 @@ export function LibraryWorkspace({
                 })}
               </div>
             )}
-        </section>
+              </section>
+            ) : null}
+          </div>
+        </article>
           </>
         )}
       </div>
@@ -2082,24 +2443,271 @@ export function LibraryWorkspace({
             ) : workflowList && workflowList.workflows.length === 0 ? (
               <p className="library-muted-copy">{workflowList.empty_message}</p>
             ) : workflowList ? (
-              <div className="library-workflow-list">
-                {workflowList.workflows.map((workflow) => (
-                  <article key={workflow.workflow_id} className="library-workflow-card">
-                    <div className="library-workflow-card-copy">
-                      <strong>{workflow.label}</strong>
-                      <span>{workflow.description}</span>
+              <>
+                <section className="library-workflow-summary" aria-label="Record resolution summary">
+                  <div className="library-workflow-summary-main">
+                    <span className="eyebrow">Recommended Action</span>
+                    <strong>{recommendedWorkflow?.label ?? 'Manual Review'}</strong>
+                    <p>{workflowList.action_plan?.description ?? recommendedWorkflow?.description ?? workflowList.empty_message}</p>
+                  </div>
+                  <div className="library-workflow-chip-row">
+                    <span className={`status-pill status-pill-${workflowStatusTone(workflowList.action_plan?.status)}`}>
+                      {formatWorkflowValue(workflowList.action_plan?.status, 'Review')}
+                    </span>
+                    <span className={`status-pill status-pill-${workflowStatusTone(workflowList.governance?.status)}`}>
+                      {formatWorkflowValue(workflowList.governance?.status, 'Governance Pending')}
+                    </span>
+                    <span className="entity-chip entity-chip-soft">
+                      {formatWorkflowPercent(workflowList.linkage_assessment?.confidence)} confidence
+                    </span>
+                  </div>
+                  <dl className="library-workflow-summary-grid">
+                    <div>
+                      <dt>Target</dt>
+                      <dd>{workflowRecordLabel(workflowList.action_plan?.target)}</dd>
                     </div>
-                    <button
-                      type="button"
-                      className="button button-primary"
-                      disabled={executingWorkflowId !== null}
-                      onClick={() => void handleExecuteWorkflow(workflow)}
-                    >
-                      {executingWorkflowId === workflow.workflow_id ? 'Executing...' : 'Execute'}
-                    </button>
-                  </article>
-                ))}
-              </div>
+                    <div>
+                      <dt>Owner</dt>
+                      <dd>{workflowRecordLabel(workflowList.action_plan?.owner)}</dd>
+                    </div>
+                    <div>
+                      <dt>Primary Match</dt>
+                      <dd>{workflowPrimaryCandidate ? workflowCandidateLabel(workflowPrimaryCandidate) : 'No candidate yet'}</dd>
+                    </div>
+                    <div>
+                      <dt>Existing Links</dt>
+                      <dd>{workflowExistingLinkCount}</dd>
+                    </div>
+                  </dl>
+                  {(workflowList.action_plan?.missing_evidence ?? []).length ? (
+                    <div className="library-workflow-token-section">
+                      <span>Missing Evidence</span>
+                      <div className="library-workflow-token-list">
+                        {(workflowList.action_plan?.missing_evidence ?? []).map((item) => (
+                          <small key={item}>{formatWorkflowValue(item)}</small>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {workflowPendingApprovalRequest ? (
+                    <div className="library-workflow-token-section">
+                      <span>Pending Approval</span>
+                      <div className="library-workflow-token-list">
+                        <small>Request {workflowPendingApprovalRequest.request_id}</small>
+                        <small>{formatWorkflowValue(workflowPendingApprovalRequest.governance_status)}</small>
+                        <small>{formatDate(workflowPendingApprovalRequest.requested_at)}</small>
+                      </div>
+                    </div>
+                  ) : null}
+                </section>
+
+                {(workflowList.linkage_assessment?.candidates ?? []).length ? (
+                  <section className="library-workflow-candidates" aria-label="Record candidates">
+                    <div className="library-workflow-section-head">
+                      <strong>Record Candidates</strong>
+                      <span>{workflowList.linkage_assessment?.candidates?.length ?? 0}</span>
+                    </div>
+                    <div className="library-workflow-candidate-list">
+                      {(workflowList.linkage_assessment?.candidates ?? []).slice(0, 4).map((candidate) => {
+                        const candidateKey = workflowCandidateKey(candidate)
+                        const isSelectable = canRequestSelectedWorkflowCandidateApproval(candidate)
+                        const isSelected = selectedWorkflowCandidateKey === candidateKey
+
+                        return (
+                          <article
+                            key={candidateKey}
+                            className={`library-workflow-candidate${isSelected ? ' is-selected' : ''}`}
+                          >
+                            <div>
+                              <strong>{candidate.record_label}</strong>
+                              <span>{candidate.summary}</span>
+                            </div>
+                            <div className="library-workflow-chip-row">
+                              <span className={`status-pill status-pill-${workflowStatusTone(candidate.candidate_state)}`}>
+                                {formatWorkflowValue(candidate.candidate_state)}
+                              </span>
+                              <span className="entity-chip entity-chip-soft">
+                                {formatWorkflowPercent(candidate.score)}
+                              </span>
+                              {isSelectable ? (
+                                <button
+                                  type="button"
+                                  className="button button-secondary library-workflow-candidate-select"
+                                  onClick={() => setSelectedWorkflowCandidateKey(candidateKey)}
+                                >
+                                  {isSelected ? 'Selected' : 'Select'}
+                                </button>
+                              ) : null}
+                            </div>
+                            {(candidate.matched_keys ?? []).length || (candidate.missing_keys ?? []).length ? (
+                              <div className="library-workflow-candidate-evidence">
+                                {(candidate.matched_keys ?? []).length ? (
+                                  <span>Matched {(candidate.matched_keys ?? []).map((item) => formatWorkflowValue(item)).join(', ')}</span>
+                                ) : null}
+                                {(candidate.missing_keys ?? []).length ? (
+                                  <span>Missing {(candidate.missing_keys ?? []).map((item) => formatWorkflowValue(item)).join(', ')}</span>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </article>
+                        )
+                      })}
+                    </div>
+                    {selectedWorkflowCandidate ? (
+                      <div className="library-workflow-selected-candidate">
+                        <div>
+                          <strong>{selectedWorkflowCandidate.record_label}</strong>
+                          <span>
+                            {formatWorkflowPercent(selectedWorkflowCandidate.score)} confidence /{' '}
+                            {formatWorkflowValue(selectedWorkflowCandidate.candidate_state)}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="button button-primary"
+                          disabled={executingWorkflowId !== null || Boolean(workflowPendingApprovalRequest)}
+                          onClick={() =>
+                            canAttachSelectedWorkflowCandidate(selectedWorkflowCandidate)
+                              ? void handleAttachSelectedWorkflowCandidate(selectedWorkflowCandidate)
+                              : void handleRequestSelectedWorkflowCandidateApproval(selectedWorkflowCandidate)
+                          }
+                        >
+                          {executingWorkflowId === `candidate:${workflowCandidateKey(selectedWorkflowCandidate)}`
+                            ? 'Working...'
+                            : workflowPendingApprovalRequest
+                              ? 'Approval Pending'
+                              : canAttachSelectedWorkflowCandidate(selectedWorkflowCandidate)
+                                ? 'Attach Selected'
+                                : 'Request Approval'}
+                        </button>
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+
+                <div className="library-workflow-list">
+                  {workflowList.workflows.map((workflow) => {
+                    const disabledReason = workflowDisabledReason(workflow)
+                    const canExecute = canExecuteWorkflowAction(workflow)
+                    const canRequestApproval =
+                      canRequestDocumentActionApproval(workflow) && !workflowPendingApprovalRequest
+                    const buttonEnabled = canExecute || canRequestApproval
+                    const buttonLabel = workflowPendingApprovalRequest && workflow.approval_required
+                      ? 'Approval Pending'
+                      : canRequestApproval
+                        ? 'Request Approval'
+                        : workflowActionButtonLabel(workflow)
+                    const requiredOwnerTypes = workflow.required_owner_record_types ?? []
+                    const missingEvidence = workflow.missing_evidence ?? []
+                    const riskFlags = workflow.risk_flags ?? []
+                    const reasons = workflow.reasons ?? []
+
+                    return (
+                      <article
+                        key={workflow.workflow_id}
+                        className={`library-workflow-card${workflow.recommended ? ' is-recommended' : ''}`}
+                      >
+                        <div className="library-workflow-card-head">
+                          <div>
+                            <strong>{workflow.label}</strong>
+                            <span>{workflow.description}</span>
+                          </div>
+                          <div className="library-workflow-card-badges">
+                            {workflow.recommended ? <span className="entity-chip entity-chip-soft">Recommended</span> : null}
+                            <span className={`status-pill status-pill-${workflowStatusTone(workflow.status)}`}>
+                              {formatWorkflowValue(workflow.status)}
+                            </span>
+                            {workflow.candidate_state ? (
+                              <span className="entity-chip entity-chip-soft">
+                                {formatWorkflowValue(workflow.candidate_state)}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <dl className="library-workflow-card-grid">
+                          <div>
+                            <dt>Effect</dt>
+                            <dd>{workflow.record_effect ?? 'Review only'}</dd>
+                          </div>
+                          <div>
+                            <dt>Target</dt>
+                            <dd>{workflowRecordLabel(workflow.target)}</dd>
+                          </div>
+                          <div>
+                            <dt>Owner</dt>
+                            <dd>{workflowRecordLabel(workflow.owner)}</dd>
+                          </div>
+                          <div>
+                            <dt>Governance</dt>
+                            <dd>{formatWorkflowValue(workflow.governance_status, 'Not evaluated')}</dd>
+                          </div>
+                        </dl>
+
+                        {requiredOwnerTypes.length ? (
+                          <div className="library-workflow-token-section">
+                            <span>Required Owner</span>
+                            <div className="library-workflow-token-list">
+                              {requiredOwnerTypes.map((item) => (
+                                <small key={item}>{formatWorkflowValue(item)}</small>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {missingEvidence.length ? (
+                          <div className="library-workflow-token-section">
+                            <span>Missing Evidence</span>
+                            <div className="library-workflow-token-list">
+                              {missingEvidence.map((item) => (
+                                <small key={item}>{formatWorkflowValue(item)}</small>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {riskFlags.length ? (
+                          <div className="library-workflow-token-section">
+                            <span>Risk Flags</span>
+                            <div className="library-workflow-token-list">
+                              {riskFlags.map((item) => (
+                                <small key={item}>{formatWorkflowValue(item)}</small>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {reasons.length ? (
+                          <ul className="library-workflow-reasons">
+                            {reasons.slice(0, 3).map((reason) => (
+                              <li key={reason}>{reason}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+
+                        {disabledReason ? (
+                          <p className="library-workflow-disabled-reason">{disabledReason}</p>
+                        ) : null}
+
+                        <div className="library-workflow-card-actions">
+                          <button
+                            type="button"
+                            className="button button-primary"
+                            disabled={executingWorkflowId !== null || !buttonEnabled}
+                            onClick={() =>
+                              canRequestApproval
+                                ? void handleRequestWorkflowApproval(workflow)
+                                : void handleExecuteWorkflow(workflow)
+                            }
+                          >
+                            {executingWorkflowId === workflow.workflow_id ? 'Working...' : buttonLabel}
+                          </button>
+                        </div>
+                      </article>
+                    )
+                  })}
+                </div>
+              </>
             ) : null}
 
             {workflowExecution ? (
@@ -2110,6 +2718,13 @@ export function LibraryWorkspace({
                   {workflowExecution.created_count} created / {workflowExecution.updated_count} updated /{' '}
                   {workflowExecution.unchanged_count} unchanged
                 </span>
+              </div>
+            ) : null}
+
+            {workflowActionMessage ? (
+              <div className="library-workflow-result">
+                <strong>Attach complete</strong>
+                <p>{workflowActionMessage}</p>
               </div>
             ) : null}
 

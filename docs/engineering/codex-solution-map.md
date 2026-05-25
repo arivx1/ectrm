@@ -98,7 +98,7 @@ domain-first packages. New business logic should normally live under
 | Settlement and accruals | `domains/settlement`, `domains/accruals`, settlement-adjacent operations services | Invoice/payment state, settlement posture, accrual lots and entries, settlement exceptions. |
 | Documents | `domains/documents`, `routes/documents.py` | Ingestion, classification, extraction review, deterministic facets, linkage, document action planning. |
 | Reports | `domains/reports` | Aggregation, report definitions, presets, exports, and summaries over governed domain outputs. |
-| Home view instances | `domains/home_views`, `routes/home_view_definitions.py` | System Home template metadata, personal saved Home definitions, card registry validation, scope/audit fields, and reset behavior. Not live business data truth. |
+| Home view instances | `domains/home_views`, `routes/home_view_definitions.py` | System Home template metadata, personal and shared Home definitions, card registry and card configuration value validation, shared lifecycle/admin inventory, scope/audit fields, and reset behavior. Not live business data truth. |
 | Assistant and AI gateway | `domains/assistant`, `routes/assistant.py` | Prompt assembly, live tools, managed agents, run traces, evals, action planning, action governance. |
 | MCP | `domains/mcp` | External read transport and identity bridge. Future writes must map to typed services or action requests. |
 | Codex | `domains/codex`, `routes/codex.py` | Admin-owned engineering task dispatch, task state, callbacks, and smoke checks. Not business-record truth. |
@@ -209,17 +209,18 @@ Before adding or widening an action type, read
 
 ```text
 /documents upload or reprocess
-  -> document storage and page records
-  -> extraction or processor layer
+  -> uploaded-file storage, page records, and logical-document page ranges
   -> deterministic classification/facet scoring
-  -> ingestion review serialization
-  -> routing/linkage/action planning
+  -> threshold-gated AI processor for low-confidence pages using system config
+     or the Library session override
+  -> packet split provenance and logical-document review serialization
+  -> routing/linkage/action planning at the logical-document boundary
   -> optional governed action request
 ```
 
 Document AI output can help extract or normalize, but deterministic scoring,
-review state, linkage, and business-record mutations must remain explicit and
-testable.
+packet boundaries, review state, linkage, and business-record mutations must
+remain explicit and testable.
 
 ### Codex Task Flow
 

@@ -64,6 +64,10 @@ def bootstrap_admin_account(
         user_id=payload.user_id,
         email=payload.email,
         display_name=payload.display_name,
+        first_name=None,
+        last_name=None,
+        preferred_timezone=None,
+        primary_location=None,
         role="OPS_ADMIN",
         default_assistant_persona=default_assistant_persona_for_role("OPS_ADMIN"),
         password_hash=hash_password(payload.password),
@@ -200,6 +204,14 @@ def update_current_user_profile(
 
     if "display_name" in payload.model_fields_set and payload.display_name is not None:
         user.display_name = payload.display_name
+    if "first_name" in payload.model_fields_set:
+        user.first_name = payload.first_name
+    if "last_name" in payload.model_fields_set:
+        user.last_name = payload.last_name
+    if "preferred_timezone" in payload.model_fields_set:
+        user.preferred_timezone = payload.preferred_timezone
+    if "primary_location" in payload.model_fields_set:
+        user.primary_location = payload.primary_location
     if "default_assistant_persona" in payload.model_fields_set:
         user.default_assistant_persona = (
             payload.default_assistant_persona
@@ -242,6 +254,10 @@ def _to_authenticated_user(user: UserAccount) -> AuthenticatedUserOut:
         user_id=user.user_id,
         email=user.email,
         display_name=user.display_name,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        preferred_timezone=user.preferred_timezone,
+        primary_location=user.primary_location,
         role=user.role,
         default_assistant_persona=(
             normalize_assistant_persona_key(user.default_assistant_persona)

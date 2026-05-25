@@ -32,19 +32,26 @@ export type HomeViewDefinition = {
   definition_id: number
   definition_key: string
   name: string
-  scope: 'PERSONAL'
+  scope: 'PERSONAL' | 'TEAM' | 'ORGANIZATION'
+  scope_owner_key: string
   base_template_key: 'system_home'
   base_template_version: 1
   persona_hint: AssistantPersona | null
   cards: HomeViewCardPayload[]
   global_filters: Record<string, unknown>
-  status: 'ACTIVE' | 'RETIRED'
+  status: 'DRAFT' | 'ACTIVE' | 'RETIRED'
   created_at: string
   created_by: string
   updated_at: string
   updated_by: string
   version: number
   can_edit: boolean
+  can_duplicate: boolean
+  can_publish: boolean
+  can_retire: boolean
+  can_restore: boolean
+  is_shared: boolean
+  validation_warnings: string[]
 }
 
 export type HomeViewSystemTemplate = {
@@ -70,6 +77,16 @@ export type HomeViewDefinitionUpdatePayload = {
   persona_hint?: AssistantPersona | null
   cards?: HomeViewCardPayload[]
   global_filters?: Record<string, unknown>
+}
+
+export type HomeViewDefinitionPublishPayload = {
+  name?: string
+  scope: 'TEAM' | 'ORGANIZATION'
+  team_key?: string | null
+}
+
+export type HomeViewDefinitionDuplicatePayload = {
+  name?: string
 }
 
 export function toHomeViewCardPayload(card: PromptHomeTemplateCard): HomeViewCardPayload {
@@ -124,6 +141,16 @@ export async function listHomeViewDefinitions(
   })
 }
 
+export async function listAdminHomeViewDefinitions(
+  apiBase: string,
+  accessToken: string,
+): Promise<HomeViewDefinition[]> {
+  return fetchJson<HomeViewDefinition[]>(`${apiBase}/home-view-definitions/admin/inventory`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
 export async function createHomeViewDefinition(
   apiBase: string,
   accessToken: string,
@@ -152,6 +179,64 @@ export async function resetHomeViewDefinition(
 ): Promise<HomeViewDefinition> {
   return postJson<HomeViewDefinition>(
     `${apiBase}/home-view-definitions/${definitionId}/reset`,
+    {},
+    {
+      headers: authorizationHeaders(accessToken),
+    },
+  )
+}
+
+export async function publishHomeViewDefinition(
+  apiBase: string,
+  accessToken: string,
+  definitionId: number,
+  payload: HomeViewDefinitionPublishPayload,
+): Promise<HomeViewDefinition> {
+  return postJson<HomeViewDefinition>(
+    `${apiBase}/home-view-definitions/${definitionId}/publish`,
+    payload,
+    {
+      headers: authorizationHeaders(accessToken),
+    },
+  )
+}
+
+export async function duplicateHomeViewDefinition(
+  apiBase: string,
+  accessToken: string,
+  definitionId: number,
+  payload: HomeViewDefinitionDuplicatePayload,
+): Promise<HomeViewDefinition> {
+  return postJson<HomeViewDefinition>(
+    `${apiBase}/home-view-definitions/${definitionId}/duplicate`,
+    payload,
+    {
+      headers: authorizationHeaders(accessToken),
+    },
+  )
+}
+
+export async function retireHomeViewDefinition(
+  apiBase: string,
+  accessToken: string,
+  definitionId: number,
+): Promise<HomeViewDefinition> {
+  return postJson<HomeViewDefinition>(
+    `${apiBase}/home-view-definitions/${definitionId}/retire`,
+    {},
+    {
+      headers: authorizationHeaders(accessToken),
+    },
+  )
+}
+
+export async function restoreHomeViewDefinition(
+  apiBase: string,
+  accessToken: string,
+  definitionId: number,
+): Promise<HomeViewDefinition> {
+  return postJson<HomeViewDefinition>(
+    `${apiBase}/home-view-definitions/${definitionId}/restore`,
     {},
     {
       headers: authorizationHeaders(accessToken),

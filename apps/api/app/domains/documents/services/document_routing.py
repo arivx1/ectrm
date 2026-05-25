@@ -59,6 +59,8 @@ STRATEGY_KEY_WEIGHTS: dict[str, dict[str, float]] = {
     },
     "DELIVERY_FIRST": {
         "delivery_id": 1.0,
+        "delivery_order_number": 0.92,
+        "packing_list_number": 0.9,
         "bill_of_lading_number": 0.92,
         "waybill_number": 0.9,
         "railcar_number": 0.9,
@@ -71,9 +73,12 @@ STRATEGY_KEY_WEIGHTS: dict[str, dict[str, float]] = {
         "pipeline_system": 0.6,
         "contract_number": 0.55,
         "carrier_reference": 0.7,
+        "customer_reference": 0.58,
         "asset_reference": 0.45,
         "dispatch_number": 0.9,
         "load_date": 0.45,
+        "loading_date": 0.45,
+        "delivery_date": 0.45,
         "dispatch_date": 0.45,
         "dispatch_start": 0.35,
         "dispatch_end": 0.35,
@@ -85,6 +90,9 @@ STRATEGY_KEY_WEIGHTS: dict[str, dict[str, float]] = {
         "outage_end": 0.32,
         "origin": 0.35,
         "destination": 0.35,
+        "carrier": 0.32,
+        "shipper": 0.28,
+        "consignee": 0.28,
         "vessel_name": 0.42,
         "voyage_number": 0.42,
         "load_port": 0.35,
@@ -92,6 +100,8 @@ STRATEGY_KEY_WEIGHTS: dict[str, dict[str, float]] = {
         "flow_date": 0.45,
         "nomination_date": 0.3,
         "quantity": 0.25,
+        "product": 0.25,
+        "tare_weight": 0.16,
         "curtailed_quantity": 0.35,
         "issuing_entity": 0.35,
         "facility": 0.35,
@@ -221,6 +231,8 @@ TARGET_KEY_WEIGHTS: dict[str, dict[str, float]] = {
     },
     "DELIVERY_OBLIGATION": {
         "delivery_id": 1.0,
+        "delivery_order_number": 0.78,
+        "packing_list_number": 0.76,
         "bill_of_lading_number": 0.78,
         "waybill_number": 0.78,
         "railcar_number": 0.78,
@@ -233,7 +245,10 @@ TARGET_KEY_WEIGHTS: dict[str, dict[str, float]] = {
         "contract_number": 0.72,
         "pipeline_system": 0.55,
         "carrier_reference": 0.62,
+        "customer_reference": 0.5,
         "load_date": 0.35,
+        "loading_date": 0.35,
+        "delivery_date": 0.35,
         "dispatch_date": 0.35,
         "dispatch_start": 0.32,
         "dispatch_end": 0.28,
@@ -249,11 +264,17 @@ TARGET_KEY_WEIGHTS: dict[str, dict[str, float]] = {
         "discharge_port": 0.28,
         "origin": 0.28,
         "destination": 0.28,
+        "carrier": 0.24,
+        "shipper": 0.22,
+        "consignee": 0.22,
         "receipt_location_code": 0.32,
         "delivery_location_code": 0.32,
         "sample_id": 0.2,
         "lot_number": 0.24,
         "product": 0.2,
+        "gross_weight": 0.18,
+        "net_weight": 0.18,
+        "tare_weight": 0.12,
         "facility": 0.2,
         "issuing_entity": 0.2,
         "curtailed_quantity": 0.24,
@@ -285,6 +306,8 @@ TARGET_KEY_WEIGHTS: dict[str, dict[str, float]] = {
     },
     "DELIVERY": {
         "delivery_id": 1.0,
+        "delivery_order_number": 0.84,
+        "packing_list_number": 0.82,
         "bill_of_lading_number": 0.86,
         "waybill_number": 0.84,
         "railcar_number": 0.84,
@@ -298,7 +321,10 @@ TARGET_KEY_WEIGHTS: dict[str, dict[str, float]] = {
         "contract_number": 0.68,
         "pipeline_system": 0.55,
         "carrier_reference": 0.62,
+        "customer_reference": 0.5,
         "load_date": 0.38,
+        "loading_date": 0.38,
+        "delivery_date": 0.38,
         "dispatch_date": 0.38,
         "dispatch_start": 0.32,
         "dispatch_end": 0.28,
@@ -315,9 +341,15 @@ TARGET_KEY_WEIGHTS: dict[str, dict[str, float]] = {
         "discharge_port": 0.28,
         "origin": 0.28,
         "destination": 0.28,
+        "carrier": 0.24,
+        "shipper": 0.22,
+        "consignee": 0.22,
         "sample_id": 0.18,
         "lot_number": 0.24,
         "product": 0.2,
+        "gross_weight": 0.18,
+        "net_weight": 0.18,
+        "tare_weight": 0.12,
         "facility": 0.2,
         "issuing_entity": 0.2,
         "curtailed_quantity": 0.24,
@@ -442,7 +474,15 @@ TARGET_KEY_WEIGHTS: dict[str, dict[str, float]] = {
 
 TABLE_BONUS_BY_STRATEGY: dict[str, set[str]] = {
     "TRADE_FIRST": {"economic_terms", "commercial_terms", "execution_lines", "statement_lines"},
-    "DELIVERY_FIRST": {"shipment_lines", "flow_lines", "inventory_lines", "delivered_lines", "measurement_lines", "weight_measurements"},
+    "DELIVERY_FIRST": {
+        "shipment_lines",
+        "flow_lines",
+        "inventory_lines",
+        "delivered_lines",
+        "measurement_lines",
+        "weight_measurements",
+        "packing_lines",
+    },
     "SETTLEMENT_FIRST": {"line_items", "settlement_lines", "statement_lines", "claim_lines"},
     "MARKET_DATA_FIRST": {"price_lines"},
     "ATTACHMENT_FIRST": {"quality_results", "analyte_results", "assay_results", "parameter_limits", "hazardous_components"},
@@ -452,6 +492,8 @@ HIGH_SIGNAL_KEYS = {
     "trade_id",
     "external_trade_id",
     "delivery_id",
+    "delivery_order_number",
+    "packing_list_number",
     "invoice_number",
     "payment_reference",
     "letter_of_credit_number",
@@ -467,6 +509,7 @@ HIGH_SIGNAL_KEYS = {
     "railcar_number",
     "ticket_number",
     "delivery_confirmation_number",
+    "customer_reference",
     "notice_number",
     "nomination_reference",
     "sample_id",
@@ -593,9 +636,9 @@ def build_document_routing_assessment(
     has_unknown_pages = any(page.document_kind == "UNKNOWN" for page in pages)
     if len(page_level_kinds) > 1 or (has_unknown_pages and page_level_kinds):
         reason = (
-            f"Document contains multiple page-level document kinds: {', '.join(page_level_kinds)}."
+            f"Document packet contains multiple logical document kinds: {', '.join(page_level_kinds)}."
             if len(page_level_kinds) > 1
-            else f"Document has unclassified pages alongside {page_level_kinds[0]} pages."
+            else f"Document packet has unclassified pages alongside {page_level_kinds[0]} pages."
         )
         return DocumentRoutingAssessmentOut(
             routing_strategy="MANUAL_REVIEW",
@@ -603,7 +646,7 @@ def build_document_routing_assessment(
             confidence=0.0,
             reasons=[
                 reason,
-                "Route each logical document or page group separately instead of assigning one document-level target.",
+                "Route each logical document page range separately instead of assigning one file-level target.",
             ],
         )
 

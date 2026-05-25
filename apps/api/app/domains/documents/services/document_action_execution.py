@@ -13,13 +13,18 @@ from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.schemas.document import DocumentActionPlanOut
+from apps.api.app.schemas.document import DocumentLinkageAssessmentOut
 from apps.api.app.schemas.document import DocumentIngestionOut
 
+from .document_action_governance import DocumentActionGovernance
+from .document_action_governance import build_document_action_governance
 from .document_action_planning import build_document_action_plan
 from .document_ingestion_serialization import load_document_and_pages
 from .document_ingestion_serialization import serialize_documents
 from .document_linkage import build_document_linkage_assessment
 from .document_record_links import create_document_record_link
+from .document_record_links import list_document_record_links
+from .document_record_links import to_document_record_link_out
 
 SUPPORTED_DOCUMENT_ACTION_OPERATIONS: frozenset[str] = frozenset(
     {
@@ -36,6 +41,8 @@ def execute_document_action_plan(
     *,
     document_id: str,
     actor_id: str,
+    require_safe_direct_execution: bool = True,
+    action_plan_override: DocumentActionPlanOut | None = None,
 ) -> DocumentIngestionOut:
     reference_time = datetime.now(timezone.utc)
     document, pages = load_document_and_pages(db, document_id=document_id)
@@ -48,7 +55,7 @@ def execute_document_action_plan(
         review_status=document.review_status,
         document_id=document.document_id,
     )
-    action_plan = build_document_action_plan(
+    action_plan = action_plan_override or build_document_action_plan(
         document_id=document.document_id,
         pages=pages,
         review_status=document.review_status,
@@ -60,6 +67,15 @@ def execute_document_action_plan(
         raise ValueError(
             f"Document action operation '{action_plan.operation_type}' is not supported for execution yet."
         )
+
+    governance = _build_action_governance(
+        db,
+        document_id=document.document_id,
+        action_plan=action_plan,
+        linkage_assessment=linkage_assessment,
+    )
+    if require_safe_direct_execution:
+        _ensure_safe_direct_execution(action_plan=action_plan, governance=governance)
 
     changed = _apply_document_action(
         db,
@@ -75,6 +91,56 @@ def execute_document_action_plan(
         db.flush()
 
     return serialize_documents(db, [document], preloaded_pages=pages)[0]
+
+
+def _build_action_governance(
+    db: Session,
+    *,
+    document_id: str,
+    action_plan: DocumentActionPlanOut,
+    linkage_assessment: DocumentLinkageAssessmentOut,
+) -> DocumentActionGovernance:
+    record_links = [
+        to_document_record_link_out(link)
+        for link in list_document_record_links(db, document_id=document_id)
+    ]
+    return build_document_action_governance(
+        action_plan=action_plan,
+        linkage_assessment=linkage_assessment,
+        record_links=record_links,
+    )
+
+
+def _ensure_safe_direct_execution(
+    *,
+    action_plan: DocumentActionPlanOut,
+    governance: DocumentActionGovernance,
+) -> None:
+    if governance.status == "ALREADY_APPLIED":
+        raise ValueError("The planned document action has already been applied.")
+
+    if (
+        action_plan.action_type != "ATTACH_EXISTING_RECORD"
+        or action_plan.operation_type != "link_document_to_record"
+    ):
+        raise ValueError(
+            "Direct document action execution is limited to high-confidence attachments to existing records. "
+            "Create or financial actions must be staged for approval before execution."
+        )
+
+    target = action_plan.target
+    if target is None or not target.record_id or not target.existing_record:
+        raise ValueError("Attach actions require a concrete existing target record.")
+
+    if governance.approval_required or not governance.auto_execution_allowed:
+        detail = (
+            governance.reasons[0]
+            if governance.reasons
+            else "The action plan is not eligible for direct execution."
+        )
+        raise ValueError(
+            f"Only high-confidence existing-record attach plans can execute directly. {detail}"
+        )
 
 
 def _apply_document_action(

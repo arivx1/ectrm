@@ -747,6 +747,7 @@ class AdminSeedApiTests(unittest.TestCase):
             )
             self.assertEqual(third.trades_seeded, 20)
             self.assertEqual(session.query(Trade).count(), 26)
+            self.assertEqual(session.query(Trade).filter(Trade.unit_of_measure.is_(None)).count(), 0)
 
             fourth = seed_admin_transactions(
                 TransactionSeedRequest(

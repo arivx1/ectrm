@@ -935,16 +935,16 @@ def _resolve_email_recipients(db: Session) -> list[str]:
         return configured_recipients
 
     records = db.execute(
-        select(UserAccount)
+        select(UserAccount.email, UserAccount.role)
         .where(UserAccount.is_active.is_(True))
         .order_by(UserAccount.display_name.asc(), UserAccount.user_id.asc())
-    ).scalars().all()
+    ).all()
     recipients: list[str] = []
     seen: set[str] = set()
-    for record in records:
-        if normalize_role(record.role) not in ADMIN_ROLES:
+    for email_value, role in records:
+        if normalize_role(role) not in ADMIN_ROLES:
             continue
-        email = record.email.strip().lower()
+        email = email_value.strip().lower()
         if not email or email in seen:
             continue
         recipients.append(email)

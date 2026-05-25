@@ -174,6 +174,7 @@ class DocumentLinkageServiceTests(unittest.TestCase):
         self.assertEqual(assessment.recommended_action, "ATTACH")
         self.assertEqual(assessment.primary_record_type, "TRADE_INVOICE")
         self.assertEqual(assessment.primary_record_id, str(invoice.id))
+        self.assertEqual(assessment.candidates[0].candidate_state, "ATTACH_READY")
         self.assertIn("invoice_number", assessment.candidates[0].matched_keys)
         self.assertIn("trade_id", assessment.candidates[0].matched_keys)
 
@@ -206,6 +207,7 @@ class DocumentLinkageServiceTests(unittest.TestCase):
         self.assertEqual(assessment.primary_record_type, "TRADE_INVOICE")
         self.assertIsNone(assessment.primary_record_id)
         self.assertFalse(assessment.candidates[0].existing_record)
+        self.assertEqual(assessment.candidates[0].candidate_state, "CREATE_CANDIDATE")
         self.assertTrue(any(candidate.record_type == "TRADE" and candidate.existing_record for candidate in assessment.candidates))
 
     def test_pipeline_statement_links_to_delivery_by_nomination(self) -> None:
@@ -302,6 +304,7 @@ class DocumentLinkageServiceTests(unittest.TestCase):
         self.assertEqual(assessment.status, "READY")
         self.assertEqual(assessment.primary_record_type, "DELIVERY")
         self.assertEqual(assessment.primary_record_id, "DLV-300")
+        self.assertEqual(assessment.candidates[0].candidate_state, "ATTACH_READY")
         self.assertIn("nomination_reference", assessment.candidates[0].matched_keys)
 
     def test_quality_specification_can_propose_creation_and_keep_trade_context(self) -> None:

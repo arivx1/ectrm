@@ -24,6 +24,7 @@ from apps.api.app.models.delivery_truck_movement import DeliveryTruckMovement
 from apps.api.app.models.delivery_truck_stop import DeliveryTruckStop
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
+from apps.api.app.models.document_logical_document import DocumentLogicalDocument
 from apps.api.app.models.document_action_approval_request import DocumentActionApprovalRequest
 from apps.api.app.models.document_action_decision import DocumentActionDecision
 from apps.api.app.models.document_facet_value import DocumentFacetValue
@@ -122,6 +123,7 @@ __all__ = [
     "DeliveryTruckStop",
     "DocumentIngestion",
     "DocumentIngestionPage",
+    "DocumentLogicalDocument",
     "DocumentActionApprovalRequest",
     "DocumentActionDecision",
     "DocumentFacetValue",

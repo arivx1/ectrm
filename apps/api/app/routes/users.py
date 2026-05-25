@@ -42,6 +42,10 @@ def list_users(
                 UserAccount.user_id.ilike(pattern),
                 UserAccount.display_name.ilike(pattern),
                 UserAccount.email.ilike(pattern),
+                UserAccount.first_name.ilike(pattern),
+                UserAccount.last_name.ilike(pattern),
+                UserAccount.preferred_timezone.ilike(pattern),
+                UserAccount.primary_location.ilike(pattern),
                 UserAccount.role.ilike(pattern),
                 UserAccount.default_assistant_persona.ilike(pattern),
                 UserAccount.assistant_context_blurb.ilike(pattern),
@@ -68,6 +72,10 @@ def create_user(payload: UserAccountCreate, db: Session = Depends(get_db)) -> Us
         user_id=payload.user_id,
         email=payload.email,
         display_name=payload.display_name,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        preferred_timezone=payload.preferred_timezone,
+        primary_location=payload.primary_location,
         role=payload.role,
         default_assistant_persona=(
             payload.default_assistant_persona
@@ -120,6 +128,14 @@ def update_user(user_id: str, payload: UserAccountUpdate, db: Session = Depends(
 
     if payload.display_name is not None:
         record.display_name = payload.display_name
+    if "first_name" in payload.model_fields_set:
+        record.first_name = payload.first_name
+    if "last_name" in payload.model_fields_set:
+        record.last_name = payload.last_name
+    if "preferred_timezone" in payload.model_fields_set:
+        record.preferred_timezone = payload.preferred_timezone
+    if "primary_location" in payload.model_fields_set:
+        record.primary_location = payload.primary_location
     if payload.role is not None:
         record.role = payload.role
     if payload.default_assistant_persona is not None:
@@ -186,6 +202,10 @@ def _to_out(record: UserAccount) -> UserAccountOut:
         user_id=record.user_id,
         email=record.email,
         display_name=record.display_name,
+        first_name=record.first_name,
+        last_name=record.last_name,
+        preferred_timezone=record.preferred_timezone,
+        primary_location=record.primary_location,
         role=record.role,
         default_assistant_persona=(
             normalize_assistant_persona_key(record.default_assistant_persona)

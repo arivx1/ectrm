@@ -19,6 +19,8 @@ DETERMINISTIC_ASSESSMENT_VERSION = "deterministic-score-v1"
 LOW_CONFIDENCE_CLASSIFICATION_THRESHOLD = 0.46
 _TEXT_KEYWORD_SCORE = 0.44
 _EXTRA_TEXT_KEYWORD_SCORE = 0.08
+_TITLE_KEYWORD_SCORE = 0.26
+_TITLE_LINE_SCAN_LIMIT = 12
 _FILENAME_KEYWORD_SCORE = 0.12
 _REQUIRED_FIELD_SCORE = 0.24
 _MATCHING_KEY_SCORE = 0.16
@@ -28,6 +30,22 @@ _TABLE_REQUIRED_SCORE = 0.08
 _TABLE_ROW_BONUS = 0.02
 _AMBIGUITY_MARGIN = 0.12
 _MIN_TEMPLATE_OVERLAP = 0.4
+_TABLE_COLUMN_ALIASES_BY_TEMPLATE: dict[str, dict[str, str]] = {
+    "assay_results": {
+        "analysis": "parameter",
+        "analyte": "parameter",
+        "description": "parameter",
+        "property": "parameter",
+        "test": "parameter",
+        "test_description": "parameter",
+        "max": "spec_max",
+        "maximum": "spec_max",
+        "min": "spec_min",
+        "minimum": "spec_min",
+        "result": "value",
+        "test_result": "value",
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -191,6 +209,7 @@ def _score_schema_candidate(
         normalized_text=normalized_text,
         normalized_filename=normalized_filename,
     )
+    title_hits = _title_keyword_hits(document_kind=document_kind, raw_text=raw_text)
     candidate.keyword_hits = keyword_hits
     candidate.filename_hits = filename_hits
     if keyword_hits:
@@ -201,6 +220,12 @@ def _score_schema_candidate(
         candidate.matched_by_parts.append(f"text:{keyword_hits[0].replace(' ', '_')}")
         candidate.supporting_evidence.append(
             f"Detected {_kind_label(document_kind).lower()} terminology in extracted text ({', '.join(keyword_hits[:2])})."
+        )
+    if title_hits:
+        candidate.score += _TITLE_KEYWORD_SCORE
+        candidate.matched_by_parts.append(f"title:{title_hits[0].replace(' ', '_')}")
+        candidate.supporting_evidence.append(
+            f"Detected {_kind_label(document_kind).lower()} title line in extracted text ({title_hits[0]})."
         )
     if filename_hits:
         filename_bonus = _FILENAME_KEYWORD_SCORE if not keyword_hits else _FILENAME_KEYWORD_SCORE / 2
@@ -309,7 +334,10 @@ def _table_template_match_score(
     best_overlap: list[str] = []
     for block in table_blocks:
         block_columns = {
-            clean_optional_text(column, lowercase=True)
+            _canonical_table_column_key(
+                clean_optional_text(column, lowercase=True),
+                template_key=template.template_key,
+            )
             for column in list(block.get("columns") or [])
             if clean_optional_text(column, lowercase=True)
         }
@@ -338,6 +366,12 @@ def _table_template_match_score(
         best_score,
         f"Parsed table columns align with the {template.label.lower()} layout ({', '.join(_humanized_keys(best_overlap[:4]))}).",
     )
+
+
+def _canonical_table_column_key(value: str | None, *, template_key: str) -> str | None:
+    if value is None:
+        return None
+    return _TABLE_COLUMN_ALIASES_BY_TEMPLATE.get(template_key, {}).get(value, value)
 
 
 def _fallback_candidates(*, searchable: str, raw_text: str | None) -> list[_CandidateScore]:
@@ -416,6 +450,23 @@ def _keyword_hits(
         filename_hits = [keyword for keyword in keywords if keyword in normalized_filename]
         return text_hits, filename_hits
     return [], []
+
+
+def _title_keyword_hits(*, document_kind: str, raw_text: str | None) -> list[str]:
+    if not raw_text:
+        return []
+    early_lines = {
+        normalize_for_matching(line).strip(" :#.-")
+        for line in raw_text.splitlines()[:_TITLE_LINE_SCAN_LIMIT]
+        if line.strip()
+    }
+    if not early_lines:
+        return []
+    for candidate_kind, keywords in CLASSIFICATION_RULES:
+        if candidate_kind != document_kind:
+            continue
+        return [keyword for keyword in keywords if keyword in early_lines]
+    return []
 
 
 def _field_keys(header_fields: list[dict[str, object]]) -> set[str]:

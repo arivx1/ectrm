@@ -166,6 +166,7 @@ def build_document_processor_runtime_settings() -> DocumentProcessorRuntimeSetti
         default_provider=normalize_document_processor_default_provider(settings.DOCUMENT_AI_DEFAULT_PROVIDER),
         effective_default_provider=effective_default_provider,
         configured_provider_count=sum(1 for config in provider_configs if config.configured),
+        ai_processing_confidence_threshold=settings.DOCUMENT_AI_CONFIDENCE_THRESHOLD,
         providers=[
             DocumentProcessorProviderStatusOut(
                 provider=config.provider,

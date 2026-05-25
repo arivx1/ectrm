@@ -5,9 +5,12 @@ import type { StoredAuthSession } from "../../shared/mutation";
 import {
   createHomeViewDefinition,
   deleteHomeViewDefinition,
+  duplicateHomeViewDefinition,
   homeViewCardPayloadToPromptHomeCard,
   listHomeViewDefinitions,
   loadHomeViewSystemTemplate,
+  publishHomeViewDefinition,
+  retireHomeViewDefinition,
   resetHomeViewDefinition,
   toHomeViewCardPayload,
   updateHomeViewDefinition,
@@ -49,7 +52,7 @@ export type PromptHomeViewOption = {
   value: string;
   label: string;
   detail: string;
-  kind: "system" | "personal" | "local";
+  kind: "system" | "personal" | "shared" | "local";
   canEdit: boolean;
 };
 
@@ -57,6 +60,7 @@ export type PromptHomeCardPersistenceStatus =
   | "loading"
   | "system"
   | "personal"
+  | "shared"
   | "saving"
   | "local"
   | "fallback";
@@ -75,6 +79,11 @@ type PersonalHomeViewState = {
 type UsePersistentPromptHomeCardVisibilityOptions = {
   apiBase?: string;
   authSession?: StoredAuthSession | null;
+};
+
+export type PromptHomeCardConfigurationPatch = {
+  parameters?: Record<string, unknown>;
+  filters?: Record<string, unknown>;
 };
 
 function uniquePromptHomeCardKeys(candidate: unknown): PromptHomeCardKey[] {
@@ -207,12 +216,28 @@ function personalHomeViewValue(definitionId: number): string {
   return `personal:${definitionId}`;
 }
 
-function parsePersonalHomeViewValue(value: string): number | null {
-  if (!value.startsWith("personal:")) {
+function sharedHomeViewValue(definitionId: number): string {
+  return `shared:${definitionId}`;
+}
+
+function homeViewDefinitionValue(definition: HomeViewDefinition): string {
+  return definition.is_shared
+    ? sharedHomeViewValue(definition.definition_id)
+    : personalHomeViewValue(definition.definition_id);
+}
+
+function parseHomeViewDefinitionValue(value: string): number | null {
+  const separatorIndex = value.indexOf(":");
+  if (separatorIndex === -1) {
     return null;
   }
 
-  const parsedValue = Number.parseInt(value.slice("personal:".length), 10);
+  const prefix = value.slice(0, separatorIndex);
+  if (prefix !== "personal" && prefix !== "shared") {
+    return null;
+  }
+
+  const parsedValue = Number.parseInt(value.slice(separatorIndex + 1), 10);
   return Number.isFinite(parsedValue) ? parsedValue : null;
 }
 
@@ -253,6 +278,8 @@ function clonePromptHomeTemplateCard(
   args: {
     order: number;
     visible: boolean;
+    parameters?: Record<string, unknown>;
+    filters?: Record<string, unknown>;
   },
 ): PromptHomeTemplateCard {
   return {
@@ -263,8 +290,8 @@ function clonePromptHomeTemplateCard(
       columnSpan: card.placement.columnSpan,
       rowSpan: card.placement.rowSpan,
     },
-    parameters: { ...card.parameters },
-    filters: { ...card.filters },
+    parameters: args.parameters ? { ...args.parameters } : { ...card.parameters },
+    filters: args.filters ? { ...args.filters } : { ...card.filters },
     dataBindings: [...card.dataBindings],
   };
 }
@@ -393,7 +420,7 @@ function resolveActiveHomeViewDefinitionId(
   }
 
   const storedDefinitionId = storedValue
-    ? parsePersonalHomeViewValue(storedValue)
+    ? parseHomeViewDefinitionValue(storedValue)
     : null;
   if (
     storedDefinitionId !== null &&
@@ -404,7 +431,22 @@ function resolveActiveHomeViewDefinitionId(
     return storedDefinitionId;
   }
 
-  return definitions[0]?.definition_id ?? null;
+  const defaultDefinition =
+    definitions.find((definition) => definition.scope === "PERSONAL") ??
+    definitions[0] ??
+    null;
+
+  return defaultDefinition?.definition_id ?? null;
+}
+
+function formatPromptHomeViewScopeDetail(definition: HomeViewDefinition): string {
+  if (definition.scope === "PERSONAL") {
+    return `Personal · v${definition.version}`;
+  }
+  if (definition.scope === "TEAM") {
+    return `Team · ${definition.scope_owner_key.replace(/^team:/, "")} · v${definition.version}`;
+  }
+  return `Organization · v${definition.version}`;
 }
 
 export function savePromptHomeHiddenCardKeys(
@@ -593,11 +635,20 @@ export function usePersistentPromptHomeCardVisibility(
   canManageHomeViews: boolean;
   canRenameActiveHomeView: boolean;
   canDeleteActiveHomeView: boolean;
+  canPublishActiveHomeView: boolean;
+  canRetireActiveHomeView: boolean;
   canResetHomeView: boolean;
   selectHomeView: (value: string) => void;
   saveHomeViewAs: (name: string) => void;
   renameActiveHomeView: (name: string) => void;
   deleteActiveHomeView: () => void;
+  publishActiveHomeView: (name?: string) => void;
+  retireActiveHomeView: () => void;
+  getCard: (cardKey: PromptHomeCardKey) => PromptHomeTemplateCard | null;
+  updateCardConfiguration: (
+    cardKey: PromptHomeCardKey,
+    patch: PromptHomeCardConfigurationPatch,
+  ) => void;
   hiddenCardKeys: PromptHomeCardKey[];
   visibleCardKeys: PromptHomeCardKey[];
   isCardVisible: (cardKey: PromptHomeCardKey) => boolean;
@@ -693,9 +744,15 @@ export function usePersistentPromptHomeCardVisibility(
           loadHomeViewSystemTemplate(apiBase, accessToken),
           listHomeViewDefinitions(apiBase, accessToken),
         ]);
-        let definition = definitions[0] ?? null;
+        let definition =
+          definitions.find((candidate) => candidate.scope === "PERSONAL") ??
+          definitions[0] ??
+          null;
 
-        if (!definition && !defaultPersonalViewWasMigrated(userId)) {
+        if (
+          !definitions.some((candidate) => candidate.scope === "PERSONAL") &&
+          !defaultPersonalViewWasMigrated(userId)
+        ) {
           const systemCards =
             normalizePromptHomeCardsFromSystemTemplate(systemTemplate);
           const shouldMigrateLocalPreferences =
@@ -722,7 +779,10 @@ export function usePersistentPromptHomeCardVisibility(
                 accessToken,
               );
               definitions.splice(0, definitions.length, ...refreshedDefinitions);
-              definition = definitions[0] ?? null;
+              definition =
+                definitions.find((candidate) => candidate.scope === "PERSONAL") ??
+                definitions[0] ??
+                null;
             } else {
               throw error;
             }
@@ -822,7 +882,7 @@ export function usePersistentPromptHomeCardVisibility(
     !personalHomeViewState.fallback &&
     !activeHomeViewDefinition;
   const activeHomeViewValue = activeHomeViewDefinition
-    ? personalHomeViewValue(activeHomeViewDefinition.definition_id)
+    ? homeViewDefinitionValue(activeHomeViewDefinition)
     : activeHomeViewIsSystem
       ? PROMPT_HOME_SYSTEM_VIEW_VALUE
       : PROMPT_HOME_LOCAL_VIEW_VALUE;
@@ -831,17 +891,26 @@ export function usePersistentPromptHomeCardVisibility(
     (activeHomeViewIsSystem ? "System Home" : "Local Home");
   const activeHomeViewDetail =
     activeHomeViewDefinition
-      ? `Personal · v${activeHomeViewDefinition.version}`
+      ? formatPromptHomeViewScopeDetail(activeHomeViewDefinition)
       : activeHomeViewIsSystem
         ? "Immutable system default"
         : "Browser-local fallback";
-  const canEditCards = !activeHomeViewIsSystem;
+  const canEditCards = activeHomeViewDefinition
+    ? activeHomeViewDefinition.can_edit
+    : !activeHomeViewIsSystem;
   const canManageHomeViews =
     Boolean(apiBase && accessToken) && !personalHomeViewState.fallback;
   const canRenameActiveHomeView =
     canManageHomeViews && Boolean(activeHomeViewDefinition?.can_edit);
   const canDeleteActiveHomeView = canRenameActiveHomeView;
-  const canResetHomeView = !activeHomeViewIsSystem;
+  const canPublishActiveHomeView =
+    canManageHomeViews && Boolean(activeHomeViewDefinition?.can_publish);
+  const canRetireActiveHomeView =
+    canManageHomeViews && Boolean(activeHomeViewDefinition?.can_retire);
+  const canResetHomeView =
+    activeHomeViewDefinition
+      ? activeHomeViewDefinition.can_edit
+      : !activeHomeViewIsSystem;
   const homeViewOptions = useMemo<PromptHomeViewOption[]>(() => {
     if (!accessToken || personalHomeViewState.fallback) {
       return [
@@ -864,10 +933,10 @@ export function usePersistentPromptHomeCardVisibility(
         canEdit: false,
       },
       ...personalHomeViewState.definitions.map((definition) => ({
-        value: personalHomeViewValue(definition.definition_id),
+        value: homeViewDefinitionValue(definition),
         label: definition.name,
-        detail: `Personal · v${definition.version}`,
-        kind: "personal" as const,
+        detail: formatPromptHomeViewScopeDetail(definition),
+        kind: definition.is_shared ? "shared" as const : "personal" as const,
         canEdit: definition.can_edit,
       })),
     ];
@@ -893,7 +962,7 @@ export function usePersistentPromptHomeCardVisibility(
         return;
       }
 
-      const definitionId = parsePersonalHomeViewValue(value);
+      const definitionId = parseHomeViewDefinitionValue(value);
       const definition = findHomeViewDefinition(
         personalHomeViewState.definitions,
         definitionId,
@@ -903,7 +972,7 @@ export function usePersistentPromptHomeCardVisibility(
       }
 
       const nextCards = normalizePromptHomeCardsFromDefinition(definition);
-      saveActiveHomeViewValue(userId, personalHomeViewValue(definition.definition_id));
+      saveActiveHomeViewValue(userId, homeViewDefinitionValue(definition));
       savePromptHomeTemplateCardsToLocalStorage(nextCards);
       setPersonalHomeViewState((current) => ({
         ...current,
@@ -929,6 +998,13 @@ export function usePersistentPromptHomeCardVisibility(
         }));
         return;
       }
+      if (activeHomeViewDefinition && !activeHomeViewDefinition.can_edit) {
+        setPersonalHomeViewState((current) => ({
+          ...current,
+          error: "Shared Home views are read-only. Duplicate it before editing cards.",
+        }));
+        return;
+      }
 
       const normalizedCards = normalizePromptHomeTemplateCards(nextCards);
       savePromptHomeTemplateCardsToLocalStorage(normalizedCards);
@@ -940,6 +1016,11 @@ export function usePersistentPromptHomeCardVisibility(
         !definitionId ||
         personalHomeViewState.fallback
       ) {
+        setPersonalHomeViewState((current) => ({
+          ...current,
+          cards: normalizedCards,
+          error: "",
+        }));
         return;
       }
 
@@ -996,7 +1077,7 @@ export function usePersistentPromptHomeCardVisibility(
     },
     [
       accessToken,
-      activeHomeViewDefinition?.definition_id,
+      activeHomeViewDefinition,
       activeHomeViewIsSystem,
       apiBase,
       personalHomeViewState.definitions,
@@ -1015,6 +1096,31 @@ export function usePersistentPromptHomeCardVisibility(
           clonePromptHomeTemplateCard(card, {
             order: index,
             visible: card.cardId === cardKey ? visible : card.visible,
+          }),
+        ),
+      );
+    },
+    [cards, persistCards],
+  );
+  const getCard = useCallback(
+    (cardKey: PromptHomeCardKey) =>
+      cards.find((card) => card.cardId === cardKey) ?? null,
+    [cards],
+  );
+  const updateCardConfiguration = useCallback(
+    (cardKey: PromptHomeCardKey, patch: PromptHomeCardConfigurationPatch) => {
+      if (!cards.some((card) => card.cardId === cardKey)) {
+        return;
+      }
+
+      persistCards(
+        cards.map((card, index) =>
+          clonePromptHomeTemplateCard(card, {
+            order: index,
+            visible: card.visible,
+            parameters:
+              card.cardId === cardKey ? patch.parameters : card.parameters,
+            filters: card.cardId === cardKey ? patch.filters : card.filters,
           }),
         ),
       );
@@ -1140,15 +1246,25 @@ export function usePersistentPromptHomeCardVisibility(
         error: "",
       }));
 
-      void createHomeViewDefinition(
-        apiBase,
-        accessToken,
-        createHomeViewPayload({
-          name: normalizedName,
-          cards,
-          personaHint,
-        }),
-      )
+      const saveRequest =
+        activeHomeViewDefinition?.is_shared
+          ? duplicateHomeViewDefinition(
+              apiBase,
+              accessToken,
+              activeHomeViewDefinition.definition_id,
+              { name: normalizedName },
+            )
+          : createHomeViewDefinition(
+              apiBase,
+              accessToken,
+              createHomeViewPayload({
+                name: normalizedName,
+                cards,
+                personaHint,
+              }),
+            );
+
+      void saveRequest
         .then((definition) => {
           if (saveRunRef.current !== saveRunId) {
             return;
@@ -1187,7 +1303,15 @@ export function usePersistentPromptHomeCardVisibility(
           }));
         });
     },
-    [accessToken, apiBase, cards, personaHint, personalHomeViewState.fallback, userId],
+    [
+      accessToken,
+      activeHomeViewDefinition,
+      apiBase,
+      cards,
+      personaHint,
+      personalHomeViewState.fallback,
+      userId,
+    ],
   );
   const renameActiveHomeView = useCallback(
     (name: string) => {
@@ -1280,7 +1404,7 @@ export function usePersistentPromptHomeCardVisibility(
         saveActiveHomeViewValue(
           userId,
           nextDefinition
-            ? personalHomeViewValue(nextDefinition.definition_id)
+            ? homeViewDefinitionValue(nextDefinition)
             : PROMPT_HOME_SYSTEM_VIEW_VALUE,
         );
         savePromptHomeTemplateCardsToLocalStorage(nextCards);
@@ -1318,6 +1442,137 @@ export function usePersistentPromptHomeCardVisibility(
     personalHomeViewState.systemCards,
     userId,
   ]);
+  const publishActiveHomeView = useCallback(
+    (name?: string) => {
+      const definitionId = activeHomeViewDefinition?.definition_id;
+      if (!definitionId || !canPublishActiveHomeView) {
+        return;
+      }
+
+      const normalizedName = name?.trim() || activeHomeViewDefinition.name;
+      const saveRunId = saveRunRef.current + 1;
+      saveRunRef.current = saveRunId;
+      setPersonalHomeViewState((current) => ({
+        ...current,
+        saving: true,
+        error: "",
+      }));
+
+      void publishHomeViewDefinition(apiBase, accessToken, definitionId, {
+        name: normalizedName,
+        scope: "ORGANIZATION",
+      })
+        .then((definition) => {
+          if (saveRunRef.current !== saveRunId) {
+            return;
+          }
+
+          setPersonalHomeViewState((current) => ({
+            ...current,
+            definitions: upsertHomeViewDefinition(
+              current.definitions,
+              definition,
+            ),
+            loading: false,
+            saving: false,
+            fallback: false,
+            error: "",
+          }));
+        })
+        .catch((error) => {
+          if (saveRunRef.current !== saveRunId) {
+            return;
+          }
+
+          setPersonalHomeViewState((current) => ({
+            ...current,
+            saving: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Could not publish the Home view.",
+          }));
+        });
+    },
+    [
+      accessToken,
+      activeHomeViewDefinition,
+      apiBase,
+      canPublishActiveHomeView,
+    ],
+  );
+  const retireActiveHomeView = useCallback(() => {
+    const definitionId = activeHomeViewDefinition?.definition_id;
+    if (!definitionId || !canRetireActiveHomeView) {
+      return;
+    }
+
+    const saveRunId = saveRunRef.current + 1;
+    saveRunRef.current = saveRunId;
+    setPersonalHomeViewState((current) => ({
+      ...current,
+      saving: true,
+      error: "",
+    }));
+
+    void retireHomeViewDefinition(apiBase, accessToken, definitionId)
+      .then(() => {
+        if (saveRunRef.current !== saveRunId) {
+          return;
+        }
+
+        const remainingDefinitions = personalHomeViewState.definitions.filter(
+          (definition) => definition.definition_id !== definitionId,
+        );
+        const nextDefinition =
+          remainingDefinitions.find((definition) => definition.scope === "PERSONAL") ??
+          remainingDefinitions[0] ??
+          null;
+        const nextCards = nextDefinition
+          ? normalizePromptHomeCardsFromDefinition(nextDefinition)
+          : (personalHomeViewState.systemCards ??
+            normalizePromptHomeTemplateCards(PROMPT_HOME_SYSTEM_TEMPLATE.cards));
+        saveActiveHomeViewValue(
+          userId,
+          nextDefinition
+            ? homeViewDefinitionValue(nextDefinition)
+            : PROMPT_HOME_SYSTEM_VIEW_VALUE,
+        );
+        savePromptHomeTemplateCardsToLocalStorage(nextCards);
+        setPersonalHomeViewState({
+          definitions: remainingDefinitions,
+          activeDefinitionId: nextDefinition?.definition_id ?? null,
+          cards: nextCards,
+          systemCards: personalHomeViewState.systemCards,
+          loading: false,
+          saving: false,
+          fallback: false,
+          error: "",
+        });
+      })
+      .catch((error) => {
+        if (saveRunRef.current !== saveRunId) {
+          return;
+        }
+
+        setPersonalHomeViewState((current) => ({
+          ...current,
+          saving: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Could not retire the shared Home view.",
+        }));
+      });
+  }, [
+    accessToken,
+    activeHomeViewDefinition?.definition_id,
+    apiBase,
+    canRetireActiveHomeView,
+    personalHomeViewState.definitions,
+    personalHomeViewState.systemCards,
+    userId,
+  ]);
   const persistenceStatus: PromptHomeCardPersistenceStatus =
     personalHomeViewState.loading
       ? "loading"
@@ -1326,7 +1581,9 @@ export function usePersistentPromptHomeCardVisibility(
         : personalHomeViewState.saving
         ? "saving"
         : activeHomeViewDefinition
-          ? "personal"
+          ? activeHomeViewDefinition.is_shared
+            ? "shared"
+            : "personal"
           : activeHomeViewIsSystem
             ? "system"
             : "local";
@@ -1349,11 +1606,17 @@ export function usePersistentPromptHomeCardVisibility(
     canManageHomeViews,
     canRenameActiveHomeView,
     canDeleteActiveHomeView,
+    canPublishActiveHomeView,
+    canRetireActiveHomeView,
     canResetHomeView,
     selectHomeView,
     saveHomeViewAs,
     renameActiveHomeView,
     deleteActiveHomeView,
+    publishActiveHomeView,
+    retireActiveHomeView,
+    getCard,
+    updateCardConfiguration,
     hiddenCardKeys,
     visibleCardKeys,
     isCardVisible,

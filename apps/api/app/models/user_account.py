@@ -16,6 +16,10 @@ class UserAccount(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     google_subject: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True)
     display_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    first_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    last_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    preferred_timezone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    primary_location: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
     role: Mapped[str] = mapped_column(String(50), nullable=False)
     default_assistant_persona: Mapped[str] = mapped_column(
         String(32),

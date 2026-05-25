@@ -1427,6 +1427,10 @@ class AssistantApiTests(unittest.TestCase):
 
     def test_assistant_prompt_context_includes_user_profile_context_as_preferences(self) -> None:
         token = self._create_session_token(
+            first_name="Alex",
+            last_name="Ops",
+            preferred_timezone="America/Chicago",
+            primary_location="Houston desk",
             assistant_context_blurb="I cover East gas operations and prefer exposure risk before market color.",
         )
 
@@ -1439,6 +1443,10 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         user_section = next(section for section in payload["sections"] if section["key"] == "user")
+        self.assertIn("first_name: Alex", user_section["content"])
+        self.assertIn("last_name: Ops", user_section["content"])
+        self.assertIn("preferred_timezone: America/Chicago", user_section["content"])
+        self.assertIn("primary_location: Houston desk", user_section["content"])
         self.assertIn("user_ai_context:", user_section["content"])
         self.assertIn("<BEGIN_USER_AI_CONTEXT>", user_section["content"])
         self.assertIn("<END_USER_AI_CONTEXT>", user_section["content"])
@@ -8370,6 +8378,10 @@ class AssistantApiTests(unittest.TestCase):
         display_name: str | None = None,
         role: str = "OPS_ADMIN",
         default_persona: str | None = None,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        preferred_timezone: str | None = None,
+        primary_location: str | None = None,
         assistant_context_blurb: str | None = None,
     ) -> str:
         now = datetime.now(timezone.utc)
@@ -8383,6 +8395,10 @@ class AssistantApiTests(unittest.TestCase):
                         user_id=user_id,
                         email=resolved_email,
                         display_name=resolved_display_name,
+                        first_name=first_name,
+                        last_name=last_name,
+                        preferred_timezone=preferred_timezone,
+                        primary_location=primary_location,
                         role=role,
                         default_assistant_persona=default_persona or default_assistant_persona_for_role(role),
                         assistant_context_blurb=assistant_context_blurb,
@@ -8399,6 +8415,10 @@ class AssistantApiTests(unittest.TestCase):
             else:
                 user.email = resolved_email
                 user.display_name = resolved_display_name
+                user.first_name = first_name
+                user.last_name = last_name
+                user.preferred_timezone = preferred_timezone
+                user.primary_location = primary_location
                 user.role = role
                 user.default_assistant_persona = default_persona or default_assistant_persona_for_role(role)
                 user.assistant_context_blurb = assistant_context_blurb

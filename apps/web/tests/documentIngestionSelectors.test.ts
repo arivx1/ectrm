@@ -19,6 +19,7 @@ const PROCESSOR_SETTINGS = {
   default_provider: 'openai',
   effective_default_provider: 'openai',
   configured_provider_count: 1,
+  ai_processing_confidence_threshold: 0.62,
   gmail_inbox: {
     enabled: true,
     configured: true,
@@ -285,6 +286,9 @@ function buildController(
     documents: [document],
     processorSettings: PROCESSOR_SETTINGS,
     reprocessProviderByDocument: {},
+    systemAiConfidenceThresholdPercent: 62,
+    aiConfidenceThresholdOverridePercent: null,
+    effectiveAiConfidenceThresholdPercent: 62,
     schemaRegistry: null,
     schemaByKind: {},
     loading: false,
@@ -318,6 +322,7 @@ function buildController(
     setDisplayName: () => undefined,
     setSelectedProcessorProvider: () => undefined,
     setSelectedProcessorModel: () => undefined,
+    setAiConfidenceThresholdOverridePercent: () => undefined,
     setDocumentReprocessProvider: () => undefined,
     toggleDocumentExpanded: () => undefined,
     updateSelectedFile: () => undefined,
@@ -440,7 +445,51 @@ describe('document ingestion selectors', () => {
     expect(markup).toContain('Processing Model')
     expect(markup).toContain('<option value="gpt-5" selected="">gpt-5</option>')
     expect(markup).toContain('gpt-5-nano')
-    expect(markup).toContain('OpenAI API (gpt-5) will be used for document processing when the background job runs.')
+    expect(markup).toContain('AI Assist Below 62%')
+    expect(markup).toContain('OpenAI API (gpt-5) will be used when classifier confidence is below 62%.')
+  })
+
+  it('labels an AI threshold session override in the upload form', () => {
+    const markup = renderToStaticMarkup(
+      createElement(DocumentIngestionUploadForm, {
+        compact: false,
+        displayName: '',
+        processorSettings: PROCESSOR_SETTINGS,
+        selectedProcessorProvider: 'openai',
+        selectedProcessorModel: 'gpt-5',
+        selectedFile: null,
+        schemaRegistry: null,
+        uploading: false,
+        uploadError: '',
+        aiConfidenceThresholdPercent: 81,
+        aiConfidenceThresholdIsOverride: true,
+        gmailInboxSettings: PROCESSOR_SETTINGS.gmail_inbox,
+        gmailImporting: false,
+        gmailImportError: '',
+        gmailImportSummary: '',
+        isDragActive: false,
+        fileInputRef: { current: null },
+        onDisplayNameChange: () => undefined,
+        onProcessorProviderChange: () => undefined,
+        onProcessorModelChange: () => undefined,
+        onAiConfidenceThresholdPercentChange: () => undefined,
+        onAiConfidenceThresholdReset: () => undefined,
+        onFileChange: () => undefined,
+        onOpenFilePicker: () => undefined,
+        onDropzoneKeyDown: () => undefined,
+        onDropzoneDragEnter: () => undefined,
+        onDropzoneDragOver: () => undefined,
+        onDropzoneDragLeave: () => undefined,
+        onDropzoneDrop: () => undefined,
+        onSubmit: async () => undefined,
+        onImportGmailInbox: async () => undefined,
+      }),
+    )
+
+    expect(markup).toContain('AI Assist Below 81%')
+    expect(markup).toContain('Session override active until logout.')
+    expect(markup).toContain('Use System Default')
+    expect(markup).toContain('OpenAI API (gpt-5) will be used when classifier confidence is below 81%.')
   })
 
   it('renders classification correction and learning guidance in the review editor', () => {
