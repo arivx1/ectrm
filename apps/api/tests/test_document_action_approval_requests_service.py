@@ -25,6 +25,8 @@ from apps.api.app.domains.documents.services.document_candidate_actions import (
     stage_selected_document_record_candidate_approval_request,
 )
 from apps.api.app.models import Base
+from apps.api.app.models.delivery_obligation import DeliveryObligation
+from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.document_action_approval_request import DocumentActionApprovalRequest
 from apps.api.app.models.document_action_decision import DocumentActionDecision
 from apps.api.app.models.document_ingestion import DocumentIngestion
@@ -61,10 +63,12 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
             session.query(DocumentRecordLink).delete()
             session.query(TradeConfirmation).delete()
             session.query(TradePayment).delete()
+            session.query(DeliveryPipelineDetail).delete()
             session.query(DocumentIngestionPage).delete()
             session.query(DocumentIngestion).delete()
             session.query(Event).delete()
             session.query(TradeInvoice).delete()
+            session.query(DeliveryObligation).delete()
             session.query(Trade).delete()
             session.commit()
 
@@ -283,6 +287,76 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
             version=1,
         )
 
+    def _seed_delivery(self, *, trade: Trade, delivery_id: str, nomination_reference: str) -> tuple[DeliveryObligation, DeliveryPipelineDetail]:
+        now = datetime(2026, 4, 14, 12, 50, tzinfo=timezone.utc)
+        delivery = DeliveryObligation(
+            delivery_id=delivery_id,
+            trade_id=trade.trade_id,
+            trade_leg_id=None,
+            leg_no=1,
+            external_trade_id=trade.external_trade_id,
+            direction="OUTBOUND",
+            mode_family="NETWORK_FLOW",
+            transport_mode="PIPELINE",
+            transport_mode_source="EXPLICIT",
+            delivery_profile="FLOW_WINDOW",
+            book=trade.book,
+            book_source="TRADE_DERIVED",
+            portfolio=trade.portfolio,
+            portfolio_source="TRADE_DERIVED",
+            counterparty=trade.counterparty,
+            counterparty_source="TRADE_DERIVED",
+            commodity_class=trade.commodity_class,
+            commodity=trade.commodity,
+            volume=trade.volume,
+            unit_of_measure=trade.unit_of_measure,
+            trade_currency_code=trade.trade_currency_code,
+            price_unit_code=trade.price_unit_code,
+            location_code=trade.location_code,
+            location_source="TRADE_DERIVED",
+            delivery_start=trade.delivery_start,
+            delivery_end=trade.delivery_end,
+            delivery_window_source="TRADE_DERIVED",
+            execution_status="SCHEDULED",
+            execution_status_source="SYSTEM_GENERATED",
+            operations_owner=None,
+            operations_owner_source="SYSTEM_GENERATED",
+            external_reference=None,
+            external_reference_source="SYSTEM_GENERATED",
+            ops_notes=None,
+            ops_notes_source="SYSTEM_GENERATED",
+            booked_at=now,
+            source_trade_updated_at=trade.updated_at,
+            created_at=now,
+            created_by="tester",
+            updated_at=now,
+            updated_by="tester",
+            version=1,
+        )
+        pipeline_detail = DeliveryPipelineDetail(
+            delivery_id=delivery.delivery_id,
+            pipeline_system="NGPL",
+            pipeline_system_source="MANUAL",
+            pipeline_path=None,
+            pipeline_path_source="SYSTEM_GENERATED",
+            receipt_location_code="HOUSTON",
+            receipt_location_code_source="MANUAL",
+            delivery_location_code="BEAUMONT",
+            delivery_location_code_source="MANUAL",
+            contract_number="PIPE-CONTRACT-500",
+            contract_number_source="MANUAL",
+            cycle_code=None,
+            cycle_code_source="SYSTEM_GENERATED",
+            nomination_reference=nomination_reference,
+            nomination_reference_source="MANUAL",
+            created_at=now,
+            created_by="tester",
+            updated_at=now,
+            updated_by="tester",
+            version=1,
+        )
+        return delivery, pipeline_detail
+
     def test_stage_approval_request_creates_pending_queue_item(self) -> None:
         with self.SessionLocal() as session:
             trade = self._seed_trade(trade_id="TRD-APR-100")
@@ -426,6 +500,76 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
         self.assertEqual(links[0].record_type, "TRADE_INVOICE")
         self.assertEqual(links[0].record_id, invoice_id)
         self.assertTrue(any(link.record_label == "Invoice INV-SEL-100" for link in result.record_links))
+
+    def test_execute_selected_candidate_attach_links_high_confidence_delivery(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-DLV-SEL-100")
+            delivery, pipeline_detail = self._seed_delivery(
+                trade=trade,
+                delivery_id="DLV-SEL-100",
+                nomination_reference="NOM-SEL-100",
+            )
+            document, page = self._seed_verified_document(
+                document_id="DOC-DLV-SEL-100",
+                document_kind="PIPELINE_STATEMENT",
+                header_fields=[
+                    {"field_key": "statement_number", "value": "PIPE-SEL-100"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-SEL-100"},
+                    {"field_key": "delivery_id", "value": "DLV-SEL-100"},
+                    {"field_key": "pipeline_system", "value": "NGPL"},
+                    {"field_key": "contract_number", "value": "PIPE-CONTRACT-500"},
+                    {"field_key": "nomination_reference", "value": "NOM-SEL-100"},
+                    {"field_key": "receipt_location_code", "value": "HOUSTON"},
+                    {"field_key": "delivery_location_code", "value": "BEAUMONT"},
+                ],
+            )
+            session.add_all([trade, delivery, pipeline_detail, document, page])
+            session.commit()
+
+            result = execute_selected_document_record_candidate_attach(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                record_type="DELIVERY",
+                record_id=delivery.delivery_id,
+            )
+            session.commit()
+            links = session.execute(
+                select(DocumentRecordLink).where(DocumentRecordLink.document_id == document.document_id)
+            ).scalars().all()
+            linked_records = [(link.record_type, link.record_id) for link in links]
+
+        self.assertEqual(linked_records, [("DELIVERY", "DLV-SEL-100")])
+        self.assertTrue(any(link.record_label == "Delivery DLV-SEL-100" for link in result.record_links))
+
+    def test_selected_delivery_create_candidate_requires_typed_creation_service(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-DLV-SEL-200")
+            document, page = self._seed_verified_document(
+                document_id="DOC-DLV-SEL-200",
+                document_kind="NOMINATION",
+                header_fields=[
+                    {"field_key": "nomination_reference", "value": "NOM-SEL-200"},
+                    {"field_key": "flow_date", "value": "2026-04-15"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-SEL-200"},
+                    {"field_key": "contract_number", "value": "PIPE-CONTRACT-200"},
+                    {"field_key": "pipeline_system", "value": "NGPL"},
+                    {"field_key": "receipt_location_code", "value": "HOUSTON"},
+                    {"field_key": "delivery_location_code", "value": "BEAUMONT"},
+                ],
+            )
+            session.add_all([trade, document, page])
+            session.commit()
+
+            with self.assertRaisesRegex(ValueError, "not eligible for record creation"):
+                stage_selected_document_record_candidate_approval_request(
+                    session,
+                    document_id=document.document_id,
+                    actor_id="reviewer",
+                    record_type="DELIVERY",
+                    record_id=None,
+                    request_comment="Create missing delivery from nomination.",
+                )
 
     def test_selected_create_candidate_approval_creates_missing_invoice(self) -> None:
         with self.SessionLocal() as session:

@@ -11,6 +11,8 @@ from sqlalchemy.pool import StaticPool
 from apps.api.app.domains.documents.services.document_workflows import execute_document_workflow
 from apps.api.app.domains.documents.services.document_workflows import list_document_workflows
 from apps.api.app.models import Base
+from apps.api.app.models.delivery_obligation import DeliveryObligation
+from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.document_record_link import DocumentRecordLink
@@ -46,9 +48,11 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
             session.query(DocumentRecordLink).delete()
             session.query(PriceIndexObservation).delete()
             session.query(ExternalDataRun).delete()
+            session.query(DeliveryPipelineDetail).delete()
             session.query(DocumentIngestionPage).delete()
             session.query(DocumentIngestion).delete()
             session.query(TradeInvoice).delete()
+            session.query(DeliveryObligation).delete()
             session.query(Trade).delete()
             session.query(ReferencePriceIndex).delete()
             session.commit()
@@ -281,6 +285,84 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
         session.add(record)
         return record
 
+    def _seed_delivery(
+        self,
+        session,
+        *,
+        trade: Trade,
+        delivery_id: str,
+        nomination_reference: str,
+    ) -> tuple[DeliveryObligation, DeliveryPipelineDetail]:
+        now = datetime(2026, 4, 14, 12, 50, tzinfo=timezone.utc)
+        delivery = DeliveryObligation(
+            delivery_id=delivery_id,
+            trade_id=trade.trade_id,
+            trade_leg_id=None,
+            leg_no=1,
+            external_trade_id=trade.external_trade_id,
+            direction="OUTBOUND",
+            mode_family="NETWORK_FLOW",
+            transport_mode="PIPELINE",
+            transport_mode_source="EXPLICIT",
+            delivery_profile="FLOW_WINDOW",
+            book=trade.book,
+            book_source="TRADE_DERIVED",
+            portfolio=trade.portfolio,
+            portfolio_source="TRADE_DERIVED",
+            counterparty=trade.counterparty,
+            counterparty_source="TRADE_DERIVED",
+            commodity_class=trade.commodity_class,
+            commodity=trade.commodity,
+            volume=trade.volume,
+            unit_of_measure=trade.unit_of_measure,
+            trade_currency_code=trade.trade_currency_code,
+            price_unit_code=trade.price_unit_code,
+            location_code=trade.location_code,
+            location_source="TRADE_DERIVED",
+            delivery_start=trade.delivery_start,
+            delivery_end=trade.delivery_end,
+            delivery_window_source="TRADE_DERIVED",
+            execution_status="SCHEDULED",
+            execution_status_source="SYSTEM_GENERATED",
+            operations_owner=None,
+            operations_owner_source="SYSTEM_GENERATED",
+            external_reference=None,
+            external_reference_source="SYSTEM_GENERATED",
+            ops_notes=None,
+            ops_notes_source="SYSTEM_GENERATED",
+            booked_at=now,
+            source_trade_updated_at=trade.updated_at,
+            created_at=now,
+            created_by="tester",
+            updated_at=now,
+            updated_by="tester",
+            version=1,
+        )
+        pipeline_detail = DeliveryPipelineDetail(
+            delivery_id=delivery.delivery_id,
+            pipeline_system="NGPL",
+            pipeline_system_source="MANUAL",
+            pipeline_path=None,
+            pipeline_path_source="SYSTEM_GENERATED",
+            receipt_location_code="HOUSTON",
+            receipt_location_code_source="MANUAL",
+            delivery_location_code="BEAUMONT",
+            delivery_location_code_source="MANUAL",
+            contract_number="PIPE-CONTRACT-600",
+            contract_number_source="MANUAL",
+            cycle_code=None,
+            cycle_code_source="SYSTEM_GENERATED",
+            nomination_reference=nomination_reference,
+            nomination_reference_source="MANUAL",
+            created_at=now,
+            created_by="tester",
+            updated_at=now,
+            updated_by="tester",
+            version=1,
+        )
+        session.add_all([delivery, pipeline_detail])
+        return delivery, pipeline_detail
+
     def test_workflow_registry_assigns_process_prices_to_price_publication_report(self) -> None:
         with self.SessionLocal() as session:
             self._seed_price_index(session)
@@ -411,6 +493,77 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
         self.assertTrue(create_workflow.approval_required)
         self.assertIn("CREATES_NEW_RECORD", create_workflow.risk_flags)
         self.assertIn("FINANCIAL_MUTATION", create_workflow.risk_flags)
+
+    def test_workflow_summary_exposes_existing_delivery_candidate_for_pipeline_statement(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(session, trade_id="TRD-DLV-WF-200")
+            self._seed_delivery(
+                session,
+                trade=trade,
+                delivery_id="DLV-WF-200",
+                nomination_reference="NOM-WF-200",
+            )
+            document = self._seed_verified_document(
+                session,
+                document_id="DOC-DLV-WF-200",
+                document_kind="PIPELINE_STATEMENT",
+                header_fields=[
+                    {"field_key": "statement_number", "value": "PIPE-WF-200"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-WF-200"},
+                    {"field_key": "delivery_id", "value": "DLV-WF-200"},
+                    {"field_key": "pipeline_system", "value": "NGPL"},
+                    {"field_key": "contract_number", "value": "PIPE-CONTRACT-600"},
+                    {"field_key": "nomination_reference", "value": "NOM-WF-200"},
+                    {"field_key": "receipt_location_code", "value": "HOUSTON"},
+                    {"field_key": "delivery_location_code", "value": "BEAUMONT"},
+                ],
+            )
+            session.commit()
+
+            workflows = list_document_workflows(session, document_id=document.document_id)
+
+        self.assertEqual(workflows.action_plan.action_type, "ATTACH_EXISTING_RECORD")
+        self.assertEqual(workflows.action_plan.operation_type, "link_document_to_record")
+        self.assertEqual(workflows.action_plan.target.record_type, "DELIVERY")
+        self.assertEqual(workflows.action_plan.target.record_id, "DLV-WF-200")
+        self.assertEqual(workflows.action_plan.candidate_state, "ATTACH_READY")
+        self.assertEqual([workflow.workflow_id for workflow in workflows.workflows], ["match_existing_record"])
+        self.assertEqual(workflows.workflows[0].status, "READY")
+
+    def test_workflow_summary_blocks_missing_delivery_creation_until_typed_service_exists(self) -> None:
+        with self.SessionLocal() as session:
+            self._seed_trade(session, trade_id="TRD-DLV-WF-300")
+            document = self._seed_verified_document(
+                session,
+                document_id="DOC-DLV-WF-300",
+                document_kind="NOMINATION",
+                header_fields=[
+                    {"field_key": "nomination_reference", "value": "NOM-WF-300"},
+                    {"field_key": "flow_date", "value": "2026-04-15"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-WF-300"},
+                    {"field_key": "contract_number", "value": "PIPE-CONTRACT-300"},
+                    {"field_key": "pipeline_system", "value": "NGPL"},
+                    {"field_key": "receipt_location_code", "value": "HOUSTON"},
+                    {"field_key": "delivery_location_code", "value": "BEAUMONT"},
+                ],
+            )
+            session.commit()
+
+            workflows = list_document_workflows(session, document_id=document.document_id)
+
+        self.assertEqual(workflows.action_plan.status, "BLOCKED")
+        self.assertEqual(workflows.action_plan.action_type, "MANUAL_REVIEW")
+        self.assertEqual(workflows.action_plan.operation_type, "manual_review_document_linkage")
+        self.assertEqual(workflows.action_plan.target.record_type, "DELIVERY")
+        self.assertEqual(workflows.action_plan.owner.record_type, "TRADE")
+        self.assertEqual(workflows.action_plan.owner.record_id, "TRD-DLV-WF-300")
+        self.assertIn("typed_creation_service", workflows.action_plan.missing_evidence)
+        self.assertEqual([workflow.workflow_id for workflow in workflows.workflows], ["create_delivery_from_document", "match_existing_record"])
+        create_workflow = workflows.workflows[0]
+        self.assertEqual(create_workflow.status, "BLOCKED")
+        self.assertEqual(create_workflow.candidate_state, "MANUAL_REVIEW")
+        self.assertEqual(create_workflow.target.record_type, "DELIVERY")
+        self.assertIn("typed creation service", create_workflow.disabled_reason)
 
     def test_workflow_summary_blocks_invoice_creation_without_owner_trade(self) -> None:
         with self.SessionLocal() as session:

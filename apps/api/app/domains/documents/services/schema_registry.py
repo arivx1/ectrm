@@ -1259,7 +1259,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Confirm the nomination reference, flow date, system, locations, and quantity before matching it to delivery obligations.",
         linkage_summary="Links primarily to delivery and trade records using nomination references, trade IDs, contract numbers, locations, and gas or flow dates.",
         record_targets=[
-            _target("DELIVERY", "Delivery", "Match using nomination reference, delivery ID, locations, and flow date."),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Match using nomination reference, delivery ID, locations, and flow date.",
+                create_if_missing=True,
+            ),
             _target(
                 "TRADE",
                 "Trade",
@@ -1303,7 +1308,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Confirm the curtailment notice identity, effective window, issuing entity, affected system, and curtailed quantity before routing it to operations.",
         linkage_summary="Links primarily to delivery and trade records using curtailment notice numbers, nomination references, delivery IDs, trade IDs, systems, and locations.",
         record_targets=[
-            _target("DELIVERY", "Delivery", "Match using delivery ID, nomination reference, system, location, and effective window."),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Match using delivery ID, nomination reference, system, location, and effective window.",
+                create_if_missing=True,
+            ),
             _target(
                 "TRADE",
                 "Trade",
@@ -1337,7 +1347,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Confirm the statement identity, pipeline system, and nomination references before matching it to flow records.",
         linkage_summary="Links primarily to delivery and trade records using statement numbers, trade IDs, contract numbers, and nomination references.",
         record_targets=[
-            _target("DELIVERY", "Delivery", "Match using nomination reference, locations, and trade ID when available."),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Match using nomination reference, locations, and trade ID when available.",
+                create_if_missing=True,
+            ),
             _target(
                 "TRADE",
                 "Trade",
@@ -1366,7 +1381,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Confirm the ticket identity, carrier, and movement dates before reviewing quantities.",
         linkage_summary="Links primarily to delivery and trade records using truck ticket numbers, delivery IDs, trade IDs, and carrier references.",
         record_targets=[
-            _target("DELIVERY", "Delivery", "Match using delivery ID, carrier reference, and route details."),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Match using delivery ID, carrier reference, and route details.",
+                create_if_missing=True,
+            ),
             _target(
                 "TRADE",
                 "Trade",
@@ -1397,7 +1417,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Confirm the waybill or railcar identity, carrier, route, and movement date before reviewing quantity details.",
         linkage_summary="Links primarily to delivery and trade records using waybill numbers, railcar numbers, delivery IDs, trade IDs, and carrier references.",
         record_targets=[
-            _target("DELIVERY", "Delivery", "Match using delivery ID, waybill number, railcar number, and route details."),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Match using delivery ID, waybill number, railcar number, and route details.",
+                create_if_missing=True,
+            ),
             _target(
                 "TRADE",
                 "Trade",
@@ -1428,7 +1453,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Confirm the dispatch number, dispatch window, asset or carrier, route, and quantity before matching it to the delivery workflow.",
         linkage_summary="Links primarily to delivery and trade records using dispatch numbers, delivery IDs, trade IDs, carrier references, asset references, routes, and dates.",
         record_targets=[
-            _target("DELIVERY", "Delivery", "Match using delivery ID, dispatch number, route, carrier, asset reference, and dispatch window."),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Match using delivery ID, dispatch number, route, carrier, asset reference, and dispatch window.",
+                create_if_missing=True,
+            ),
             _target(
                 "TRADE",
                 "Trade",
@@ -1462,7 +1492,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Confirm the transport identifier and route, then capture any shipped line or compartment details.",
         linkage_summary="Links primarily to delivery and trade records using bill of lading number, carrier, route, and load date.",
         record_targets=[
-            _target("DELIVERY", "Delivery", "Match using delivery ID, bill of lading number, and shipment route."),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Match using delivery ID, bill of lading number, and shipment route.",
+                create_if_missing=True,
+            ),
             _target(
                 "TRADE",
                 "Trade",
@@ -1569,7 +1604,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Confirm the delivery confirmation number, delivery references, and route before accepting it as final proof.",
         linkage_summary="Links primarily to delivery and trade records using delivery confirmation numbers, delivery IDs, carrier references, and route details.",
         record_targets=[
-            _target("DELIVERY", "Delivery", "Match using delivery ID, confirmation number, and route information."),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Match using delivery ID, confirmation number, and route information.",
+                create_if_missing=True,
+            ),
             _target(
                 "TRADE",
                 "Trade",
@@ -1597,7 +1637,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Confirm the notice time, vessel or terminal details, ports, and delivery references before using it for operational readiness.",
         linkage_summary="Links primarily to delivery and trade records using notice numbers, vessel names, voyage numbers, ports, delivery IDs, and trade IDs.",
         record_targets=[
-            _target("DELIVERY", "Delivery", "Match using delivery ID, vessel or voyage details, ports, and notice time."),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Match using delivery ID, vessel or voyage details, ports, and notice time.",
+                create_if_missing=True,
+            ),
             _target(
                 "TRADE",
                 "Trade",
@@ -1934,7 +1979,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Confirm the outage number, affected facility or asset, outage window, and operational impact before routing it to operations.",
         linkage_summary="Links primarily to delivery, inventory, and trade records using outage numbers, facility or asset references, systems, locations, trade IDs, and delivery IDs.",
         record_targets=[
-            _target("DELIVERY", "Delivery", "Match using delivery ID, facility, asset, system, location, and outage window."),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Match using delivery ID, facility, asset, system, location, and outage window.",
+                create_if_missing=True,
+            ),
             _target(
                 "TRADE",
                 "Trade",
@@ -1966,7 +2016,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Verify the statement number, facility, account, product, and period before matching inventory or delivery activity.",
         linkage_summary="Links primarily to inventory, delivery, and trade records using facility, account, period, product, trade IDs, and delivery IDs.",
         record_targets=[
-            _target("DELIVERY", "Delivery", "Match using delivery ID, trade ID, facility, product, and period."),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Match using delivery ID, trade ID, facility, product, and period.",
+                create_if_missing=True,
+            ),
             _target(
                 "INVENTORY_POSITION",
                 "Inventory Position",
@@ -2041,7 +2096,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Confirm the ticket identity and capture the weight measurements or line-level movements.",
         linkage_summary="Links primarily to delivery, inventory, and trade records using ticket numbers, trade IDs, delivery IDs, and measured weights.",
         record_targets=[
-            _target("DELIVERY", "Delivery", "Match using delivery ID, trade ID, and weigh date."),
+            _target(
+                "DELIVERY",
+                "Delivery",
+                "Match using delivery ID, trade ID, and weigh date.",
+                create_if_missing=True,
+            ),
             _target(
                 "TRADE",
                 "Trade",

@@ -269,6 +269,42 @@ class DocumentActionPlanningServiceTests(unittest.TestCase):
         self.assertEqual(plan.required_owner_record_types, ["TRADE"])
         self.assertIn("owner:TRADE", plan.missing_evidence)
 
+    def test_missing_delivery_creation_stays_blocked_until_typed_service_exists(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-DLV-ACT-500")
+            session.add(trade)
+            session.commit()
+
+            page = self._reviewed_page(
+                document_kind="NOMINATION",
+                header_fields=[
+                    {"field_key": "nomination_reference", "value": "NOM-ACT-500"},
+                    {"field_key": "flow_date", "value": "2026-04-15"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-ACT-500"},
+                    {"field_key": "contract_number", "value": "PIPE-CONTRACT-500"},
+                    {"field_key": "pipeline_system", "value": "NGPL"},
+                    {"field_key": "receipt_location_code", "value": "HOUSTON"},
+                    {"field_key": "delivery_location_code", "value": "BEAUMONT"},
+                ],
+            )
+            linkage = build_document_linkage_assessment(session, pages=[page], review_status="VERIFIED")
+            plan = build_document_action_plan(
+                document_id="DOC-200",
+                pages=[page],
+                review_status="VERIFIED",
+                linkage_assessment=linkage,
+            )
+
+        self.assertEqual(plan.status, "BLOCKED")
+        self.assertEqual(plan.action_type, "MANUAL_REVIEW")
+        self.assertEqual(plan.operation_type, "manual_review_document_linkage")
+        self.assertEqual(plan.candidate_state, "MANUAL_REVIEW")
+        self.assertEqual(plan.target.record_type, "DELIVERY")
+        self.assertEqual(plan.owner.record_type, "TRADE")
+        self.assertEqual(plan.owner.record_id, "TRD-DLV-ACT-500")
+        self.assertIn("typed_creation_service", plan.missing_evidence)
+        self.assertIn("typed creation service", plan.reasons[0])
+
 
 if __name__ == "__main__":
     unittest.main()

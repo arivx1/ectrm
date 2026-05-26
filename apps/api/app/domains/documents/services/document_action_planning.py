@@ -17,6 +17,14 @@ ACTION_OPERATION_BY_TARGET: dict[str, str] = {
     "QUALITY_SPECIFICATION": "create_quality_specification",
 }
 
+EXECUTABLE_CREATE_OPERATIONS: frozenset[str] = frozenset(
+    {
+        "create_trade_confirmation",
+        "issue_trade_invoice",
+        "create_trade_payment",
+    }
+)
+
 ACTION_PREFERRED_TARGETS_BY_KIND: dict[str, tuple[str, ...]] = {
     "DEAL_RECAP": ("TRADE", "TRADE_WORKFLOW_ITEM"),
     "TRADE_CONFIRMATION": ("TRADE_CONFIRMATION", "TRADE"),
@@ -29,9 +37,15 @@ ACTION_PREFERRED_TARGETS_BY_KIND: dict[str, tuple[str, ...]] = {
     "NOMINATION": ("DELIVERY", "TRADE"),
     "CURTAILMENT_NOTICE": ("DELIVERY", "TRADE"),
     "PIPELINE_STATEMENT": ("DELIVERY", "TRADE"),
+    "TRUCK_TICKET": ("DELIVERY", "TRADE"),
+    "RAILCAR_TICKET": ("DELIVERY", "TRADE"),
     "DISPATCH_NOTICE": ("DELIVERY", "TRADE"),
+    "BILL_OF_LADING": ("DELIVERY", "TRADE"),
+    "DELIVERY_CONFIRMATION": ("DELIVERY", "TRADE"),
+    "NOTICE_OF_READINESS": ("DELIVERY", "TRADE"),
     "OUTAGE_NOTICE": ("DELIVERY", "TRADE"),
     "STORAGE_STATEMENT": ("DELIVERY", "INVENTORY_POSITION"),
+    "WEIGH_TICKET": ("DELIVERY", "TRADE"),
     "PRICE_PUBLICATION": ("PRICE_INDEX_OBSERVATION", "PRICE_INDEX"),
 }
 
@@ -39,6 +53,7 @@ CREATE_OWNER_REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "TRADE_CONFIRMATION": ("TRADE",),
     "TRADE_INVOICE": ("TRADE",),
     "TRADE_PAYMENT": ("TRADE_INVOICE",),
+    "DELIVERY": ("TRADE",),
     "QUALITY_SPECIFICATION": ("TRADE",),
 }
 
@@ -46,6 +61,7 @@ CREATE_OWNER_REQUIRED: set[str] = {
     "TRADE_CONFIRMATION",
     "TRADE_INVOICE",
     "TRADE_PAYMENT",
+    "DELIVERY",
 }
 
 
@@ -257,6 +273,46 @@ def _build_create_plan(
     status = "READY" if review_status == "VERIFIED" else "REVIEW"
     owner_record = _action_record(owner_candidate) if owner_candidate is not None else None
     target_label = candidate.record_label.replace("Create ", "")
+    operation_type = ACTION_OPERATION_BY_TARGET.get(candidate.record_type)
+    if operation_type not in EXECUTABLE_CREATE_OPERATIONS:
+        return DocumentActionPlanOut(
+            status="BLOCKED",
+            action_type="MANUAL_REVIEW",
+            operation_type="manual_review_document_linkage",
+            candidate_state="MANUAL_REVIEW",
+            title=f"Creation Service Required For {target_label}",
+            description=(
+                f"The document suggests creating a {candidate.record_type.replace('_', ' ').lower()}, "
+                "but this record type does not yet have a typed document creation service."
+            ),
+            confidence=round(candidate.score, 3),
+            target=_action_record(candidate),
+            owner=owner_record,
+            required_owner_record_types=required_owner_record_types,
+            missing_evidence=["typed_creation_service", *_candidate_missing_evidence(candidate)],
+            reasons=[
+                "A typed creation service is required before this record can be created from a document.",
+                f"{candidate.record_label} is the leading creation candidate.",
+                *(
+                    [f"Use {owner_candidate.record_label} as the owning record."]
+                    if owner_candidate is not None
+                    else []
+                ),
+                *linkage_assessment.reasons[:2],
+            ][:4],
+            payload={
+                "document_id": document_id,
+                "target_record_type": candidate.record_type,
+                **(
+                    {
+                        "owner_record_type": owner_candidate.record_type,
+                        "owner_record_id": owner_candidate.record_id,
+                    }
+                    if owner_candidate is not None
+                    else {}
+                ),
+            },
+        )
     title = (
         f"Create {target_label} Under {owner_candidate.record_label}"
         if owner_candidate is not None
@@ -283,7 +339,7 @@ def _build_create_plan(
     return DocumentActionPlanOut(
         status=status,
         action_type="CREATE_RECORD_FROM_DOCUMENT",
-        operation_type=ACTION_OPERATION_BY_TARGET.get(candidate.record_type, "create_record_from_document"),
+        operation_type=operation_type,
         candidate_state="CREATE_CANDIDATE",
         title=title,
         description=description,
