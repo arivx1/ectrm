@@ -9,6 +9,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.models.delivery_logistics_detail import DeliveryLogisticsDetail
+from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
@@ -38,6 +39,13 @@ PRIMARY_IDENTIFIER_KEYS_BY_RECORD_TYPE: dict[str, set[str]] = {
     "TRADE_INVOICE": {"invoice_number"},
     "TRADE_PAYMENT": {"payment_reference", "invoice_number"},
     "DELIVERY": {"delivery_id", "nomination_reference", "carrier_reference", "contract_number"},
+    "DELIVERY_EVENT": {
+        "delivery_confirmation_number",
+        "bill_of_lading_number",
+        "dispatch_number",
+        "ticket_number",
+        "reference_code",
+    },
     "PRICE_INDEX": {"price_index_code"},
     "PRICE_INDEX_OBSERVATION": {"price_index_code", "observation_date", "source_series_id"},
 }
@@ -414,6 +422,7 @@ def _lookup_builders() -> dict[str, Callable[[Session, dict[str, str], int], lis
         "TRADE_INVOICE": _lookup_trade_invoices,
         "TRADE_PAYMENT": _lookup_trade_payments,
         "DELIVERY": _lookup_deliveries,
+        "DELIVERY_EVENT": _lookup_delivery_events,
         "PRICE_INDEX": _lookup_price_indices,
         "PRICE_INDEX_OBSERVATION": _lookup_price_index_observations,
     }
@@ -751,6 +760,66 @@ def _lookup_deliveries(db: Session, field_map: dict[str, str], limit: int) -> li
     return matches
 
 
+def _lookup_delivery_events(db: Session, field_map: dict[str, str], limit: int) -> list[_LookupMatch]:
+    delivery_id = _normalized_token(field_map.get("delivery_id"))
+    trade_id = _normalized_token(field_map.get("trade_id"))
+    event_date_key, event_date = _event_date_from_fields(field_map)
+    reference_values = _event_reference_values(field_map)
+
+    conditions = []
+    if reference_values:
+        conditions.append(func.upper(DeliveryEvent.reference_code).in_(list(reference_values.values())))
+    if delivery_id:
+        conditions.append(func.upper(DeliveryEvent.delivery_id) == delivery_id)
+    elif trade_id:
+        conditions.append(func.upper(DeliveryEvent.trade_id) == trade_id)
+    if not conditions:
+        return []
+
+    rows = db.execute(
+        select(DeliveryEvent)
+        .where(or_(*conditions))
+        .order_by(DeliveryEvent.occurred_at.desc(), DeliveryEvent.id.desc())
+        .limit(limit * 4)
+    ).scalars().all()
+
+    matches: list[_LookupMatch] = []
+    for event in rows:
+        matched_keys: list[str] = []
+        matched_reference = False
+        if delivery_id and _normalized_token(event.delivery_id) == delivery_id:
+            matched_keys.append("delivery_id")
+        if trade_id and _normalized_token(event.trade_id) == trade_id:
+            matched_keys.append("trade_id")
+        for key, normalized_value in reference_values.items():
+            if _normalized_token(event.reference_code) == normalized_value:
+                matched_keys.append(key)
+                matched_reference = True
+                break
+        if event_date_key and event_date and _same_date(event.occurred_at, event_date):
+            matched_keys.append(event_date_key)
+        if not matched_keys:
+            continue
+        if not matched_reference and not (delivery_id and event_date_key in matched_keys):
+            continue
+
+        matches.append(
+            _LookupMatch(
+                record_id=str(event.id),
+                record_label=f"Delivery Event {event.event_type.replace('_', ' ').title()}",
+                summary=(
+                    f"Delivery {event.delivery_id} • {event.occurred_at.date().isoformat()} • "
+                    f"{event.execution_status.replace('_', ' ').title()}"
+                ),
+                matched_keys=matched_keys,
+                exact_identifier_match=matched_reference,
+            )
+        )
+        if len(matches) >= limit:
+            break
+    return matches
+
+
 def _lookup_price_indices(db: Session, field_map: dict[str, str], limit: int) -> list[_LookupMatch]:
     price_index_code = _normalized_token(field_map.get("price_index_code"))
     source_provider = _normalized_token(field_map.get("source_provider"))
@@ -955,6 +1024,44 @@ def _parse_decimal(value: object | None) -> Decimal | None:
         return Decimal(normalized)
     except InvalidOperation:
         return None
+
+
+def _event_reference_values(field_map: dict[str, str]) -> dict[str, str]:
+    reference_keys = (
+        "delivery_confirmation_number",
+        "bill_of_lading_number",
+        "waybill_number",
+        "railcar_number",
+        "ticket_number",
+        "notice_number",
+        "dispatch_number",
+        "carrier_reference",
+        "asset_reference",
+        "reference_code",
+    )
+    values: dict[str, str] = {}
+    for key in reference_keys:
+        value = _normalized_token(field_map.get(key))
+        if value is not None:
+            values[key] = value
+    return values
+
+
+def _event_date_from_fields(field_map: dict[str, str]) -> tuple[str | None, date | None]:
+    for key in (
+        "confirmation_date",
+        "delivery_date",
+        "load_date",
+        "loading_date",
+        "dispatch_date",
+        "dispatch_start",
+        "notice_date",
+        "weigh_date",
+    ):
+        value = _parse_date(field_map.get(key))
+        if value is not None:
+            return key, value
+    return None, None
 
 
 def _same_date(left: object | None, right: date | None) -> bool:

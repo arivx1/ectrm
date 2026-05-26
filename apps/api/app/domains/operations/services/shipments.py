@@ -500,6 +500,15 @@ def _normalize_required_text(value: object | None, *, label: str) -> str:
     raise ValueError(f"{label} must be provided.")
 
 
+def _normalized_trade_id_filter(trade_ids: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    for trade_id in trade_ids or []:
+        cleaned = _normalize_optional_text(trade_id)
+        if cleaned is not None and cleaned not in normalized:
+            normalized.append(cleaned)
+    return normalized
+
+
 def _validate_transport_mode(value: object | None) -> TransportMode:
     normalized = _normalize_token(str(value or ""))
     try:
@@ -2813,6 +2822,103 @@ def get_delivery_obligation_for_operations(
     raise LookupError(f"Delivery '{delivery_id}' was not found.")
 
 
+def _resolve_document_delivery_target_leg(
+    *,
+    trade: Trade,
+    legs: list[TradeLeg],
+    requested_delivery_id: str | None,
+    requested_leg_no: int | None,
+) -> TradeLeg | None:
+    targets: list[TradeLeg | None] = legs if legs else [None]
+    if requested_leg_no is not None:
+        for leg in legs:
+            if leg.leg_no == requested_leg_no:
+                return leg
+        raise LookupError(f"Trade '{trade.trade_id}' does not have leg {requested_leg_no}.")
+
+    if requested_delivery_id:
+        normalized_delivery_id = _normalize_token(requested_delivery_id)
+        for leg in targets:
+            candidate_id = build_delivery_obligation_id(trade.trade_id, leg.leg_no if leg is not None else None)
+            if _normalize_token(candidate_id) == normalized_delivery_id:
+                return leg
+        raise ValueError(
+            f"Requested delivery '{requested_delivery_id}' is not a canonical delivery for trade '{trade.trade_id}'."
+        )
+
+    if len(targets) == 1:
+        return targets[0]
+
+    raise ValueError(
+        f"Trade '{trade.trade_id}' has multiple delivery legs. Provide a delivery_id or leg_no before creating a delivery."
+    )
+
+
+def create_delivery_from_document(
+    db: Session,
+    *,
+    trade_id: str,
+    actor_id: str,
+    source_document_id: str,
+    delivery_id: str | None = None,
+    leg_no: object | None = None,
+    now: Optional[datetime] = None,
+) -> DeliveryObligation:
+    normalized_trade_id = _normalize_required_text(trade_id, label="trade_id")
+    requested_delivery_id = _normalize_optional_text(delivery_id)
+    requested_leg_no = _normalize_optional_positive_int(leg_no, label="leg_no")
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+
+    trade = db.execute(
+        select(Trade).where(
+            Trade.trade_id == normalized_trade_id,
+            Trade.trade_nature == "PHYSICAL",
+            Trade.status == "ACTIVE",
+        )
+    ).scalars().first()
+    if trade is None:
+        raise LookupError(f"Active physical trade '{normalized_trade_id}' was not found.")
+
+    legs = db.execute(
+        select(TradeLeg)
+        .where(TradeLeg.trade_id == normalized_trade_id)
+        .order_by(TradeLeg.leg_no.asc())
+    ).scalars().all()
+    target_leg = _resolve_document_delivery_target_leg(
+        trade=trade,
+        legs=legs,
+        requested_delivery_id=requested_delivery_id,
+        requested_leg_no=requested_leg_no,
+    )
+    target_delivery_id = build_delivery_obligation_id(
+        normalized_trade_id,
+        target_leg.leg_no if target_leg is not None else None,
+    )
+    if requested_delivery_id and _normalize_token(requested_delivery_id) != _normalize_token(target_delivery_id):
+        raise ValueError(
+            f"Requested delivery '{requested_delivery_id}' does not match canonical delivery '{target_delivery_id}'."
+        )
+
+    if db.get(DeliveryObligation, target_delivery_id) is not None:
+        raise ValueError(
+            f"Delivery '{target_delivery_id}' already exists. Reject this request and restage the document as an attach."
+        )
+
+    synchronize_delivery_obligations_from_trades(
+        db,
+        actor_id=actor_id,
+        now=reference_time,
+        trade_ids=[normalized_trade_id],
+        delete_obsolete=False,
+    )
+    delivery = db.get(DeliveryObligation, target_delivery_id)
+    if delivery is None:
+        raise RuntimeError(
+            f"Delivery '{target_delivery_id}' was not materialized from document '{source_document_id}'."
+        )
+    return delivery
+
+
 def update_delivery_obligation(
     db: Session,
     *,
@@ -3778,16 +3884,34 @@ def synchronize_delivery_obligations_from_trades(
     *,
     actor_id: str,
     now: Optional[datetime] = None,
+    trade_ids: list[str] | None = None,
+    delete_obsolete: bool = True,
 ) -> DeliverySyncResultOut:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
-    trades = db.execute(
+    trade_filter_requested = trade_ids is not None
+    requested_trade_ids = _normalized_trade_id_filter(trade_ids)
+    if trade_filter_requested and not requested_trade_ids:
+        return DeliverySyncResultOut(
+            synced_at=reference_time,
+            created_count=0,
+            updated_count=0,
+            deleted_count=0,
+            total_count=0,
+            logistics_count=0,
+            network_flow_count=0,
+            power_schedule_count=0,
+        )
+    trade_statement = (
         select(Trade)
         .where(
             Trade.trade_nature == "PHYSICAL",
             Trade.status == "ACTIVE",
         )
         .order_by(Trade.trade_id.asc())
-    ).scalars().all()
+    )
+    if trade_filter_requested:
+        trade_statement = trade_statement.where(Trade.trade_id.in_(requested_trade_ids))
+    trades = db.execute(trade_statement).scalars().all()
     trade_ids = [trade.trade_id for trade in trades]
 
     legs_by_trade_id: dict[str, list[TradeLeg]] = {}
@@ -3800,7 +3924,12 @@ def synchronize_delivery_obligations_from_trades(
         for leg in trade_legs:
             legs_by_trade_id.setdefault(leg.trade_id, []).append(leg)
 
-    existing_deliveries = db.execute(select(DeliveryObligation)).scalars().all()
+    existing_delivery_statement = select(DeliveryObligation)
+    if trade_filter_requested:
+        existing_delivery_statement = existing_delivery_statement.where(
+            DeliveryObligation.trade_id.in_(requested_trade_ids)
+        )
+    existing_deliveries = db.execute(existing_delivery_statement).scalars().all()
     existing_by_id = {delivery.delivery_id: delivery for delivery in existing_deliveries}
     preexisting_delivery_ids = set(existing_by_id)
     existing_logistics = {
@@ -4182,37 +4311,38 @@ def synchronize_delivery_obligations_from_trades(
                 updated_count += 1
 
     deleted_count = 0
-    for obsolete_delivery in existing_deliveries:
-        if obsolete_delivery.delivery_id in target_delivery_ids:
-            continue
-        for existing_event in existing_events.pop(obsolete_delivery.delivery_id, []):
-            db.delete(existing_event)
-        logistics_detail = existing_logistics.pop(obsolete_delivery.delivery_id, None)
-        pipeline_detail = existing_pipeline.pop(obsolete_delivery.delivery_id, None)
-        rail_detail = existing_rail.pop(obsolete_delivery.delivery_id, None)
-        power_detail = existing_power.pop(obsolete_delivery.delivery_id, None)
-        truck_detail = existing_truck_details.pop(obsolete_delivery.delivery_id, None)
-        vessel_detail = existing_vessel_details.pop(obsolete_delivery.delivery_id, None)
-        truck_movements = existing_truck_movements_by_delivery_id.pop(obsolete_delivery.delivery_id, [])
-        tracking_signals = existing_tracking_signals_by_delivery_id.pop(obsolete_delivery.delivery_id, [])
-        if logistics_detail is not None:
-            db.delete(logistics_detail)
-        if pipeline_detail is not None:
-            db.delete(pipeline_detail)
-        if rail_detail is not None:
-            db.delete(rail_detail)
-        if power_detail is not None:
-            db.delete(power_detail)
-        if truck_detail is not None:
-            db.delete(truck_detail)
-        if vessel_detail is not None:
-            db.delete(vessel_detail)
-        for movement in truck_movements:
-            db.delete(movement)
-        for signal in tracking_signals:
-            db.delete(signal)
-        db.delete(obsolete_delivery)
-        deleted_count += 1
+    if delete_obsolete:
+        for obsolete_delivery in existing_deliveries:
+            if obsolete_delivery.delivery_id in target_delivery_ids:
+                continue
+            for existing_event in existing_events.pop(obsolete_delivery.delivery_id, []):
+                db.delete(existing_event)
+            logistics_detail = existing_logistics.pop(obsolete_delivery.delivery_id, None)
+            pipeline_detail = existing_pipeline.pop(obsolete_delivery.delivery_id, None)
+            rail_detail = existing_rail.pop(obsolete_delivery.delivery_id, None)
+            power_detail = existing_power.pop(obsolete_delivery.delivery_id, None)
+            truck_detail = existing_truck_details.pop(obsolete_delivery.delivery_id, None)
+            vessel_detail = existing_vessel_details.pop(obsolete_delivery.delivery_id, None)
+            truck_movements = existing_truck_movements_by_delivery_id.pop(obsolete_delivery.delivery_id, [])
+            tracking_signals = existing_tracking_signals_by_delivery_id.pop(obsolete_delivery.delivery_id, [])
+            if logistics_detail is not None:
+                db.delete(logistics_detail)
+            if pipeline_detail is not None:
+                db.delete(pipeline_detail)
+            if rail_detail is not None:
+                db.delete(rail_detail)
+            if power_detail is not None:
+                db.delete(power_detail)
+            if truck_detail is not None:
+                db.delete(truck_detail)
+            if vessel_detail is not None:
+                db.delete(vessel_detail)
+            for movement in truck_movements:
+                db.delete(movement)
+            for signal in tracking_signals:
+                db.delete(signal)
+            db.delete(obsolete_delivery)
+            deleted_count += 1
 
     db.flush()
 

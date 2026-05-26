@@ -25,6 +25,7 @@ from apps.api.app.domains.documents.services.document_candidate_actions import (
     stage_selected_document_record_candidate_approval_request,
 )
 from apps.api.app.models import Base
+from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.document_action_approval_request import DocumentActionApprovalRequest
@@ -63,6 +64,7 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
             session.query(DocumentRecordLink).delete()
             session.query(TradeConfirmation).delete()
             session.query(TradePayment).delete()
+            session.query(DeliveryEvent).delete()
             session.query(DeliveryPipelineDetail).delete()
             session.query(DocumentIngestionPage).delete()
             session.query(DocumentIngestion).delete()
@@ -542,7 +544,7 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
         self.assertEqual(linked_records, [("DELIVERY", "DLV-SEL-100")])
         self.assertTrue(any(link.record_label == "Delivery DLV-SEL-100" for link in result.record_links))
 
-    def test_selected_delivery_create_candidate_requires_typed_creation_service(self) -> None:
+    def test_selected_delivery_create_candidate_approval_materializes_missing_delivery(self) -> None:
         with self.SessionLocal() as session:
             trade = self._seed_trade(trade_id="TRD-DLV-SEL-200")
             document, page = self._seed_verified_document(
@@ -561,15 +563,157 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
             session.add_all([trade, document, page])
             session.commit()
 
-            with self.assertRaisesRegex(ValueError, "not eligible for record creation"):
-                stage_selected_document_record_candidate_approval_request(
+            staged = stage_selected_document_record_candidate_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                record_type="DELIVERY",
+                record_id=None,
+                request_comment="Create missing delivery from nomination.",
+            )
+            self.assertEqual(staged.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+            self.assertEqual(staged.operation_type, "create_delivery_from_document")
+            self.assertEqual(staged.target_record_type, "DELIVERY")
+            self.assertIsNone(staged.target_record_id)
+            self.assertEqual(staged.owner_record_type, "TRADE")
+            self.assertEqual(staged.owner_record_id, "TRD-DLV-SEL-200")
+
+            executed = approve_document_action_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="approver",
+                decision_comment="Approved missing delivery creation.",
+            )
+            executed_status = executed.status
+            deliveries = session.execute(
+                select(DeliveryObligation).where(DeliveryObligation.trade_id == trade.trade_id)
+            ).scalars().all()
+            delivery_ids = [delivery.delivery_id for delivery in deliveries]
+            links = session.execute(
+                select(DocumentRecordLink)
+                .where(DocumentRecordLink.document_id == document.document_id)
+                .order_by(DocumentRecordLink.record_type.asc())
+            ).scalars().all()
+            linked_records = {(link.record_type, link.record_id) for link in links}
+            session.commit()
+
+        self.assertEqual(executed_status, "EXECUTED")
+        self.assertEqual(delivery_ids, ["DLV-TRD-DLV-SEL-200"])
+        self.assertEqual(linked_records, {("DELIVERY", "DLV-TRD-DLV-SEL-200"), ("TRADE", "TRD-DLV-SEL-200")})
+
+    def test_selected_delivery_create_candidate_rechecks_missing_record_before_execution(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-DLV-SEL-250")
+            document, page = self._seed_verified_document(
+                document_id="DOC-DLV-SEL-250",
+                document_kind="NOMINATION",
+                header_fields=[
+                    {"field_key": "nomination_reference", "value": "NOM-SEL-250"},
+                    {"field_key": "flow_date", "value": "2026-04-15"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-SEL-250"},
+                    {"field_key": "contract_number", "value": "PIPE-CONTRACT-250"},
+                    {"field_key": "pipeline_system", "value": "NGPL"},
+                    {"field_key": "receipt_location_code", "value": "HOUSTON"},
+                    {"field_key": "delivery_location_code", "value": "BEAUMONT"},
+                ],
+            )
+            session.add_all([trade, document, page])
+            session.commit()
+
+            stage_selected_document_record_candidate_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                record_type="DELIVERY",
+                record_id=None,
+                request_comment="Create missing delivery from nomination.",
+            )
+            delivery, pipeline_detail = self._seed_delivery(
+                trade=trade,
+                delivery_id="DLV-TRD-DLV-SEL-250",
+                nomination_reference="NOM-SEL-250",
+            )
+            session.add_all([delivery, pipeline_detail])
+            session.commit()
+
+            with self.assertRaisesRegex(ValueError, "no longer matches a current record candidate"):
+                approve_document_action_approval_request(
                     session,
                     document_id=document.document_id,
-                    actor_id="reviewer",
-                    record_type="DELIVERY",
-                    record_id=None,
-                    request_comment="Create missing delivery from nomination.",
+                    actor_id="approver",
+                    decision_comment="Approved missing delivery creation.",
                 )
+
+    def test_delivery_confirmation_approval_records_delivery_event_and_links_evidence(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-DLV-EVT-300")
+            delivery, pipeline_detail = self._seed_delivery(
+                trade=trade,
+                delivery_id="DLV-TRD-DLV-EVT-300",
+                nomination_reference="NOM-EVT-300",
+            )
+            document, page = self._seed_verified_document(
+                document_id="DOC-DLV-EVT-300",
+                document_kind="DELIVERY_CONFIRMATION",
+                header_fields=[
+                    {"field_key": "delivery_confirmation_number", "value": "POD-EVT-300"},
+                    {"field_key": "confirmation_date", "value": "2026-04-18"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-EVT-300"},
+                    {"field_key": "delivery_id", "value": "DLV-TRD-DLV-EVT-300"},
+                    {"field_key": "carrier_reference", "value": "CAR-EVT-300"},
+                    {"field_key": "destination", "value": "BEAUMONT"},
+                ],
+            )
+            session.add_all([trade, delivery, pipeline_detail, document, page])
+            session.commit()
+
+            staged = stage_document_action_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                request_comment="Record completed delivery from proof of delivery.",
+            )
+            self.assertEqual(staged.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+            self.assertEqual(staged.operation_type, "record_delivery_event_from_document")
+            self.assertEqual(staged.target_record_type, "DELIVERY_EVENT")
+            self.assertIsNone(staged.target_record_id)
+            self.assertEqual(staged.owner_record_type, "DELIVERY")
+            self.assertEqual(staged.owner_record_id, "DLV-TRD-DLV-EVT-300")
+            self.assertEqual(staged.action_plan_snapshot["payload"]["event_type"], "DELIVERY_COMPLETED")
+
+            executed = approve_document_action_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="approver",
+                decision_comment="Approved proof-of-delivery event.",
+            )
+            executed_status = executed.status
+            events = session.execute(
+                select(DeliveryEvent).where(DeliveryEvent.delivery_id == delivery.delivery_id)
+            ).scalars().all()
+            links = session.execute(
+                select(DocumentRecordLink)
+                .where(DocumentRecordLink.document_id == document.document_id)
+                .order_by(DocumentRecordLink.record_type.asc())
+            ).scalars().all()
+            event_count = len(events)
+            event_id = str(events[0].id) if events else None
+            event_type = events[0].event_type if events else None
+            event_status = events[0].execution_status if events else None
+            event_reference = events[0].reference_code if events else None
+            event_source = events[0].source if events else None
+            linked_records = {(link.record_type, link.record_id) for link in links}
+            session.commit()
+
+        self.assertEqual(executed_status, "EXECUTED")
+        self.assertEqual(event_count, 1)
+        self.assertEqual(event_type, "DELIVERY_COMPLETED")
+        self.assertEqual(event_status, "COMPLETED")
+        self.assertEqual(event_reference, "POD-EVT-300")
+        self.assertEqual(event_source, "DOCUMENT_LIBRARY")
+        self.assertIn(("DELIVERY", "DLV-TRD-DLV-EVT-300"), linked_records)
+        self.assertIn(("DELIVERY_EVENT", event_id), linked_records)
+        self.assertIn(("TRADE", "TRD-DLV-EVT-300"), linked_records)
 
     def test_selected_create_candidate_approval_creates_missing_invoice(self) -> None:
         with self.SessionLocal() as session:

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.document_record_link import DocumentRecordLink
 from apps.api.app.models.price_index_observation import PriceIndexObservation
@@ -236,6 +237,19 @@ def _resolve_record_target(
             record_id=delivery.delivery_id,
             record_label=f"Delivery {delivery.delivery_id}",
             summary=f"Trade {delivery.trade_id} • {delivery.execution_status.replace('_', ' ').title()}",
+        )
+    elif normalized_type == "DELIVERY_EVENT":
+        event = db.get(DeliveryEvent, _coerce_int_id(normalized_id, label="delivery event"))
+        if event is None:
+            raise LookupError(f"Delivery event '{normalized_id}' was not found.")
+        resolved = ResolvedRecordTarget(
+            record_type=normalized_type,
+            record_id=str(event.id),
+            record_label=f"Delivery Event {event.event_type.replace('_', ' ').title()}",
+            summary=(
+                f"Delivery {event.delivery_id} • {event.occurred_at.date().isoformat()} • "
+                f"{event.execution_status.replace('_', ' ').title()}"
+            ),
         )
     elif normalized_type == "PRICE_INDEX":
         price_index = db.get(ReferencePriceIndex, normalized_id)

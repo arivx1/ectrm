@@ -93,17 +93,27 @@ proposal form until a human owner approves the domain rule.
   settlement, or trade-adjacent records
 - Status: implemented
 - Source:
+  `apps/api/app/domains/operations/services/shipments.py`,
+  `apps/api/app/domains/documents/services/document_action_execution.py`,
+  `apps/api/app/domains/documents/services/document_action_governance.py`,
+  `apps/api/app/domains/documents/services/document_linkage.py`,
+  `apps/api/app/domains/documents/services/document_record_links.py`,
   `apps/api/app/domains/documents/services/document_action_planning.py`,
+  `apps/api/app/domains/documents/services/document_workflows.py`,
   `apps/api/app/domains/documents/services/schema_registry.py`,
+  `apps/api/tests/test_shipments_api.py`,
   `apps/api/tests/test_document_action_planning_service.py`,
   `apps/api/tests/test_document_action_approval_requests_service.py`, and
   `apps/api/tests/test_document_workflows_service.py`
 - Lesson: a missing linked record may be surfaced as a create candidate, but it
   must not become an approval-executable document action until the target record
-  has an explicit typed creation operation behind it. Unsupported creates should
-  remain blocked manual-review workflows with `typed_creation_service` listed as
-  missing evidence.
-- Deterministic opportunity: when delivery, shipment, quality, or compliance
+  has an explicit typed creation operation behind it. Delivery creates and
+  delivery-event records are executable only because they now materialize
+  canonical delivery obligations or append delivery event history from matched
+  owners through the operations shipment service; unsupported creates should
+  remain blocked manual-review workflows with `typed_creation_service` listed
+  as missing evidence.
+- Deterministic opportunity: when shipment, quality, compliance, or other
   document creates become recurring accepted reviewer actions, add a typed
   domain service and executor, then promote only that specific operation into
   the executable create set.
@@ -111,7 +121,7 @@ proposal form until a human owner approves the domain rule.
   review of missing-record intent, but they cannot use freeform extraction or a
   generic `create_record_from_document` path to mutate business records.
 - Tests or evidence:
-  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_document_action_planning_service apps.api.tests.test_document_action_approval_requests_service apps.api.tests.test_document_workflows_service apps.api.tests.test_document_linkage_service`
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_shipments_api apps.api.tests.test_document_action_planning_service apps.api.tests.test_document_action_execution_service apps.api.tests.test_document_action_approval_requests_service apps.api.tests.test_document_workflows_service apps.api.tests.test_document_linkage_service`.
 - Follow-up: when a new typed document-create executor lands, add stale-state,
   owner, duplicate-prevention, audit, and approval-request tests before marking
   the workflow executable.

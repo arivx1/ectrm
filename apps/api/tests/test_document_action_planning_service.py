@@ -11,6 +11,9 @@ from sqlalchemy.pool import StaticPool
 from apps.api.app.domains.documents.services.document_action_planning import build_document_action_plan
 from apps.api.app.domains.documents.services.document_linkage import build_document_linkage_assessment
 from apps.api.app.models import Base
+from apps.api.app.models.delivery_event import DeliveryEvent
+from apps.api.app.models.delivery_obligation import DeliveryObligation
+from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_confirmation import TradeConfirmation
@@ -39,6 +42,9 @@ class DocumentActionPlanningServiceTests(unittest.TestCase):
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()
             session.query(TradeConfirmation).delete()
+            session.query(DeliveryEvent).delete()
+            session.query(DeliveryPipelineDetail).delete()
+            session.query(DeliveryObligation).delete()
             session.query(Trade).delete()
             session.commit()
 
@@ -116,6 +122,76 @@ class DocumentActionPlanningServiceTests(unittest.TestCase):
             status="ACTIVE",
             last_event_id="evt-200",
         )
+
+    def _seed_delivery(self, *, trade: Trade, delivery_id: str) -> tuple[DeliveryObligation, DeliveryPipelineDetail]:
+        now = datetime(2026, 4, 14, 12, 50, tzinfo=timezone.utc)
+        delivery = DeliveryObligation(
+            delivery_id=delivery_id,
+            trade_id=trade.trade_id,
+            trade_leg_id=None,
+            leg_no=1,
+            external_trade_id=trade.external_trade_id,
+            direction="OUTBOUND",
+            mode_family="NETWORK_FLOW",
+            transport_mode="PIPELINE",
+            transport_mode_source="EXPLICIT",
+            delivery_profile="FLOW_WINDOW",
+            book=trade.book,
+            book_source="TRADE_DERIVED",
+            portfolio=trade.portfolio,
+            portfolio_source="TRADE_DERIVED",
+            counterparty=trade.counterparty,
+            counterparty_source="TRADE_DERIVED",
+            commodity_class=trade.commodity_class,
+            commodity=trade.commodity,
+            volume=trade.volume,
+            unit_of_measure=trade.unit_of_measure,
+            trade_currency_code=trade.trade_currency_code,
+            price_unit_code=trade.price_unit_code,
+            location_code=trade.location_code,
+            location_source="TRADE_DERIVED",
+            delivery_start=trade.delivery_start,
+            delivery_end=trade.delivery_end,
+            delivery_window_source="TRADE_DERIVED",
+            execution_status="SCHEDULED",
+            execution_status_source="SYSTEM_GENERATED",
+            operations_owner=None,
+            operations_owner_source="SYSTEM_GENERATED",
+            external_reference=None,
+            external_reference_source="SYSTEM_GENERATED",
+            ops_notes=None,
+            ops_notes_source="SYSTEM_GENERATED",
+            booked_at=now,
+            source_trade_updated_at=trade.updated_at,
+            created_at=now,
+            created_by="tester",
+            updated_at=now,
+            updated_by="tester",
+            version=1,
+        )
+        pipeline_detail = DeliveryPipelineDetail(
+            delivery_id=delivery.delivery_id,
+            pipeline_system="NGPL",
+            pipeline_system_source="MANUAL",
+            pipeline_path=None,
+            pipeline_path_source="SYSTEM_GENERATED",
+            receipt_location_code="HOUSTON",
+            receipt_location_code_source="MANUAL",
+            delivery_location_code="BEAUMONT",
+            delivery_location_code_source="MANUAL",
+            contract_number="PIPE-CONTRACT-500",
+            contract_number_source="MANUAL",
+            cycle_code=None,
+            cycle_code_source="SYSTEM_GENERATED",
+            nomination_reference="NOM-ACT-600",
+            nomination_reference_source="MANUAL",
+            created_at=now,
+            created_by="tester",
+            updated_at=now,
+            updated_by="tester",
+            version=1,
+        )
+        return delivery, pipeline_detail
 
     def test_existing_invoice_plans_attach_existing_record(self) -> None:
         with self.SessionLocal() as session:
@@ -269,7 +345,7 @@ class DocumentActionPlanningServiceTests(unittest.TestCase):
         self.assertEqual(plan.required_owner_record_types, ["TRADE"])
         self.assertIn("owner:TRADE", plan.missing_evidence)
 
-    def test_missing_delivery_creation_stays_blocked_until_typed_service_exists(self) -> None:
+    def test_missing_delivery_plans_create_under_trade_owner(self) -> None:
         with self.SessionLocal() as session:
             trade = self._seed_trade(trade_id="TRD-DLV-ACT-500")
             session.add(trade)
@@ -295,15 +371,86 @@ class DocumentActionPlanningServiceTests(unittest.TestCase):
                 linkage_assessment=linkage,
             )
 
-        self.assertEqual(plan.status, "BLOCKED")
-        self.assertEqual(plan.action_type, "MANUAL_REVIEW")
-        self.assertEqual(plan.operation_type, "manual_review_document_linkage")
-        self.assertEqual(plan.candidate_state, "MANUAL_REVIEW")
+        self.assertEqual(plan.status, "READY")
+        self.assertEqual(plan.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+        self.assertEqual(plan.operation_type, "create_delivery_from_document")
+        self.assertEqual(plan.candidate_state, "CREATE_CANDIDATE")
         self.assertEqual(plan.target.record_type, "DELIVERY")
         self.assertEqual(plan.owner.record_type, "TRADE")
         self.assertEqual(plan.owner.record_id, "TRD-DLV-ACT-500")
-        self.assertIn("typed_creation_service", plan.missing_evidence)
-        self.assertIn("typed creation service", plan.reasons[0])
+        self.assertEqual(plan.required_owner_record_types, ["TRADE"])
+        self.assertEqual(plan.payload["trade_id"], "TRD-DLV-ACT-500")
+        self.assertEqual(plan.payload["nomination_reference"], "NOM-ACT-500")
+
+    def test_delivery_confirmation_plans_delivery_event_under_existing_delivery(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-DLV-EVT-600")
+            delivery, pipeline_detail = self._seed_delivery(trade=trade, delivery_id="DLV-EVT-600")
+            session.add_all([trade, delivery, pipeline_detail])
+            session.commit()
+
+            page = self._reviewed_page(
+                document_kind="DELIVERY_CONFIRMATION",
+                header_fields=[
+                    {"field_key": "delivery_confirmation_number", "value": "POD-ACT-600"},
+                    {"field_key": "confirmation_date", "value": "2026-04-18"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-EVT-600"},
+                    {"field_key": "delivery_id", "value": "DLV-EVT-600"},
+                    {"field_key": "carrier_reference", "value": "CAR-ACT-600"},
+                    {"field_key": "destination", "value": "BEAUMONT"},
+                ],
+            )
+            linkage = build_document_linkage_assessment(session, pages=[page], review_status="VERIFIED")
+            plan = build_document_action_plan(
+                document_id="DOC-200",
+                pages=[page],
+                review_status="VERIFIED",
+                linkage_assessment=linkage,
+            )
+
+        self.assertEqual(plan.status, "READY")
+        self.assertEqual(plan.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+        self.assertEqual(plan.operation_type, "record_delivery_event_from_document")
+        self.assertEqual(plan.candidate_state, "CREATE_CANDIDATE")
+        self.assertEqual(plan.target.record_type, "DELIVERY_EVENT")
+        self.assertFalse(plan.target.existing_record)
+        self.assertEqual(plan.owner.record_type, "DELIVERY")
+        self.assertEqual(plan.owner.record_id, "DLV-EVT-600")
+        self.assertEqual(plan.required_owner_record_types, ["DELIVERY"])
+        self.assertEqual(plan.payload["delivery_id"], "DLV-EVT-600")
+        self.assertEqual(plan.payload["event_type"], "DELIVERY_COMPLETED")
+        self.assertEqual(plan.payload["occurred_at"], "2026-04-18")
+        self.assertEqual(plan.payload["reference_code"], "POD-ACT-600")
+
+    def test_delivery_confirmation_without_delivery_plans_delivery_creation_first(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-DLV-EVT-650")
+            session.add(trade)
+            session.commit()
+
+            page = self._reviewed_page(
+                document_kind="DELIVERY_CONFIRMATION",
+                header_fields=[
+                    {"field_key": "delivery_confirmation_number", "value": "POD-ACT-650"},
+                    {"field_key": "confirmation_date", "value": "2026-04-18"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-EVT-650"},
+                    {"field_key": "carrier_reference", "value": "CAR-ACT-650"},
+                ],
+            )
+            linkage = build_document_linkage_assessment(session, pages=[page], review_status="VERIFIED")
+            plan = build_document_action_plan(
+                document_id="DOC-200",
+                pages=[page],
+                review_status="VERIFIED",
+                linkage_assessment=linkage,
+            )
+
+        self.assertEqual(plan.status, "READY")
+        self.assertEqual(plan.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+        self.assertEqual(plan.operation_type, "create_delivery_from_document")
+        self.assertEqual(plan.target.record_type, "DELIVERY")
+        self.assertEqual(plan.owner.record_type, "TRADE")
+        self.assertEqual(plan.owner.record_id, "TRD-DLV-EVT-650")
 
 
 if __name__ == "__main__":

@@ -60,6 +60,11 @@ CREATE_WORKFLOW_BY_TARGET: dict[str, tuple[str, str, str]] = {
         "Create Delivery From Document",
         "Stage a delivery or shipment workflow under the matched trade owner.",
     ),
+    "DELIVERY_EVENT": (
+        "record_delivery_event_from_document",
+        "Record Delivery Event",
+        "Stage a delivery movement event under the matched delivery owner.",
+    ),
     "TRADE_INVOICE": (
         "create_invoice_from_document",
         "Create Invoice From Document",
@@ -346,6 +351,8 @@ def _record_effect(action_plan: DocumentActionPlanOut) -> str:
     if action_plan.action_type == "ATTACH_EXISTING_RECORD" and target is not None:
         return f"Attach document evidence to existing {target.record_type.replace('_', ' ').lower()}."
     if action_plan.action_type == "CREATE_RECORD_FROM_DOCUMENT" and target is not None:
+        if target.record_type == "DELIVERY_EVENT":
+            return "Append a delivery movement event from reviewed document evidence."
         return f"Stage creation of a new {target.record_type.replace('_', ' ').lower()} from reviewed document evidence."
     return "Review only; no business record mutation."
 

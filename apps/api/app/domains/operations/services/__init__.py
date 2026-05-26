@@ -2,6 +2,7 @@
 
 from apps.api.app.domains.operations.services.database_overview import build_database_overview
 from apps.api.app.domains.operations.services.shipments import append_delivery_event
+from apps.api.app.domains.operations.services.shipments import create_delivery_from_document
 from apps.api.app.domains.operations.services.shipments import get_delivery_obligation_for_operations
 from apps.api.app.domains.operations.services.shipments import list_delivery_obligations_for_operations
 from apps.api.app.domains.operations.services.shipments import list_shipments_for_operations
@@ -33,6 +34,7 @@ from apps.api.app.domains.operations.services.workspace_bootstrap_summary import
 __all__ = [
     "build_database_overview",
     "append_delivery_event",
+    "create_delivery_from_document",
     "get_delivery_obligation_for_operations",
     "list_delivery_obligations_for_operations",
     "list_shipments_for_operations",

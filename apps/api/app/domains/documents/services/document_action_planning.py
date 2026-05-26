@@ -14,6 +14,8 @@ ACTION_OPERATION_BY_TARGET: dict[str, str] = {
     "TRADE_CONFIRMATION": "create_trade_confirmation",
     "TRADE_INVOICE": "issue_trade_invoice",
     "TRADE_PAYMENT": "create_trade_payment",
+    "DELIVERY": "create_delivery_from_document",
+    "DELIVERY_EVENT": "record_delivery_event_from_document",
     "QUALITY_SPECIFICATION": "create_quality_specification",
 }
 
@@ -22,6 +24,8 @@ EXECUTABLE_CREATE_OPERATIONS: frozenset[str] = frozenset(
         "create_trade_confirmation",
         "issue_trade_invoice",
         "create_trade_payment",
+        "create_delivery_from_document",
+        "record_delivery_event_from_document",
     }
 )
 
@@ -39,13 +43,13 @@ ACTION_PREFERRED_TARGETS_BY_KIND: dict[str, tuple[str, ...]] = {
     "PIPELINE_STATEMENT": ("DELIVERY", "TRADE"),
     "TRUCK_TICKET": ("DELIVERY", "TRADE"),
     "RAILCAR_TICKET": ("DELIVERY", "TRADE"),
-    "DISPATCH_NOTICE": ("DELIVERY", "TRADE"),
-    "BILL_OF_LADING": ("DELIVERY", "TRADE"),
-    "DELIVERY_CONFIRMATION": ("DELIVERY", "TRADE"),
+    "DISPATCH_NOTICE": ("DELIVERY_EVENT", "DELIVERY", "TRADE"),
+    "BILL_OF_LADING": ("DELIVERY_EVENT", "DELIVERY", "TRADE"),
+    "DELIVERY_CONFIRMATION": ("DELIVERY_EVENT", "DELIVERY", "TRADE"),
     "NOTICE_OF_READINESS": ("DELIVERY", "TRADE"),
     "OUTAGE_NOTICE": ("DELIVERY", "TRADE"),
     "STORAGE_STATEMENT": ("DELIVERY", "INVENTORY_POSITION"),
-    "WEIGH_TICKET": ("DELIVERY", "TRADE"),
+    "WEIGH_TICKET": ("DELIVERY_EVENT", "DELIVERY", "TRADE"),
     "PRICE_PUBLICATION": ("PRICE_INDEX_OBSERVATION", "PRICE_INDEX"),
 }
 
@@ -54,6 +58,7 @@ CREATE_OWNER_REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "TRADE_INVOICE": ("TRADE",),
     "TRADE_PAYMENT": ("TRADE_INVOICE",),
     "DELIVERY": ("TRADE",),
+    "DELIVERY_EVENT": ("DELIVERY",),
     "QUALITY_SPECIFICATION": ("TRADE",),
 }
 
@@ -62,6 +67,34 @@ CREATE_OWNER_REQUIRED: set[str] = {
     "TRADE_INVOICE",
     "TRADE_PAYMENT",
     "DELIVERY",
+    "DELIVERY_EVENT",
+}
+
+DELIVERY_EVENT_RULES_BY_KIND: dict[str, dict[str, tuple[str, ...] | str]] = {
+    "DELIVERY_CONFIRMATION": {
+        "event_type": "DELIVERY_COMPLETED",
+        "occurred_at_keys": ("confirmation_date", "delivery_date", "load_date"),
+        "reference_keys": ("delivery_confirmation_number", "carrier_reference", "delivery_id"),
+        "location_keys": ("destination", "delivery_location_code", "origin"),
+    },
+    "BILL_OF_LADING": {
+        "event_type": "EXECUTION_STARTED",
+        "occurred_at_keys": ("load_date", "loading_date", "shipment_date"),
+        "reference_keys": ("bill_of_lading_number", "carrier_reference", "delivery_id"),
+        "location_keys": ("origin", "load_port", "destination"),
+    },
+    "DISPATCH_NOTICE": {
+        "event_type": "SCHEDULE_COMMITTED",
+        "occurred_at_keys": ("dispatch_start", "dispatch_date"),
+        "reference_keys": ("dispatch_number", "carrier_reference", "asset_reference", "delivery_id"),
+        "location_keys": ("origin", "destination"),
+    },
+    "WEIGH_TICKET": {
+        "event_type": "CHECKPOINT_RECORDED",
+        "occurred_at_keys": ("load_date", "weigh_date"),
+        "reference_keys": ("ticket_number", "delivery_id"),
+        "location_keys": ("origin", "destination"),
+    },
 }
 
 
@@ -118,6 +151,11 @@ def build_document_action_plan(
 
         create_candidate = create_candidate_by_type.get(record_type)
         if create_candidate is not None:
+            if record_type == "DELIVERY_EVENT" and _resolve_owner_candidate(
+                "DELIVERY_EVENT",
+                all_candidates=candidates,
+            ) is None:
+                continue
             return build_document_action_plan_for_candidate(
                 document_id=document_id,
                 pages=pages,
@@ -178,6 +216,7 @@ def build_document_action_plan_for_candidate(
             linkage_assessment=linkage_assessment,
             field_map=_build_document_field_map(pages),
             all_candidates=candidates,
+            document_kind=_dominant_document_kind(pages),
         )
 
     return _manual_review_plan(
@@ -239,6 +278,7 @@ def _build_create_plan(
     linkage_assessment: DocumentLinkageAssessmentOut,
     field_map: dict[str, str],
     all_candidates: list[DocumentLinkageCandidateOut],
+    document_kind: str,
 ) -> DocumentActionPlanOut:
     owner_candidate = _resolve_owner_candidate(candidate.record_type, all_candidates=all_candidates)
     owner_required = candidate.record_type in CREATE_OWNER_REQUIRED
@@ -313,6 +353,52 @@ def _build_create_plan(
                 ),
             },
         )
+    payload = _build_create_payload(
+        document_id=document_id,
+        target_candidate=candidate,
+        owner_candidate=owner_candidate,
+        field_map=field_map,
+        document_kind=document_kind,
+    )
+    if candidate.record_type == "DELIVERY_EVENT" and not clean_optional_text(payload.get("occurred_at")):
+        return DocumentActionPlanOut(
+            status="BLOCKED",
+            action_type="MANUAL_REVIEW",
+            operation_type="manual_review_document_linkage",
+            candidate_state="MANUAL_REVIEW",
+            title=f"Resolve Event Timestamp Before Recording {target_label}",
+            description=(
+                "The document can record a delivery event, but an event timestamp is required before "
+                "the movement history can be updated."
+            ),
+            confidence=round(candidate.score, 3),
+            target=_action_record(candidate),
+            owner=owner_record,
+            required_owner_record_types=required_owner_record_types,
+            missing_evidence=["event_occurred_at", *_candidate_missing_evidence(candidate)],
+            reasons=[
+                f"{candidate.record_label} is the leading creation candidate.",
+                "A delivery event timestamp is required before event execution can proceed.",
+                *(
+                    [f"Use {owner_candidate.record_label} as the owning record."]
+                    if owner_candidate is not None
+                    else []
+                ),
+                *linkage_assessment.reasons[:2],
+            ][:4],
+            payload={
+                "document_id": document_id,
+                "target_record_type": candidate.record_type,
+                **(
+                    {
+                        "owner_record_type": owner_candidate.record_type,
+                        "owner_record_id": owner_candidate.record_id,
+                    }
+                    if owner_candidate is not None
+                    else {}
+                ),
+            },
+        )
     title = (
         f"Create {target_label} Under {owner_candidate.record_label}"
         if owner_candidate is not None
@@ -323,6 +409,17 @@ def _build_create_plan(
     )
     if owner_candidate is not None:
         description += f" The matched {owner_candidate.record_label.lower()} should act as the owning anchor."
+    if candidate.record_type == "DELIVERY_EVENT":
+        event_label = str(payload.get("event_type") or "delivery event").replace("_", " ").title()
+        title = (
+            f"Record {event_label} For {owner_candidate.record_label}"
+            if owner_candidate is not None
+            else f"Record {event_label} From Document"
+        )
+        description = (
+            "Append a reviewed delivery movement event from this document and link the event evidence "
+            "back to the owning delivery."
+        )
 
     reasons = [
         candidate.reason,
@@ -349,12 +446,7 @@ def _build_create_plan(
         required_owner_record_types=required_owner_record_types,
         missing_evidence=_candidate_missing_evidence(candidate),
         reasons=reasons[:4],
-        payload=_build_create_payload(
-            document_id=document_id,
-            target_candidate=candidate,
-            owner_candidate=owner_candidate,
-            field_map=field_map,
-        ),
+        payload=payload,
     )
 
 
@@ -384,6 +476,7 @@ def _build_create_payload(
     target_candidate: DocumentLinkageCandidateOut,
     owner_candidate: DocumentLinkageCandidateOut | None,
     field_map: dict[str, str],
+    document_kind: str,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "document_id": document_id,
@@ -434,6 +527,40 @@ def _build_create_payload(
                 "received_at": advice_date,
             }
         )
+        return payload
+
+    if target_candidate.record_type == "DELIVERY":
+        payload.update(
+            {
+                "trade_id": owner_candidate.record_id if owner_candidate is not None else field_map.get("trade_id"),
+                "delivery_id": field_map.get("delivery_id"),
+                "leg_no": field_map.get("leg_no"),
+                "nomination_reference": field_map.get("nomination_reference"),
+                "contract_number": field_map.get("contract_number"),
+                "pipeline_system": field_map.get("pipeline_system"),
+            }
+        )
+        return payload
+
+    if target_candidate.record_type == "DELIVERY_EVENT":
+        rule = DELIVERY_EVENT_RULES_BY_KIND.get(document_kind, {})
+        event_type = str(rule.get("event_type") or "CHECKPOINT_RECORDED")
+        occurred_at_keys = tuple(rule.get("occurred_at_keys") or ())
+        reference_keys = tuple(rule.get("reference_keys") or ())
+        location_keys = tuple(rule.get("location_keys") or ())
+        reference_code = _first_field_value(field_map, reference_keys) or document_id
+        payload.update(
+            {
+                "delivery_id": owner_candidate.record_id if owner_candidate is not None else field_map.get("delivery_id"),
+                "event_type": event_type,
+                "occurred_at": _first_field_value(field_map, occurred_at_keys),
+                "location_code": _first_field_value(field_map, location_keys),
+                "reference_code": reference_code,
+                "source": "DOCUMENT_LIBRARY",
+            }
+        )
+        if field_map.get("trade_id"):
+            payload["trade_id"] = field_map.get("trade_id")
         return payload
 
     if target_candidate.record_type == "QUALITY_SPECIFICATION":
@@ -563,3 +690,11 @@ def _normalized_amount(value: str | None) -> str | None:
         return str(Decimal(normalized))
     except InvalidOperation:
         return cleaned
+
+
+def _first_field_value(field_map: dict[str, str], keys: tuple[str, ...]) -> str | None:
+    for key in keys:
+        value = clean_optional_text(field_map.get(key))
+        if value is not None:
+            return value
+    return None

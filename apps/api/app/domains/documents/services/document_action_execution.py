@@ -7,8 +7,11 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.domains.operations.services.settlement_invoices import issue_trade_invoice
 from apps.api.app.domains.operations.services.settlement_payments import create_trade_payment
+from apps.api.app.domains.operations.services.shipments import append_delivery_event
+from apps.api.app.domains.operations.services.shipments import create_delivery_from_document
 from apps.api.app.domains.operations.services.trade_confirmations import create_trade_confirmation
 from apps.api.app.domains.operations.services.trade_confirmations import update_trade_confirmation
+from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.trade_confirmation import TradeConfirmation
@@ -32,6 +35,8 @@ SUPPORTED_DOCUMENT_ACTION_OPERATIONS: frozenset[str] = frozenset(
         "create_trade_confirmation",
         "issue_trade_invoice",
         "create_trade_payment",
+        "create_delivery_from_document",
+        "record_delivery_event_from_document",
     }
 )
 
@@ -238,6 +243,87 @@ def _apply_document_action(
         _link_owner_record(db, document=document, actor_id=actor_id, action_plan=action_plan)
         return True
 
+    if action_plan.operation_type == "create_delivery_from_document":
+        created_delivery = create_delivery_from_document(
+            db,
+            trade_id=_require_payload_value(action_plan.payload, "trade_id"),
+            actor_id=actor_id,
+            source_document_id=document.document_id,
+            delivery_id=_optional_payload_value(action_plan.payload, "delivery_id"),
+            leg_no=action_plan.payload.get("leg_no"),
+            now=now,
+        )
+        create_document_record_link(
+            db,
+            document_id=document.document_id,
+            record_type="DELIVERY",
+            record_id=created_delivery.delivery_id,
+            actor_id=actor_id,
+            role="PRIMARY",
+        )
+        _link_owner_record(db, document=document, actor_id=actor_id, action_plan=action_plan)
+        return True
+
+    if action_plan.operation_type == "record_delivery_event_from_document":
+        delivery_id = _require_payload_value(action_plan.payload, "delivery_id")
+        event_type = _require_payload_value(action_plan.payload, "event_type")
+        occurred_at = _parse_datetime_candidate(action_plan.payload.get("occurred_at"))
+        if occurred_at is None:
+            raise ValueError("Document action payload is missing 'occurred_at'.")
+        source = _optional_payload_value(action_plan.payload, "source") or "DOCUMENT_LIBRARY"
+        reference_code = _optional_payload_value(action_plan.payload, "reference_code") or document.document_id
+        existing_event = _find_document_delivery_event(
+            db,
+            delivery_id=delivery_id,
+            event_type=event_type,
+            source=source,
+            reference_code=reference_code,
+        )
+        if existing_event is not None:
+            raise ValueError(
+                f"Delivery event '{event_type}' has already been recorded for document reference '{reference_code}'."
+            )
+        delivery = append_delivery_event(
+            db,
+            delivery_id=delivery_id,
+            actor_id=actor_id,
+            event_type=event_type,
+            occurred_at=occurred_at,
+            location_code=_optional_payload_value(action_plan.payload, "location_code"),
+            reference_code=reference_code,
+            source=source,
+            notes=_execution_note(document),
+            now=now,
+        )
+        created_event = _find_document_delivery_event(
+            db,
+            delivery_id=delivery_id,
+            event_type=event_type,
+            source=source,
+            reference_code=reference_code,
+        )
+        if created_event is None:
+            raise LookupError("Delivery event was recorded, but its audit row could not be resolved.")
+        create_document_record_link(
+            db,
+            document_id=document.document_id,
+            record_type="DELIVERY_EVENT",
+            record_id=str(created_event.id),
+            actor_id=actor_id,
+            role="PRIMARY",
+        )
+        _link_owner_record(db, document=document, actor_id=actor_id, action_plan=action_plan)
+        if delivery.trade_id:
+            create_document_record_link(
+                db,
+                document_id=document.document_id,
+                record_type="TRADE",
+                record_id=delivery.trade_id,
+                actor_id=actor_id,
+                role="SECONDARY",
+            )
+        return True
+
     raise ValueError(f"Document action operation '{action_plan.operation_type}' is not supported.")
 
 
@@ -336,6 +422,27 @@ def _coerce_utc(value: datetime) -> datetime:
 
 def _execution_note(document: DocumentIngestion) -> str:
     return f"Created from verified document {document.display_name} ({document.document_id})."
+
+
+def _find_document_delivery_event(
+    db: Session,
+    *,
+    delivery_id: str,
+    event_type: str,
+    source: str,
+    reference_code: str,
+) -> DeliveryEvent | None:
+    return db.execute(
+        select(DeliveryEvent)
+        .where(
+            DeliveryEvent.delivery_id == delivery_id,
+            DeliveryEvent.event_type == event_type,
+            DeliveryEvent.source == source,
+            DeliveryEvent.reference_code == reference_code,
+        )
+        .order_by(DeliveryEvent.id.desc())
+        .limit(1)
+    ).scalars().first()
 
 
 def _require_payload_value(payload: dict[str, object], key: str) -> str:

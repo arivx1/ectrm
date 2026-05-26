@@ -1454,6 +1454,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         linkage_summary="Links primarily to delivery and trade records using dispatch numbers, delivery IDs, trade IDs, carrier references, asset references, routes, and dates.",
         record_targets=[
             _target(
+                "DELIVERY_EVENT",
+                "Delivery Event",
+                "Record a committed schedule event once the delivery owner is resolved.",
+                create_if_missing=True,
+            ),
+            _target(
                 "DELIVERY",
                 "Delivery",
                 "Match using delivery ID, dispatch number, route, carrier, asset reference, and dispatch window.",
@@ -1492,6 +1498,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Confirm the transport identifier and route, then capture any shipped line or compartment details.",
         linkage_summary="Links primarily to delivery and trade records using bill of lading number, carrier, route, and load date.",
         record_targets=[
+            _target(
+                "DELIVERY_EVENT",
+                "Delivery Event",
+                "Record a movement-start event once the delivery owner is resolved.",
+                create_if_missing=True,
+            ),
             _target(
                 "DELIVERY",
                 "Delivery",
@@ -1604,6 +1616,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Confirm the delivery confirmation number, delivery references, and route before accepting it as final proof.",
         linkage_summary="Links primarily to delivery and trade records using delivery confirmation numbers, delivery IDs, carrier references, and route details.",
         record_targets=[
+            _target(
+                "DELIVERY_EVENT",
+                "Delivery Event",
+                "Record a completed delivery event once the delivery owner is resolved.",
+                create_if_missing=True,
+            ),
             _target(
                 "DELIVERY",
                 "Delivery",
@@ -2096,6 +2114,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         review_guidance="Confirm the ticket identity and capture the weight measurements or line-level movements.",
         linkage_summary="Links primarily to delivery, inventory, and trade records using ticket numbers, trade IDs, delivery IDs, and measured weights.",
         record_targets=[
+            _target(
+                "DELIVERY_EVENT",
+                "Delivery Event",
+                "Record a delivery checkpoint event once the delivery owner is resolved.",
+                create_if_missing=True,
+            ),
             _target(
                 "DELIVERY",
                 "Delivery",

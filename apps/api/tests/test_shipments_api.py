@@ -18,6 +18,7 @@ from sqlalchemy.pool import StaticPool
 from apps.api.app.domains.operations.services.actualizations import void_trade_actualization
 from apps.api.app.domains.operations.services.shipments import list_delivery_obligations_for_operations
 from apps.api.app.domains.operations.services.shipments import append_delivery_event
+from apps.api.app.domains.operations.services.shipments import create_delivery_from_document
 from apps.api.app.domains.operations.services.shipments import reverse_delivery_event
 from apps.api.app.domains.operations.services.shipments import synchronize_delivery_obligations_from_trades
 from apps.api.app.domains.operations.services.shipments import update_delivery_rail_detail
@@ -682,6 +683,118 @@ class DeliveriesApiTests(unittest.TestCase):
         self.assertEqual(power_details[0].market_operator_source, "SYSTEM_GENERATED")
         self.assertEqual(power_details[0].pricing_node_code_source, "TRADE_DERIVED")
         self.assertEqual(power_details[0].delivery_node_code_source, "TRADE_DERIVED")
+
+    def test_scoped_sync_materializes_requested_trade_without_global_prune(self) -> None:
+        with self.SessionLocal() as session:
+            result = synchronize_delivery_obligations_from_trades(
+                session,
+                actor_id="ops.document",
+                now=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+                trade_ids=["T-GAS-1"],
+                delete_obsolete=False,
+            )
+            session.commit()
+
+            obligations = session.execute(
+                select(DeliveryObligation).order_by(DeliveryObligation.delivery_id.asc())
+            ).scalars().all()
+            pipeline_details = session.execute(select(DeliveryPipelineDetail)).scalars().all()
+
+        self.assertEqual(result.created_count, 1)
+        self.assertEqual(result.updated_count, 0)
+        self.assertEqual(result.deleted_count, 0)
+        self.assertEqual(result.total_count, 1)
+        self.assertEqual([record.delivery_id for record in obligations], ["DLV-T-GAS-1"])
+        self.assertEqual([detail.delivery_id for detail in pipeline_details], ["DLV-T-GAS-1"])
+
+    def test_create_delivery_from_document_materializes_single_trade_delivery(self) -> None:
+        with self.SessionLocal() as session:
+            delivery = create_delivery_from_document(
+                session,
+                trade_id="T-GAS-1",
+                actor_id="ops.document",
+                source_document_id="DOC-GAS-NOM-1",
+                now=datetime(2026, 4, 5, 12, 0, tzinfo=timezone.utc),
+            )
+            session.commit()
+
+            obligations = session.execute(
+                select(DeliveryObligation).order_by(DeliveryObligation.delivery_id.asc())
+            ).scalars().all()
+            pipeline_detail = session.get(DeliveryPipelineDetail, "DLV-T-GAS-1")
+
+        self.assertEqual(delivery.delivery_id, "DLV-T-GAS-1")
+        self.assertEqual(delivery.created_by, "ops.document")
+        self.assertEqual([record.delivery_id for record in obligations], ["DLV-T-GAS-1"])
+        self.assertIsNotNone(pipeline_detail)
+
+    def test_create_delivery_from_document_rejects_non_physical_or_inactive_trade(self) -> None:
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(LookupError, "Active physical trade 'T-FIN-1' was not found"):
+                create_delivery_from_document(
+                    session,
+                    trade_id="T-FIN-1",
+                    actor_id="ops.document",
+                    source_document_id="DOC-FIN-1",
+                )
+
+            with self.assertRaisesRegex(LookupError, "Active physical trade 'T-CANCELLED-1' was not found"):
+                create_delivery_from_document(
+                    session,
+                    trade_id="T-CANCELLED-1",
+                    actor_id="ops.document",
+                    source_document_id="DOC-CANCELLED-1",
+                )
+
+    def test_create_delivery_from_document_blocks_duplicates_and_noncanonical_ids(self) -> None:
+        with self.SessionLocal() as session:
+            create_delivery_from_document(
+                session,
+                trade_id="T-GAS-1",
+                actor_id="ops.document",
+                source_document_id="DOC-GAS-NOM-1",
+            )
+            session.commit()
+
+            with self.assertRaisesRegex(ValueError, "already exists"):
+                create_delivery_from_document(
+                    session,
+                    trade_id="T-GAS-1",
+                    actor_id="ops.document",
+                    source_document_id="DOC-GAS-NOM-RETRY",
+                )
+
+            with self.assertRaisesRegex(ValueError, "not a canonical delivery"):
+                create_delivery_from_document(
+                    session,
+                    trade_id="T-POWER-1",
+                    actor_id="ops.document",
+                    source_document_id="DOC-POWER-SCHEDULE",
+                    delivery_id="DLV-WRONG",
+                )
+
+    def test_create_delivery_from_document_requires_leg_target_for_multi_leg_trade(self) -> None:
+        with self.SessionLocal() as session:
+            with self.assertRaisesRegex(ValueError, "multiple delivery legs"):
+                create_delivery_from_document(
+                    session,
+                    trade_id="T-SWAP-1",
+                    actor_id="ops.document",
+                    source_document_id="DOC-SWAP-NOM",
+                )
+
+            delivery = create_delivery_from_document(
+                session,
+                trade_id="T-SWAP-1",
+                actor_id="ops.document",
+                source_document_id="DOC-SWAP-NOM",
+                leg_no=2,
+            )
+            session.commit()
+            persisted_target = session.get(DeliveryObligation, "DLV-T-SWAP-1-L2")
+
+        self.assertEqual(delivery.delivery_id, "DLV-T-SWAP-1-L2")
+        self.assertIsNotNone(persisted_target)
 
     def test_persisted_transport_override_removes_missing_mode_blocker(self) -> None:
         with self.SessionLocal() as session:

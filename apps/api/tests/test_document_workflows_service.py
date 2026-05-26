@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from apps.api.app.domains.documents.services.document_workflows import execute_document_workflow
 from apps.api.app.domains.documents.services.document_workflows import list_document_workflows
 from apps.api.app.models import Base
+from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.document_ingestion import DocumentIngestion
@@ -48,6 +49,7 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
             session.query(DocumentRecordLink).delete()
             session.query(PriceIndexObservation).delete()
             session.query(ExternalDataRun).delete()
+            session.query(DeliveryEvent).delete()
             session.query(DeliveryPipelineDetail).delete()
             session.query(DocumentIngestionPage).delete()
             session.query(DocumentIngestion).delete()
@@ -530,7 +532,52 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
         self.assertEqual([workflow.workflow_id for workflow in workflows.workflows], ["match_existing_record"])
         self.assertEqual(workflows.workflows[0].status, "READY")
 
-    def test_workflow_summary_blocks_missing_delivery_creation_until_typed_service_exists(self) -> None:
+    def test_workflow_summary_exposes_delivery_event_candidate_for_delivery_confirmation(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(session, trade_id="TRD-DLV-WF-EVT-200")
+            self._seed_delivery(
+                session,
+                trade=trade,
+                delivery_id="DLV-WF-EVT-200",
+                nomination_reference="NOM-WF-EVT-200",
+            )
+            document = self._seed_verified_document(
+                session,
+                document_id="DOC-DLV-WF-EVT-200",
+                document_kind="DELIVERY_CONFIRMATION",
+                header_fields=[
+                    {"field_key": "delivery_confirmation_number", "value": "POD-WF-EVT-200"},
+                    {"field_key": "confirmation_date", "value": "2026-04-18"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-WF-EVT-200"},
+                    {"field_key": "delivery_id", "value": "DLV-WF-EVT-200"},
+                    {"field_key": "carrier_reference", "value": "CAR-WF-EVT-200"},
+                    {"field_key": "destination", "value": "BEAUMONT"},
+                ],
+            )
+            session.commit()
+
+            workflows = list_document_workflows(session, document_id=document.document_id)
+
+        self.assertEqual(workflows.action_plan.status, "READY")
+        self.assertEqual(workflows.action_plan.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+        self.assertEqual(workflows.action_plan.operation_type, "record_delivery_event_from_document")
+        self.assertEqual(workflows.action_plan.target.record_type, "DELIVERY_EVENT")
+        self.assertEqual(workflows.action_plan.owner.record_type, "DELIVERY")
+        self.assertEqual(workflows.action_plan.owner.record_id, "DLV-WF-EVT-200")
+        self.assertEqual(workflows.governance.status, "HUMAN_CONFIRMATION_REQUIRED")
+        self.assertEqual(
+            [workflow.workflow_id for workflow in workflows.workflows],
+            ["record_delivery_event_from_document", "match_existing_record"],
+        )
+        event_workflow = workflows.workflows[0]
+        self.assertEqual(event_workflow.status, "READY")
+        self.assertEqual(event_workflow.target.record_type, "DELIVERY_EVENT")
+        self.assertEqual(event_workflow.owner.record_type, "DELIVERY")
+        self.assertTrue(event_workflow.approval_required)
+        self.assertIn("CREATES_NEW_RECORD", event_workflow.risk_flags)
+        self.assertIn("OPERATIONAL_MUTATION", event_workflow.risk_flags)
+
+    def test_workflow_summary_exposes_create_delivery_candidate_under_trade(self) -> None:
         with self.SessionLocal() as session:
             self._seed_trade(session, trade_id="TRD-DLV-WF-300")
             document = self._seed_verified_document(
@@ -551,19 +598,21 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
 
             workflows = list_document_workflows(session, document_id=document.document_id)
 
-        self.assertEqual(workflows.action_plan.status, "BLOCKED")
-        self.assertEqual(workflows.action_plan.action_type, "MANUAL_REVIEW")
-        self.assertEqual(workflows.action_plan.operation_type, "manual_review_document_linkage")
+        self.assertEqual(workflows.action_plan.status, "READY")
+        self.assertEqual(workflows.action_plan.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+        self.assertEqual(workflows.action_plan.operation_type, "create_delivery_from_document")
+        self.assertEqual(workflows.action_plan.candidate_state, "CREATE_CANDIDATE")
         self.assertEqual(workflows.action_plan.target.record_type, "DELIVERY")
         self.assertEqual(workflows.action_plan.owner.record_type, "TRADE")
         self.assertEqual(workflows.action_plan.owner.record_id, "TRD-DLV-WF-300")
-        self.assertIn("typed_creation_service", workflows.action_plan.missing_evidence)
+        self.assertEqual(workflows.governance.status, "HUMAN_CONFIRMATION_REQUIRED")
         self.assertEqual([workflow.workflow_id for workflow in workflows.workflows], ["create_delivery_from_document", "match_existing_record"])
         create_workflow = workflows.workflows[0]
-        self.assertEqual(create_workflow.status, "BLOCKED")
-        self.assertEqual(create_workflow.candidate_state, "MANUAL_REVIEW")
+        self.assertEqual(create_workflow.status, "READY")
+        self.assertEqual(create_workflow.candidate_state, "CREATE_CANDIDATE")
         self.assertEqual(create_workflow.target.record_type, "DELIVERY")
-        self.assertIn("typed creation service", create_workflow.disabled_reason)
+        self.assertTrue(create_workflow.approval_required)
+        self.assertIn("CREATES_NEW_RECORD", create_workflow.risk_flags)
 
     def test_workflow_summary_blocks_invoice_creation_without_owner_trade(self) -> None:
         with self.SessionLocal() as session:
