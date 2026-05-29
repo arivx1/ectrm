@@ -1645,6 +1645,28 @@ export function PreTradeWorkspace({
                   <p>{recommendation.opportunity_summary.detail}</p>
                 </div>
               ) : null}
+              {recommendation.arbitrage_candidate ? (
+                <div className="surface pretrade-next-actions">
+                  <span className="eyebrow">Arbitrage Candidate</span>
+                  <p>
+                    <strong>{recommendation.arbitrage_candidate.family.replaceAll('_', ' ')}</strong>
+                    {` | ${recommendation.arbitrage_candidate.status.replaceAll('_', ' ')}`}
+                  </p>
+                  <ul className="pretrade-bullet-list">
+                    <li>Gross spread: {formatNumber(recommendation.arbitrage_candidate.gross_spread, 2)}</li>
+                    <li>Bridge cost: {formatNumber(recommendation.arbitrage_candidate.bridge_cost, 2)}</li>
+                    <li>Net opportunity: {formatNumber(recommendation.arbitrage_candidate.net_opportunity, 2)}</li>
+                    <li>
+                      Executable basis: {recommendation.arbitrage_candidate.buy_price_basis ?? 'n/a'} / {recommendation.arbitrage_candidate.sell_price_basis ?? 'n/a'}
+                    </li>
+                    {recommendation.arbitrage_candidate.edges.map((edge) => (
+                      <li key={`${edge.edge_type}-${edge.label}`}>
+                        {edge.label}: {formatNumber(edge.bridge_cost_per_unit, 2)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               {draftAnalysis?.comparison ? (
                 <div className="surface pretrade-next-actions">
                   <span className="eyebrow">Compared To Latest Saved Run</span>

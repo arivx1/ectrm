@@ -2389,6 +2389,7 @@ export type PreTradeRecommendationSourceQuality = 'OK' | 'STALE' | 'DEGRADED' | 
 export type PreTradeGovernanceRiskStatus = 'CLEAR' | 'WATCH' | 'ACTION_REQUIRED'
 export type PreTradeOpportunityCategory =
   | 'MARK_GAP'
+  | 'ARBITRAGE'
   | 'EXPOSURE_OFFSET'
   | 'RISK_REDUCTION'
   | 'RISK_INCREASE'
@@ -2396,6 +2397,16 @@ export type PreTradeOpportunityCategory =
   | 'WAIT_FOR_DATA'
 export type PreTradeExposureDirection = 'LONG' | 'SHORT' | 'FLAT' | 'UNKNOWN'
 export type PreTradeExposureEffect = 'OFFSETS' | 'DEEPENS' | 'NEUTRAL' | 'UNKNOWN'
+export type PreTradeArbitrageFamily = 'PRODUCT_QUALITY' | 'TIME' | 'GEOGRAPHIC' | 'COMBINED'
+export type PreTradeArbitrageCandidateStatus = 'SUPPORTED' | 'INCOMPLETE' | 'UNSUPPORTED'
+export type PreTradeExecutablePriceBasis = 'ASK' | 'BID' | 'LAST' | 'TARGET' | 'ASSUMPTION'
+export type PreTradeTransformationEdgeType =
+  | 'PRODUCT_CONVERSION'
+  | 'STORAGE'
+  | 'TRANSPORT'
+  | 'FINANCING'
+  | 'FEES'
+  | 'RISK_BUFFER'
 export type PreTradeNettingCandidateMatchQuality = 'EXACT' | 'PARTIAL' | 'REJECTED'
 export type PreTradeHedgeInstrumentType = 'FUTURES' | 'OPTIONS' | 'SWAP' | 'PHYSICAL_OFFSET' | 'NO_HEDGE' | 'WAIT_FOR_DATA'
 export type PreTradeMissingEvidenceSeverity = 'BLOCKING' | 'WARNING'
@@ -2587,6 +2598,47 @@ export type PreTradeRecommendationOpportunitySummaryRecord = {
   source_refs: PreTradeRecommendationEvidenceRefRecord[]
 }
 
+export type PreTradeRecommendationCommodityStateRecord = {
+  commodity_class: string | null
+  commodity: string | null
+  quality_spec: string | null
+  location_code: string | null
+  delivery_start: string | null
+  delivery_end: string | null
+  price_index_code: string | null
+  unit_of_measure: string | null
+  currency_code: string | null
+}
+
+export type PreTradeRecommendationTransformationEdgeRecord = {
+  edge_type: PreTradeTransformationEdgeType
+  label: string
+  bridge_cost_per_unit: number
+  supported: boolean
+  detail: string
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
+export type PreTradeRecommendationArbitrageCandidateRecord = {
+  family: PreTradeArbitrageFamily
+  status: PreTradeArbitrageCandidateStatus
+  buy_state: PreTradeRecommendationCommodityStateRecord
+  sell_state: PreTradeRecommendationCommodityStateRecord
+  buy_price: number | null
+  buy_price_basis: PreTradeExecutablePriceBasis | null
+  sell_price: number | null
+  sell_price_basis: PreTradeExecutablePriceBasis | null
+  gross_spread: number | null
+  bridge_cost: number | null
+  net_opportunity: number | null
+  net_opportunity_pct: number | null
+  estimated_value: number | null
+  edges: PreTradeRecommendationTransformationEdgeRecord[]
+  missing_evidence: string[]
+  stop_reasons: string[]
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
 export type PreTradeRecommendationResidualExposureRecord = {
   current_net_position: number | null
   proposed_trade_delta: number | null
@@ -2648,6 +2700,7 @@ export type PreTradeRecommendationResultRecord = {
   checks: PreTradeRecommendationCheckRecord[]
   next_actions: string[]
   opportunity_summary: PreTradeRecommendationOpportunitySummaryRecord | null
+  arbitrage_candidate: PreTradeRecommendationArbitrageCandidateRecord | null
   residual_exposure: PreTradeRecommendationResidualExposureRecord | null
   netting_candidates: PreTradeRecommendationNettingCandidateRecord[]
   hedge_recommendation: PreTradeRecommendationHedgeRecommendationRecord | null

@@ -19,6 +19,7 @@ PreTradeRecommendationSourceQuality = Literal["OK", "STALE", "DEGRADED", "MISSIN
 PreTradeGovernanceRiskStatus = Literal["CLEAR", "WATCH", "ACTION_REQUIRED"]
 PreTradeOpportunityCategory = Literal[
     "MARK_GAP",
+    "ARBITRAGE",
     "EXPOSURE_OFFSET",
     "RISK_REDUCTION",
     "RISK_INCREASE",
@@ -27,6 +28,17 @@ PreTradeOpportunityCategory = Literal[
 ]
 PreTradeExposureDirection = Literal["LONG", "SHORT", "FLAT", "UNKNOWN"]
 PreTradeExposureEffect = Literal["OFFSETS", "DEEPENS", "NEUTRAL", "UNKNOWN"]
+PreTradeArbitrageFamily = Literal["PRODUCT_QUALITY", "TIME", "GEOGRAPHIC", "COMBINED"]
+PreTradeArbitrageCandidateStatus = Literal["SUPPORTED", "INCOMPLETE", "UNSUPPORTED"]
+PreTradeExecutablePriceBasis = Literal["ASK", "BID", "LAST", "TARGET", "ASSUMPTION"]
+PreTradeTransformationEdgeType = Literal[
+    "PRODUCT_CONVERSION",
+    "STORAGE",
+    "TRANSPORT",
+    "FINANCING",
+    "FEES",
+    "RISK_BUFFER",
+]
 PreTradeNettingCandidateMatchQuality = Literal["EXACT", "PARTIAL", "REJECTED"]
 PreTradeHedgeInstrumentType = Literal["FUTURES", "OPTIONS", "SWAP", "PHYSICAL_OFFSET", "NO_HEDGE", "WAIT_FOR_DATA"]
 PreTradeMissingEvidenceSeverity = Literal["BLOCKING", "WARNING"]
@@ -417,6 +429,53 @@ class PreTradeRecommendationOpportunitySummaryOut(BaseModel):
     source_refs: list[PreTradeRecommendationEvidenceRefOut] = Field(default_factory=list)
 
 
+class PreTradeRecommendationCommodityStateOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    commodity_class: str | None = None
+    commodity: str | None = None
+    quality_spec: str | None = None
+    location_code: str | None = None
+    delivery_start: date | None = None
+    delivery_end: date | None = None
+    price_index_code: str | None = None
+    unit_of_measure: str | None = None
+    currency_code: str | None = None
+
+
+class PreTradeRecommendationTransformationEdgeOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    edge_type: PreTradeTransformationEdgeType
+    label: str
+    bridge_cost_per_unit: float = Field(..., ge=0)
+    supported: bool = True
+    detail: str
+    source_refs: list[PreTradeRecommendationEvidenceRefOut] = Field(default_factory=list)
+
+
+class PreTradeRecommendationArbitrageCandidateOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    family: PreTradeArbitrageFamily
+    status: PreTradeArbitrageCandidateStatus
+    buy_state: PreTradeRecommendationCommodityStateOut
+    sell_state: PreTradeRecommendationCommodityStateOut
+    buy_price: float | None = None
+    buy_price_basis: PreTradeExecutablePriceBasis | None = None
+    sell_price: float | None = None
+    sell_price_basis: PreTradeExecutablePriceBasis | None = None
+    gross_spread: float | None = None
+    bridge_cost: float | None = Field(default=None, ge=0)
+    net_opportunity: float | None = None
+    net_opportunity_pct: float | None = None
+    estimated_value: float | None = None
+    edges: list[PreTradeRecommendationTransformationEdgeOut] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    stop_reasons: list[str] = Field(default_factory=list)
+    source_refs: list[PreTradeRecommendationEvidenceRefOut] = Field(default_factory=list)
+
+
 class PreTradeRecommendationResidualExposureOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -488,6 +547,7 @@ class PreTradeRecommendationResultOut(BaseModel):
     checks: list[PreTradeRecommendationCheckOut]
     next_actions: list[str]
     opportunity_summary: PreTradeRecommendationOpportunitySummaryOut | None = None
+    arbitrage_candidate: PreTradeRecommendationArbitrageCandidateOut | None = None
     residual_exposure: PreTradeRecommendationResidualExposureOut | None = None
     netting_candidates: list[PreTradeRecommendationNettingCandidateOut] = Field(default_factory=list)
     hedge_recommendation: PreTradeRecommendationHedgeRecommendationOut | None = None

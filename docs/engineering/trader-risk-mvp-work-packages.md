@@ -104,13 +104,13 @@ The MVP should use or prepare these durable work objects:
 
 ### Wave 0: Contract And Evidence Foundation
 
-1. TRMVP-01 recommendation output contract
-2. TRMVP-02 source freshness and evidence normalization
+1. TRMVP-01 recommendation output contract - implemented
+2. TRMVP-02 source freshness and evidence normalization - implemented
 
 ### Wave 1: First Trader/Risk Slice
 
-3. TRMVP-03 opportunity, arbitrage, and residual exposure triage
-4. TRMVP-04 pre-trade scenario enrichment
+3. TRMVP-03 opportunity, arbitrage, and residual exposure triage - implemented
+4. TRMVP-04 pre-trade scenario enrichment - next
 5. TRMVP-05 pre-trade workspace integration
 
 ### Wave 2: Netting And Hedge Depth
@@ -139,6 +139,8 @@ Each work package is done only when:
 - docs are updated when contracts, rules, or authority boundaries change
 
 ## TRMVP-01: Recommendation Output Contract
+
+Status: implemented.
 
 ### Priority
 
@@ -191,6 +193,8 @@ netting, and hedge-draft details without collapsing them into freeform text.
 
 ## TRMVP-02: Source Freshness And Evidence Normalization
 
+Status: implemented.
+
 ### Priority
 
 P0
@@ -239,6 +243,8 @@ across positions, marks, market context, weather, credit, and option exposure.
 - web tests for freshness labels and missing-evidence display
 
 ## TRMVP-03: Opportunity, Arbitrage, And Residual Exposure Triage
+
+Status: implemented.
 
 ### Priority
 
@@ -617,11 +623,11 @@ protected by browser smoke coverage.
 
 Implement in this order:
 
-1. TRMVP-01 and TRMVP-02 together, because the UI and assistant should not grow
-   new recommendation language before the evidence contract exists.
-2. TRMVP-03 as a backend-first deterministic service with focused tests.
-3. TRMVP-05 as the first user-visible slice in Pre-Trade.
-4. TRMVP-09 before any assistant role starts producing hedge or netting drafts.
+1. TRMVP-04 to preserve triage rationale on saved scenarios and review items.
+2. TRMVP-05 as the next deeper user-visible slice in Pre-Trade.
+3. TRMVP-09 before any assistant role starts producing hedge or netting drafts.
 
-This sequence gives traders and risk managers visible value while keeping the
-system inside read, explain, and draft authority.
+TRMVP-01 through TRMVP-03 are now the evidence and triage foundation for this
+sequence. The next slice should preserve the deterministic rationale through
+scenario and review handoff while keeping the system inside read, explain, and
+draft authority.

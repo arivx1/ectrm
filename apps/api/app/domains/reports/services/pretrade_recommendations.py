@@ -27,9 +27,14 @@ from apps.api.app.models.reference_counterparty_external_credit_snapshot import 
 from apps.api.app.models.trade import Trade
 from apps.api.app.schemas.pretrade import (
     PreTradeRecommendationDraftAnalysisOut,
+    PreTradeArbitrageCandidateStatus,
+    PreTradeArbitrageFamily,
     PreTradeRecommendationCheckOut,
     PreTradeRecommendationConfidence,
+    PreTradeRecommendationArbitrageCandidateOut,
+    PreTradeRecommendationCommodityStateOut,
     PreTradeRecommendationEvidenceRefOut,
+    PreTradeExecutablePriceBasis,
     PreTradeExposureDirection,
     PreTradeExposureEffect,
     PreTradeRecommendationExplanationOut,
@@ -51,8 +56,10 @@ from apps.api.app.schemas.pretrade import (
     PreTradeRecommendationSourceSnapshot,
     PreTradeRecommendationStance,
     PreTradeRecommendationSourceType,
+    PreTradeRecommendationTransformationEdgeOut,
     PreTradeReviewRecommendationSummary,
     PreTradeScenarioDraft,
+    PreTradeTransformationEdgeType,
 )
 
 PRETRADE_RECOMMENDATION_RUN_PRESET_KEY = "pretrade_recommendation_run"
@@ -70,6 +77,60 @@ QUALITY_SCORE_BY_STATUS: dict[PreTradeRecommendationSourceQuality, int] = {
     "DEGRADED": 45,
     "MISSING": 0,
 }
+
+ARBITRAGE_POSITIVE_THRESHOLD = 0.0
+
+EDGE_FAMILY_BY_TYPE: dict[PreTradeTransformationEdgeType, PreTradeArbitrageFamily] = {
+    "PRODUCT_CONVERSION": "PRODUCT_QUALITY",
+    "STORAGE": "TIME",
+    "TRANSPORT": "GEOGRAPHIC",
+}
+
+REQUIRED_EDGE_TYPES_BY_FAMILY: dict[PreTradeArbitrageFamily, set[PreTradeTransformationEdgeType]] = {
+    "PRODUCT_QUALITY": {"PRODUCT_CONVERSION"},
+    "TIME": {"STORAGE"},
+    "GEOGRAPHIC": {"TRANSPORT"},
+    "COMBINED": set(),
+}
+
+ARBITRAGE_COST_FIELD_SPECS: tuple[tuple[PreTradeTransformationEdgeType, tuple[str, ...], str, str], ...] = (
+    (
+        "PRODUCT_CONVERSION",
+        ("conversion_cost_per_unit", "conversion_cost", "quality_conversion_cost", "product_conversion_cost"),
+        "Product or quality conversion",
+        "Product or quality conversion cost applied to bridge the buy and sell states.",
+    ),
+    (
+        "STORAGE",
+        ("storage_cost_per_unit", "storage_cost", "calendar_storage_cost"),
+        "Calendar storage",
+        "Storage cost applied to bridge the delivery timing between the buy and sell states.",
+    ),
+    (
+        "TRANSPORT",
+        ("transportation_cost_per_unit", "transportation_cost", "transport_cost", "freight_cost"),
+        "Geographic transport",
+        "Transportation cost applied to bridge the origin and destination states.",
+    ),
+    (
+        "FINANCING",
+        ("financing_cost_per_unit", "financing_cost"),
+        "Financing",
+        "Financing cost applied to carry the opportunity.",
+    ),
+    (
+        "FEES",
+        ("fees_cost_per_unit", "fees_cost", "fee_cost", "taxes_and_fees_cost"),
+        "Fees and taxes",
+        "Fees, taxes, terminal, or inspection costs applied to the bridge.",
+    ),
+    (
+        "RISK_BUFFER",
+        ("risk_buffer_per_unit", "risk_buffer", "slippage_buffer"),
+        "Risk buffer",
+        "Risk, slippage, or uncertainty buffer applied before surfacing the net opportunity.",
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -927,6 +988,510 @@ def _evidence_refs_for_adapter_keys(
     ]
 
 
+def _payload_object(payload: dict[str, object], keys: Iterable[str]) -> object | None:
+    for key in keys:
+        value = payload.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def _payload_mapping(payload: dict[str, object], keys: Iterable[str]) -> dict[str, object] | None:
+    value = _payload_object(payload, keys)
+    return value if isinstance(value, dict) else None
+
+
+def _payload_items(value: object) -> list[dict[str, object]]:
+    if isinstance(value, dict):
+        return [value]
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _normalize_text(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _payload_flag(payload: dict[str, object], keys: Iterable[str]) -> bool | None:
+    value = _payload_object(payload, keys)
+    return value if isinstance(value, bool) else None
+
+
+def _normalize_price_basis(value: object, *, default: PreTradeExecutablePriceBasis) -> PreTradeExecutablePriceBasis:
+    normalized = _normalize_text(value)
+    if normalized is None:
+        return default
+    candidate = normalized.upper().replace("-", "_").replace(" ", "_")
+    if candidate in {"ASK", "BID", "LAST", "TARGET", "ASSUMPTION"}:
+        return candidate  # type: ignore[return-value]
+    return default
+
+
+def _normalize_arbitrage_family(value: object) -> PreTradeArbitrageFamily | None:
+    normalized = _normalize_text(value)
+    if normalized is None:
+        return None
+    candidate = normalized.upper().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "PRODUCT": "PRODUCT_QUALITY",
+        "QUALITY": "PRODUCT_QUALITY",
+        "PRODUCT_OR_QUALITY": "PRODUCT_QUALITY",
+        "PRODUCT_QUALITY": "PRODUCT_QUALITY",
+        "CALENDAR": "TIME",
+        "TIME": "TIME",
+        "GEOGRAPHIC": "GEOGRAPHIC",
+        "LOCATION": "GEOGRAPHIC",
+        "TRANSPORT": "GEOGRAPHIC",
+        "COMBINED": "COMBINED",
+    }
+    family = aliases.get(candidate)
+    return family if family is not None else None  # type: ignore[return-value]
+
+
+def _normalize_edge_type(value: object) -> PreTradeTransformationEdgeType | None:
+    normalized = _normalize_text(value)
+    if normalized is None:
+        return None
+    candidate = normalized.upper().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "CONVERSION": "PRODUCT_CONVERSION",
+        "PRODUCT": "PRODUCT_CONVERSION",
+        "QUALITY": "PRODUCT_CONVERSION",
+        "PRODUCT_CONVERSION": "PRODUCT_CONVERSION",
+        "QUALITY_CONVERSION": "PRODUCT_CONVERSION",
+        "STORAGE": "STORAGE",
+        "CALENDAR": "STORAGE",
+        "TRANSPORT": "TRANSPORT",
+        "TRANSPORTATION": "TRANSPORT",
+        "FREIGHT": "TRANSPORT",
+        "FINANCING": "FINANCING",
+        "FINANCE": "FINANCING",
+        "FEES": "FEES",
+        "FEE": "FEES",
+        "TAX": "FEES",
+        "RISK_BUFFER": "RISK_BUFFER",
+        "BUFFER": "RISK_BUFFER",
+        "SLIPPAGE": "RISK_BUFFER",
+    }
+    edge_type = aliases.get(candidate)
+    return edge_type if edge_type is not None else None  # type: ignore[return-value]
+
+
+def _first_number(payload: dict[str, object], keys: Iterable[str]) -> float | None:
+    for key in keys:
+        value = _to_float(payload.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _price_from_candidate(
+    *,
+    candidate_payload: dict[str, object],
+    draft: PreTradeScenarioDraft,
+    side: str,
+) -> tuple[float | None, PreTradeExecutablePriceBasis | None]:
+    if side == "BUY":
+        ask_price = _first_number(candidate_payload, ("buy_ask_price", "ask_price", "executable_buy_price"))
+        if ask_price is not None:
+            return ask_price, "ASK"
+        explicit_price = _first_number(candidate_payload, ("buy_price",))
+        if explicit_price is not None:
+            return explicit_price, _normalize_price_basis(candidate_payload.get("buy_price_basis"), default="ASSUMPTION")
+        last_price = _first_number(candidate_payload, ("buy_last_price", "last_price"))
+        if last_price is not None:
+            return last_price, "LAST"
+        if draft.trade_side == "BUY" and draft.target_price is not None:
+            return draft.target_price, "TARGET"
+        return None, None
+
+    bid_price = _first_number(candidate_payload, ("sell_bid_price", "bid_price", "executable_sell_price"))
+    if bid_price is not None:
+        return bid_price, "BID"
+    explicit_price = _first_number(candidate_payload, ("sell_price",))
+    if explicit_price is not None:
+        return explicit_price, _normalize_price_basis(candidate_payload.get("sell_price_basis"), default="ASSUMPTION")
+    last_price = _first_number(candidate_payload, ("sell_last_price", "last_price"))
+    if last_price is not None:
+        return last_price, "LAST"
+    if draft.trade_side == "SELL" and draft.target_price is not None:
+        return draft.target_price, "TARGET"
+    return None, None
+
+
+def _state_value(
+    *,
+    state_payload: dict[str, object],
+    candidate_payload: dict[str, object],
+    field_name: str,
+    prefix: str,
+    fallback: object,
+) -> object | None:
+    return (
+        state_payload.get(field_name)
+        or candidate_payload.get(f"{prefix}_{field_name}")
+        or candidate_payload.get(f"{prefix}_{field_name.replace('_code', '')}")
+        or fallback
+    )
+
+
+def _state_from_candidate_payload(
+    *,
+    candidate_payload: dict[str, object],
+    draft: PreTradeScenarioDraft,
+    key: str,
+    prefix: str,
+) -> PreTradeRecommendationCommodityStateOut:
+    state_payload = _payload_mapping(candidate_payload, (key, f"{prefix}_state")) or {}
+    return PreTradeRecommendationCommodityStateOut(
+        commodity_class=_normalize_text(
+            _state_value(
+                state_payload=state_payload,
+                candidate_payload=candidate_payload,
+                field_name="commodity_class",
+                prefix=prefix,
+                fallback=draft.commodity_class,
+            )
+        ),
+        commodity=_normalize_text(
+            _state_value(
+                state_payload=state_payload,
+                candidate_payload=candidate_payload,
+                field_name="commodity",
+                prefix=prefix,
+                fallback=draft.commodity,
+            )
+        ),
+        quality_spec=_normalize_text(
+            _state_value(
+                state_payload=state_payload,
+                candidate_payload=candidate_payload,
+                field_name="quality_spec",
+                prefix=prefix,
+                fallback=None,
+            )
+        ),
+        location_code=_normalize_text(
+            _state_value(
+                state_payload=state_payload,
+                candidate_payload=candidate_payload,
+                field_name="location_code",
+                prefix=prefix,
+                fallback=draft.location_code,
+            )
+        ),
+        delivery_start=_state_value(
+            state_payload=state_payload,
+            candidate_payload=candidate_payload,
+            field_name="delivery_start",
+            prefix=prefix,
+            fallback=draft.delivery_start,
+        ),
+        delivery_end=_state_value(
+            state_payload=state_payload,
+            candidate_payload=candidate_payload,
+            field_name="delivery_end",
+            prefix=prefix,
+            fallback=draft.delivery_end,
+        ),
+        price_index_code=_normalize_text(
+            _state_value(
+                state_payload=state_payload,
+                candidate_payload=candidate_payload,
+                field_name="price_index_code",
+                prefix=prefix,
+                fallback=draft.price_index_code,
+            )
+        ),
+        unit_of_measure=_normalize_text(
+            _state_value(
+                state_payload=state_payload,
+                candidate_payload=candidate_payload,
+                field_name="unit_of_measure",
+                prefix=prefix,
+                fallback=draft.unit_of_measure,
+            )
+        ),
+        currency_code=_normalize_text(
+            _state_value(
+                state_payload=state_payload,
+                candidate_payload=candidate_payload,
+                field_name="currency_code",
+                prefix=prefix,
+                fallback=draft.trade_currency_code,
+            )
+        ),
+    )
+
+
+def _edge_from_payload(
+    *,
+    raw_edge: dict[str, object],
+    source_refs: list[PreTradeRecommendationEvidenceRefOut],
+) -> PreTradeRecommendationTransformationEdgeOut | None:
+    edge_type = _normalize_edge_type(raw_edge.get("edge_type") or raw_edge.get("type"))
+    cost = _first_number(raw_edge, ("bridge_cost_per_unit", "cost_per_unit", "cost", "variable_cost"))
+    if edge_type is None or cost is None or cost < 0:
+        return None
+    label = _normalize_text(raw_edge.get("label")) or edge_type.replace("_", " ").title()
+    detail = _normalize_text(raw_edge.get("detail")) or f"{label} cost contributes {cost:g} per unit."
+    supported = _payload_flag(raw_edge, ("supported", "is_supported")) is not False
+    return PreTradeRecommendationTransformationEdgeOut(
+        edge_type=edge_type,
+        label=label,
+        bridge_cost_per_unit=cost,
+        supported=supported,
+        detail=detail,
+        source_refs=source_refs,
+    )
+
+
+def _arbitrage_edges_from_candidate(
+    *,
+    candidate_payload: dict[str, object],
+    source_refs: list[PreTradeRecommendationEvidenceRefOut],
+) -> list[PreTradeRecommendationTransformationEdgeOut]:
+    edges: list[PreTradeRecommendationTransformationEdgeOut] = []
+    seen_edge_types: set[PreTradeTransformationEdgeType] = set()
+    for raw_edge in _payload_items(candidate_payload.get("edges") or candidate_payload.get("path_edges")):
+        edge = _edge_from_payload(raw_edge=raw_edge, source_refs=source_refs)
+        if edge is None:
+            continue
+        edges.append(edge)
+        seen_edge_types.add(edge.edge_type)
+
+    for edge_type, keys, label, detail in ARBITRAGE_COST_FIELD_SPECS:
+        if edge_type in seen_edge_types:
+            continue
+        cost = _first_number(candidate_payload, keys)
+        if cost is None or cost < 0:
+            continue
+        edges.append(
+            PreTradeRecommendationTransformationEdgeOut(
+                edge_type=edge_type,
+                label=label,
+                bridge_cost_per_unit=cost,
+                supported=True,
+                detail=detail,
+                source_refs=source_refs,
+            )
+        )
+    return edges
+
+
+def _infer_arbitrage_family(
+    *,
+    candidate_payload: dict[str, object],
+    edges: list[PreTradeRecommendationTransformationEdgeOut],
+) -> PreTradeArbitrageFamily:
+    explicit_family = _normalize_arbitrage_family(
+        candidate_payload.get("family")
+        or candidate_payload.get("arbitrage_family")
+        or candidate_payload.get("candidate_family")
+    )
+    if explicit_family is not None:
+        return explicit_family
+
+    edge_families = {
+        EDGE_FAMILY_BY_TYPE[edge.edge_type]
+        for edge in edges
+        if edge.edge_type in EDGE_FAMILY_BY_TYPE
+    }
+    if len(edge_families) > 1:
+        return "COMBINED"
+    if len(edge_families) == 1:
+        return next(iter(edge_families))
+    return "COMBINED"
+
+
+def _arbitrage_candidate_payloads(
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
+) -> list[tuple[dict[str, object], PreTradeRecommendationSourceSnapshot]]:
+    candidates: list[tuple[dict[str, object], PreTradeRecommendationSourceSnapshot]] = []
+    candidate_keys = ("arbitrage_candidates", "arbitrage_candidate", "arbitrage")
+    for snapshot in snapshots:
+        for key in candidate_keys:
+            raw_value = snapshot.payload.get(key)
+            for item in _payload_items(raw_value):
+                candidates.append((item, snapshot))
+    return candidates
+
+
+def _status_for_arbitrage_candidate(
+    *,
+    family: PreTradeArbitrageFamily,
+    buy_price: float | None,
+    buy_price_basis: PreTradeExecutablePriceBasis | None,
+    sell_price: float | None,
+    sell_price_basis: PreTradeExecutablePriceBasis | None,
+    edges: list[PreTradeRecommendationTransformationEdgeOut],
+    candidate_payload: dict[str, object],
+) -> tuple[PreTradeArbitrageCandidateStatus, list[str], list[str]]:
+    missing_evidence: list[str] = []
+    stop_reasons: list[str] = []
+
+    if buy_price is None:
+        missing_evidence.append("Executable buy ask price is missing.")
+    elif buy_price_basis != "ASK":
+        missing_evidence.append("Buy economics did not use an executable ask price.")
+
+    if sell_price is None:
+        missing_evidence.append("Executable sell bid price is missing.")
+    elif sell_price_basis != "BID":
+        missing_evidence.append("Sell economics did not use an executable bid price.")
+
+    supported_edges = {edge.edge_type for edge in edges if edge.supported}
+    unsupported_edges = [edge for edge in edges if not edge.supported]
+    for edge in unsupported_edges:
+        stop_reasons.append(f"{edge.label} is marked unsupported.")
+
+    required_edge_types = REQUIRED_EDGE_TYPES_BY_FAMILY[family]
+    for edge_type in sorted(required_edge_types):
+        if edge_type not in supported_edges:
+            label = edge_type.replace("_", " ").title()
+            missing_evidence.append(f"{label} evidence is required for {family.replace('_', ' ').lower()} arbitrage.")
+
+    if family == "COMBINED":
+        bridge_families = {
+            EDGE_FAMILY_BY_TYPE[edge.edge_type]
+            for edge in edges
+            if edge.supported and edge.edge_type in EDGE_FAMILY_BY_TYPE
+        }
+        if len(bridge_families) < 2:
+            missing_evidence.append("Combined arbitrage requires at least two supported product, time, or geographic bridge edges.")
+
+    supported_flag = _payload_flag(candidate_payload, ("supported", "is_supported"))
+    unsupported_reason = _normalize_text(candidate_payload.get("unsupported_reason") or candidate_payload.get("stop_reason"))
+    if supported_flag is False:
+        stop_reasons.append(unsupported_reason or "The transformation mapping is marked unsupported.")
+
+    if stop_reasons:
+        return "UNSUPPORTED", missing_evidence, stop_reasons
+    if missing_evidence:
+        return "INCOMPLETE", missing_evidence, stop_reasons
+    return "SUPPORTED", missing_evidence, stop_reasons
+
+
+def _build_single_arbitrage_candidate(
+    *,
+    draft: PreTradeScenarioDraft,
+    candidate_payload: dict[str, object],
+    source_snapshot: PreTradeRecommendationSourceSnapshot,
+) -> PreTradeRecommendationArbitrageCandidateOut:
+    source_refs = [_evidence_ref(source_snapshot)]
+    buy_state = _state_from_candidate_payload(
+        candidate_payload=candidate_payload,
+        draft=draft,
+        key="buy_state",
+        prefix="buy",
+    )
+    sell_state = _state_from_candidate_payload(
+        candidate_payload=candidate_payload,
+        draft=draft,
+        key="sell_state",
+        prefix="sell",
+    )
+    edges = _arbitrage_edges_from_candidate(
+        candidate_payload=candidate_payload,
+        source_refs=source_refs,
+    )
+    family = _infer_arbitrage_family(candidate_payload=candidate_payload, edges=edges)
+    buy_price, buy_price_basis = _price_from_candidate(
+        candidate_payload=candidate_payload,
+        draft=draft,
+        side="BUY",
+    )
+    sell_price, sell_price_basis = _price_from_candidate(
+        candidate_payload=candidate_payload,
+        draft=draft,
+        side="SELL",
+    )
+    bridge_cost = sum(edge.bridge_cost_per_unit for edge in edges if edge.supported)
+    gross_spread = sell_price - buy_price if buy_price is not None and sell_price is not None else None
+    net_opportunity = gross_spread - bridge_cost if gross_spread is not None else None
+    net_opportunity_pct = (
+        _safe_divide(net_opportunity, abs(buy_price))
+        if net_opportunity is not None and buy_price is not None and buy_price != 0
+        else None
+    )
+    estimated_value = (
+        net_opportunity * draft.target_volume
+        if net_opportunity is not None and draft.target_volume is not None
+        else None
+    )
+    status, missing_evidence, stop_reasons = _status_for_arbitrage_candidate(
+        family=family,
+        buy_price=buy_price,
+        buy_price_basis=buy_price_basis,
+        sell_price=sell_price,
+        sell_price_basis=sell_price_basis,
+        edges=edges,
+        candidate_payload=candidate_payload,
+    )
+    if status == "SUPPORTED" and net_opportunity is not None and net_opportunity <= ARBITRAGE_POSITIVE_THRESHOLD:
+        stop_reasons.append("Net opportunity is not positive after bridge costs.")
+
+    return PreTradeRecommendationArbitrageCandidateOut(
+        family=family,
+        status=status,
+        buy_state=buy_state,
+        sell_state=sell_state,
+        buy_price=buy_price,
+        buy_price_basis=buy_price_basis,
+        sell_price=sell_price,
+        sell_price_basis=sell_price_basis,
+        gross_spread=gross_spread,
+        bridge_cost=bridge_cost,
+        net_opportunity=net_opportunity,
+        net_opportunity_pct=net_opportunity_pct,
+        estimated_value=estimated_value,
+        edges=edges,
+        missing_evidence=missing_evidence,
+        stop_reasons=stop_reasons,
+        source_refs=source_refs,
+    )
+
+
+def _build_arbitrage_candidate(
+    *,
+    draft: PreTradeScenarioDraft,
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
+) -> PreTradeRecommendationArbitrageCandidateOut | None:
+    candidates = [
+        _build_single_arbitrage_candidate(
+            draft=draft,
+            candidate_payload=candidate_payload,
+            source_snapshot=source_snapshot,
+        )
+        for candidate_payload, source_snapshot in _arbitrage_candidate_payloads(snapshots)
+    ]
+    if not candidates:
+        return None
+
+    def sort_key(candidate: PreTradeRecommendationArbitrageCandidateOut) -> tuple[int, float]:
+        is_positive_supported = (
+            candidate.status == "SUPPORTED"
+            and candidate.net_opportunity is not None
+            and candidate.net_opportunity > ARBITRAGE_POSITIVE_THRESHOLD
+        )
+        status_rank = 3 if is_positive_supported else 2 if candidate.status == "SUPPORTED" else 1 if candidate.status == "INCOMPLETE" else 0
+        return (status_rank, candidate.net_opportunity if candidate.net_opportunity is not None else float("-inf"))
+
+    return max(candidates, key=sort_key)
+
+
+def _format_unit_amount(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:,.4f}".rstrip("0").rstrip(".")
+
+
 def _direction(value: float | None) -> PreTradeExposureDirection:
     if value is None:
         return "UNKNOWN"
@@ -984,6 +1549,40 @@ def _build_missing_evidence(
                 severity="BLOCKING" if required and snapshot.quality_status == "MISSING" else "WARNING",
                 detail=detail,
                 source_refs=[_evidence_ref(snapshot)],
+            )
+        )
+    return missing
+
+
+def _build_arbitrage_missing_evidence(
+    arbitrage_candidate: PreTradeRecommendationArbitrageCandidateOut | None,
+) -> list[PreTradeRecommendationMissingEvidenceOut]:
+    if arbitrage_candidate is None:
+        return []
+
+    missing: list[PreTradeRecommendationMissingEvidenceOut] = []
+    for index, detail in enumerate(arbitrage_candidate.missing_evidence, start=1):
+        missing.append(
+            PreTradeRecommendationMissingEvidenceOut(
+                evidence_key=f"arbitrage-missing-{index}",
+                label="Arbitrage evidence",
+                severity="WARNING",
+                detail=detail,
+                source_refs=arbitrage_candidate.source_refs,
+            )
+        )
+    if arbitrage_candidate.status == "UNSUPPORTED":
+        missing.append(
+            PreTradeRecommendationMissingEvidenceOut(
+                evidence_key="arbitrage-unsupported-mapping",
+                label="Arbitrage mapping",
+                severity="WARNING",
+                detail=(
+                    arbitrage_candidate.stop_reasons[0]
+                    if arbitrage_candidate.stop_reasons
+                    else "The arbitrage transformation path is unsupported."
+                ),
+                source_refs=arbitrage_candidate.source_refs,
             )
         )
     return missing
@@ -1068,6 +1667,7 @@ def _build_opportunity_summary(
     *,
     stance: PreTradeRecommendationStance,
     mark_gap_pct: float | None,
+    arbitrage_candidate: PreTradeRecommendationArbitrageCandidateOut | None,
     residual_exposure: PreTradeRecommendationResidualExposureOut,
     checks: list[PreTradeRecommendationCheckOut],
     snapshots: list[PreTradeRecommendationSourceSnapshot],
@@ -1077,14 +1677,36 @@ def _build_opportunity_summary(
         category: PreTradeOpportunityCategory = "WAIT_FOR_DATA"
         title = "Wait for required evidence"
         detail = "Required context or source evidence is missing, so this should not be promoted as an opportunity yet."
+    elif (
+        arbitrage_candidate is not None
+        and arbitrage_candidate.status == "SUPPORTED"
+        and arbitrage_candidate.net_opportunity is not None
+        and arbitrage_candidate.net_opportunity > ARBITRAGE_POSITIVE_THRESHOLD
+    ):
+        category = "ARBITRAGE"
+        title = f"{arbitrage_candidate.family.replace('_', ' ').title()} arbitrage review"
+        detail = (
+            f"Gross spread is {_format_unit_amount(arbitrage_candidate.gross_spread)} per unit, "
+            f"bridge cost is {_format_unit_amount(arbitrage_candidate.bridge_cost)}, "
+            f"and net opportunity is {_format_unit_amount(arbitrage_candidate.net_opportunity)}."
+        )
+        if "arbitrage" not in attention_keys:
+            attention_keys.append("arbitrage")
     elif mark_gap_pct is not None and mark_gap_pct >= 7:
         category = "MARK_GAP"
         title = "Pricing gap review"
         detail = f"Target economics are {_format_percent(mark_gap_pct)} away from the captured mark."
     elif residual_exposure.exposure_effect == "OFFSETS":
-        category = "EXPOSURE_OFFSET"
-        title = "Exposure offset review"
-        detail = "The draft appears to reduce current net exposure and may be useful for risk reduction."
+        before_abs = abs(residual_exposure.current_net_position or 0)
+        after_abs = abs(residual_exposure.residual_after_trade or 0)
+        if before_abs > 0 and after_abs <= before_abs / 2:
+            category = "RISK_REDUCTION"
+            title = "Risk reduction review"
+            detail = "The draft appears to materially reduce current net exposure."
+        else:
+            category = "EXPOSURE_OFFSET"
+            title = "Exposure offset review"
+            detail = "The draft appears to reduce current net exposure and may be useful for risk reduction."
     elif residual_exposure.exposure_effect == "DEEPENS":
         category = "RISK_INCREASE"
         title = "Risk-increasing review"
@@ -1099,9 +1721,13 @@ def _build_opportunity_summary(
         title=title,
         detail=detail,
         driver_keys=attention_keys,
-        source_refs=_evidence_refs_for_adapter_keys(
-            snapshots,
-            ("desk-context", "latest-mark", "market-context", "weather-intelligence"),
+        source_refs=(
+            arbitrage_candidate.source_refs
+            if category == "ARBITRAGE" and arbitrage_candidate is not None
+            else _evidence_refs_for_adapter_keys(
+                snapshots,
+                ("desk-context", "latest-mark", "market-context", "weather-intelligence"),
+            )
         ),
     )
 
@@ -1340,6 +1966,10 @@ def build_pretrade_recommendation_result(
         if latest_mark is not None and draft.target_price is not None and latest_mark != 0
         else None
     )
+    arbitrage_candidate = _build_arbitrage_candidate(
+        draft=draft,
+        snapshots=input_snapshots,
+    )
     has_credit_profile = _payload_bool(input_snapshots, ("has_credit_profile",))
     breach_action = _payload_text(input_snapshots, ("breach_action", "credit_breach_action"))
     if has_credit_profile is None:
@@ -1501,6 +2131,61 @@ def build_pretrade_recommendation_result(
             )
         )
 
+    if arbitrage_candidate is not None:
+        if (
+            arbitrage_candidate.status == "SUPPORTED"
+            and arbitrage_candidate.net_opportunity is not None
+            and arbitrage_candidate.net_opportunity > ARBITRAGE_POSITIVE_THRESHOLD
+        ):
+            checks.append(
+                _build_check(
+                    key="arbitrage",
+                    label="Arbitrage economics",
+                    status="good",
+                    detail=(
+                        f"{arbitrage_candidate.family.replace('_', ' ').title()} arbitrage candidate "
+                        f"shows gross spread {_format_unit_amount(arbitrage_candidate.gross_spread)}, "
+                        f"bridge cost {_format_unit_amount(arbitrage_candidate.bridge_cost)}, and "
+                        f"net opportunity {_format_unit_amount(arbitrage_candidate.net_opportunity)} per unit."
+                    ),
+                )
+            )
+        elif arbitrage_candidate.status == "SUPPORTED":
+            checks.append(
+                _build_check(
+                    key="arbitrage",
+                    label="Arbitrage economics",
+                    status="good",
+                    detail="Captured arbitrage economics do not show a positive net opportunity after bridge costs.",
+                )
+            )
+        elif arbitrage_candidate.status == "INCOMPLETE":
+            stance = _max_stance(stance, "PROCEED_WITH_CARE")
+            checks.append(
+                _build_check(
+                    key="arbitrage",
+                    label="Arbitrage economics",
+                    status="watch",
+                    detail=(
+                        "Arbitrage evidence is incomplete: "
+                        + "; ".join(arbitrage_candidate.missing_evidence[:2])
+                    ),
+                )
+            )
+        else:
+            stance = _max_stance(stance, "PROCEED_WITH_CARE")
+            checks.append(
+                _build_check(
+                    key="arbitrage",
+                    label="Arbitrage economics",
+                    status="watch",
+                    detail=(
+                        "Arbitrage mapping is unsupported: "
+                        + "; ".join(arbitrage_candidate.stop_reasons[:2])
+                    ),
+                )
+            )
+
     if current_net_position is not None and draft.target_volume is not None:
         same_direction = (
             (current_net_position >= 0 and draft.trade_side == "BUY")
@@ -1555,6 +2240,7 @@ def build_pretrade_recommendation_result(
     opportunity_summary = _build_opportunity_summary(
         stance=stance,
         mark_gap_pct=mark_gap_pct,
+        arbitrage_candidate=arbitrage_candidate,
         residual_exposure=residual_exposure,
         checks=checks,
         snapshots=input_snapshots,
@@ -1596,6 +2282,7 @@ def build_pretrade_recommendation_result(
         next_actions=next_actions
         or ["No blocking gaps were detected. Hand the scenario into trade capture when the desk is ready."],
         opportunity_summary=opportunity_summary,
+        arbitrage_candidate=arbitrage_candidate,
         residual_exposure=residual_exposure,
         netting_candidates=_build_netting_candidates(
             draft=draft,
@@ -1609,7 +2296,8 @@ def build_pretrade_recommendation_result(
         missing_evidence=_build_missing_evidence(
             snapshots=input_snapshots,
             required_adapter_keys=required_adapter_keys,
-        ),
+        )
+        + _build_arbitrage_missing_evidence(arbitrage_candidate),
     )
 
 

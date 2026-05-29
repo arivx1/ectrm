@@ -83,6 +83,45 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-29 - Pre-Trade Triage Emits Typed Arbitrage Economics
+
+- Type: algorithm-added
+- Domain: pre-trade opportunity triage, arbitrage economics, residual exposure,
+  and trader/risk recommendation evidence
+- Applies to:
+  `apps/api/app/domains/reports/services/pretrade_recommendations.py`,
+  `apps/api/app/schemas/pretrade.py`,
+  `apps/api/tests/test_pretrade_recommendation_triage.py`,
+  `apps/web/src/shared/models.ts`,
+  `apps/web/src/workspaces/pretrade/PreTradeWorkspace.tsx`, and
+  `apps/web/src/workspaces/pretrade/preTradeStructuringDraft.ts`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-03
+  and [Arbitrage Detection Design](./arbitrage-detection-design.md).
+- Lesson: pre-trade recommendations now carry an optional typed
+  `arbitrage_candidate` with buy and sell commodity states, executable price
+  basis, transformation edges, gross spread, bridge cost, net opportunity,
+  missing evidence, and stop reasons. The deterministic triage path uses ask
+  prices for buys, bid prices for sells, explicit conversion/storage/transport
+  bridge costs, and the existing residual-exposure logic to distinguish
+  offsetting from deepening drafts.
+- Deterministic opportunity: future product, time, geographic, and combined
+  arbitrage work should extend the typed edge/state contract or promote it into
+  a dedicated arbitrage service. Do not replace conversion, storage,
+  transportation, or quote-basis math with prompt-only ranking.
+- Agent autonomy impact: agents may explain the arbitrage payload, draft a
+  review note, and surface missing evidence. They may not create an executable
+  watchlist record, book trades, execute hedges, approve credit, or externally
+  commit from the recommendation.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_pretrade_recommendation_triage apps.api.tests.test_pretrade_api apps.api.tests.test_assistant_tooling`,
+  `npm --prefix apps/web run test -- preTradeApi.test.ts preTradeStructuringDraft.test.ts preTradeWorkspaceSupport.test.ts`,
+  `npm --prefix apps/web run build`, and `make api-assistant-evals`.
+- Follow-up: TRMVP-04 should persist the triage rationale into saved
+  scenarios, review items, and Trade Capture handoff context without increasing
+  agent authority.
+
 ### 2026-05-29 - Nomination Documents Update Delivery Schedule Details
 
 - Type: algorithm-added
@@ -114,6 +153,45 @@ proposal form until a human owner approves the domain rule.
   `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_document_action_planning_service apps.api.tests.test_document_action_approval_requests_service apps.api.tests.test_document_workflows_service apps.api.tests.test_document_action_execution_service apps.api.tests.test_document_action_governance_service`
 - Follow-up: add a first-class schedule or nomination record before promoting
   document flow dates and quantities beyond evidence capture.
+
+### 2026-05-29 - Pre-Trade Recommendations Carry Typed Evidence And Freshness
+
+- Type: algorithm-added
+- Domain: pre-trade recommendations, trader/risk decision support, source
+  freshness, and assistant-readable draft evidence
+- Applies to:
+  `apps/api/app/domains/reports/services/pretrade_recommendations.py`,
+  `apps/api/app/schemas/pretrade.py`,
+  `apps/api/app/routes/pretrade.py`,
+  `apps/web/src/workspaces/pretrade/PreTradeWorkspace.tsx`,
+  `apps/web/src/workspaces/pretrade/preTradeStructuringDraft.ts`, and
+  `apps/web/src/shared/models.ts`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-01
+  and TRMVP-02, plus the implemented Pre-Trade recommendation contract.
+- Lesson: pre-trade recommendations now use a typed read/draft contract rather
+  than freeform recommendation prose. Recommendation results can carry
+  opportunity summary, residual exposure, netting candidates, hedge draft,
+  rejected alternatives, and missing evidence. Source adapters normalize desk
+  context, counterparty credit, latest marks, market context, weather
+  intelligence, and option exposure into `OK`, `STALE`, `DEGRADED`, or
+  `MISSING` quality states with source provenance and freshness windows.
+- Deterministic opportunity: future opportunity triage, arbitrage, hedge, and
+  book-flattening work should extend this contract with deterministic rule
+  outputs over governed source snapshots. Do not reintroduce prompt-only
+  recommendation fields or use the recommendation result as trade-booking or
+  hedge-execution authority.
+- Agent autonomy impact: agents may read the recommendation payload, explain
+  source quality, draft review-ready handoffs, and surface missing evidence.
+  They still may not book trades, execute hedges, approve reviews, change
+  limits, or externally commit the firm.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api apps.api.tests.test_assistant_tooling`
+  and
+  `npm --prefix apps/web run test -- preTradeApi.test.ts preTradeStructuringDraft.test.ts preTradeWorkspaceSupport.test.ts`.
+- Follow-up: TRMVP-04 should preserve the recommendation rationale on saved
+  scenarios and review handoffs now that deterministic triage exists.
 
 ### 2026-05-29 - Delivery Proof Documents Can Record Actualization
 

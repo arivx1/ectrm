@@ -105,6 +105,7 @@ function buildReviewSummary(context: PreTradeStructuringDraftContext): string {
 function buildAssumptions(context: PreTradeStructuringDraftContext): string[] {
   const recommendation = context.analysis?.recommendation ?? null
   const latestMark = context.latestMark
+  const arbitrageCandidate = recommendation?.arbitrage_candidate ?? null
   return compactLines([
     typeof context.relatedPositionNetVolume === 'number'
       ? `Current net position in this commodity lane is ${formatNumber(context.relatedPositionNetVolume)} before the proposed draft.`
@@ -126,6 +127,9 @@ function buildAssumptions(context: PreTradeStructuringDraftContext): string[] {
     context.weatherHeadline ? `Weather signal: ${context.weatherHeadline}` : null,
     recommendation?.hedge_recommendation
       ? `If the desk continues, the hedge draft is ${recommendation.hedge_recommendation.instrument_type.replaceAll('_', ' ')}.`
+      : null,
+    arbitrageCandidate
+      ? `Arbitrage ${arbitrageCandidate.family.replaceAll('_', ' ').toLowerCase()} candidate is ${arbitrageCandidate.status.toLowerCase()} with gross spread ${formatNumber(arbitrageCandidate.gross_spread, 2) ?? 'n/a'}, bridge cost ${formatNumber(arbitrageCandidate.bridge_cost, 2) ?? 'n/a'}, and net ${formatNumber(arbitrageCandidate.net_opportunity, 2) ?? 'n/a'}.`
       : null,
   ]).slice(0, 6)
 }
@@ -164,6 +168,8 @@ function buildReviewFocus(context: PreTradeStructuringDraftContext): string[] {
   const focus = compactLines([
     ...recommendation.explanation.reviewer_focus,
     ...recommendation.next_actions,
+    ...(recommendation.arbitrage_candidate?.missing_evidence ?? []),
+    ...(recommendation.arbitrage_candidate?.stop_reasons ?? []),
     ...recommendation.missing_evidence.slice(0, 3).map((item) => `${item.severity}: ${item.detail}`),
   ])
   return focus.length > 0 ? focus.slice(0, 6) : ['Review the scenario details and supporting evidence before any capture handoff.']

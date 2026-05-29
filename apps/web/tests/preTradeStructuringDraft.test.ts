@@ -146,7 +146,10 @@ const analysis = {
       title: 'Prompt gas offset',
       category: 'RISK_REDUCTION' as const,
       detail: 'The draft reduces prompt imbalance without flipping the desk short.',
+      driver_keys: [],
+      source_refs: [],
     },
+    arbitrage_candidate: null,
     residual_exposure: {
       current_position: 18000,
       current_direction: 'LONG' as const,
