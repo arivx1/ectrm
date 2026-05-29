@@ -14,7 +14,7 @@ from apps.api.app.schemas.document import DocumentTableTemplateSchemaOut
 
 from .document_facets import DOCUMENT_FACET_SCHEMAS
 
-DOCUMENT_SCHEMA_REGISTRY_VERSION = "2026-05-24.review-v11"
+DOCUMENT_SCHEMA_REGISTRY_VERSION = "2026-05-24.review-v12"
 
 
 def _field(
@@ -1499,6 +1499,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         linkage_summary="Links primarily to delivery and trade records using bill of lading number, carrier, route, and load date.",
         record_targets=[
             _target(
+                "TRADE_ACTUALIZATION",
+                "Trade Actualization",
+                "Record actual delivery quantity once the delivery owner and measured quantity are resolved.",
+                create_if_missing=True,
+            ),
+            _target(
                 "DELIVERY_EVENT",
                 "Delivery Event",
                 "Record a movement-start event once the delivery owner is resolved.",
@@ -1517,7 +1523,15 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
                 role="SECONDARY",
             ),
         ],
-        matching_keys=["bill_of_lading_number", "trade_id", "delivery_id", "carrier"],
+        matching_keys=[
+            "bill_of_lading_number",
+            "trade_id",
+            "delivery_id",
+            "carrier",
+            "load_date",
+            "net_quantity",
+            "gross_quantity",
+        ],
         header_fields=[
             _field("bill_of_lading_number", "Bill of Lading Number", value_type="identifier", required=True),
             _field("trade_id", "Trade ID", value_type="identifier"),
@@ -1526,6 +1540,9 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
             _field("load_date", "Load Date", value_type="date", required=True),
             _field("origin", "Origin", required=True),
             _field("destination", "Destination", required=True),
+            _field("net_quantity", "Net Quantity", value_type="quantity"),
+            _field("gross_quantity", "Gross Quantity", value_type="quantity"),
+            _field("unit_of_measure", "Unit"),
         ],
         table_templates=[
             DocumentTableTemplateSchemaOut(
@@ -1617,6 +1634,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         linkage_summary="Links primarily to delivery and trade records using delivery confirmation numbers, delivery IDs, carrier references, and route details.",
         record_targets=[
             _target(
+                "TRADE_ACTUALIZATION",
+                "Trade Actualization",
+                "Record actual delivered quantity once the delivery owner is resolved.",
+                create_if_missing=True,
+            ),
+            _target(
                 "DELIVERY_EVENT",
                 "Delivery Event",
                 "Record a completed delivery event once the delivery owner is resolved.",
@@ -1635,7 +1658,16 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
                 role="SECONDARY",
             ),
         ],
-        matching_keys=["delivery_confirmation_number", "trade_id", "delivery_id", "carrier_reference"],
+        matching_keys=[
+            "delivery_confirmation_number",
+            "trade_id",
+            "delivery_id",
+            "carrier_reference",
+            "confirmation_date",
+            "delivery_date",
+            "actual_quantity",
+            "delivered_quantity",
+        ],
         header_fields=[
             _field("delivery_confirmation_number", "Delivery Confirmation Number", value_type="identifier", required=True),
             _field("confirmation_date", "Confirmation Date", value_type="date"),
@@ -1644,6 +1676,10 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
             _field("carrier_reference", "Carrier Reference", value_type="identifier"),
             _field("origin", "Origin"),
             _field("destination", "Destination"),
+            _field("delivery_date", "Delivery Date", value_type="date"),
+            _field("actual_quantity", "Actual Quantity", value_type="quantity"),
+            _field("delivered_quantity", "Delivered Quantity", value_type="quantity"),
+            _field("unit_of_measure", "Unit"),
         ],
         table_templates=[],
     ),
@@ -2115,6 +2151,12 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
         linkage_summary="Links primarily to delivery, inventory, and trade records using ticket numbers, trade IDs, delivery IDs, and measured weights.",
         record_targets=[
             _target(
+                "TRADE_ACTUALIZATION",
+                "Trade Actualization",
+                "Record actual measured quantity once the delivery owner is resolved.",
+                create_if_missing=True,
+            ),
+            _target(
                 "DELIVERY_EVENT",
                 "Delivery Event",
                 "Record a delivery checkpoint event once the delivery owner is resolved.",
@@ -2133,7 +2175,7 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
                 role="SECONDARY",
             ),
         ],
-        matching_keys=["ticket_number", "trade_id", "delivery_id", "load_date"],
+        matching_keys=["ticket_number", "trade_id", "delivery_id", "load_date", "gross_weight", "net_weight"],
         header_fields=[
             _field("ticket_number", "Ticket Number", value_type="identifier", required=True),
             _field("trade_id", "Trade ID", value_type="identifier"),
@@ -2141,6 +2183,7 @@ DOCUMENT_KIND_SCHEMAS: tuple[DocumentKindSchemaOut, ...] = (
             _field("load_date", "Load Date", value_type="date"),
             _field("gross_weight", "Gross Weight", value_type="quantity", required=True),
             _field("net_weight", "Net Weight", value_type="quantity", required=True),
+            _field("unit_of_measure", "Unit"),
         ],
         table_templates=[
             DocumentTableTemplateSchemaOut(

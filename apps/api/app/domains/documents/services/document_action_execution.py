@@ -5,6 +5,8 @@ from datetime import datetime, time, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.operations.services.actualizations import build_delivery_obligation_id
+from apps.api.app.domains.operations.services.actualizations import upsert_trade_actualization
 from apps.api.app.domains.operations.services.settlement_invoices import issue_trade_invoice
 from apps.api.app.domains.operations.services.settlement_payments import create_trade_payment
 from apps.api.app.domains.operations.services.shipments import append_delivery_event
@@ -14,6 +16,7 @@ from apps.api.app.domains.operations.services.trade_confirmations import update_
 from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.document_ingestion import DocumentIngestion
+from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.schemas.document import DocumentActionPlanOut
 from apps.api.app.schemas.document import DocumentLinkageAssessmentOut
@@ -37,6 +40,7 @@ SUPPORTED_DOCUMENT_ACTION_OPERATIONS: frozenset[str] = frozenset(
         "create_trade_payment",
         "create_delivery_from_document",
         "record_delivery_event_from_document",
+        "record_trade_actualization_from_document",
     }
 )
 
@@ -324,6 +328,67 @@ def _apply_document_action(
             )
         return True
 
+    if action_plan.operation_type == "record_trade_actualization_from_document":
+        delivery_id = _require_payload_value(action_plan.payload, "delivery_id")
+        trade_id, leg_no, delivery = _resolve_actualization_delivery_target(
+            db,
+            payload=action_plan.payload,
+            delivery_id=delivery_id,
+        )
+        canonical_delivery_id = build_delivery_obligation_id(trade_id, leg_no)
+        if delivery.delivery_id != canonical_delivery_id:
+            raise ValueError(
+                f"Delivery '{delivery.delivery_id}' is not the canonical actualization target '{canonical_delivery_id}'."
+            )
+        existing_actualization = _find_active_trade_actualization(
+            db,
+            delivery_id=canonical_delivery_id,
+        )
+        if existing_actualization is not None:
+            raise ValueError(
+                f"Delivery '{canonical_delivery_id}' already has active actualization record "
+                f"'{existing_actualization.id}'."
+            )
+        actualized_at = _parse_datetime_candidate(action_plan.payload.get("actualized_at"))
+        if actualized_at is None:
+            raise ValueError("Document action payload is missing 'actualized_at'.")
+        actualization = upsert_trade_actualization(
+            db,
+            trade_id=trade_id,
+            leg_no=leg_no,
+            actual_quantity=_require_payload_value(action_plan.payload, "actual_quantity"),
+            actualized_at=actualized_at,
+            source=_optional_payload_value(action_plan.payload, "source") or "DOCUMENT_LIBRARY",
+            notes=_actualization_execution_note(document, action_plan.payload),
+            actor_id=actor_id,
+            now=now,
+        )
+        create_document_record_link(
+            db,
+            document_id=document.document_id,
+            record_type="TRADE_ACTUALIZATION",
+            record_id=str(actualization.actualization_id),
+            actor_id=actor_id,
+            role="PRIMARY",
+        )
+        create_document_record_link(
+            db,
+            document_id=document.document_id,
+            record_type="DELIVERY",
+            record_id=delivery.delivery_id,
+            actor_id=actor_id,
+            role="SECONDARY",
+        )
+        create_document_record_link(
+            db,
+            document_id=document.document_id,
+            record_type="TRADE",
+            record_id=trade_id,
+            actor_id=actor_id,
+            role="SECONDARY",
+        )
+        return True
+
     raise ValueError(f"Document action operation '{action_plan.operation_type}' is not supported.")
 
 
@@ -401,6 +466,28 @@ def _resolve_leg_no_from_action_payload(
     return delivery.leg_no
 
 
+def _resolve_actualization_delivery_target(
+    db: Session,
+    *,
+    payload: dict[str, object],
+    delivery_id: str,
+) -> tuple[str, int | None, DeliveryObligation]:
+    delivery = db.execute(
+        select(DeliveryObligation).where(DeliveryObligation.delivery_id == delivery_id)
+    ).scalars().first()
+    if delivery is None:
+        raise LookupError(f"Delivery '{delivery_id}' was not found.")
+
+    payload_trade_id = _optional_payload_value(payload, "trade_id")
+    if payload_trade_id is not None and payload_trade_id != delivery.trade_id:
+        raise ValueError(
+            f"Document action trade '{payload_trade_id}' does not match delivery trade '{delivery.trade_id}'."
+        )
+
+    payload_leg_no = _optional_int_payload_value(payload, "leg_no")
+    return delivery.trade_id, payload_leg_no if payload_leg_no is not None else delivery.leg_no, delivery
+
+
 def _parse_datetime_candidate(value: object | None) -> datetime | None:
     text = str(value or "").strip()
     if not text:
@@ -424,6 +511,17 @@ def _execution_note(document: DocumentIngestion) -> str:
     return f"Created from verified document {document.display_name} ({document.document_id})."
 
 
+def _actualization_execution_note(document: DocumentIngestion, payload: dict[str, object]) -> str:
+    details = [_execution_note(document)]
+    reference_code = _optional_payload_value(payload, "reference_code")
+    if reference_code is not None:
+        details.append(f"Source reference {reference_code}.")
+    quantity_basis = _optional_payload_value(payload, "quantity_basis")
+    if quantity_basis is not None:
+        details.append(f"Quantity basis {quantity_basis}.")
+    return " ".join(details)
+
+
 def _find_document_delivery_event(
     db: Session,
     *,
@@ -445,6 +543,22 @@ def _find_document_delivery_event(
     ).scalars().first()
 
 
+def _find_active_trade_actualization(
+    db: Session,
+    *,
+    delivery_id: str,
+) -> TradeActualization | None:
+    return db.execute(
+        select(TradeActualization)
+        .where(
+            TradeActualization.delivery_id == delivery_id,
+            TradeActualization.voided_at.is_(None),
+        )
+        .order_by(TradeActualization.id.desc())
+        .limit(1)
+    ).scalars().first()
+
+
 def _require_payload_value(payload: dict[str, object], key: str) -> str:
     value = _optional_payload_value(payload, key)
     if value is None:
@@ -455,3 +569,19 @@ def _require_payload_value(payload: dict[str, object], key: str) -> str:
 def _optional_payload_value(payload: dict[str, object], key: str) -> str | None:
     text = str(payload.get(key) or "").strip()
     return text or None
+
+
+def _optional_int_payload_value(payload: dict[str, object], key: str) -> int | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        normalized = int(text)
+    except ValueError as exc:
+        raise ValueError(f"Document action payload field '{key}' must be an integer.") from exc
+    if normalized <= 0:
+        raise ValueError(f"Document action payload field '{key}' must be greater than zero.")
+    return normalized

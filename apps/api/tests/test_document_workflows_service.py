@@ -294,13 +294,14 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
         trade: Trade,
         delivery_id: str,
         nomination_reference: str,
+        leg_no: int | None = 1,
     ) -> tuple[DeliveryObligation, DeliveryPipelineDetail]:
         now = datetime(2026, 4, 14, 12, 50, tzinfo=timezone.utc)
         delivery = DeliveryObligation(
             delivery_id=delivery_id,
             trade_id=trade.trade_id,
             trade_leg_id=None,
-            leg_no=1,
+            leg_no=leg_no,
             external_trade_id=trade.external_trade_id,
             direction="OUTBOUND",
             mode_family="NETWORK_FLOW",
@@ -576,6 +577,52 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
         self.assertTrue(event_workflow.approval_required)
         self.assertIn("CREATES_NEW_RECORD", event_workflow.risk_flags)
         self.assertIn("OPERATIONAL_MUTATION", event_workflow.risk_flags)
+
+    def test_workflow_summary_exposes_actualization_candidate_for_delivery_confirmation(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(session, trade_id="TRD-DLV-WF-ACT-250")
+            self._seed_delivery(
+                session,
+                trade=trade,
+                delivery_id="DLV-TRD-DLV-WF-ACT-250",
+                nomination_reference="NOM-WF-ACT-250",
+                leg_no=None,
+            )
+            document = self._seed_verified_document(
+                session,
+                document_id="DOC-DLV-WF-ACT-250",
+                document_kind="DELIVERY_CONFIRMATION",
+                header_fields=[
+                    {"field_key": "delivery_confirmation_number", "value": "POD-WF-ACT-250"},
+                    {"field_key": "confirmation_date", "value": "2026-04-18"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-WF-ACT-250"},
+                    {"field_key": "delivery_id", "value": "DLV-TRD-DLV-WF-ACT-250"},
+                    {"field_key": "carrier_reference", "value": "CAR-WF-ACT-250"},
+                    {"field_key": "actual_quantity", "value": "1000"},
+                ],
+            )
+            session.commit()
+
+            workflows = list_document_workflows(session, document_id=document.document_id)
+
+        self.assertEqual(workflows.action_plan.status, "READY")
+        self.assertEqual(workflows.action_plan.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+        self.assertEqual(workflows.action_plan.operation_type, "record_trade_actualization_from_document")
+        self.assertEqual(workflows.action_plan.target.record_type, "TRADE_ACTUALIZATION")
+        self.assertEqual(workflows.action_plan.owner.record_type, "DELIVERY")
+        self.assertEqual(workflows.action_plan.owner.record_id, "DLV-TRD-DLV-WF-ACT-250")
+        self.assertEqual(workflows.governance.status, "HUMAN_CONFIRMATION_REQUIRED")
+        self.assertEqual(
+            [workflow.workflow_id for workflow in workflows.workflows],
+            ["record_trade_actualization_from_document", "match_existing_record"],
+        )
+        actualization_workflow = workflows.workflows[0]
+        self.assertEqual(actualization_workflow.status, "READY")
+        self.assertEqual(actualization_workflow.target.record_type, "TRADE_ACTUALIZATION")
+        self.assertEqual(actualization_workflow.owner.record_type, "DELIVERY")
+        self.assertTrue(actualization_workflow.approval_required)
+        self.assertIn("CREATES_NEW_RECORD", actualization_workflow.risk_flags)
+        self.assertIn("OPERATIONAL_MUTATION", actualization_workflow.risk_flags)
 
     def test_workflow_summary_exposes_create_delivery_candidate_under_trade(self) -> None:
         with self.SessionLocal() as session:

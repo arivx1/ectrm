@@ -16,6 +16,7 @@ from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
@@ -42,6 +43,7 @@ class DocumentActionPlanningServiceTests(unittest.TestCase):
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()
             session.query(TradeConfirmation).delete()
+            session.query(TradeActualization).delete()
             session.query(DeliveryEvent).delete()
             session.query(DeliveryPipelineDetail).delete()
             session.query(DeliveryObligation).delete()
@@ -421,6 +423,47 @@ class DocumentActionPlanningServiceTests(unittest.TestCase):
         self.assertEqual(plan.payload["event_type"], "DELIVERY_COMPLETED")
         self.assertEqual(plan.payload["occurred_at"], "2026-04-18")
         self.assertEqual(plan.payload["reference_code"], "POD-ACT-600")
+
+    def test_delivery_confirmation_with_quantity_plans_actualization_under_existing_delivery(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-DLV-ACT-625")
+            delivery, pipeline_detail = self._seed_delivery(trade=trade, delivery_id="DLV-TRD-DLV-ACT-625")
+            session.add_all([trade, delivery, pipeline_detail])
+            session.commit()
+
+            page = self._reviewed_page(
+                document_kind="DELIVERY_CONFIRMATION",
+                header_fields=[
+                    {"field_key": "delivery_confirmation_number", "value": "POD-ACT-625"},
+                    {"field_key": "confirmation_date", "value": "2026-04-18"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-ACT-625"},
+                    {"field_key": "delivery_id", "value": "DLV-TRD-DLV-ACT-625"},
+                    {"field_key": "carrier_reference", "value": "CAR-ACT-625"},
+                    {"field_key": "actual_quantity", "value": "1,000 BBL"},
+                    {"field_key": "unit_of_measure", "value": "BBL"},
+                ],
+            )
+            linkage = build_document_linkage_assessment(session, pages=[page], review_status="VERIFIED")
+            plan = build_document_action_plan(
+                document_id="DOC-200",
+                pages=[page],
+                review_status="VERIFIED",
+                linkage_assessment=linkage,
+            )
+
+        self.assertEqual(plan.status, "READY")
+        self.assertEqual(plan.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+        self.assertEqual(plan.operation_type, "record_trade_actualization_from_document")
+        self.assertEqual(plan.target.record_type, "TRADE_ACTUALIZATION")
+        self.assertFalse(plan.target.existing_record)
+        self.assertEqual(plan.owner.record_type, "DELIVERY")
+        self.assertEqual(plan.owner.record_id, "DLV-TRD-DLV-ACT-625")
+        self.assertEqual(plan.required_owner_record_types, ["DELIVERY"])
+        self.assertEqual(plan.payload["delivery_id"], "DLV-TRD-DLV-ACT-625")
+        self.assertEqual(plan.payload["actual_quantity"], "1000")
+        self.assertEqual(plan.payload["actualized_at"], "2026-04-18")
+        self.assertEqual(plan.payload["quantity_basis"], "actual_quantity")
+        self.assertEqual(plan.payload["reference_code"], "POD-ACT-625")
 
     def test_delivery_confirmation_without_delivery_plans_delivery_creation_first(self) -> None:
         with self.SessionLocal() as session:

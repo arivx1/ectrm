@@ -17,6 +17,7 @@ FINANCIAL_OPERATIONS = {
 OPERATIONAL_MUTATION_OPERATIONS = {
     "create_delivery_from_document",
     "record_delivery_event_from_document",
+    "record_trade_actualization_from_document",
 }
 
 

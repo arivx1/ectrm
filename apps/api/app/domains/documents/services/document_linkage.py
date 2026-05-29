@@ -17,6 +17,7 @@ from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade import trade_recency_order
+from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
@@ -46,6 +47,7 @@ PRIMARY_IDENTIFIER_KEYS_BY_RECORD_TYPE: dict[str, set[str]] = {
         "ticket_number",
         "reference_code",
     },
+    "TRADE_ACTUALIZATION": {"delivery_id", "trade_id"},
     "PRICE_INDEX": {"price_index_code"},
     "PRICE_INDEX_OBSERVATION": {"price_index_code", "observation_date", "source_series_id"},
 }
@@ -333,6 +335,10 @@ def _select_best_candidate(candidates: list[DocumentLinkageCandidateOut]) -> Doc
     if not primary_candidates:
         return best_overall
 
+    existing_primary_candidates = [candidate for candidate in primary_candidates if candidate.existing_record]
+    if existing_primary_candidates and existing_primary_candidates[0].score >= best_overall.score - 0.08:
+        return existing_primary_candidates[0]
+
     best_primary = primary_candidates[0]
     if best_primary.score >= best_overall.score - 0.08:
         return best_primary
@@ -423,6 +429,7 @@ def _lookup_builders() -> dict[str, Callable[[Session, dict[str, str], int], lis
         "TRADE_PAYMENT": _lookup_trade_payments,
         "DELIVERY": _lookup_deliveries,
         "DELIVERY_EVENT": _lookup_delivery_events,
+        "TRADE_ACTUALIZATION": _lookup_trade_actualizations,
         "PRICE_INDEX": _lookup_price_indices,
         "PRICE_INDEX_OBSERVATION": _lookup_price_index_observations,
     }
@@ -820,6 +827,64 @@ def _lookup_delivery_events(db: Session, field_map: dict[str, str], limit: int) 
     return matches
 
 
+def _lookup_trade_actualizations(db: Session, field_map: dict[str, str], limit: int) -> list[_LookupMatch]:
+    delivery_id = _normalized_token(field_map.get("delivery_id"))
+    trade_id = _normalized_token(field_map.get("trade_id"))
+    quantity_key, actual_quantity = _actualization_quantity_from_fields(field_map)
+    actualized_at_key, actualized_at = _actualization_date_from_fields(field_map)
+
+    conditions = []
+    if delivery_id:
+        conditions.append(func.upper(TradeActualization.delivery_id) == delivery_id)
+    if trade_id:
+        conditions.append(func.upper(TradeActualization.trade_id) == trade_id)
+    if not conditions:
+        return []
+
+    rows = db.execute(
+        select(TradeActualization)
+        .where(
+            or_(*conditions),
+            TradeActualization.voided_at.is_(None),
+        )
+        .order_by(TradeActualization.updated_at.desc(), TradeActualization.id.desc())
+        .limit(limit * 3)
+    ).scalars().all()
+
+    matches: list[_LookupMatch] = []
+    for actualization in rows:
+        matched_keys: list[str] = []
+        if delivery_id and _normalized_token(actualization.delivery_id) == delivery_id:
+            matched_keys.append("delivery_id")
+        if trade_id and _normalized_token(actualization.trade_id) == trade_id:
+            matched_keys.append("trade_id")
+        if quantity_key and _same_decimal(actualization.actual_quantity, actual_quantity):
+            matched_keys.append(quantity_key)
+        if actualized_at_key and _same_date(actualization.actualized_at, actualized_at):
+            matched_keys.append(actualized_at_key)
+        if not matched_keys:
+            continue
+        if "delivery_id" not in matched_keys and not (trade_id and quantity_key in matched_keys and actualized_at_key in matched_keys):
+            continue
+
+        matches.append(
+            _LookupMatch(
+                record_id=str(actualization.id),
+                record_label=f"Actualization {actualization.id}",
+                summary=(
+                    f"Delivery {actualization.delivery_id} • "
+                    f"{float(actualization.actual_quantity)} actualized "
+                    f"{actualization.actualized_at.date().isoformat()}"
+                ),
+                matched_keys=matched_keys,
+                exact_identifier_match="delivery_id" in matched_keys,
+            )
+        )
+        if len(matches) >= limit:
+            break
+    return matches
+
+
 def _lookup_price_indices(db: Session, field_map: dict[str, str], limit: int) -> list[_LookupMatch]:
     price_index_code = _normalized_token(field_map.get("price_index_code"))
     source_provider = _normalized_token(field_map.get("source_provider"))
@@ -1056,6 +1121,37 @@ def _event_date_from_fields(field_map: dict[str, str]) -> tuple[str | None, date
         "dispatch_date",
         "dispatch_start",
         "notice_date",
+        "weigh_date",
+    ):
+        value = _parse_date(field_map.get(key))
+        if value is not None:
+            return key, value
+    return None, None
+
+
+def _actualization_quantity_from_fields(field_map: dict[str, str]) -> tuple[str | None, Decimal | None]:
+    for key in (
+        "actual_quantity",
+        "delivered_quantity",
+        "net_quantity",
+        "net_weight",
+        "quantity",
+        "gross_quantity",
+        "gross_weight",
+    ):
+        value = _parse_decimal(field_map.get(key))
+        if value is not None:
+            return key, value
+    return None, None
+
+
+def _actualization_date_from_fields(field_map: dict[str, str]) -> tuple[str | None, date | None]:
+    for key in (
+        "confirmation_date",
+        "delivery_date",
+        "load_date",
+        "loading_date",
+        "shipment_date",
         "weigh_date",
     ):
         value = _parse_date(field_map.get(key))

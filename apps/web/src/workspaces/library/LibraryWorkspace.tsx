@@ -207,7 +207,34 @@ function canAttachSelectedWorkflowCandidate(candidate: DocumentLinkageCandidateR
   )
 }
 
-function canRequestSelectedWorkflowCandidateApproval(candidate: DocumentLinkageCandidateRecord): boolean {
+function workflowCandidateBlockedReason(
+  candidate: DocumentLinkageCandidateRecord,
+  workflowList: DocumentWorkflowListRecord | null,
+): string | null {
+  const actionPlan = workflowList?.action_plan
+  if (
+    candidate.existing_record ||
+    !candidate.create_if_missing ||
+    !actionPlan ||
+    actionPlan.status !== 'BLOCKED' ||
+    actionPlan.target?.record_type !== candidate.record_type
+  ) {
+    return null
+  }
+  return (
+    actionPlan.reasons[0] ??
+    actionPlan.missing_evidence[0] ??
+    'Manual review is required before this record can be created.'
+  )
+}
+
+function canRequestSelectedWorkflowCandidateApproval(
+  candidate: DocumentLinkageCandidateRecord,
+  workflowList: DocumentWorkflowListRecord | null = null,
+): boolean {
+  if (workflowCandidateBlockedReason(candidate, workflowList)) {
+    return false
+  }
   return (
     (candidate.existing_record &&
       Boolean(candidate.record_id) &&
@@ -675,6 +702,9 @@ export function LibraryWorkspace({
     workflowList?.linkage_assessment?.candidates.find(
       (candidate) => workflowCandidateKey(candidate) === selectedWorkflowCandidateKey,
     ) ?? null
+  const selectedWorkflowCandidateBlockedReason = selectedWorkflowCandidate
+    ? workflowCandidateBlockedReason(selectedWorkflowCandidate, workflowList)
+    : null
   const pendingReprocessDocument = pendingReprocessDocumentId
     ? documents.find((document) => document.document_id === pendingReprocessDocumentId) ?? null
     : null
@@ -2523,7 +2553,8 @@ export function LibraryWorkspace({
                     <div className="library-workflow-candidate-list">
                       {(workflowList.linkage_assessment?.candidates ?? []).slice(0, 4).map((candidate) => {
                         const candidateKey = workflowCandidateKey(candidate)
-                        const isSelectable = canRequestSelectedWorkflowCandidateApproval(candidate)
+                        const candidateBlockedReason = workflowCandidateBlockedReason(candidate, workflowList)
+                        const isSelectable = canRequestSelectedWorkflowCandidateApproval(candidate, workflowList)
                         const isSelected = selectedWorkflowCandidateKey === candidateKey
 
                         return (
@@ -2552,6 +2583,11 @@ export function LibraryWorkspace({
                                 </button>
                               ) : null}
                             </div>
+                            {candidateBlockedReason ? (
+                              <div className="library-workflow-candidate-evidence">
+                                <span>{candidateBlockedReason}</span>
+                              </div>
+                            ) : null}
                             {(candidate.matched_keys ?? []).length || (candidate.missing_keys ?? []).length ? (
                               <div className="library-workflow-candidate-evidence">
                                 {(candidate.matched_keys ?? []).length ? (
@@ -2574,11 +2610,18 @@ export function LibraryWorkspace({
                             {formatWorkflowPercent(selectedWorkflowCandidate.score)} confidence /{' '}
                             {formatWorkflowValue(selectedWorkflowCandidate.candidate_state)}
                           </span>
+                          {selectedWorkflowCandidateBlockedReason ? (
+                            <span>{selectedWorkflowCandidateBlockedReason}</span>
+                          ) : null}
                         </div>
                         <button
                           type="button"
                           className="button button-primary"
-                          disabled={executingWorkflowId !== null || Boolean(workflowPendingApprovalRequest)}
+                          disabled={
+                            executingWorkflowId !== null ||
+                            Boolean(workflowPendingApprovalRequest) ||
+                            Boolean(selectedWorkflowCandidateBlockedReason)
+                          }
                           onClick={() =>
                             canAttachSelectedWorkflowCandidate(selectedWorkflowCandidate)
                               ? void handleAttachSelectedWorkflowCandidate(selectedWorkflowCandidate)
@@ -2589,6 +2632,8 @@ export function LibraryWorkspace({
                             ? 'Working...'
                             : workflowPendingApprovalRequest
                               ? 'Approval Pending'
+                              : selectedWorkflowCandidateBlockedReason
+                                ? 'Manual Review Required'
                               : selectedWorkflowCandidateActionLabel(selectedWorkflowCandidate)}
                         </button>
                       </div>

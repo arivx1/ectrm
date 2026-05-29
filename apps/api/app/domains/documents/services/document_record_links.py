@@ -12,6 +12,7 @@ from apps.api.app.models.document_record_link import DocumentRecordLink
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
@@ -249,6 +250,20 @@ def _resolve_record_target(
             summary=(
                 f"Delivery {event.delivery_id} • {event.occurred_at.date().isoformat()} • "
                 f"{event.execution_status.replace('_', ' ').title()}"
+            ),
+        )
+    elif normalized_type == "TRADE_ACTUALIZATION":
+        actualization = db.get(TradeActualization, _coerce_int_id(normalized_id, label="trade actualization"))
+        if actualization is None:
+            raise LookupError(f"Trade actualization '{normalized_id}' was not found.")
+        state = "Voided" if actualization.voided_at is not None else "Active"
+        resolved = ResolvedRecordTarget(
+            record_type=normalized_type,
+            record_id=str(actualization.id),
+            record_label=f"Actualization {actualization.id}",
+            summary=(
+                f"Delivery {actualization.delivery_id} • Trade {actualization.trade_id} • "
+                f"{float(actualization.actual_quantity)} • {state}"
             ),
         )
     elif normalized_type == "PRICE_INDEX":

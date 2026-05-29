@@ -83,6 +83,40 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-29 - Delivery Proof Documents Can Record Actualization
+
+- Type: algorithm-added
+- Domain: document linkage, delivery operations, actualization, and Library
+  action approvals
+- Applies to: `DELIVERY_CONFIRMATION`, `BILL_OF_LADING`, and `WEIGH_TICKET`
+  document workflows
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_action_planning.py`,
+  `apps/api/app/domains/documents/services/document_action_execution.py`,
+  `apps/api/app/domains/documents/services/document_linkage.py`,
+  `apps/api/app/domains/documents/services/schema_registry.py`,
+  `apps/api/app/domains/operations/services/actualizations.py`, and
+  `apps/web/src/workspaces/library/LibraryWorkspace.tsx`
+- Lesson: delivery proof documents with resolved delivery ownership, positive
+  measured quantity, and an actualization timestamp may stage
+  `TRADE_ACTUALIZATION` as the preferred create target. Execution must resolve
+  the owning delivery, validate the canonical delivery ID, block duplicate
+  active actualization, call `upsert_trade_actualization`, and link the
+  document to the actualization, delivery, and trade evidence records.
+- Deterministic opportunity: keep future proof-of-delivery actualization rules
+  in typed document schema targets and deterministic field maps, including
+  owner requirements, quantity keys, timestamp keys, duplicate checks, and
+  approval tests.
+- Agent autonomy impact: agents and document workflows may explain or stage
+  actualization from reviewed document evidence, but execution remains behind
+  human approval, the document action governance service, and the typed
+  operations actualization service.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_document_action_planning_service apps.api.tests.test_document_action_approval_requests_service apps.api.tests.test_document_workflows_service apps.api.tests.test_document_action_execution_service apps.api.tests.test_document_linkage_service apps.api.tests.test_document_routing_service apps.api.tests.test_document_action_governance_service`,
+  `npm --prefix apps/web run test -- libraryWorkspace.test.ts documentApi.test.ts`,
+  and `npm --prefix apps/web run lint`.
+
 ### 2026-05-27 - Reports Prompt Uses Typed Read-Only Price Lenses
 
 - Type: algorithm-added

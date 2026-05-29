@@ -35,6 +35,7 @@ from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.document_record_link import DocumentRecordLink
 from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_leg import TradeLeg
@@ -64,6 +65,7 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
             session.query(DocumentRecordLink).delete()
             session.query(TradeConfirmation).delete()
             session.query(TradePayment).delete()
+            session.query(TradeActualization).delete()
             session.query(DeliveryEvent).delete()
             session.query(DeliveryPipelineDetail).delete()
             session.query(DocumentIngestionPage).delete()
@@ -289,13 +291,20 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
             version=1,
         )
 
-    def _seed_delivery(self, *, trade: Trade, delivery_id: str, nomination_reference: str) -> tuple[DeliveryObligation, DeliveryPipelineDetail]:
+    def _seed_delivery(
+        self,
+        *,
+        trade: Trade,
+        delivery_id: str,
+        nomination_reference: str,
+        leg_no: int | None = 1,
+    ) -> tuple[DeliveryObligation, DeliveryPipelineDetail]:
         now = datetime(2026, 4, 14, 12, 50, tzinfo=timezone.utc)
         delivery = DeliveryObligation(
             delivery_id=delivery_id,
             trade_id=trade.trade_id,
             trade_leg_id=None,
-            leg_no=1,
+            leg_no=leg_no,
             external_trade_id=trade.external_trade_id,
             direction="OUTBOUND",
             mode_family="NETWORK_FLOW",
@@ -714,6 +723,81 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
         self.assertIn(("DELIVERY", "DLV-TRD-DLV-EVT-300"), linked_records)
         self.assertIn(("DELIVERY_EVENT", event_id), linked_records)
         self.assertIn(("TRADE", "TRD-DLV-EVT-300"), linked_records)
+
+    def test_delivery_confirmation_approval_records_actualization_and_links_evidence(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-DLV-ACT-350")
+            delivery, pipeline_detail = self._seed_delivery(
+                trade=trade,
+                delivery_id="DLV-TRD-DLV-ACT-350",
+                nomination_reference="NOM-ACT-350",
+                leg_no=None,
+            )
+            document, page = self._seed_verified_document(
+                document_id="DOC-DLV-ACT-350",
+                document_kind="DELIVERY_CONFIRMATION",
+                header_fields=[
+                    {"field_key": "delivery_confirmation_number", "value": "POD-ACT-350"},
+                    {"field_key": "confirmation_date", "value": "2026-04-18"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-ACT-350"},
+                    {"field_key": "delivery_id", "value": "DLV-TRD-DLV-ACT-350"},
+                    {"field_key": "carrier_reference", "value": "CAR-ACT-350"},
+                    {"field_key": "actual_quantity", "value": "1000"},
+                    {"field_key": "unit_of_measure", "value": "BBL"},
+                ],
+            )
+            session.add_all([trade, delivery, pipeline_detail, document, page])
+            session.commit()
+
+            staged = stage_document_action_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                request_comment="Record actualized delivery quantity from proof of delivery.",
+            )
+            self.assertEqual(staged.action_type, "CREATE_RECORD_FROM_DOCUMENT")
+            self.assertEqual(staged.operation_type, "record_trade_actualization_from_document")
+            self.assertEqual(staged.target_record_type, "TRADE_ACTUALIZATION")
+            self.assertIsNone(staged.target_record_id)
+            self.assertEqual(staged.owner_record_type, "DELIVERY")
+            self.assertEqual(staged.owner_record_id, "DLV-TRD-DLV-ACT-350")
+            self.assertEqual(staged.action_plan_snapshot["payload"]["actual_quantity"], "1000")
+
+            executed = approve_document_action_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="approver",
+                decision_comment="Approved actual quantity from POD.",
+            )
+            actualizations = session.execute(
+                select(TradeActualization).where(TradeActualization.trade_id == trade.trade_id)
+            ).scalars().all()
+            links = session.execute(
+                select(DocumentRecordLink)
+                .where(DocumentRecordLink.document_id == document.document_id)
+                .order_by(DocumentRecordLink.record_type.asc())
+            ).scalars().all()
+            refreshed_trade = session.get(Trade, trade.trade_id)
+            actualization = actualizations[0] if actualizations else None
+            linked_records = {(link.record_type, link.record_id) for link in links}
+            executed_status = executed.status
+            actualization_count = len(actualizations)
+            actualization_id = str(actualization.id) if actualization is not None else None
+            actualization_delivery_id = actualization.delivery_id if actualization is not None else None
+            actualization_quantity = float(actualization.actual_quantity) if actualization is not None else None
+            actualization_source = actualization.source if actualization is not None else None
+            trade_actualization_status = refreshed_trade.actualization_status if refreshed_trade is not None else None
+            session.commit()
+
+        self.assertEqual(executed_status, "EXECUTED")
+        self.assertEqual(actualization_count, 1)
+        self.assertEqual(actualization_delivery_id, "DLV-TRD-DLV-ACT-350")
+        self.assertEqual(actualization_quantity, 1000.0)
+        self.assertEqual(actualization_source, "DOCUMENT_LIBRARY")
+        self.assertEqual(trade_actualization_status, "ACTUALIZED")
+        self.assertIn(("TRADE_ACTUALIZATION", actualization_id), linked_records)
+        self.assertIn(("DELIVERY", "DLV-TRD-DLV-ACT-350"), linked_records)
+        self.assertIn(("TRADE", "TRD-DLV-ACT-350"), linked_records)
 
     def test_selected_create_candidate_approval_creates_missing_invoice(self) -> None:
         with self.SessionLocal() as session:

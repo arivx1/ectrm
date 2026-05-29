@@ -16,6 +16,7 @@ from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_leg import TradeLeg
@@ -45,6 +46,7 @@ class DocumentLinkageServiceTests(unittest.TestCase):
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()
             session.query(TradeConfirmation).delete()
+            session.query(TradeActualization).delete()
             session.query(DeliveryPipelineDetail).delete()
             session.query(DeliveryObligation).delete()
             session.query(Trade).delete()
@@ -124,6 +126,53 @@ class DocumentLinkageServiceTests(unittest.TestCase):
             status="ACTIVE",
             last_event_id="evt-100",
         )
+
+    def test_delivery_confirmation_links_to_existing_actualization(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-ACT-100")
+            actualization = TradeActualization(
+                delivery_id="DLV-TRD-ACT-100",
+                trade_id=trade.trade_id,
+                leg_no=None,
+                actual_quantity=Decimal("1000"),
+                actualized_at=datetime(2026, 4, 18, 0, 0, tzinfo=timezone.utc),
+                source="DOCUMENT_LIBRARY",
+                notes="Prior reviewed actualization.",
+                created_at=datetime(2026, 4, 18, 0, 0, tzinfo=timezone.utc),
+                created_by="tester",
+                updated_at=datetime(2026, 4, 18, 0, 0, tzinfo=timezone.utc),
+                updated_by="tester",
+                version=1,
+            )
+            session.add_all([trade, actualization])
+            session.commit()
+            session.refresh(actualization)
+            actualization_id = str(actualization.id)
+
+            page = self._reviewed_page(
+                document_kind="DELIVERY_CONFIRMATION",
+                header_fields=[
+                    {"field_key": "delivery_confirmation_number", "value": "POD-ACT-100"},
+                    {"field_key": "confirmation_date", "value": "2026-04-18"},
+                    {"field_key": "trade_id", "value": "TRD-ACT-100"},
+                    {"field_key": "delivery_id", "value": "DLV-TRD-ACT-100"},
+                    {"field_key": "actual_quantity", "value": "1000"},
+                ],
+            )
+
+            assessment = build_document_linkage_assessment(
+                session,
+                pages=[page],
+                review_status="VERIFIED",
+            )
+
+        self.assertEqual(assessment.status, "READY")
+        self.assertEqual(assessment.recommended_action, "ATTACH")
+        self.assertEqual(assessment.primary_record_type, "TRADE_ACTUALIZATION")
+        self.assertEqual(assessment.primary_record_id, actualization_id)
+        self.assertEqual(assessment.candidates[0].candidate_state, "ATTACH_READY")
+        self.assertIn("delivery_id", assessment.candidates[0].matched_keys)
+        self.assertIn("actual_quantity", assessment.candidates[0].matched_keys)
 
     def test_invoice_links_to_existing_trade_invoice(self) -> None:
         with self.SessionLocal() as session:
