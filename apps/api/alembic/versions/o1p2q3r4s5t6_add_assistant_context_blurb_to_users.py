@@ -21,7 +21,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("user_accounts", sa.Column("assistant_context_blurb", sa.Text(), nullable=True))
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {column["name"] for column in inspector.get_columns("user_accounts")}
+
+    if "assistant_context_blurb" not in columns:
+        op.add_column("user_accounts", sa.Column("assistant_context_blurb", sa.Text(), nullable=True))
 
 
 def downgrade() -> None:

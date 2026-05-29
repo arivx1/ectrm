@@ -127,12 +127,57 @@ class PreTradeScenarioDraft(BaseModel):
         return self
 
 
+class PreTradeScenarioEnrichmentOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    opportunity_category: PreTradeOpportunityCategory | None = None
+    hedge_intent: PreTradeHedgeInstrumentType | None = None
+    residual_exposure_summary: str | None = Field(default=None, max_length=1000)
+    source_freshness_summary: str | None = Field(default=None, max_length=1000)
+    reviewer_focus: list[str] = Field(default_factory=list)
+    recommendation_run_id: int | None = Field(default=None, ge=1)
+    recommendation_run_key: str | None = Field(default=None, max_length=120)
+    recommendation_stance: PreTradeRecommendationStance | None = None
+    recommendation_score: int | None = Field(default=None, ge=0, le=100)
+    recommendation_headline: str | None = Field(default=None, max_length=1000)
+    captured_at: datetime | None = None
+
+    @field_validator(
+        "residual_exposure_summary",
+        "source_freshness_summary",
+        "recommendation_run_key",
+        "recommendation_headline",
+    )
+    @classmethod
+    def normalize_optional_fields(cls, value: str | None, info) -> str | None:
+        return _normalize_optional_text(value, field_name=info.field_name)
+
+    @field_validator("reviewer_focus")
+    @classmethod
+    def normalize_reviewer_focus(cls, value: list[str]) -> list[str]:
+        normalized_items: list[str] = []
+        seen_items: set[str] = set()
+        for item in value:
+            normalized_item = _normalize_optional_text(item, field_name="reviewer_focus")
+            if normalized_item is None:
+                continue
+            item_key = normalized_item.casefold()
+            if item_key in seen_items:
+                continue
+            normalized_items.append(normalized_item[:500])
+            seen_items.add(item_key)
+            if len(normalized_items) >= 8:
+                break
+        return normalized_items
+
+
 class PreTradeScenarioCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., min_length=1, max_length=120)
     thesis: str | None = Field(default=None, max_length=2000)
     draft: PreTradeScenarioDraft
+    enrichment: PreTradeScenarioEnrichmentOut | None = None
 
     @field_validator("name")
     @classmethod
@@ -151,6 +196,7 @@ class PreTradeScenarioUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     thesis: str | None = Field(default=None, max_length=2000)
     draft: PreTradeScenarioDraft | None = None
+    enrichment: PreTradeScenarioEnrichmentOut | None = None
 
     @field_validator("name")
     @classmethod
@@ -168,6 +214,7 @@ class PreTradeScenarioOut(BaseModel):
     name: str
     thesis: str | None
     draft: PreTradeScenarioDraft
+    enrichment: PreTradeScenarioEnrichmentOut | None = None
     created_at: datetime
     created_by: str
     updated_at: datetime
@@ -184,6 +231,7 @@ class PreTradeReviewItemCreate(BaseModel):
     draft: PreTradeScenarioDraft
     source_scenario_id: int | None = Field(default=None, ge=1)
     recommendation_run_id: int | None = Field(default=None, ge=1)
+    enrichment: PreTradeScenarioEnrichmentOut | None = None
     owner: str | None = Field(default=None, max_length=120)
     due_at: datetime | None = None
     review_notes: str | None = Field(default=None, max_length=4000)
@@ -206,6 +254,7 @@ class PreTradeReviewItemUpdate(BaseModel):
     thesis: str | None = Field(default=None, max_length=2000)
     draft: PreTradeScenarioDraft | None = None
     recommendation_run_id: int | None = Field(default=None, ge=1)
+    enrichment: PreTradeScenarioEnrichmentOut | None = None
     recommendation_override_reason: str | None = Field(default=None, max_length=4000)
     review_status: PreTradeReviewStatus | None = None
     owner: str | None = Field(default=None, max_length=120)
@@ -262,6 +311,7 @@ class PreTradeReviewItemOut(BaseModel):
     draft: PreTradeScenarioDraft
     source_scenario_id: int | None
     recommendation_run_id: int | None = None
+    enrichment: PreTradeScenarioEnrichmentOut | None = None
     recommendation_summary: PreTradeReviewRecommendationSummary | None = None
     recommendation_override_reason: str | None = None
     recommendation_override_by: str | None = None

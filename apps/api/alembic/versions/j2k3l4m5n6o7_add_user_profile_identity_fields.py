@@ -21,10 +21,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("user_accounts", sa.Column("first_name", sa.String(length=80), nullable=True))
-    op.add_column("user_accounts", sa.Column("last_name", sa.String(length=80), nullable=True))
-    op.add_column("user_accounts", sa.Column("preferred_timezone", sa.String(length=64), nullable=True))
-    op.add_column("user_accounts", sa.Column("primary_location", sa.String(length=160), nullable=True))
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {column["name"] for column in inspector.get_columns("user_accounts")}
+
+    if "first_name" not in columns:
+        op.add_column("user_accounts", sa.Column("first_name", sa.String(length=80), nullable=True))
+    if "last_name" not in columns:
+        op.add_column("user_accounts", sa.Column("last_name", sa.String(length=80), nullable=True))
+    if "preferred_timezone" not in columns:
+        op.add_column("user_accounts", sa.Column("preferred_timezone", sa.String(length=64), nullable=True))
+    if "primary_location" not in columns:
+        op.add_column("user_accounts", sa.Column("primary_location", sa.String(length=160), nullable=True))
 
 
 def downgrade() -> None:

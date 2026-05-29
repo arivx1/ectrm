@@ -490,6 +490,15 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             {preTradeReviewContext.recommendationRationale ? (
               <p>{`Rationale: ${preTradeReviewContext.recommendationRationale}`}</p>
             ) : null}
+            {preTradeReviewContext.enrichment?.opportunity_category ? (
+              <p>{`Opportunity: ${preTradeReviewContext.enrichment.opportunity_category.replaceAll('_', ' ')}`}</p>
+            ) : null}
+            {preTradeReviewContext.enrichment?.source_freshness_summary ? (
+              <p>{`Sources: ${preTradeReviewContext.enrichment.source_freshness_summary}`}</p>
+            ) : null}
+            {preTradeReviewContext.enrichment?.reviewer_focus.length ? (
+              <p>{`Review focus: ${preTradeReviewContext.enrichment.reviewer_focus.slice(0, 2).join(' | ')}`}</p>
+            ) : null}
             {preTradeReviewContext.recommendationOverrideReason ? (
               <p>
                 {`Recommendation override: ${preTradeReviewContext.recommendationOverrideReason}`}

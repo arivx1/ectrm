@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -41,6 +42,7 @@ from apps.api.app.domains.reports.services.pretrade_recommendations import (
     PRETRADE_RECOMMENDATION_RUN_PRESET_KEY,
     accessible_recommendation_run_records,
     build_pretrade_recommendation_draft_analysis,
+    build_pretrade_scenario_enrichment,
     build_recommendation_run_payload,
     build_recommendation_summary_lookup,
     get_accessible_recommendation_run_record,
@@ -76,6 +78,7 @@ from apps.api.app.schemas.pretrade import (
     PreTradeReviewItemUpdate,
     PreTradeScenarioCreate,
     PreTradeScenarioDraft,
+    PreTradeScenarioEnrichmentOut,
     PreTradeScenarioOut,
     PreTradeScenarioUpdate,
 )
@@ -107,12 +110,29 @@ def _scenario_thesis(record: ReportPreset) -> str | None:
     return thesis if isinstance(thesis, str) else None
 
 
+def _payload_enrichment_json(enrichment: PreTradeScenarioEnrichmentOut | None) -> dict[str, object] | None:
+    if enrichment is None:
+        return None
+    return enrichment.model_dump(mode="json", exclude_none=True)
+
+
+def _scenario_enrichment(record: ReportPreset) -> PreTradeScenarioEnrichmentOut | None:
+    raw_enrichment = _record_payload(record).get("enrichment")
+    if not isinstance(raw_enrichment, dict):
+        return None
+    try:
+        return PreTradeScenarioEnrichmentOut.model_validate(raw_enrichment)
+    except ValidationError:
+        return None
+
+
 def _to_scenario_out(record: ReportPreset, *, actor_id: str) -> PreTradeScenarioOut:
     return PreTradeScenarioOut(
         scenario_id=record.id,
         name=record.name,
         thesis=_scenario_thesis(record),
         draft=_draft_from_record(record),
+        enrichment=_scenario_enrichment(record),
         created_at=record.created_at,
         created_by=record.created_by,
         updated_at=record.updated_at,
@@ -122,11 +142,20 @@ def _to_scenario_out(record: ReportPreset, *, actor_id: str) -> PreTradeScenario
     )
 
 
-def _scenario_payload_json(*, thesis: str | None, draft: PreTradeScenarioDraft) -> dict[str, object | None]:
-    return {
+def _scenario_payload_json(
+    *,
+    thesis: str | None,
+    draft: PreTradeScenarioDraft,
+    enrichment: PreTradeScenarioEnrichmentOut | None = None,
+) -> dict[str, object | None]:
+    payload: dict[str, object | None] = {
         "thesis": thesis,
         "draft": draft.model_dump(mode="json", exclude_none=True),
     }
+    enrichment_json = _payload_enrichment_json(enrichment)
+    if enrichment_json is not None:
+        payload["enrichment"] = enrichment_json
+    return payload
 
 
 def _review_payload_json(
@@ -135,6 +164,7 @@ def _review_payload_json(
     draft: PreTradeScenarioDraft,
     source_scenario_id: int | None,
     recommendation_run_id: int | None,
+    enrichment: PreTradeScenarioEnrichmentOut | None,
     review_status: str,
     owner: str | None,
     due_at: datetime | None,
@@ -145,6 +175,7 @@ def _review_payload_json(
         "draft": draft.model_dump(mode="json", exclude_none=True),
         "source_scenario_id": source_scenario_id,
         "recommendation_run_id": recommendation_run_id,
+        "enrichment": _payload_enrichment_json(enrichment),
         "recommendation_override_reason": None,
         "recommendation_override_by": None,
         "recommendation_override_at": None,
@@ -186,6 +217,19 @@ def _get_visible_recommendation_run_record_or_404(
             detail="Pre-trade recommendation run was not found.",
         )
     return record
+
+
+def _recommendation_record_enrichment(
+    recommendation_record: ReportPreset,
+    *,
+    actor_id: str,
+) -> PreTradeScenarioEnrichmentOut:
+    return build_pretrade_scenario_enrichment(
+        to_recommendation_run_out(
+            recommendation_record,
+            actor_id=actor_id,
+        )
+    )
 
 
 def _validate_review_recommendation_attachment(
@@ -410,7 +454,11 @@ def create_pretrade_scenario(
         scope_owner_key=actor_id,
         name=payload.name,
         name_key=name_key,
-        filters_json=_scenario_payload_json(thesis=payload.thesis, draft=payload.draft),
+        filters_json=_scenario_payload_json(
+            thesis=payload.thesis,
+            draft=payload.draft,
+            enrichment=payload.enrichment,
+        ),
         created_at=now,
         created_by=actor_id,
         updated_at=now,
@@ -465,6 +513,12 @@ def update_pretrade_scenario(
         if payload.draft is None:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="draft is required when provided")
         next_payload["draft"] = payload.draft.model_dump(mode="json", exclude_none=True)
+    if "enrichment" in changes:
+        enrichment_json = _payload_enrichment_json(payload.enrichment)
+        if enrichment_json is None:
+            next_payload.pop("enrichment", None)
+        else:
+            next_payload["enrichment"] = enrichment_json
     record.filters_json = next_payload
 
     record.updated_at = datetime.now(timezone.utc)
@@ -790,6 +844,7 @@ def create_pretrade_review(
 ) -> PreTradeReviewItemOut:
     actor_id = require_authenticated_actor(request)
 
+    source_record: ReportPreset | None = None
     if payload.source_scenario_id is not None:
         source_record = db.execute(
             _visible_scenarios_stmt(actor_id).where(ReportPreset.id == payload.source_scenario_id)
@@ -812,6 +867,15 @@ def create_pretrade_review(
             source_scenario_id=payload.source_scenario_id,
         )
 
+    resolved_enrichment = payload.enrichment
+    if resolved_enrichment is None and source_record is not None:
+        resolved_enrichment = _scenario_enrichment(source_record)
+    if recommendation_record is not None:
+        resolved_enrichment = _recommendation_record_enrichment(
+            recommendation_record,
+            actor_id=actor_id,
+        )
+
     now = datetime.now(timezone.utc)
     record = ReportPreset(
         preset_key=PRETRADE_REVIEW_PRESET_KEY,
@@ -824,6 +888,7 @@ def create_pretrade_review(
             draft=payload.draft,
             source_scenario_id=payload.source_scenario_id,
             recommendation_run_id=payload.recommendation_run_id,
+            enrichment=resolved_enrichment,
             review_status="OPEN",
             owner=payload.owner,
             due_at=payload.due_at,
@@ -846,6 +911,7 @@ def create_pretrade_review(
             for key, value in {
                 "source_scenario_id": payload.source_scenario_id,
                 "recommendation_run_id": payload.recommendation_run_id,
+                "opportunity_category": resolved_enrichment.opportunity_category if resolved_enrichment else None,
             }.items()
             if value is not None
         },
@@ -902,6 +968,7 @@ def update_pretrade_review(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Approval comment is required.",
         )
+    recommendation_enrichment: PreTradeScenarioEnrichmentOut | None = None
     if "recommendation_run_id" in changes and payload.recommendation_run_id is not None:
         recommendation_record = _get_visible_recommendation_run_record_or_404(
             db,
@@ -911,6 +978,10 @@ def update_pretrade_review(
         _validate_review_recommendation_attachment(
             recommendation_record=recommendation_record,
             source_scenario_id=review_source_scenario_id(record),
+        )
+        recommendation_enrichment = _recommendation_record_enrichment(
+            recommendation_record,
+            actor_id=actor_id,
         )
 
     recommendation_summary = (
@@ -946,6 +1017,16 @@ def update_pretrade_review(
         next_payload["draft"] = payload.draft.model_dump(mode="json", exclude_none=True)
     if "recommendation_run_id" in changes:
         next_payload["recommendation_run_id"] = payload.recommendation_run_id
+        if recommendation_enrichment is not None:
+            next_payload["enrichment"] = _payload_enrichment_json(recommendation_enrichment)
+        elif payload.recommendation_run_id is None:
+            next_payload.pop("enrichment", None)
+    if "enrichment" in changes:
+        enrichment_json = _payload_enrichment_json(payload.enrichment)
+        if enrichment_json is None:
+            next_payload.pop("enrichment", None)
+        else:
+            next_payload["enrichment"] = enrichment_json
     if "recommendation_override_reason" in changes:
         next_payload["recommendation_override_reason"] = payload.recommendation_override_reason
         next_payload["recommendation_override_by"] = actor_id if payload.recommendation_override_reason else None
@@ -985,6 +1066,8 @@ def update_pretrade_review(
         activity_action = "COMMENTED"
         activity_payload["from_recommendation_run_id"] = current_recommendation_run_id
         activity_payload["to_recommendation_run_id"] = payload.recommendation_run_id
+        if recommendation_enrichment is not None and recommendation_enrichment.opportunity_category is not None:
+            activity_payload["opportunity_category"] = recommendation_enrichment.opportunity_category
     elif "activity_comment" in changes or "review_notes" in changes:
         activity_action = "COMMENTED"
     elif "recommendation_override_reason" in changes:

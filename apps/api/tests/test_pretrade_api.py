@@ -281,6 +281,21 @@ class PreTradeApiTests(unittest.TestCase):
             },
         }
 
+    def _scenario_enrichment_payload(self) -> dict[str, object]:
+        return {
+            "opportunity_category": "RISK_REDUCTION",
+            "hedge_intent": "SWAP",
+            "residual_exposure_summary": "Residual exposure falls inside desk appetite.",
+            "source_freshness_summary": "All 6 source snapshots were OK at capture.",
+            "reviewer_focus": ["Confirm target price against the latest mark."],
+            "recommendation_run_id": None,
+            "recommendation_run_key": None,
+            "recommendation_stance": "PROCEED",
+            "recommendation_score": 96,
+            "recommendation_headline": "Proceed with standard controls.",
+            "captured_at": self.now.isoformat(),
+        }
+
     def _recommendation_input_snapshots(self) -> list[dict[str, object]]:
         return [
             {
@@ -566,6 +581,64 @@ class PreTradeApiTests(unittest.TestCase):
         list_after_delete = self.client.get("/pretrade/scenarios", headers=self.trader_one_headers)
         self.assertEqual(list_after_delete.status_code, 200)
         self.assertEqual(list_after_delete.json(), [])
+
+    def test_scenario_enrichment_is_optional_and_carries_into_reviews(self) -> None:
+        legacy_response = self.client.post(
+            "/pretrade/scenarios",
+            json=self._scenario_payload(),
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(legacy_response.status_code, 201)
+        self.assertIsNone(legacy_response.json()["enrichment"])
+
+        enriched_payload = {
+            **self._scenario_payload(),
+            "name": "May gas hedge enriched",
+            "enrichment": self._scenario_enrichment_payload(),
+        }
+        create_response = self.client.post(
+            "/pretrade/scenarios",
+            json=enriched_payload,
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(create_response.status_code, 201)
+        created = create_response.json()
+        self.assertEqual(created["enrichment"]["opportunity_category"], "RISK_REDUCTION")
+        self.assertEqual(created["enrichment"]["hedge_intent"], "SWAP")
+
+        scenario_id = created["scenario_id"]
+        update_response = self.client.patch(
+            f"/pretrade/scenarios/{scenario_id}",
+            json={
+                "enrichment": {
+                    **self._scenario_enrichment_payload(),
+                    "opportunity_category": "WAIT_FOR_DATA",
+                    "reviewer_focus": ["Refresh the latest mark before capture."],
+                }
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(update_response.status_code, 200)
+        updated = update_response.json()
+        self.assertEqual(updated["enrichment"]["opportunity_category"], "WAIT_FOR_DATA")
+        self.assertEqual(updated["enrichment"]["reviewer_focus"], ["Refresh the latest mark before capture."])
+
+        review_response = self.client.post(
+            "/pretrade/reviews",
+            json={
+                "name": "May gas hedge enriched review",
+                "thesis": "Queue enriched context for desk review.",
+                "source_scenario_id": scenario_id,
+                "review_notes": "Review copied enrichment.",
+                "draft": self._scenario_payload()["draft"],
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(review_response.status_code, 201)
+        review = review_response.json()
+        self.assertEqual(review["source_scenario_id"], scenario_id)
+        self.assertEqual(review["enrichment"]["opportunity_category"], "WAIT_FOR_DATA")
+        self.assertEqual(review["enrichment"]["reviewer_focus"], ["Refresh the latest mark before capture."])
 
     def test_reviews_are_shared_and_support_collaborative_status_updates(self) -> None:
         scenario_response = self.client.post(
@@ -1027,6 +1100,11 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(review_payload["recommendation_summary"]["stance"], "ESCALATE")
         self.assertIn("Escalate because", review_payload["recommendation_summary"]["explanation"]["stance_rationale"])
         self.assertEqual(review_payload["recommendation_summary"]["input_snapshot_count"], 6)
+        self.assertEqual(review_payload["enrichment"]["recommendation_run_id"], recommendation_run_id)
+        self.assertEqual(review_payload["enrichment"]["recommendation_stance"], "ESCALATE")
+        self.assertEqual(review_payload["enrichment"]["opportunity_category"], "RISK_INCREASE")
+        self.assertIn("source snapshot", review_payload["enrichment"]["source_freshness_summary"])
+        self.assertTrue(review_payload["enrichment"]["reviewer_focus"])
 
         visible_attached_run = self.client.get(
             f"/pretrade/recommendations/runs/{recommendation_run_id}",

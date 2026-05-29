@@ -21,15 +21,21 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "user_accounts",
-        sa.Column(
-            "default_assistant_persona",
-            sa.String(length=32),
-            nullable=False,
-            server_default="operator",
-        ),
-    )
+    bind = op.get_bind()
+    existing_columns = {
+        column["name"]
+        for column in sa.inspect(bind).get_columns("user_accounts")
+    }
+    if "default_assistant_persona" not in existing_columns:
+        op.add_column(
+            "user_accounts",
+            sa.Column(
+                "default_assistant_persona",
+                sa.String(length=32),
+                nullable=False,
+                server_default="operator",
+            ),
+        )
     op.execute(
         """
         UPDATE user_accounts

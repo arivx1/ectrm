@@ -17,6 +17,7 @@ from apps.api.app.schemas.pretrade import (
     PreTradeReviewItemOut,
     PreTradeReviewRecommendationSummary,
     PreTradeScenarioDraft,
+    PreTradeScenarioEnrichmentOut,
 )
 
 PRETRADE_REVIEW_PRESET_KEY = "pretrade_review"
@@ -78,6 +79,16 @@ def review_source_scenario_id(record: ReportPreset) -> int | None:
 def review_recommendation_run_id(record: ReportPreset) -> int | None:
     recommendation_run_id = review_record_payload(record).get("recommendation_run_id")
     return recommendation_run_id if isinstance(recommendation_run_id, int) else None
+
+
+def review_enrichment(record: ReportPreset) -> PreTradeScenarioEnrichmentOut | None:
+    raw_enrichment = review_record_payload(record).get("enrichment")
+    if not isinstance(raw_enrichment, dict):
+        return None
+    try:
+        return PreTradeScenarioEnrichmentOut.model_validate(raw_enrichment)
+    except ValidationError:
+        return None
 
 
 def review_recommendation_override_reason(record: ReportPreset) -> str | None:
@@ -251,6 +262,7 @@ def to_review_out(
         draft=review_draft(record),
         source_scenario_id=review_source_scenario_id(record),
         recommendation_run_id=recommendation_run_id,
+        enrichment=review_enrichment(record),
         recommendation_summary=(
             recommendation_summary_by_id.get(recommendation_run_id)
             if recommendation_run_id is not None and recommendation_summary_by_id

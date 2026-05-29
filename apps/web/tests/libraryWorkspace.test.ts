@@ -14,6 +14,7 @@ import { LibraryWorkspace } from '../src/workspaces/library/LibraryWorkspace'
 import {
   canExecuteDocumentActionPlanWorkflow,
   canRequestDocumentActionApproval,
+  canRequestDocumentRecordCreation,
   workflowActionButtonLabel,
 } from '../src/workspaces/library/libraryWorkspaceSupport'
 
@@ -486,6 +487,32 @@ describe('LibraryWorkspace', () => {
     expect(canExecuteDocumentActionPlanWorkflow(approvalWorkflow)).toBe(false)
     expect(canRequestDocumentActionApproval(approvalWorkflow)).toBe(true)
     expect(workflowActionButtonLabel(approvalWorkflow)).toBe('Approval Required')
+  })
+
+  it('labels missing-record intake workflows as creation requests', () => {
+    const intakeWorkflow = buildWorkflow({
+      workflow_id: 'request_missing_record_creation',
+      label: 'Request Missing Record Creation',
+      action_type: 'MANUAL_REVIEW',
+      operation_type: 'stage_record_creation_request',
+      candidate_state: 'OWNER_REQUIRED',
+      status: 'READY',
+      target: {
+        record_type: 'TRADE_INVOICE',
+        record_id: null,
+        record_label: 'Create Trade Invoice',
+        existing_record: false,
+      },
+      owner: null,
+      required_owner_record_types: ['TRADE'],
+      governance_status: 'MANUAL_REVIEW_REQUIRED',
+      approval_required: false,
+      risk_flags: ['WORK_INTAKE'],
+      disabled_reason: null,
+    })
+
+    expect(canRequestDocumentRecordCreation(intakeWorkflow)).toBe(true)
+    expect(workflowActionButtonLabel(intakeWorkflow)).toBe('Request Creation')
   })
 
   it('surfaces document load failures in the main empty state', () => {

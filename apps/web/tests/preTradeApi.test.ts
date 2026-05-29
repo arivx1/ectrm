@@ -18,6 +18,8 @@ vi.mock('../src/shared/api.ts', () => ({
 import {
   analyzePreTradeRecommendationDraft,
   createPreTradeRecommendationRun,
+  createPreTradeReviewItem,
+  createPreTradeScenario,
   loadPreTradeReviewDrift,
 } from '../src/entities/pretrade/api.ts'
 
@@ -173,6 +175,97 @@ test('createPreTradeRecommendationRun can rely on server-collected live snapshot
   })
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer token-123')
+})
+
+test('scenario and review payloads can include optional pre-trade enrichment', async () => {
+  const enrichment = {
+    opportunity_category: 'RISK_REDUCTION' as const,
+    hedge_intent: 'SWAP' as const,
+    residual_exposure_summary: 'Residual exposure falls inside desk appetite.',
+    source_freshness_summary: 'All 6 source snapshots were OK at capture.',
+    reviewer_focus: ['Confirm target price against the latest mark.'],
+    recommendation_run_id: 44,
+    recommendation_run_key: 'run-44',
+    recommendation_stance: 'PROCEED' as const,
+    recommendation_score: 96,
+    recommendation_headline: 'Proceed with standard controls.',
+    captured_at: '2026-04-23T18:00:00Z',
+  }
+  postJsonMock.mockResolvedValueOnce({
+    scenario_id: 17,
+    name: 'May gas hedge',
+    thesis: 'Use live evidence.',
+    draft,
+    enrichment,
+    created_at: '2026-04-23T18:00:00Z',
+    created_by: 'trader_one',
+    updated_at: '2026-04-23T18:00:00Z',
+    updated_by: 'trader_one',
+    version: 1,
+    can_edit: true,
+  })
+  postJsonMock.mockResolvedValueOnce({
+    review_id: 22,
+    name: 'May gas hedge',
+    thesis: 'Use live evidence.',
+    draft,
+    source_scenario_id: 17,
+    recommendation_run_id: 44,
+    enrichment,
+    recommendation_summary: null,
+    recommendation_override_reason: null,
+    recommendation_override_by: null,
+    recommendation_override_at: null,
+    review_status: 'OPEN',
+    owner: null,
+    due_at: null,
+    review_notes: 'Review the enriched handoff.',
+    linked_trade_id: null,
+    linked_trade_status: null,
+    booked_at: null,
+    booked_by: null,
+    approval_governance_snapshot: null,
+    booking_governance_snapshot: null,
+    activity: [],
+    created_at: '2026-04-23T18:00:00Z',
+    created_by: 'trader_one',
+    updated_at: '2026-04-23T18:00:00Z',
+    updated_by: 'trader_one',
+    version: 1,
+    can_edit: true,
+  })
+
+  await createPreTradeScenario('http://api.test', 'token-123', {
+    name: 'May gas hedge',
+    thesis: 'Use live evidence.',
+    draft,
+    enrichment,
+  })
+  await createPreTradeReviewItem('http://api.test', 'token-123', {
+    name: 'May gas hedge',
+    thesis: 'Use live evidence.',
+    draft,
+    source_scenario_id: 17,
+    recommendation_run_id: 44,
+    enrichment,
+    review_notes: 'Review the enriched handoff.',
+  })
+
+  assert.deepEqual(postJsonMock.mock.calls[0][1], {
+    name: 'May gas hedge',
+    thesis: 'Use live evidence.',
+    draft,
+    enrichment,
+  })
+  assert.deepEqual(postJsonMock.mock.calls[1][1], {
+    name: 'May gas hedge',
+    thesis: 'Use live evidence.',
+    draft,
+    source_scenario_id: 17,
+    recommendation_run_id: 44,
+    enrichment,
+    review_notes: 'Review the enriched handoff.',
+  })
 })
 
 test('loadPreTradeReviewDrift fetches the review drift contract', async () => {

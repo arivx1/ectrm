@@ -541,6 +541,103 @@
 .admin-weather-row-detail span {
   color: rgba(15, 23, 42, 0.72);
   font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.admin-price-source-view {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 1rem;
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  scroll-margin-top: 1rem;
+}
+
+.admin-price-source-view-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.admin-price-source-view-head h4,
+.admin-price-source-view-head p,
+.admin-price-source-detail-section dd,
+.admin-price-source-fact p {
+  overflow-wrap: anywhere;
+}
+
+.admin-price-source-view-head h4 {
+  margin: 0.15rem 0 0;
+}
+
+.admin-price-source-view-head p {
+  color: rgba(15, 23, 42, 0.72);
+  margin: 0.3rem 0 0;
+}
+
+.admin-price-source-summary-grid,
+.admin-price-source-detail-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.admin-price-source-fact,
+.admin-price-source-detail-section {
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 0.75rem;
+  padding: 0.85rem;
+}
+
+.admin-price-source-fact {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.admin-price-source-fact span,
+.admin-price-source-detail-section dt {
+  color: rgba(15, 23, 42, 0.58);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.admin-price-source-fact strong {
+  color: rgba(15, 23, 42, 0.92);
+}
+
+.admin-price-source-fact p {
+  color: rgba(15, 23, 42, 0.72);
+  margin: 0;
+}
+
+.admin-price-source-detail-section h5 {
+  margin: 0 0 0.75rem;
+}
+
+.admin-price-source-detail-section dl {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.admin-price-source-detail-section dl div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.admin-price-source-detail-section dd {
+  color: rgba(15, 23, 42, 0.78);
+  margin: 0;
+}
+
+.admin-price-source-detail-section a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
 }
 
 .admin-weather-grid {

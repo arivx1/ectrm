@@ -43,10 +43,15 @@ export function buildPreTradeWorkflowNote(reviewContext: PreTradeReviewCaptureCo
   const reviewOwner = normalizeOptionalText(reviewContext.reviewOwner)
   const reviewThesis = normalizeOptionalText(reviewContext.reviewThesis)
   const reviewNotes = normalizeOptionalText(reviewContext.reviewNotes)
+  const enrichment = reviewContext.enrichment
   const recommendationSummary = [
-    reviewContext.recommendationRunId ? `#${reviewContext.recommendationRunId}` : null,
-    normalizeOptionalText(reviewContext.recommendationStance),
-    typeof reviewContext.recommendationScore === 'number' ? `score ${reviewContext.recommendationScore}` : null,
+    reviewContext.recommendationRunId ?? enrichment?.recommendation_run_id
+      ? `#${reviewContext.recommendationRunId ?? enrichment?.recommendation_run_id}`
+      : null,
+    normalizeOptionalText(reviewContext.recommendationStance ?? enrichment?.recommendation_stance),
+    typeof (reviewContext.recommendationScore ?? enrichment?.recommendation_score) === 'number'
+      ? `score ${reviewContext.recommendationScore ?? enrichment?.recommendation_score}`
+      : null,
   ]
     .filter(Boolean)
     .join(' • ')
@@ -70,11 +75,26 @@ export function buildPreTradeWorkflowNote(reviewContext: PreTradeReviewCaptureCo
   if (recommendationSummary) {
     lines.push(`Recommendation run: ${recommendationSummary}`)
   }
-  if (reviewContext.recommendationHeadline) {
-    lines.push(`Recommendation: ${reviewContext.recommendationHeadline}`)
+  if (reviewContext.recommendationHeadline ?? enrichment?.recommendation_headline) {
+    lines.push(`Recommendation: ${reviewContext.recommendationHeadline ?? enrichment?.recommendation_headline}`)
   }
   if (reviewContext.recommendationRationale) {
     lines.push(`Recommendation rationale: ${reviewContext.recommendationRationale}`)
+  }
+  if (enrichment?.opportunity_category) {
+    lines.push(`Opportunity category: ${enrichment.opportunity_category.replaceAll('_', ' ')}`)
+  }
+  if (enrichment?.hedge_intent) {
+    lines.push(`Hedge intent: ${enrichment.hedge_intent.replaceAll('_', ' ')}`)
+  }
+  if (enrichment?.residual_exposure_summary) {
+    lines.push(`Residual exposure: ${enrichment.residual_exposure_summary}`)
+  }
+  if (enrichment?.source_freshness_summary) {
+    lines.push(`Source freshness: ${enrichment.source_freshness_summary}`)
+  }
+  if (enrichment?.reviewer_focus.length) {
+    lines.push(`Reviewer focus: ${enrichment.reviewer_focus.join(' | ')}`)
   }
   if (reviewContext.recommendationOverrideReason) {
     const overrideSummary = [

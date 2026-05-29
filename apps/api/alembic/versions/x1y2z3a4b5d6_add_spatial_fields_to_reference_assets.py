@@ -1,6 +1,6 @@
 """add spatial fields to reference assets
 
-Revision ID: x1y2z3a4b5c6
+Revision ID: x1y2z3a4b5d6
 Revises: w0x1y2z3a4b
 Create Date: 2026-04-25 18:30:00.000000
 """
@@ -14,7 +14,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "x1y2z3a4b5c6"
+revision: str = "x1y2z3a4b5d6"
 down_revision: Union[str, Sequence[str], None] = "w0x1y2z3a4b"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

@@ -21,6 +21,28 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_tables = set(inspector.get_table_names())
+    expected_tables = {
+        "delivery_truck_details",
+        "delivery_truck_movements",
+        "delivery_truck_stops",
+        "delivery_tracking_signals",
+    }
+    if expected_tables.issubset(existing_tables):
+        signal_indexes = {
+            index["name"]
+            for index in inspector.get_indexes("delivery_tracking_signals")
+        }
+        if "ix_delivery_tracking_signals_source_system_event_id" not in signal_indexes:
+            op.create_index(
+                "ix_delivery_tracking_signals_source_system_event_id",
+                "delivery_tracking_signals",
+                ["source_system", "source_event_id"],
+            )
+        return
+
     op.create_table(
         "delivery_truck_details",
         sa.Column("delivery_id", sa.String(length=96), nullable=False),

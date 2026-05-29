@@ -60,6 +60,64 @@ Do not add an agent-only shortcut when a human work object or service boundary
 already exists. The goal is one governed platform surface that humans and
 agents can both use with appropriate permissions.
 
+## Consolidated Use Case Repository
+
+This repository captures user-provided use cases that should be evaluated
+against the governed platform spine before being converted into work packages,
+durable work objects, deterministic services, or agent toolkit surfaces.
+
+### Priority 1: Gas Pipeline Statement Ingestion, Actualization, And Settlement/Accrual Tie-Outs
+
+- Value: High
+- Complexity: Medium-High
+
+Scope:
+
+A. Ingestion and extraction
+
+- Ingest pipeline statements across many formats.
+- Extract volumes, receipt and delivery points, nominations, actuals, and
+  statement values.
+- Create actualization-ready records.
+
+B. Workflow automation and reconciliation
+
+- Support producer services workflows.
+- Prepare records for invoicing and settlement.
+- Support monthly gas nominations, accruals, statement tie-outs, and
+  reconciliation workflows.
+
+### Priority 2: Power / ISO Invoice Ingestion And Settlement Reconciliation
+
+- Value: High
+- Complexity: Very High
+
+Scope:
+
+A. Ingestion and normalization
+
+- Ingest ISO invoices and downloads.
+- Normalize products, charge codes, prices, volumes, hourly and five-minute
+  data, day-ahead and real-time markets, FTRs, and other ISO-specific fields.
+
+B. Reconciliation and exception management
+
+- Reconcile ISO data against Openlink / trading-system records.
+- Surface price, volume, charge-code, and allocation-style exceptions.
+- Support investigation of complex ISO settlement breaks.
+
+### Priority 3: Environmental OTC Recap / Confirmation Processing
+
+- Value: Medium
+- Complexity: Medium
+
+Scope:
+
+- Process environmental trade recaps.
+- Extract data from OTC confirmations, long-form contracts, emails, and
+  IM-driven execution records.
+- Structure trade details for review or downstream processing.
+
 ## Persona Use Cases
 
 ### Trader

@@ -22,6 +22,10 @@ from apps.api.app.domains.documents.services.document_linkage import build_docum
 from apps.api.app.domains.documents.services.document_record_links import create_document_record_link
 from apps.api.app.domains.documents.services.document_record_links import list_document_record_links
 from apps.api.app.domains.documents.services.document_record_links import to_document_record_link_out
+from apps.api.app.domains.documents.services.document_record_creation_requests import (
+    document_record_creation_requests_table_available,
+    list_document_record_creation_requests_for_document,
+)
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.external_data_run import ExternalDataRun
@@ -30,6 +34,7 @@ from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.schemas.document import DocumentActionGovernanceOut
 from apps.api.app.schemas.document import DocumentActionPlanOut
 from apps.api.app.schemas.document import DocumentLinkageAssessmentOut
+from apps.api.app.schemas.document import DocumentRecordCreationRequestOut
 from apps.api.app.schemas.document import DocumentRecordLinkOut
 from apps.api.app.schemas.document import DocumentWorkflowExecutionOut
 from apps.api.app.schemas.document import DocumentWorkflowListOut
@@ -143,6 +148,14 @@ class _PreparedPriceObservation:
     raw_payload: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class _WorkflowReadiness:
+    status: str
+    disabled_reason: str | None = None
+    missing_evidence: tuple[str, ...] = ()
+    reasons: tuple[str, ...] = ()
+
+
 WORKFLOW_DEFINITIONS: tuple[DocumentWorkflowDefinition, ...] = (
     DocumentWorkflowDefinition(
         workflow_id=PROCESS_PRICES_WORKFLOW_ID,
@@ -193,7 +206,7 @@ def list_document_workflows(
     )
     workflows.extend(
         [
-            _to_workflow_out(definition, review_status=document.review_status)
+            _to_workflow_out(db, definition, review_status=document.review_status, pages=pages)
             for definition in WORKFLOW_DEFINITIONS
             if definition.document_kind == document_kind
         ]
@@ -203,6 +216,24 @@ def list_document_workflows(
         db,
         document_id=document.document_id,
     )
+    record_creation_requests: list[DocumentRecordCreationRequestOut] = []
+    if document_record_creation_requests_table_available(db):
+        record_creation_requests = list_document_record_creation_requests_for_document(
+            db,
+            document_id=document.document_id,
+            status_filter="OPEN",
+        )
+        record_creation_workflow = _record_creation_intake_workflow(
+            document_kind=document_kind,
+            document_type_label=document_type_label,
+            review_status=document.review_status,
+            action_plan=DocumentActionPlanOut.model_validate(action_plan),
+            governance=DocumentActionGovernanceOut.model_validate(governance.to_snapshot()),
+            record_creation_requests=record_creation_requests,
+        )
+        if record_creation_workflow is not None:
+            workflows.append(record_creation_workflow)
+            workflows = _dedupe_workflows(workflows)
     return DocumentWorkflowListOut(
         document_id=document_id,
         document_kind=document_kind,
@@ -215,6 +246,7 @@ def list_document_workflows(
             if pending_approval_request is not None
             else None
         ),
+        record_creation_requests=record_creation_requests,
         record_links=record_links,
         workflows=workflows,
         empty_message=NO_WORKFLOWS_MESSAGE,
@@ -372,6 +404,70 @@ def _record_effect(action_plan: DocumentActionPlanOut) -> str:
             return "Update delivery schedule detail fields from reviewed document evidence."
         return f"Update existing {target.record_type.replace('_', ' ').lower()} from reviewed document evidence."
     return "Review only; no business record mutation."
+
+
+def _record_creation_intake_workflow(
+    *,
+    document_kind: str | None,
+    document_type_label: str | None,
+    review_status: str,
+    action_plan: DocumentActionPlanOut,
+    governance: DocumentActionGovernanceOut,
+    record_creation_requests: list[DocumentRecordCreationRequestOut],
+) -> DocumentWorkflowOut | None:
+    target = action_plan.target
+    if target is None or target.existing_record:
+        return None
+    if action_plan.status != "BLOCKED" or action_plan.action_type != "MANUAL_REVIEW":
+        return None
+    if action_plan.candidate_state not in {"OWNER_REQUIRED", "MANUAL_REVIEW"}:
+        return None
+    if action_plan.candidate_state == "MANUAL_REVIEW" and "typed_creation_service" not in action_plan.missing_evidence:
+        return None
+
+    open_request = next(
+        (
+            request
+            for request in record_creation_requests
+            if request.status == "OPEN" and request.target_record_type == target.record_type
+        ),
+        None,
+    )
+    disabled_reason = None
+    status = "READY"
+    if open_request is not None:
+        status = "EXECUTED"
+        disabled_reason = f"Record creation request {open_request.request_id} is already open for this document."
+    elif review_status != "VERIFIED":
+        status = "REVIEW"
+        disabled_reason = "Verify the document before requesting missing record creation intake."
+
+    return DocumentWorkflowOut(
+        workflow_id="request_missing_record_creation",
+        label="Request Missing Record Creation",
+        document_kind=document_kind or "UNKNOWN",
+        document_type_label=document_type_label or "Unknown Document",
+        description="Create an internal work item for the missing target record implied by this document.",
+        status=status,
+        recommended=True,
+        action_type="MANUAL_REVIEW",
+        operation_type="stage_record_creation_request",
+        candidate_state=action_plan.candidate_state,
+        record_effect="Create internal intake only; no business record mutation.",
+        target=target,
+        owner=action_plan.owner,
+        required_owner_record_types=list(action_plan.required_owner_record_types),
+        missing_evidence=list(action_plan.missing_evidence),
+        governance_status=governance.status,
+        recommended_execution_mode="MANUAL",
+        approval_required=False,
+        risk_flags=["WORK_INTAKE"],
+        disabled_reason=disabled_reason,
+        reasons=[
+            "The document implies a target record that cannot be created safely from the current action plan.",
+            *action_plan.reasons[:3],
+        ][:4],
+    )
 
 
 def _disabled_reason(
@@ -830,19 +926,98 @@ def _workflow_definition(
     return None
 
 
-def _to_workflow_out(definition: DocumentWorkflowDefinition, *, review_status: str) -> DocumentWorkflowOut:
-    is_verified = review_status == "VERIFIED"
+def _to_workflow_out(
+    db: Session,
+    definition: DocumentWorkflowDefinition,
+    *,
+    review_status: str,
+    pages: list[DocumentIngestionPage],
+) -> DocumentWorkflowOut:
+    readiness = _workflow_readiness(
+        db,
+        definition=definition,
+        review_status=review_status,
+        pages=pages,
+    )
     return DocumentWorkflowOut(
         workflow_id=definition.workflow_id,
         label=definition.label,
         document_kind=definition.document_kind,
         document_type_label=definition.document_type_label,
         description=definition.description,
-        status="READY" if is_verified else "BLOCKED",
+        status=readiness.status,
         recommended=False,
         operation_type=definition.workflow_id,
         record_effect="Load reviewed document rows into a supported system table.",
-        disabled_reason=None if is_verified else "Verify the document before executing this workflow.",
+        missing_evidence=list(readiness.missing_evidence),
+        disabled_reason=readiness.disabled_reason,
+        reasons=list(readiness.reasons),
+    )
+
+
+def _workflow_readiness(
+    db: Session,
+    *,
+    definition: DocumentWorkflowDefinition,
+    review_status: str,
+    pages: list[DocumentIngestionPage],
+) -> _WorkflowReadiness:
+    if review_status != "VERIFIED":
+        return _WorkflowReadiness(
+            status="BLOCKED",
+            disabled_reason="Verify the document before executing this workflow.",
+            missing_evidence=("verified_document",),
+            reasons=("Document review is not verified yet.",),
+        )
+
+    if definition.workflow_id == PROCESS_PRICES_WORKFLOW_ID:
+        return _process_prices_readiness(db, pages=pages)
+
+    return _WorkflowReadiness(status="READY")
+
+
+def _process_prices_readiness(
+    db: Session,
+    *,
+    pages: list[DocumentIngestionPage],
+) -> _WorkflowReadiness:
+    try:
+        price_rows = _extract_price_rows(pages)
+    except ValueError as exc:
+        message = str(exc)
+        return _WorkflowReadiness(
+            status="BLOCKED",
+            disabled_reason=message,
+            missing_evidence=("valid_price_rows",),
+            reasons=(message,),
+        )
+
+    if not price_rows:
+        message = (
+            "Add a reviewed Price field or at least one Price Lines row before executing "
+            "this workflow."
+        )
+        return _WorkflowReadiness(
+            status="BLOCKED",
+            disabled_reason=message,
+            missing_evidence=("reviewed_price_rows",),
+            reasons=("No reviewed price rows were found in this price publication document.",),
+        )
+
+    try:
+        _load_price_indices(db, price_rows)
+    except ValueError as exc:
+        message = str(exc)
+        return _WorkflowReadiness(
+            status="BLOCKED",
+            disabled_reason=message,
+            missing_evidence=("configured_price_index",),
+            reasons=(message,),
+        )
+
+    return _WorkflowReadiness(
+        status="READY",
+        reasons=("Reviewed price rows and active price-index references are available.",),
     )
 
 

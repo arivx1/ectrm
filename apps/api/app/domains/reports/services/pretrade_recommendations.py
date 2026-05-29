@@ -59,6 +59,7 @@ from apps.api.app.schemas.pretrade import (
     PreTradeRecommendationTransformationEdgeOut,
     PreTradeReviewRecommendationSummary,
     PreTradeScenarioDraft,
+    PreTradeScenarioEnrichmentOut,
     PreTradeTransformationEdgeType,
 )
 
@@ -2362,6 +2363,111 @@ def build_recommendation_run_payload(
         "input_snapshots": [snapshot.model_dump(mode="json", exclude_none=True) for snapshot in input_snapshots],
         "recommendation": recommendation.model_dump(mode="json", exclude_none=True),
     }
+
+
+def _enrichment_source_freshness_summary(snapshots: list[PreTradeRecommendationSourceSnapshot]) -> str | None:
+    if not snapshots:
+        return "No source snapshots were captured with this recommendation run."
+
+    impaired_snapshots = [
+        snapshot
+        for snapshot in snapshots
+        if not snapshot.source_available
+        or snapshot.quality_status != "OK"
+        or snapshot.freshness in {"STALE", "DEGRADED", "UNKNOWN"}
+    ]
+    if not impaired_snapshots:
+        return f"All {len(snapshots)} source snapshot{'s' if len(snapshots) != 1 else ''} were OK at capture."
+
+    labels = [
+        snapshot.adapter_label or snapshot.adapter_key or snapshot.source_key
+        for snapshot in impaired_snapshots[:4]
+    ]
+    suffix = f" plus {len(impaired_snapshots) - 4} more" if len(impaired_snapshots) > 4 else ""
+    return (
+        f"{len(impaired_snapshots)} of {len(snapshots)} source snapshot"
+        f"{'s' if len(snapshots) != 1 else ''} need review: {', '.join(labels)}{suffix}."
+    )
+
+
+def _enrichment_residual_exposure_summary(recommendation: PreTradeRecommendationResultOut) -> str | None:
+    residual_exposure = recommendation.residual_exposure
+    if residual_exposure is None:
+        return None
+
+    values = [
+        f"current {residual_exposure.current_net_position:g}"
+        if residual_exposure.current_net_position is not None
+        else None,
+        f"delta {residual_exposure.proposed_trade_delta:+g}"
+        if residual_exposure.proposed_trade_delta is not None
+        else None,
+        f"residual {residual_exposure.residual_after_trade:g}"
+        if residual_exposure.residual_after_trade is not None
+        else None,
+        residual_exposure.exposure_effect.replace("_", " ").lower()
+        if residual_exposure.exposure_effect != "UNKNOWN"
+        else None,
+    ]
+    numeric_summary = "; ".join(value for value in values if value)
+    if numeric_summary:
+        return f"{residual_exposure.detail} ({numeric_summary})."
+    return residual_exposure.detail
+
+
+def _enrichment_review_focus(recommendation: PreTradeRecommendationResultOut) -> list[str]:
+    focus_items: list[str] = []
+    focus_items.extend(recommendation.explanation.reviewer_focus)
+    focus_items.extend(recommendation.next_actions)
+    focus_items.extend(
+        f"{item.severity}: {item.detail}"
+        for item in recommendation.missing_evidence
+    )
+    if recommendation.hedge_recommendation is not None:
+        focus_items.extend(recommendation.hedge_recommendation.policy_stops)
+    if recommendation.arbitrage_candidate is not None:
+        focus_items.extend(recommendation.arbitrage_candidate.missing_evidence)
+        focus_items.extend(recommendation.arbitrage_candidate.stop_reasons)
+
+    normalized_items: list[str] = []
+    seen_items: set[str] = set()
+    for item in focus_items:
+        normalized_item = item.strip()
+        if not normalized_item:
+            continue
+        item_key = normalized_item.casefold()
+        if item_key in seen_items:
+            continue
+        normalized_items.append(normalized_item)
+        seen_items.add(item_key)
+        if len(normalized_items) >= 8:
+            break
+    return normalized_items
+
+
+def build_pretrade_scenario_enrichment(run: PreTradeRecommendationRunOut) -> PreTradeScenarioEnrichmentOut:
+    recommendation = run.recommendation
+    return PreTradeScenarioEnrichmentOut(
+        opportunity_category=(
+            recommendation.opportunity_summary.category
+            if recommendation.opportunity_summary is not None
+            else None
+        ),
+        hedge_intent=(
+            recommendation.hedge_recommendation.instrument_type
+            if recommendation.hedge_recommendation is not None
+            else None
+        ),
+        residual_exposure_summary=_enrichment_residual_exposure_summary(recommendation),
+        source_freshness_summary=_enrichment_source_freshness_summary(run.input_snapshots),
+        reviewer_focus=_enrichment_review_focus(recommendation),
+        recommendation_run_id=run.run_id if run.run_id > 0 else None,
+        recommendation_run_key=run.run_key,
+        recommendation_stance=recommendation.stance,
+        recommendation_score=recommendation.score,
+        recommendation_headline=recommendation.headline,
+        captured_at=run.created_at,
+    )
 
 
 def build_pretrade_recommendation_draft_analysis(

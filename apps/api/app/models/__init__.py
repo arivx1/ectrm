@@ -28,6 +28,7 @@ from apps.api.app.models.document_logical_document import DocumentLogicalDocumen
 from apps.api.app.models.document_action_approval_request import DocumentActionApprovalRequest
 from apps.api.app.models.document_action_decision import DocumentActionDecision
 from apps.api.app.models.document_facet_value import DocumentFacetValue
+from apps.api.app.models.document_record_creation_request import DocumentRecordCreationRequest
 from apps.api.app.models.document_record_link import DocumentRecordLink
 from apps.api.app.models.gmail_inbox_import_receipt import GmailInboxImportReceipt
 from apps.api.app.models.event import Base, Event
@@ -128,6 +129,7 @@ __all__ = [
     "DocumentActionApprovalRequest",
     "DocumentActionDecision",
     "DocumentFacetValue",
+    "DocumentRecordCreationRequest",
     "DocumentRecordLink",
     "GmailInboxImportReceipt",
     "Event",

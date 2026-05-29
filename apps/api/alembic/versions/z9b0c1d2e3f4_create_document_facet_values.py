@@ -21,6 +21,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    if sa.inspect(bind).has_table("document_facet_values"):
+        return
+
     op.create_table(
         "document_facet_values",
         sa.Column("facet_value_id", sa.Integer(), autoincrement=True, nullable=False),

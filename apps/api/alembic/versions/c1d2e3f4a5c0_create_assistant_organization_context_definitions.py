@@ -1,6 +1,6 @@
 """create assistant organization context definitions
 
-Revision ID: c1d2e3f4a5b6
+Revision ID: c1d2e3f4a5c0
 Revises: z3a4b5c6d7e8
 Create Date: 2026-05-10 21:25:00.000000
 """
@@ -14,7 +14,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "c1d2e3f4a5b6"
+revision: str = "c1d2e3f4a5c0"
 down_revision: Union[str, Sequence[str], None] = "z3a4b5c6d7e8"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

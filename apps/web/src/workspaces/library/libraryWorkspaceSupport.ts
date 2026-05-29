@@ -94,12 +94,25 @@ export function canRequestDocumentActionApproval(workflow: DocumentWorkflowRecor
   )
 }
 
+export function canRequestDocumentRecordCreation(workflow: DocumentWorkflowRecord): boolean {
+  return (
+    workflow.workflow_id === 'request_missing_record_creation' &&
+    workflow.status === 'READY' &&
+    workflow.operation_type === 'stage_record_creation_request' &&
+    workflow.target?.existing_record === false &&
+    !workflow.disabled_reason
+  )
+}
+
 export function workflowActionButtonLabel(workflow: DocumentWorkflowRecord): string {
   if (canExecuteDocumentActionPlanWorkflow(workflow)) {
     return 'Attach'
   }
   if (canExecuteDocumentWorkflow(workflow)) {
     return 'Execute'
+  }
+  if (canRequestDocumentRecordCreation(workflow)) {
+    return 'Request Creation'
   }
   if (workflow.status === 'EXECUTED') {
     return 'Executed'
@@ -115,6 +128,9 @@ export function workflowActionButtonLabel(workflow: DocumentWorkflowRecord): str
 
 export function workflowDisabledReason(workflow: DocumentWorkflowRecord): string | null {
   if (canExecuteDocumentActionPlanWorkflow(workflow)) {
+    return null
+  }
+  if (canRequestDocumentRecordCreation(workflow)) {
     return null
   }
   if (workflow.disabled_reason) {

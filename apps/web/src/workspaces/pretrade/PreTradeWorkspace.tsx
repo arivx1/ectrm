@@ -47,6 +47,10 @@ import type {
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { TileLayout, type WorkspaceTile } from '../../shared/ui/TileLayout'
+import {
+  buildPreTradeScenarioEnrichmentFromAnalysis,
+  buildPreTradeScenarioEnrichmentFromRun,
+} from './preTradeScenarioEnrichment'
 import { buildPreTradeStructuringDraftPacket } from './preTradeStructuringDraft'
 import {
   findLatestCounterpartyExternalSnapshot,
@@ -245,6 +249,7 @@ function buildApprovedReviewCaptureContext(review: PreTradeReviewItemRecord): Pr
     recommendationStance: review.recommendation_summary?.stance ?? null,
     recommendationScore: review.recommendation_summary?.score ?? null,
     recommendationRationale: review.recommendation_summary?.explanation?.stance_rationale ?? null,
+    enrichment: review.enrichment,
     recommendationOverrideReason: review.recommendation_override_reason,
     recommendationOverrideBy: review.recommendation_override_by,
     recommendationOverrideAt: review.recommendation_override_at,
@@ -699,12 +704,14 @@ export function PreTradeWorkspace({
 
   async function handleSaveScenario() {
     const resolvedName = scenarioName.trim() || buildScenarioTitle(draft)
+    const enrichment = buildPreTradeScenarioEnrichmentFromAnalysis(draftAnalysis)
     await withAuthenticatedAction('save-scenario', async (accessToken) => {
       if (selectedScenarioId !== null) {
         const updated = await updatePreTradeScenario(appConfig.apiBase, accessToken, selectedScenarioId, {
           name: resolvedName,
           thesis: scenarioThesis.trim() || null,
           draft,
+          ...(enrichment ? { enrichment } : {}),
         })
         setScenarioName(updated.name)
         setScenarioThesis(updated.thesis ?? '')
@@ -713,6 +720,7 @@ export function PreTradeWorkspace({
           name: resolvedName,
           thesis: scenarioThesis.trim() || null,
           draft,
+          ...(enrichment ? { enrichment } : {}),
         })
         setSelectedScenarioId(created.scenario_id)
         setScenarioName(created.name)
@@ -788,12 +796,20 @@ export function PreTradeWorkspace({
         sourceScenarioId,
         sourceScenario,
       })
+      const analysisEnrichment =
+        sourceScenario === null || sourceScenarioId === selectedScenarioId
+          ? buildPreTradeScenarioEnrichmentFromAnalysis(draftAnalysis)
+          : null
+      const reviewEnrichment = recommendationRun
+        ? buildPreTradeScenarioEnrichmentFromRun(recommendationRun)
+        : sourceScenario?.enrichment ?? analysisEnrichment
       await createPreTradeReviewItem(appConfig.apiBase, accessToken, {
         name: resolvedName,
         thesis: resolvedThesis,
         draft: resolvedDraft,
         source_scenario_id: sourceScenarioId ?? undefined,
         recommendation_run_id: recommendationRun?.run_id ?? undefined,
+        enrichment: reviewEnrichment ?? undefined,
         review_notes: reviewPacket.reviewNotes,
       })
       await refreshPersistedState(accessToken)
@@ -1157,6 +1173,15 @@ export function PreTradeWorkspace({
                     {review.recommendation_summary ? (
                       <small>
                         Recommendation {review.recommendation_summary.stance.replaceAll('_', ' ')} | score {review.recommendation_summary.score}
+                      </small>
+                    ) : null}
+                    {review.enrichment ? (
+                      <small>
+                        {[
+                          review.enrichment.opportunity_category?.replaceAll('_', ' '),
+                          review.enrichment.hedge_intent ? `hedge ${review.enrichment.hedge_intent.replaceAll('_', ' ')}` : null,
+                          review.enrichment.source_freshness_summary,
+                        ].filter(Boolean).join(' | ')}
                       </small>
                     ) : null}
                     {review.recommendation_override_reason ? (
@@ -2003,6 +2028,15 @@ export function PreTradeWorkspace({
                   <span>{scenario.draft.book} | {scenario.draft.commodity} | {scenario.draft.trade_side}</span>
                 </div>
                 <small>Updated {formatDate(scenario.updated_at)}</small>
+                {scenario.enrichment ? (
+                  <small>
+                    {[
+                      scenario.enrichment.opportunity_category?.replaceAll('_', ' '),
+                      scenario.enrichment.hedge_intent ? `hedge ${scenario.enrichment.hedge_intent.replaceAll('_', ' ')}` : null,
+                      scenario.enrichment.source_freshness_summary,
+                    ].filter(Boolean).join(' | ')}
+                  </small>
+                ) : null}
                 <p>{scenario.thesis ?? 'No thesis captured yet.'}</p>
                 <div className="pretrade-inline-actions">
                   <button type="button" className="button button-secondary" onClick={() => handleLoadScenario(scenario)}>
@@ -2133,6 +2167,19 @@ export function PreTradeWorkspace({
                   ) : (
                     <p className="form-note">No saved recommendation run is attached to this review yet.</p>
                   )}
+                  {review.enrichment ? (
+                    <div className="pretrade-record-card pretrade-record-static">
+                      <div>
+                        <strong>{review.enrichment.opportunity_category?.replaceAll('_', ' ') ?? 'Scenario rationale'}</strong>
+                        <span>{review.enrichment.hedge_intent ? `Hedge ${review.enrichment.hedge_intent.replaceAll('_', ' ')}` : 'No hedge intent'}</span>
+                      </div>
+                      {review.enrichment.residual_exposure_summary ? <p>{review.enrichment.residual_exposure_summary}</p> : null}
+                      {review.enrichment.source_freshness_summary ? <small>{review.enrichment.source_freshness_summary}</small> : null}
+                      {review.enrichment.reviewer_focus.length > 0 ? (
+                        <p className="form-note">{review.enrichment.reviewer_focus.slice(0, 2).join(' | ')}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {review.recommendation_override_reason ? (
                     <p className="form-note">
                       Override logged by {review.recommendation_override_by ?? 'reviewer'}

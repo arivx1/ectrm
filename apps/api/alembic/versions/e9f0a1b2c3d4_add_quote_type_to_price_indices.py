@@ -21,10 +21,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "reference_price_indices",
-        sa.Column("quote_type", sa.String(length=20), nullable=False, server_default="SPOT"),
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {column["name"] for column in inspector.get_columns("reference_price_indices")}
+
+    if "quote_type" not in columns:
+        op.add_column(
+            "reference_price_indices",
+            sa.Column("quote_type", sa.String(length=20), nullable=False, server_default="SPOT"),
+        )
     op.alter_column("reference_price_indices", "quote_type", server_default=None)
 
 

@@ -271,6 +271,18 @@ def _activity_label_and_detail(
             else ""
         )
         return "Workflow Executed", f"{actor} executed {workflow_label}.{count_text}"
+    if event.event_type == "DocumentRecordCreationRequested":
+        target_label = payload.get("target_record_label") or payload.get("target_record_type") or "record"
+        return "Record Needed", f"{actor} requested creation intake for {target_label}."
+    if event.event_type == "DocumentRecordCreationResolved":
+        request = _dict_payload(payload.get("request"))
+        link = _dict_payload(payload.get("record_link"))
+        target_label = link.get("record_label") or request.get("target_record_label") or "the resolved record"
+        return "Record Request Resolved", f"{actor} resolved missing-record intake with {target_label}."
+    if event.event_type == "DocumentRecordCreationCancelled":
+        request = _dict_payload(payload.get("request"))
+        target_label = request.get("target_record_label") or request.get("target_record_type") or "record"
+        return "Record Request Cancelled", f"{actor} cancelled creation intake for {target_label}."
     if event.event_type.startswith("DocumentActionApproval"):
         request = _dict_payload(payload.get("request"))
         title = request.get("title") or request.get("action_type") or "document action"

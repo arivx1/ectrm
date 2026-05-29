@@ -11,6 +11,7 @@ import type {
   PreTradeReviewItemRecord,
   PreTradeReviewStatus,
   PreTradeScenarioDraft,
+  PreTradeScenarioEnrichmentRecord,
   PreTradeScenarioRecord,
 } from '../../shared/models'
 
@@ -22,12 +23,14 @@ export type CreatePreTradeScenarioPayload = {
   name: string
   thesis?: string | null
   draft: PreTradeScenarioDraft
+  enrichment?: PreTradeScenarioEnrichmentRecord | null
 }
 
 export type UpdatePreTradeScenarioPayload = {
   name?: string | null
   thesis?: string | null
   draft?: PreTradeScenarioDraft
+  enrichment?: PreTradeScenarioEnrichmentRecord | null
 }
 
 export type CreatePreTradeReviewItemPayload = {
@@ -36,6 +39,7 @@ export type CreatePreTradeReviewItemPayload = {
   draft: PreTradeScenarioDraft
   source_scenario_id?: number | null
   recommendation_run_id?: number | null
+  enrichment?: PreTradeScenarioEnrichmentRecord | null
   owner?: string | null
   due_at?: string | null
   review_notes?: string | null
@@ -46,6 +50,7 @@ export type UpdatePreTradeReviewItemPayload = {
   thesis?: string | null
   draft?: PreTradeScenarioDraft
   recommendation_run_id?: number | null
+  enrichment?: PreTradeScenarioEnrichmentRecord | null
   recommendation_override_reason?: string | null
   review_status?: PreTradeReviewStatus
   owner?: string | null

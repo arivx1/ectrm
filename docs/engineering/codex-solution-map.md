@@ -96,7 +96,7 @@ domain-first packages. New business logic should normally live under
 | Risk | `domains/risk`, `routes/positions.py`, `routes/option_exposures.py` | Exposure views, option exposure logic, risk-oriented projections and exceptions. |
 | Operations | `domains/operations` | Confirmations, deliveries, shipments, workflow items, actualization, operational resources, tracking. |
 | Settlement and accruals | `domains/settlement`, `domains/accruals`, settlement-adjacent operations services | Invoice/payment state, settlement posture, accrual lots and entries, settlement exceptions. |
-| Documents | `domains/documents`, `routes/documents.py` | Ingestion, classification, extraction review, deterministic facets, linkage, document action planning. |
+| Documents | `domains/documents`, `routes/documents.py` | Ingestion, classification, extraction review, deterministic facets, linkage, document action planning, and missing-record creation intake/resolution. |
 | Reports | `domains/reports` | Aggregation, report definitions, presets, exports, prompt-resolved read-only report lenses, and summaries over governed domain outputs. |
 | Home view instances | `domains/home_views`, `routes/home_view_definitions.py`, assistant read tools in `domains/assistant/services/tools.py`, recipe registry in `domains/home_views/services/recipes.py` | System Home template metadata, personal and shared Home definitions, card registry and card configuration value validation, deterministic Home view recipes, shared lifecycle/admin inventory, assistant-readable Home catalog/visible-instance inspection, governed personal `create_home_view_instance` staging/execution, scope/audit fields, and reset behavior. Not live business data truth. |
 | Assistant and AI gateway | `domains/assistant`, `routes/assistant.py` | Prompt assembly, live tools, managed agents, run traces, evals, action planning, action governance. |
@@ -233,12 +233,12 @@ contract for staged or executable mutations.
      or the Library session override
   -> packet split provenance and logical-document review serialization
   -> routing/linkage/action planning at the logical-document boundary
-  -> optional governed action request
+  -> optional governed action request or missing-record creation intake
 ```
 
 Document AI output can help extract or normalize, but deterministic scoring,
-packet boundaries, review state, linkage, and business-record mutations must
-remain explicit and testable.
+packet boundaries, review state, linkage, creation-intake state, intake
+resolution, and business-record mutations must remain explicit and testable.
 
 ### Codex Task Flow
 
@@ -298,6 +298,7 @@ Current risks to keep in view:
 | Managed agent config/governance | `agent_admin.py`, `policies.py`, `eval_gates.py`, admin UI | Assistant evals and focused admin API/web tests. |
 | Document classification or facets | `domains/documents/services/document_classification_scoring.py`, `document_facets.py`, fixtures | `make api-document-classification-evals`, focused document tests. |
 | Document action planning | `document_action_planning.py`, approval/execution/governance services | Document action tests and assistant/action eval coverage when relevant. |
+| Missing document record intake | `document_record_creation_requests.py`, `document_workflows.py`, `routes/documents.py`, Library workspace | Focused document record-creation tests plus Library API/support tests. |
 | Operations/delivery workflow | `domains/operations`, shipment/delivery workspaces | Focused operations/delivery API tests and web tests. |
 | Settlement or accrual state | `domains/settlement`, `domains/accruals`, settlement workspace | Settlement/accrual API tests; ensure immutable correction patterns. |
 | Reports | `domains/reports`, reports workspace | Report API tests and focused web tests; verify rules come from governed services or typed read-only resolvers where applicable. |
@@ -351,6 +352,14 @@ For general architecture:
 - [ADR 0002](../adr/0002-v2-application-architecture.md)
 - [Governed Core Platform Roadmap](./core-platform-roadmap.md)
 - [Governed Core Platform Boundary Reset](./core-platform-boundary-reset.md)
+
+For commodity product direction, vertical workflow packs, and report-pack
+scoping:
+
+- [Opinionated Commodity Workflow Roadmap](./opinionated-commodity-workflow-roadmap.md)
+- [Business Use Case Roadmap](./business-use-case-roadmap.md)
+- [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md)
+- [Trading UI Familiarity Reference](./trading-ui-familiarity-reference.md)
 
 For trade lifecycle and the governed core:
 

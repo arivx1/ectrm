@@ -31,6 +31,14 @@ from apps.api.app.domains.documents.services.document_candidate_actions import (
     execute_selected_document_record_candidate_attach,
     stage_selected_document_record_candidate_approval_request,
 )
+from apps.api.app.domains.documents.services.document_record_creation_requests import (
+    DocumentRecordCreationRequestPersistenceUnavailable,
+    cancel_document_record_creation_request,
+    list_document_record_creation_requests,
+    resolve_document_record_creation_request,
+    stage_document_record_creation_request,
+    to_document_record_creation_request_out,
+)
 from apps.api.app.domains.documents.services.document_workflows import execute_document_workflow
 from apps.api.app.domains.documents.services.document_workflows import list_document_workflows
 from apps.api.app.domains.documents.services.ingestion import get_document_ingestion
@@ -53,6 +61,10 @@ from apps.api.app.schemas.document import DocumentGmailInboxImportResultOut
 from apps.api.app.schemas.document import DocumentActionApprovalDecisionRequest
 from apps.api.app.schemas.document import DocumentActionApprovalRequestCreate
 from apps.api.app.schemas.document import DocumentActionApprovalRequestOut
+from apps.api.app.schemas.document import DocumentRecordCreationRequestCancel
+from apps.api.app.schemas.document import DocumentRecordCreationRequestCreate
+from apps.api.app.schemas.document import DocumentRecordCreationRequestOut
+from apps.api.app.schemas.document import DocumentRecordCreationRequestResolve
 from apps.api.app.schemas.document import DocumentRecordCandidateSelectionRequest
 from apps.api.app.schemas.document import DocumentIngestionPageUpdate
 from apps.api.app.schemas.document import DocumentIngestionProcessRequest
@@ -158,6 +170,33 @@ def get_document_action_approval_requests(
 
     def load_requests() -> list[DocumentActionApprovalRequestOut]:
         return list_document_action_approval_requests(
+            db,
+            status_filter=status_filter,
+            limit=limit,
+        )
+
+    return execute_http_action(
+        db,
+        load_requests,
+        handled_exceptions=VALIDATION_ERROR_STATUS_CODES,
+    )
+
+
+@router.get("/record-creation-requests", response_model=list[DocumentRecordCreationRequestOut])
+def get_document_record_creation_requests(
+    request: Request,
+    status_filter: str | None = Query(default="OPEN", alias="status", max_length=24),
+    limit: int = Query(default=50, ge=1, le=250),
+    db: Session = Depends(get_db),
+) -> list[DocumentRecordCreationRequestOut]:
+    require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can view document record creation requests.",
+    )
+
+    def load_requests() -> list[DocumentRecordCreationRequestOut]:
+        return list_document_record_creation_requests(
             db,
             status_filter=status_filter,
             limit=limit,
@@ -600,6 +639,122 @@ def post_selected_record_candidate_approval_request(
         stage_request,
         commit=True,
         handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
+
+
+@router.post(
+    "/{document_id}/record-creation-requests",
+    response_model=DocumentRecordCreationRequestOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_document_record_creation_request(
+    document_id: str,
+    request: Request,
+    payload: DocumentRecordCreationRequestCreate | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> DocumentRecordCreationRequestOut:
+    actor_id = require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can request missing document record creation.",
+    )
+    changes = payload.model_dump(exclude_unset=True) if payload is not None else {}
+
+    def stage_request() -> DocumentRecordCreationRequestOut:
+        staged = stage_document_record_creation_request(
+            db,
+            document_id=document_id,
+            actor_id=actor_id,
+            request_comment=changes.get("request_comment"),
+        )
+        return to_document_record_creation_request_out(staged)
+
+    return execute_http_action(
+        db,
+        stage_request,
+        commit=True,
+        handled_exceptions=(
+            *NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+            (DocumentRecordCreationRequestPersistenceUnavailable, status.HTTP_503_SERVICE_UNAVAILABLE),
+        ),
+    )
+
+
+@router.post(
+    "/{document_id}/record-creation-requests/{request_id}/resolve",
+    response_model=DocumentRecordCreationRequestOut,
+)
+def post_resolve_document_record_creation_request(
+    document_id: str,
+    request_id: int,
+    payload: DocumentRecordCreationRequestResolve,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DocumentRecordCreationRequestOut:
+    actor_id = require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can resolve document record creation requests.",
+    )
+
+    def resolve_request() -> DocumentRecordCreationRequestOut:
+        resolved = resolve_document_record_creation_request(
+            db,
+            document_id=document_id,
+            request_id=request_id,
+            actor_id=actor_id,
+            record_type=payload.record_type,
+            record_id=payload.record_id,
+            resolution_comment=payload.resolution_comment,
+        )
+        return to_document_record_creation_request_out(resolved)
+
+    return execute_http_action(
+        db,
+        resolve_request,
+        commit=True,
+        handled_exceptions=(
+            *NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+            (DocumentRecordCreationRequestPersistenceUnavailable, status.HTTP_503_SERVICE_UNAVAILABLE),
+        ),
+    )
+
+
+@router.post(
+    "/{document_id}/record-creation-requests/{request_id}/cancel",
+    response_model=DocumentRecordCreationRequestOut,
+)
+def post_cancel_document_record_creation_request(
+    document_id: str,
+    request_id: int,
+    payload: DocumentRecordCreationRequestCancel,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DocumentRecordCreationRequestOut:
+    actor_id = require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can cancel document record creation requests.",
+    )
+
+    def cancel_request() -> DocumentRecordCreationRequestOut:
+        cancelled = cancel_document_record_creation_request(
+            db,
+            document_id=document_id,
+            request_id=request_id,
+            actor_id=actor_id,
+            resolution_comment=payload.resolution_comment,
+        )
+        return to_document_record_creation_request_out(cancelled)
+
+    return execute_http_action(
+        db,
+        cancel_request,
+        commit=True,
+        handled_exceptions=(
+            *NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+            (DocumentRecordCreationRequestPersistenceUnavailable, status.HTTP_503_SERVICE_UNAVAILABLE),
+        ),
     )
 
 

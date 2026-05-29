@@ -1082,6 +1082,36 @@ export type DocumentActionApprovalRequestRecord = {
   decided_by: string | null
 }
 
+export type DocumentRecordCreationRequestRecord = {
+  request_id: number
+  document_id: string
+  status: 'OPEN' | 'RESOLVED' | 'CANCELLED'
+  document_kind: string | null
+  target_record_type: string
+  target_record_label: string
+  owner_record_type: string | null
+  owner_record_id: string | null
+  required_owner_record_types: string[]
+  matched_keys: string[]
+  missing_evidence: string[]
+  captured_fields: Record<string, unknown>
+  title: string
+  description: string
+  request_comment: string | null
+  resolution_comment: string | null
+  linkage_snapshot: Record<string, unknown>
+  action_plan_snapshot: Record<string, unknown>
+  resolved_record_type: string | null
+  resolved_record_id: string | null
+  requested_at: string
+  requested_by: string
+  resolved_at: string | null
+  resolved_by: string | null
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
 export type DocumentWorkflowRecord = {
   workflow_id: string
   label: string
@@ -1114,6 +1144,7 @@ export type DocumentWorkflowListRecord = {
   action_plan: DocumentActionPlanRecord | null
   governance: DocumentActionGovernanceRecord | null
   pending_approval_request: DocumentActionApprovalRequestRecord | null
+  record_creation_requests: DocumentRecordCreationRequestRecord[]
   record_links: DocumentRecordLinkRecord[]
   workflows: DocumentWorkflowRecord[]
   empty_message: string
@@ -2364,11 +2395,26 @@ export type PreTradeScenarioDraft = {
   delivery_end: string | null
 }
 
+export type PreTradeScenarioEnrichmentRecord = {
+  opportunity_category: PreTradeOpportunityCategory | null
+  hedge_intent: PreTradeHedgeInstrumentType | null
+  residual_exposure_summary: string | null
+  source_freshness_summary: string | null
+  reviewer_focus: string[]
+  recommendation_run_id: number | null
+  recommendation_run_key: string | null
+  recommendation_stance: PreTradeRecommendationStance | null
+  recommendation_score: number | null
+  recommendation_headline: string | null
+  captured_at: string | null
+}
+
 export type PreTradeScenarioRecord = {
   scenario_id: number
   name: string
   thesis: string | null
   draft: PreTradeScenarioDraft
+  enrichment: PreTradeScenarioEnrichmentRecord | null
   created_at: string
   created_by: string
   updated_at: string
@@ -2458,6 +2504,7 @@ export type PreTradeReviewItemRecord = {
   draft: PreTradeScenarioDraft
   source_scenario_id: number | null
   recommendation_run_id: number | null
+  enrichment: PreTradeScenarioEnrichmentRecord | null
   recommendation_summary: PreTradeReviewRecommendationSummaryRecord | null
   recommendation_override_reason: string | null
   recommendation_override_by: string | null
@@ -2831,6 +2878,7 @@ export type PreTradeReviewCaptureContext = {
   recommendationStance: PreTradeRecommendationStance | null
   recommendationScore: number | null
   recommendationRationale: string | null
+  enrichment: PreTradeScenarioEnrichmentRecord | null
   recommendationOverrideReason: string | null
   recommendationOverrideBy: string | null
   recommendationOverrideAt: string | null

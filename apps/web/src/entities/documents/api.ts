@@ -6,6 +6,7 @@ import type {
   DocumentGmailInboxMessageDetailRecord,
   DocumentIngestionRecord,
   DocumentProcessorRuntimeSettingsRecord,
+  DocumentRecordCreationRequestRecord,
   DocumentSchemaRegistryRecord,
   DocumentWorkflowExecutionRecord,
   DocumentWorkflowListRecord,
@@ -96,6 +97,20 @@ export type ListDocumentActionApprovalRequestsInput = {
 
 export type StageDocumentActionApprovalRequestInput = {
   request_comment?: string | null
+}
+
+export type StageDocumentRecordCreationRequestInput = {
+  request_comment?: string | null
+}
+
+export type ResolveDocumentRecordCreationRequestInput = {
+  record_type: string
+  record_id: string
+  resolution_comment?: string | null
+}
+
+export type CancelDocumentRecordCreationRequestInput = {
+  resolution_comment: string
 }
 
 export type DecideDocumentActionApprovalRequestInput = {
@@ -399,6 +414,53 @@ export async function stageSelectedDocumentRecordCandidateApprovalRequest(
 ): Promise<DocumentActionApprovalRequestRecord> {
   return postJson<DocumentActionApprovalRequestRecord>(
     `${apiBase}/documents/${documentId}/record-candidate-attachments/approval-requests`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function stageDocumentRecordCreationRequest(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  payload: StageDocumentRecordCreationRequestInput = {},
+): Promise<DocumentRecordCreationRequestRecord> {
+  return postJson<DocumentRecordCreationRequestRecord>(
+    `${apiBase}/documents/${documentId}/record-creation-requests`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function resolveDocumentRecordCreationRequest(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  requestId: number,
+  payload: ResolveDocumentRecordCreationRequestInput,
+): Promise<DocumentRecordCreationRequestRecord> {
+  return postJson<DocumentRecordCreationRequestRecord>(
+    `${apiBase}/documents/${documentId}/record-creation-requests/${requestId}/resolve`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function cancelDocumentRecordCreationRequest(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  requestId: number,
+  payload: CancelDocumentRecordCreationRequestInput,
+): Promise<DocumentRecordCreationRequestRecord> {
+  return postJson<DocumentRecordCreationRequestRecord>(
+    `${apiBase}/documents/${documentId}/record-creation-requests/${requestId}/cancel`,
     payload as Record<string, unknown>,
     {
       headers: documentHeaders(session),

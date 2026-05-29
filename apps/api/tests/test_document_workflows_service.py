@@ -16,6 +16,7 @@ from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
+from apps.api.app.models.document_record_creation_request import DocumentRecordCreationRequest
 from apps.api.app.models.document_record_link import DocumentRecordLink
 from apps.api.app.models.event import Event
 from apps.api.app.models.external_data_run import ExternalDataRun
@@ -46,6 +47,7 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
         with self.SessionLocal() as session:
             session.query(MutationProvenanceRecord).delete()
             session.query(Event).delete()
+            session.query(DocumentRecordCreationRequest).delete()
             session.query(DocumentRecordLink).delete()
             session.query(PriceIndexObservation).delete()
             session.query(ExternalDataRun).delete()
@@ -385,10 +387,58 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
         self.assertEqual(price_workflows.workflows[0].label, "Match Existing Record")
         self.assertEqual(price_workflows.workflows[0].candidate_state, "ATTACH_READY")
         self.assertEqual(price_workflows.workflows[1].label, "Process Prices")
+        self.assertEqual(price_workflows.workflows[1].status, "READY")
+        self.assertIsNone(price_workflows.workflows[1].disabled_reason)
         self.assertEqual(price_workflows.linkage_assessment.primary_record_type, "PRICE_INDEX")
-        self.assertEqual([workflow.workflow_id for workflow in invoice_workflows.workflows], ["create_invoice_from_document"])
+        self.assertEqual(
+            [workflow.workflow_id for workflow in invoice_workflows.workflows],
+            ["create_invoice_from_document", "request_missing_record_creation"],
+        )
         self.assertEqual(invoice_workflows.workflows[0].status, "BLOCKED")
         self.assertEqual(invoice_workflows.empty_message, "No workflows assigned to this document type.")
+
+    def test_process_prices_workflow_blocks_when_reviewed_price_rows_are_missing(self) -> None:
+        with self.SessionLocal() as session:
+            self._seed_price_index(session)
+            document = self._seed_verified_document(
+                session,
+                document_id="DOC-PRICE-NO-ROWS",
+                header_fields=[
+                    {"field_key": "publication_date", "value": "2026-04-15"},
+                    {"field_key": "observation_date", "value": "2026-04-15"},
+                    {"field_key": "price_index_code", "value": "WTI_CUSHING_D"},
+                    {"field_key": "source_provider", "value": "EIA"},
+                    {"field_key": "source_series_id", "value": "PET.RWTC.D"},
+                ],
+            )
+            session.commit()
+
+            workflows = list_document_workflows(session, document_id=document.document_id)
+
+        process_workflow = next(
+            workflow for workflow in workflows.workflows if workflow.workflow_id == "process_prices"
+        )
+        self.assertEqual(process_workflow.status, "BLOCKED")
+        self.assertEqual(process_workflow.missing_evidence, ["reviewed_price_rows"])
+        self.assertIn("Add a reviewed Price field", process_workflow.disabled_reason)
+        self.assertIn("No reviewed price rows", process_workflow.reasons[0])
+
+    def test_process_prices_workflow_blocks_when_price_index_is_not_configured(self) -> None:
+        with self.SessionLocal() as session:
+            document = self._seed_verified_document(
+                session,
+                document_id="DOC-PRICE-MISSING-INDEX",
+            )
+            session.commit()
+
+            workflows = list_document_workflows(session, document_id=document.document_id)
+
+        process_workflow = next(
+            workflow for workflow in workflows.workflows if workflow.workflow_id == "process_prices"
+        )
+        self.assertEqual(process_workflow.status, "BLOCKED")
+        self.assertEqual(process_workflow.missing_evidence, ["configured_price_index"])
+        self.assertIn("not configured", process_workflow.disabled_reason)
 
     def test_workflow_summary_exposes_create_invoice_candidate_under_trade(self) -> None:
         with self.SessionLocal() as session:
@@ -690,13 +740,46 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
             workflows = list_document_workflows(session, document_id=document.document_id)
 
         self.assertEqual(workflows.action_plan.candidate_state, "OWNER_REQUIRED")
-        self.assertEqual([workflow.workflow_id for workflow in workflows.workflows], ["create_invoice_from_document"])
+        self.assertEqual(
+            [workflow.workflow_id for workflow in workflows.workflows],
+            ["create_invoice_from_document", "request_missing_record_creation"],
+        )
         create_workflow = workflows.workflows[0]
         self.assertEqual(create_workflow.status, "BLOCKED")
         self.assertEqual(create_workflow.candidate_state, "OWNER_REQUIRED")
         self.assertEqual(create_workflow.required_owner_record_types, ["TRADE"])
         self.assertIn("owner:TRADE", create_workflow.missing_evidence)
         self.assertIn("confirmed owner record", create_workflow.disabled_reason)
+        intake_workflow = workflows.workflows[1]
+        self.assertEqual(intake_workflow.status, "READY")
+        self.assertEqual(intake_workflow.operation_type, "stage_record_creation_request")
+        self.assertEqual(intake_workflow.record_effect, "Create internal intake only; no business record mutation.")
+
+    def test_workflow_summary_skips_record_creation_intake_when_table_is_missing(self) -> None:
+        DocumentRecordCreationRequest.__table__.drop(bind=self.engine, checkfirst=True)
+        try:
+            with self.SessionLocal() as session:
+                document = self._seed_verified_document(
+                    session,
+                    document_id="DOC-INVOICE-WF-MISSING-INTAKE-TABLE",
+                    document_kind="INVOICE",
+                    header_fields=[
+                        {"field_key": "invoice_number", "value": "INV-WF-MISSING"},
+                        {"field_key": "invoice_date", "value": "2026-04-14"},
+                        {"field_key": "due_date", "value": "2026-04-20"},
+                        {"field_key": "counterparty", "value": "Shell Trading"},
+                        {"field_key": "total_amount", "value": "125000"},
+                    ],
+                )
+                session.commit()
+
+                workflows = list_document_workflows(session, document_id=document.document_id)
+        finally:
+            DocumentRecordCreationRequest.__table__.create(bind=self.engine, checkfirst=True)
+
+        self.assertEqual(workflows.action_plan.candidate_state, "OWNER_REQUIRED")
+        self.assertEqual([workflow.workflow_id for workflow in workflows.workflows], ["create_invoice_from_document"])
+        self.assertEqual(workflows.record_creation_requests, [])
 
     def test_execute_process_prices_writes_price_observation_and_links_document(self) -> None:
         with self.SessionLocal() as session:

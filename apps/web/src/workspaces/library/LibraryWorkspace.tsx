@@ -17,7 +17,9 @@ import {
   executeDocumentWorkflow,
   fetchDocumentSource,
   listDocumentWorkflows,
+  resolveDocumentRecordCreationRequest,
   stageDocumentActionApprovalRequest,
+  stageDocumentRecordCreationRequest,
   stageSelectedDocumentRecordCandidateApprovalRequest,
 } from '../../entities/documents/api'
 import { DocumentFacetEditor } from '../../features/documents/DocumentFacetEditor'
@@ -51,6 +53,7 @@ import type {
   DocumentIngestionPageRecord,
   DocumentIngestionRecord,
   DocumentLinkageCandidateRecord,
+  DocumentRecordCreationRequestRecord,
   DocumentWorkflowExecutionRecord,
   DocumentWorkflowListRecord,
   DocumentWorkflowRecord,
@@ -59,6 +62,7 @@ import type { StoredAuthSession } from '../../shared/mutation'
 import {
   buildDocumentLibraryCollectionCounts,
   canRequestDocumentActionApproval,
+  canRequestDocumentRecordCreation,
   canExecuteDocumentActionPlanWorkflow,
   canExecuteWorkflowAction,
   documentCanBeVerified,
@@ -207,6 +211,20 @@ function canAttachSelectedWorkflowCandidate(candidate: DocumentLinkageCandidateR
   )
 }
 
+function openRecordCreationRequestForCandidate(
+  candidate: DocumentLinkageCandidateRecord | null,
+  workflowList: DocumentWorkflowListRecord | null,
+): DocumentRecordCreationRequestRecord | null {
+  if (!candidate?.existing_record || !candidate.record_id) {
+    return null
+  }
+  return (
+    (workflowList?.record_creation_requests ?? []).find(
+      (request) => request.status === 'OPEN' && request.target_record_type === candidate.record_type,
+    ) ?? null
+  )
+}
+
 function workflowCandidateBlockedReason(
   candidate: DocumentLinkageCandidateRecord,
   workflowList: DocumentWorkflowListRecord | null,
@@ -245,7 +263,13 @@ function canRequestSelectedWorkflowCandidateApproval(
   )
 }
 
-function selectedWorkflowCandidateActionLabel(candidate: DocumentLinkageCandidateRecord): string {
+function selectedWorkflowCandidateActionLabel(
+  candidate: DocumentLinkageCandidateRecord,
+  workflowList: DocumentWorkflowListRecord | null = null,
+): string {
+  if (openRecordCreationRequestForCandidate(candidate, workflowList)) {
+    return 'Resolve Request'
+  }
   if (canAttachSelectedWorkflowCandidate(candidate)) {
     return 'Attach Selected'
   }
@@ -702,6 +726,10 @@ export function LibraryWorkspace({
     workflowList?.linkage_assessment?.candidates.find(
       (candidate) => workflowCandidateKey(candidate) === selectedWorkflowCandidateKey,
     ) ?? null
+  const selectedWorkflowRecordCreationRequest = openRecordCreationRequestForCandidate(
+    selectedWorkflowCandidate,
+    workflowList,
+  )
   const selectedWorkflowCandidateBlockedReason = selectedWorkflowCandidate
     ? workflowCandidateBlockedReason(selectedWorkflowCandidate, workflowList)
     : null
@@ -1053,6 +1081,38 @@ export function LibraryWorkspace({
     }
   }
 
+  async function handleRequestRecordCreationWorkflow(workflow: DocumentWorkflowRecord) {
+    if (!authSession || !workflowDialogDocumentId) {
+      setWorkflowError('Sign in before requesting record creation intake.')
+      return
+    }
+
+    const documentId = workflowDialogDocumentId
+    setExecutingWorkflowId(workflow.workflow_id)
+    setWorkflowError('')
+    setWorkflowExecution(null)
+    setWorkflowActionMessage('')
+    try {
+      const recordRequest = await stageDocumentRecordCreationRequest(
+        appConfig.apiBase,
+        authSession,
+        documentId,
+        {
+          request_comment: `Requested from Library workflow: ${workflow.label}`,
+        },
+      )
+      setWorkflowActionMessage(`Record creation request ${recordRequest.request_id} is open for ${recordRequest.target_record_label}.`)
+      const nextWorkflows = await listDocumentWorkflows(appConfig.apiBase, authSession, documentId)
+      setWorkflowList(nextWorkflows)
+    } catch (error) {
+      setWorkflowError(error instanceof Error ? error.message : 'Unable to request record creation intake.')
+    } finally {
+      setExecutingWorkflowId((current) =>
+        current === workflow.workflow_id ? null : current,
+      )
+    }
+  }
+
   async function handleAttachSelectedWorkflowCandidate(candidate: DocumentLinkageCandidateRecord) {
     if (!authSession || !workflowDialogDocumentId || !candidate.record_id) {
       setWorkflowError('Select a concrete record candidate before attaching.')
@@ -1086,6 +1146,50 @@ export function LibraryWorkspace({
       setSelectedWorkflowCandidateKey(null)
     } catch (error) {
       setWorkflowError(error instanceof Error ? error.message : 'Unable to attach the selected record candidate.')
+    } finally {
+      setExecutingWorkflowId((current) => (current === actionKey ? null : current))
+    }
+  }
+
+  async function handleResolveRecordCreationCandidate(
+    candidate: DocumentLinkageCandidateRecord,
+    recordRequest: DocumentRecordCreationRequestRecord,
+  ) {
+    if (!authSession || !workflowDialogDocumentId || !candidate.record_id) {
+      setWorkflowError('Select a concrete record candidate before resolving the request.')
+      return
+    }
+
+    const documentId = workflowDialogDocumentId
+    const actionKey = `candidate:${workflowCandidateKey(candidate)}`
+    setExecutingWorkflowId(actionKey)
+    setWorkflowError('')
+    setWorkflowExecution(null)
+    setWorkflowActionMessage('')
+    try {
+      const resolvedRequest = await resolveDocumentRecordCreationRequest(
+        appConfig.apiBase,
+        authSession,
+        documentId,
+        recordRequest.request_id,
+        {
+          record_type: candidate.record_type,
+          record_id: candidate.record_id,
+          resolution_comment: `Resolved from Library candidate selection: ${candidate.record_label}`,
+        },
+      )
+      setWorkflowActionMessage(
+        `Resolved record creation request ${resolvedRequest.request_id} with ${candidate.record_label}.`,
+      )
+      setExecutedWorkflowDocumentIds((current) => ({
+        ...current,
+        [documentId]: true,
+      }))
+      const nextWorkflows = await listDocumentWorkflows(appConfig.apiBase, authSession, documentId)
+      setWorkflowList(nextWorkflows)
+      setSelectedWorkflowCandidateKey(null)
+    } catch (error) {
+      setWorkflowError(error instanceof Error ? error.message : 'Unable to resolve the record creation request.')
     } finally {
       setExecutingWorkflowId((current) => (current === actionKey ? null : current))
     }
@@ -2623,7 +2727,12 @@ export function LibraryWorkspace({
                             Boolean(selectedWorkflowCandidateBlockedReason)
                           }
                           onClick={() =>
-                            canAttachSelectedWorkflowCandidate(selectedWorkflowCandidate)
+                            selectedWorkflowRecordCreationRequest
+                              ? void handleResolveRecordCreationCandidate(
+                                  selectedWorkflowCandidate,
+                                  selectedWorkflowRecordCreationRequest,
+                                )
+                              : canAttachSelectedWorkflowCandidate(selectedWorkflowCandidate)
                               ? void handleAttachSelectedWorkflowCandidate(selectedWorkflowCandidate)
                               : void handleRequestSelectedWorkflowCandidateApproval(selectedWorkflowCandidate)
                           }
@@ -2634,7 +2743,7 @@ export function LibraryWorkspace({
                               ? 'Approval Pending'
                               : selectedWorkflowCandidateBlockedReason
                                 ? 'Manual Review Required'
-                              : selectedWorkflowCandidateActionLabel(selectedWorkflowCandidate)}
+                              : selectedWorkflowCandidateActionLabel(selectedWorkflowCandidate, workflowList)}
                         </button>
                       </div>
                     ) : null}
@@ -2647,12 +2756,23 @@ export function LibraryWorkspace({
                     const canExecute = canExecuteWorkflowAction(workflow)
                     const canRequestApproval =
                       canRequestDocumentActionApproval(workflow) && !workflowPendingApprovalRequest
-                    const buttonEnabled = canExecute || canRequestApproval
+                    const openRecordCreationRequest = (workflowList.record_creation_requests ?? []).find(
+                      (request) =>
+                        request.status === 'OPEN' &&
+                        workflow.target?.record_type === request.target_record_type,
+                    ) ?? null
+                    const canRequestRecordCreation =
+                      canRequestDocumentRecordCreation(workflow) && !openRecordCreationRequest
+                    const buttonEnabled = canExecute || canRequestApproval || canRequestRecordCreation
                     const buttonLabel = workflowPendingApprovalRequest && workflow.approval_required
                       ? 'Approval Pending'
-                      : canRequestApproval
-                        ? 'Request Approval'
-                        : workflowActionButtonLabel(workflow)
+                      : openRecordCreationRequest && workflow.workflow_id === 'request_missing_record_creation'
+                        ? 'Request Open'
+                        : canRequestRecordCreation
+                          ? 'Request Creation'
+                          : canRequestApproval
+                            ? 'Request Approval'
+                            : workflowActionButtonLabel(workflow)
                     const requiredOwnerTypes = workflow.required_owner_record_types ?? []
                     const missingEvidence = workflow.missing_evidence ?? []
                     const riskFlags = workflow.risk_flags ?? []
@@ -2753,6 +2873,8 @@ export function LibraryWorkspace({
                             onClick={() =>
                               canRequestApproval
                                 ? void handleRequestWorkflowApproval(workflow)
+                                : canRequestRecordCreation
+                                  ? void handleRequestRecordCreationWorkflow(workflow)
                                 : void handleExecuteWorkflow(workflow)
                             }
                           >
@@ -2779,7 +2901,7 @@ export function LibraryWorkspace({
 
             {workflowActionMessage ? (
               <div className="library-workflow-result">
-                <strong>Attach complete</strong>
+                <strong>Workflow updated</strong>
                 <p>{workflowActionMessage}</p>
               </div>
             ) : null}

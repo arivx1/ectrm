@@ -154,6 +154,47 @@ proposal form until a human owner approves the domain rule.
 - Follow-up: add a first-class schedule or nomination record before promoting
   document flow dates and quantities beyond evidence capture.
 
+### 2026-05-29 - Missing Document Records Become Creation Intake
+
+- Type: algorithm-added
+- Domain: document linkage, Library workflows, record creation intake, and
+  human-owned downstream creation
+- Applies to: verified documents whose action plan is blocked because the
+  target record is missing, an owner record is required, or no typed creation
+  service exists yet
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_record_creation_requests.py`,
+  `apps/api/app/domains/documents/services/document_record_links.py`,
+  `apps/api/app/domains/documents/services/document_workflows.py`,
+  `apps/api/app/routes/documents.py`, and
+  `apps/web/src/workspaces/library/LibraryWorkspace.tsx`
+- Lesson: when a reviewed document implies a real record that cannot safely be
+  created from the current action plan, the Library should persist an open
+  `document_record_creation_requests` intake item with the target type,
+  required owner types, captured fields, missing evidence, linkage snapshot,
+  and action-plan snapshot. This creates operator-owned work intake only; it
+  does not create or mutate the business record. Once the target record exists,
+  close the intake by resolving it through `create_document_record_link`, which
+  validates the target record, attaches the document as provenance, and records
+  the resolved target on the intake item. False positives should be cancelled
+  with an explicit resolution comment.
+- Deterministic opportunity: future packages should resolve these intake items
+  by linking them to typed record-creation services or domain work queues
+  rather than letting freeform document evidence book trades, invoices,
+  deliveries, quality records, or accounting records directly.
+- Agent autonomy impact: agents and Library workflows may stage and explain the
+  missing-record intake item after document verification. They still may not
+  create the implied business record unless a typed service, approval path, and
+  authority rubric allow it.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_document_record_creation_requests_service apps.api.tests.test_document_workflows_service`
+  and
+  `npm --prefix apps/web run test -- documentApi.test.ts libraryWorkspace.test.ts`.
+- Follow-up: connect resolved intake metrics to domain work queues and add
+  resolution support for additional canonical record types as their typed
+  services mature.
+
 ### 2026-05-29 - Pre-Trade Recommendations Carry Typed Evidence And Freshness
 
 - Type: algorithm-added
@@ -263,6 +304,43 @@ proposal form until a human owner approves the domain rule.
   assistant eval coverage when scheduled agentic execution is wired to the
   assistant runtime.
 
+### 2026-05-28 - Commodity Workflow Roadmap Uses Inherited Product Packs
+
+- Type: lesson
+- Domain: commodity product direction, vertical workflow packs, reports,
+  reference data, and agent-facing feature design
+- Applies to: future commodity features, report packs, workflow packs,
+  vertical extensions, and agent tools
+- Status: accepted
+- Source:
+  [Opinionated Commodity Workflow Roadmap](./opinionated-commodity-workflow-roadmap.md),
+  distilled from the user-provided `Commodity Roadmap.pdf`.
+- Lesson: commodity functionality should be designed as inherited product
+  packs: all-commodity foundation first, then sector packs, sub-commodity
+  packs, market-specific extensions, and finally customer configuration. A pack
+  is not ready just because prompts exist; it needs reference data coverage,
+  reusable report templates, at least two data-to-analysis-to-document-to-review
+  workflow loops, source lineage, alerting/monitoring, integration posture, and
+  explicit support boundaries.
+- Deterministic opportunity: promote recurring vertical behavior into typed
+  commodity semantics, formulas, report templates, workflow state, document
+  classifiers, policies, or action contracts. Delivered cost, hedge mapping,
+  certificate eligibility, formula pricing, crop-stage weather impact, plant
+  outage impact, quality/spec checks, and settlement/reconciliation logic
+  should not remain prompt-only when they affect business decisions.
+- Agent autonomy impact: agents may synthesize briefs, draft memos, explain
+  scenarios, triage documents, and stage reviewable actions from governed data,
+  but they must not directly mutate trades, hedges, settlements, payments,
+  certificate retirements, compliance claims, reference data, or external
+  commitments from freeform output.
+- Tests or evidence: docs-only extraction and synthesis from the PDF source;
+  verify future implementations through the owning domain tests, report tests,
+  assistant evals, and browser smoke lanes named in the solution map.
+- Follow-up: when this roadmap becomes execution work, convert it into a
+  tracker with one row per pack, workflow, report, data object, integration, or
+  action type, including owner, data dependencies, stop conditions, launch
+  criteria, and verification lane.
+
 ### 2026-05-27 - Reports Prompt Uses Typed Read-Only Price Lenses
 
 - Type: algorithm-added
@@ -293,6 +371,44 @@ proposal form until a human owner approves the domain rule.
 - Tests or evidence:
   `npm --prefix apps/web run test -- reportsWorkspace.test.ts workspaceRegistry.test.ts`
   `npm --prefix apps/web run lint`, and `npm --prefix apps/web run build`.
+
+### 2026-05-25 - Delivery Evidence Documents Map To Typed Movement Events
+
+- Type: algorithm-added
+- Domain: document linkage, delivery operations, movement-event history, and
+  Library action approvals
+- Applies to: `DELIVERY_CONFIRMATION`, `BILL_OF_LADING`, `DISPATCH_NOTICE`,
+  and `WEIGH_TICKET` document workflows
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_action_planning.py`,
+  `apps/api/app/domains/documents/services/document_action_execution.py`,
+  `apps/api/app/domains/documents/services/document_linkage.py`,
+  `apps/api/app/domains/documents/services/schema_registry.py`,
+  `apps/api/app/domains/operations/services/shipments.py`,
+  `apps/api/tests/test_document_action_planning_service.py`,
+  `apps/api/tests/test_document_action_approval_requests_service.py`, and
+  `apps/api/tests/test_document_workflows_service.py`
+- Lesson: documents that prove movement state should create or attach
+  `DELIVERY_EVENT` evidence, not merely attach to the parent delivery. The
+  deterministic rule table maps delivery confirmations to
+  `DELIVERY_COMPLETED`, bills of lading to `EXECUTION_STARTED`, dispatch
+  notices to `SCHEDULE_COMMITTED`, and weigh tickets to
+  `CHECKPOINT_RECORDED`. If the owning delivery is missing, the document
+  workflow should create or resolve the delivery first rather than appending an
+  orphan movement event.
+- Deterministic opportunity: keep new delivery-evidence document kinds in the
+  same table: define event type, timestamp keys, reference keys, location keys,
+  owner requirements, duplicate matching, and approval tests before making the
+  workflow executable.
+- Agent autonomy impact: agents may explain or stage these delivery-event
+  proposals, but execution must remain behind review and the typed
+  `append_delivery_event` service until explicit movement-event autonomy is
+  approved.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_document_action_planning_service apps.api.tests.test_document_action_approval_requests_service apps.api.tests.test_document_workflows_service apps.api.tests.test_document_action_execution_service apps.api.tests.test_document_linkage_service apps.api.tests.test_document_routing_service apps.api.tests.test_document_action_governance_service`,
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api apps.api.tests.test_document_workflows_service apps.api.tests.test_document_action_approval_requests_service`,
+  and `npm --prefix apps/web run test -- libraryWorkspace.test.ts documentApi.test.ts`.
 
 ### 2026-05-25 - Document-Derived Creates Require Typed Services
 
@@ -934,7 +1050,10 @@ proposal form until a human owner approves the domain rule.
   `PRICE_PUBLICATION` / Price Publication Report documents, and it requires a
   verified document, configured active price-index codes, deterministic row
   extraction, idempotent upsert keys, an `external_data_runs` audit row, and
-  document links back to loaded observations and price indices.
+  document links back to loaded observations and price indices. The Library
+  workflow list should run the same non-mutating preflight for reviewed price
+  rows and active price-index references so an Execute button is not shown for
+  a workflow that can only fail at execution time.
 - Deterministic opportunity: add persisted workflow definitions and approval
   policy only after more document-type workflows need runtime configuration;
   keep the execution service as the source of market-data truth until then.

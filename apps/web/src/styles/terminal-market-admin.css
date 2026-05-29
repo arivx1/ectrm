@@ -214,6 +214,30 @@
   color: var(--terminal-muted);
 }
 
+:root[data-color-mode='dark'] .admin-price-source-view,
+:root[data-color-mode='dark'] .admin-price-source-fact,
+:root[data-color-mode='dark'] .admin-price-source-detail-section {
+  border-color: rgba(126, 154, 184, 0.14);
+  background: rgba(8, 15, 24, 0.72);
+}
+
+:root[data-color-mode='dark'] .admin-price-source-view-head h4,
+:root[data-color-mode='dark'] .admin-price-source-fact strong,
+:root[data-color-mode='dark'] .admin-price-source-detail-section h5 {
+  color: var(--terminal-text);
+}
+
+:root[data-color-mode='dark'] .admin-price-source-view-head p,
+:root[data-color-mode='dark'] .admin-price-source-fact p,
+:root[data-color-mode='dark'] .admin-price-source-detail-section dd {
+  color: var(--terminal-text-soft);
+}
+
+:root[data-color-mode='dark'] .admin-price-source-fact span,
+:root[data-color-mode='dark'] .admin-price-source-detail-section dt {
+  color: var(--terminal-muted);
+}
+
 .pnl-trend-stat-value-up {
   color: var(--terminal-accent-strong);
 }

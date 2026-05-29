@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type {
   CounterpartyCreditPreviewRecord,
   ExternalDataSyncStatusRecord,
@@ -24,7 +24,11 @@ import { ProjectionMonitoringPanel } from './ProjectionMonitoringPanel'
 import { RoadmapAdminPanel } from './RoadmapAdminPanel'
 import { UserManagementPanel } from './UserManagementPanel'
 import { WeatherOperationsPanel } from './WeatherOperationsPanel'
-import { ADMIN_PRICE_SOURCES_SECTION_ID } from './adminRouteAnchors'
+import {
+  ADMIN_PRICE_SOURCES_SECTION_ID,
+  adminPriceSourceDetailAnchorId,
+  readAdminPriceSourceIdFromHash,
+} from './adminRouteAnchors'
 import type { AssistantControlTowerSupervisionIntent } from './assistantSupervisionDraft'
 import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
 
@@ -348,6 +352,14 @@ function sourceEndpointLabel(value: string | null | undefined): string {
   } catch {
     return value
   }
+}
+
+function readSelectedPriceSourceIdFromLocation(): number | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  return readAdminPriceSourceIdFromHash(window.location.hash)
 }
 
 function weatherHealthTone(status: string): 'active' | 'blocked' | 'in-progress' | 'cancelled' {
@@ -704,9 +716,33 @@ export function AdminWorkspace({
   const [assistantSupervisionIntent, setAssistantSupervisionIntent] =
     useState<AssistantControlTowerSupervisionIntent | null>(null)
   const [selectedSchemaEntity, setSelectedSchemaEntity] = useState<SchemaEntityKey>('events')
+  const [selectedPriceSourceId, setSelectedPriceSourceId] = useState<number | null>(
+    readSelectedPriceSourceIdFromLocation,
+  )
   const [screenFilter, setScreenFilter] = useState('')
   const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
   const hasScreenFilter = effectiveScreenFilter.trim().length > 0
+
+  useEffect(() => {
+    function handleHashChange() {
+      setSelectedPriceSourceId(readSelectedPriceSourceIdFromLocation())
+    }
+
+    handleHashChange()
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
+
+  useEffect(() => {
+    if (selectedPriceSourceId === null) {
+      return
+    }
+
+    const anchorId = adminPriceSourceDetailAnchorId(selectedPriceSourceId)
+    window.requestAnimationFrame(() => {
+      document.getElementById(anchorId)?.scrollIntoView({ block: 'start' })
+    })
+  }, [selectedPriceSourceId])
 
   const visibleEvents = useMemo(
     () => events.filter((event) => matchesAdminEventFilter(event, effectiveScreenFilter)),
@@ -742,6 +778,10 @@ export function AdminWorkspace({
         matchesPriceSourceReviewFilter(source, effectiveScreenFilter),
       ),
     [effectiveScreenFilter, externalDataPriceSources],
+  )
+  const selectedPriceSource = useMemo(
+    () => externalDataPriceSources.find((source) => source.id === selectedPriceSourceId) ?? null,
+    [externalDataPriceSources, selectedPriceSourceId],
   )
   const visibleTradingSources = useMemo(
     () => tradingSources.filter((source) => matchesTradingSourceFilter(source, effectiveScreenFilter)),
@@ -1275,6 +1315,226 @@ export function AdminWorkspace({
             )}
           </div>
 
+          {selectedPriceSourceId !== null ? (
+            <section
+              id={adminPriceSourceDetailAnchorId(selectedPriceSourceId)}
+              className="admin-price-source-view"
+              aria-labelledby="admin-price-source-view-title"
+            >
+              {selectedPriceSource ? (
+                <>
+                  <div className="admin-price-source-view-head">
+                    <div>
+                      <span className="eyebrow">Price Source View</span>
+                      <h4 id="admin-price-source-view-title">{selectedPriceSource.price_index_code}</h4>
+                      <p>
+                        {selectedPriceSource.price_index_name ?? 'Unmapped price index'} · {selectedPriceSource.source_system ?? selectedPriceSource.provider} · {selectedPriceSource.series_id}
+                      </p>
+                    </div>
+                    <div className="admin-sync-head-actions">
+                      <span className={`status-pill status-pill-${priceSourceReviewTone(selectedPriceSource.review_status)}`}>
+                        {priceSourceReviewLabel(selectedPriceSource.review_status)}
+                      </span>
+                      <a
+                        className="button button-secondary"
+                        href={`#${ADMIN_PRICE_SOURCES_SECTION_ID}`}
+                        onClick={() => setSelectedPriceSourceId(null)}
+                      >
+                        Back to inventory
+                      </a>
+                    </div>
+                  </div>
+
+                  <div className="admin-price-source-summary-grid">
+                    <article className="admin-price-source-fact">
+                      <span>Latest mark</span>
+                      <strong>
+                        {selectedPriceSource.latest_value != null
+                          ? `${formatNumber(selectedPriceSource.latest_value, 3)} ${selectedPriceSource.latest_unit_code ?? selectedPriceSource.source_unit}${selectedPriceSource.latest_currency_code ? ` ${selectedPriceSource.latest_currency_code}` : ''}`
+                          : 'No observation'}
+                      </strong>
+                      <p>
+                        {selectedPriceSource.latest_observation_date
+                          ? `Observed ${formatDateOnly(selectedPriceSource.latest_observation_date)}`
+                          : 'No observation has landed for this mapping yet'}
+                      </p>
+                    </article>
+                    <article className="admin-price-source-fact">
+                      <span>Pull cadence</span>
+                      <strong>
+                        {selectedPriceSource.scheduler_interval_minutes != null
+                          ? cadenceLabel(selectedPriceSource.scheduler_interval_minutes)
+                          : selectedPriceSource.frequency.toUpperCase()}
+                      </strong>
+                      <p>
+                        {selectedPriceSource.due_for_sync
+                          ? 'Provider is due for sync'
+                          : selectedPriceSource.provider_observation_age_hours != null
+                            ? formatAgeHours(selectedPriceSource.provider_observation_age_hours)
+                            : 'Freshness unknown'}
+                      </p>
+                    </article>
+                    <article className="admin-price-source-fact">
+                      <span>Source status</span>
+                      <strong>{weatherHealthLabel(selectedPriceSource.provider_health_status ?? 'unknown')}</strong>
+                      <p>{selectedPriceSource.latest_run_status ?? 'No run history yet'}</p>
+                    </article>
+                    <article className="admin-price-source-fact">
+                      <span>Transform</span>
+                      <strong>{selectedPriceSource.transform_rule?.trim() ? 'Configured' : 'Raw value'}</strong>
+                      <p>{selectedPriceSource.transform_rule?.trim() || 'Stored directly from provider payload'}</p>
+                    </article>
+                  </div>
+
+                  <div className="admin-price-source-detail-grid">
+                    <section className="admin-price-source-detail-section">
+                      <h5>Mapping</h5>
+                      <dl>
+                        <div>
+                          <dt>Provider</dt>
+                          <dd>{selectedPriceSource.provider}</dd>
+                        </div>
+                        <div>
+                          <dt>Dataset</dt>
+                          <dd>{selectedPriceSource.dataset_code ?? 'Provider default'}</dd>
+                        </div>
+                        <div>
+                          <dt>Series id</dt>
+                          <dd>{selectedPriceSource.series_id}</dd>
+                        </div>
+                        <div>
+                          <dt>Commodity</dt>
+                          <dd>{selectedPriceSource.commodity_code ?? 'No commodity mapping'}</dd>
+                        </div>
+                        <div>
+                          <dt>Market</dt>
+                          <dd>{selectedPriceSource.market ?? 'No market'}</dd>
+                        </div>
+                        <div>
+                          <dt>Location</dt>
+                          <dd>{selectedPriceSource.location_code ?? 'No location'}</dd>
+                        </div>
+                      </dl>
+                    </section>
+
+                    <section className="admin-price-source-detail-section">
+                      <h5>Ingestion</h5>
+                      <dl>
+                        <div>
+                          <dt>Method</dt>
+                          <dd>{selectedPriceSource.ingestion_method ?? 'Provider pull'}</dd>
+                        </div>
+                        <div>
+                          <dt>Trigger</dt>
+                          <dd>{selectedPriceSource.ingestion_mode ?? 'Manual sync'}</dd>
+                        </div>
+                        <div>
+                          <dt>Job</dt>
+                          <dd>{selectedPriceSource.sync_job_name ?? 'No job configured'}</dd>
+                        </div>
+                        <div>
+                          <dt>Lookback</dt>
+                          <dd>{lookbackLabel(selectedPriceSource.default_lookback_days)}</dd>
+                        </div>
+                        <div>
+                          <dt>Run SLA</dt>
+                          <dd>{successSlaLabel(selectedPriceSource.success_sla_hours)}</dd>
+                        </div>
+                        <div>
+                          <dt>Endpoint</dt>
+                          <dd>
+                            {selectedPriceSource.source_endpoint ? (
+                              <a href={selectedPriceSource.source_endpoint} target="_blank" rel="noreferrer">
+                                {sourceEndpointLabel(selectedPriceSource.source_endpoint)}
+                              </a>
+                            ) : (
+                              'No source endpoint'
+                            )}
+                          </dd>
+                        </div>
+                      </dl>
+                    </section>
+
+                    <section className="admin-price-source-detail-section">
+                      <h5>Latest Observation</h5>
+                      <dl>
+                        <div>
+                          <dt>Source frequency</dt>
+                          <dd>{selectedPriceSource.frequency.toUpperCase()}</dd>
+                        </div>
+                        <div>
+                          <dt>Source unit</dt>
+                          <dd>{selectedPriceSource.source_unit}{selectedPriceSource.source_currency_code ? ` ${selectedPriceSource.source_currency_code}` : ''}</dd>
+                        </div>
+                        <div>
+                          <dt>Published</dt>
+                          <dd>{selectedPriceSource.latest_source_published_at ? formatDate(selectedPriceSource.latest_source_published_at) : 'Publication time unknown'}</dd>
+                        </div>
+                        <div>
+                          <dt>Loaded</dt>
+                          <dd>{selectedPriceSource.latest_downloaded_at ? formatDate(selectedPriceSource.latest_downloaded_at) : 'Never loaded'}</dd>
+                        </div>
+                        <div>
+                          <dt>Revision</dt>
+                          <dd>{selectedPriceSource.latest_source_revision ?? 'No revision marker'}</dd>
+                        </div>
+                        <div>
+                          <dt>Run</dt>
+                          <dd>{selectedPriceSource.latest_observation_run_id ? `Run #${selectedPriceSource.latest_observation_run_id}` : 'No observation run'}</dd>
+                        </div>
+                      </dl>
+                    </section>
+
+                    <section className="admin-price-source-detail-section">
+                      <h5>Review</h5>
+                      <dl>
+                        <div>
+                          <dt>Price index active</dt>
+                          <dd>{selectedPriceSource.price_index_is_active === false ? 'Inactive' : 'Active'}</dd>
+                        </div>
+                        <div>
+                          <dt>Source active</dt>
+                          <dd>{selectedPriceSource.is_active ? 'Active' : 'Inactive'}</dd>
+                        </div>
+                        <div>
+                          <dt>Last success</dt>
+                          <dd>{selectedPriceSource.last_success_at ? formatDate(selectedPriceSource.last_success_at) : 'No successful run yet'}</dd>
+                        </div>
+                        <div>
+                          <dt>Provider latest</dt>
+                          <dd>{selectedPriceSource.provider_latest_observation_at ? formatDate(selectedPriceSource.provider_latest_observation_at) : 'No provider observation yet'}</dd>
+                        </div>
+                        <div>
+                          <dt>Created</dt>
+                          <dd>{formatDate(selectedPriceSource.created_at)}</dd>
+                        </div>
+                        <div>
+                          <dt>Updated</dt>
+                          <dd>{formatDate(selectedPriceSource.updated_at)} · v{selectedPriceSource.version}</dd>
+                        </div>
+                      </dl>
+                    </section>
+                  </div>
+                </>
+              ) : (
+                <div className="admin-price-source-view-head">
+                  <div>
+                    <span className="eyebrow">Price Source View</span>
+                    <h4 id="admin-price-source-view-title">Price source not loaded</h4>
+                    <p>The link points to source #{selectedPriceSourceId}, but that row is not in the current loaded inventory window.</p>
+                  </div>
+                  <a
+                    className="button button-secondary"
+                    href={`#${ADMIN_PRICE_SOURCES_SECTION_ID}`}
+                    onClick={() => setSelectedPriceSourceId(null)}
+                  >
+                    Back to inventory
+                  </a>
+                </div>
+              )}
+            </section>
+          ) : null}
+
           <div id={ADMIN_PRICE_SOURCES_SECTION_ID} className="admin-run-list">
             <div className="detail-row">
               <span>
@@ -1304,9 +1564,14 @@ export function AdminWorkspace({
                   source.provider_observation_age_hours != null
                     ? formatAgeHours(source.provider_observation_age_hours)
                     : 'Provider freshness unknown'
+                const sourceAnchorId = adminPriceSourceDetailAnchorId(source.id)
+                const sourceIsSelected = source.id === selectedPriceSourceId
 
                 return (
-                  <article key={`${source.provider}-${source.series_id}-${source.id}`} className="admin-run-row admin-weather-row">
+                  <article
+                    key={`${source.provider}-${source.series_id}-${source.id}`}
+                    className={`admin-run-row admin-weather-row${sourceIsSelected ? ' admin-weather-row-selected' : ''}`}
+                  >
                     <div>
                       <strong>{source.price_index_code}</strong>
                       <p>
@@ -1343,6 +1608,13 @@ export function AdminWorkspace({
                       <span>{source.due_for_sync ? 'Provider due for sync' : sourceFreshness}</span>
                       <span>{source.latest_run_id ? `Run #${source.latest_run_id}` : source.latest_run_status ?? 'No run'}</span>
                       {source.latest_source_revision ? <span>Revision {source.latest_source_revision}</span> : null}
+                      <a
+                        className="button button-secondary"
+                        href={`#${sourceAnchorId}`}
+                        onClick={() => setSelectedPriceSourceId(source.id)}
+                      >
+                        Open source view
+                      </a>
                     </div>
                   </article>
                 )

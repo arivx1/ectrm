@@ -106,6 +106,7 @@ DocumentWorkflowStatus = Literal["READY", "REVIEW", "BLOCKED", "EXECUTED"]
 DocumentWorkflowExecutionStatus = Literal["EXECUTED"]
 DocumentWorkflowObservationAction = Literal["CREATED", "UPDATED", "UNCHANGED"]
 DocumentActionApprovalRequestStatus = Literal["PENDING", "EXECUTED", "REJECTED"]
+DocumentRecordCreationRequestStatus = Literal["OPEN", "RESOLVED", "CANCELLED"]
 
 FIELD_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 TEMPLATE_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
@@ -409,6 +410,75 @@ class DocumentActionApprovalRequestOut(BaseModel):
     decided_by: Optional[str] = None
 
 
+class DocumentRecordCreationRequestCreate(BaseModel):
+    request_comment: Optional[str] = Field(default=None, max_length=2_000)
+
+    @field_validator("request_comment")
+    @classmethod
+    def normalize_request_comment(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="request_comment")
+
+
+class DocumentRecordCreationRequestResolve(BaseModel):
+    record_type: str = Field(min_length=1, max_length=64)
+    record_id: str = Field(min_length=1, max_length=96)
+    resolution_comment: Optional[str] = Field(default=None, max_length=2_000)
+
+    @field_validator("record_type")
+    @classmethod
+    def normalize_record_type(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="record_type", uppercase=True)
+
+    @field_validator("record_id")
+    @classmethod
+    def normalize_record_id(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="record_id")
+
+    @field_validator("resolution_comment")
+    @classmethod
+    def normalize_resolution_comment(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="resolution_comment")
+
+
+class DocumentRecordCreationRequestCancel(BaseModel):
+    resolution_comment: str = Field(min_length=1, max_length=2_000)
+
+    @field_validator("resolution_comment")
+    @classmethod
+    def normalize_resolution_comment(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="resolution_comment")
+
+
+class DocumentRecordCreationRequestOut(BaseModel):
+    request_id: int
+    document_id: str
+    status: DocumentRecordCreationRequestStatus
+    document_kind: Optional[str] = None
+    target_record_type: str
+    target_record_label: str
+    owner_record_type: Optional[str] = None
+    owner_record_id: Optional[str] = None
+    required_owner_record_types: list[str] = Field(default_factory=list)
+    matched_keys: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    captured_fields: dict[str, object] = Field(default_factory=dict)
+    title: str
+    description: str
+    request_comment: Optional[str] = None
+    resolution_comment: Optional[str] = None
+    linkage_snapshot: dict[str, object] = Field(default_factory=dict)
+    action_plan_snapshot: dict[str, object] = Field(default_factory=dict)
+    resolved_record_type: Optional[str] = None
+    resolved_record_id: Optional[str] = None
+    requested_at: datetime
+    requested_by: str
+    resolved_at: Optional[datetime] = None
+    resolved_by: Optional[str] = None
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
 class DocumentRecordLinkOut(BaseModel):
     record_type: str
     record_id: str
@@ -452,6 +522,7 @@ class DocumentWorkflowListOut(BaseModel):
     action_plan: Optional[DocumentActionPlanOut] = None
     governance: Optional[DocumentActionGovernanceOut] = None
     pending_approval_request: Optional[DocumentActionApprovalRequestOut] = None
+    record_creation_requests: list[DocumentRecordCreationRequestOut] = Field(default_factory=list)
     record_links: list[DocumentRecordLinkOut] = Field(default_factory=list)
     workflows: list[DocumentWorkflowOut] = Field(default_factory=list)
     empty_message: str = "No workflows assigned to this document type."

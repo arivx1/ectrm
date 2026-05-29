@@ -27,6 +27,9 @@ import {
   listDocumentActionApprovalRequests,
   listDocumentWorkflows,
   rejectDocumentActionApprovalRequest,
+  cancelDocumentRecordCreationRequest,
+  resolveDocumentRecordCreationRequest,
+  stageDocumentRecordCreationRequest,
   stageSelectedDocumentRecordCandidateApprovalRequest,
   stageDocumentActionApprovalRequest,
   uploadPdfDocument,
@@ -127,6 +130,96 @@ test('listDocumentWorkflows requests the document workflow registry with authori
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer document-token')
   assert.equal((init as RequestInit | undefined)?.cache, 'no-store')
+})
+
+test('stageDocumentRecordCreationRequest posts missing record intake comments', async () => {
+  postJsonMock.mockResolvedValueOnce({
+    request_id: 7,
+    document_id: 'DOC-RCR-1',
+    status: 'OPEN',
+    target_record_type: 'TRADE',
+    target_record_label: 'Trade',
+  })
+
+  const payload = await stageDocumentRecordCreationRequest(
+    'http://api.test',
+    documentSession,
+    'DOC-RCR-1',
+    {
+      request_comment: 'Please create the trade first.',
+    },
+  )
+
+  assert.equal(payload.request_id, 7)
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/documents/DOC-RCR-1/record-creation-requests')
+  assert.deepEqual(body, { request_comment: 'Please create the trade first.' })
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer document-token')
+})
+
+test('resolveDocumentRecordCreationRequest posts the resolved target record', async () => {
+  postJsonMock.mockResolvedValueOnce({
+    request_id: 7,
+    document_id: 'DOC-RCR-1',
+    status: 'RESOLVED',
+    target_record_type: 'TRADE',
+    target_record_label: 'Trade',
+    resolved_record_type: 'TRADE',
+    resolved_record_id: 'TRD-100',
+  })
+
+  const payload = await resolveDocumentRecordCreationRequest(
+    'http://api.test',
+    documentSession,
+    'DOC-RCR-1',
+    7,
+    {
+      record_type: 'TRADE',
+      record_id: 'TRD-100',
+      resolution_comment: 'Created in trade capture.',
+    },
+  )
+
+  assert.equal(payload.status, 'RESOLVED')
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/documents/DOC-RCR-1/record-creation-requests/7/resolve')
+  assert.deepEqual(body, {
+    record_type: 'TRADE',
+    record_id: 'TRD-100',
+    resolution_comment: 'Created in trade capture.',
+  })
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer document-token')
+})
+
+test('cancelDocumentRecordCreationRequest posts the cancellation reason', async () => {
+  postJsonMock.mockResolvedValueOnce({
+    request_id: 8,
+    document_id: 'DOC-RCR-2',
+    status: 'CANCELLED',
+    target_record_type: 'TRADE',
+    target_record_label: 'Trade',
+  })
+
+  const payload = await cancelDocumentRecordCreationRequest(
+    'http://api.test',
+    documentSession,
+    'DOC-RCR-2',
+    8,
+    {
+      resolution_comment: 'Not a record-creation document.',
+    },
+  )
+
+  assert.equal(payload.status, 'CANCELLED')
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/documents/DOC-RCR-2/record-creation-requests/8/cancel')
+  assert.deepEqual(body, {
+    resolution_comment: 'Not a record-creation document.',
+  })
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer document-token')
 })
 
 test('listDocumentWorkflows times out instead of leaving the workflow dialog pending forever', async () => {
