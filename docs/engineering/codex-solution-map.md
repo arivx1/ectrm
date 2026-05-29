@@ -100,6 +100,7 @@ domain-first packages. New business logic should normally live under
 | Reports | `domains/reports` | Aggregation, report definitions, presets, exports, prompt-resolved read-only report lenses, and summaries over governed domain outputs. |
 | Home view instances | `domains/home_views`, `routes/home_view_definitions.py`, assistant read tools in `domains/assistant/services/tools.py`, recipe registry in `domains/home_views/services/recipes.py` | System Home template metadata, personal and shared Home definitions, card registry and card configuration value validation, deterministic Home view recipes, shared lifecycle/admin inventory, assistant-readable Home catalog/visible-instance inspection, governed personal `create_home_view_instance` staging/execution, scope/audit fields, and reset behavior. Not live business data truth. |
 | Assistant and AI gateway | `domains/assistant`, `routes/assistant.py` | Prompt assembly, live tools, managed agents, run traces, evals, action planning, action governance. |
+| Job scheduling | `domains/job_scheduling`, `models/job_schedule.py`, `apps/web/src/workspaces/admin/JobSchedulingPanel.tsx` | Admin-owned schedule definitions, time/event trigger materialization, queued job run intents, deterministic/agentic/hybrid execution plans, scheduler authority checks, and the Admin Console schedule/run surface. Not a business-write bypass. |
 | MCP | `domains/mcp` | External read transport and identity bridge. Future writes must map to typed services or action requests. |
 | Codex | `domains/codex`, `routes/codex.py` | Admin-owned engineering task dispatch, task state, callbacks, and smoke checks. Not business-record truth. |
 | Admin | `domains/admin`, admin routes | Supervision, seed jobs, provenance, external sync visibility, projection monitoring, configuration surfaces. |
@@ -204,6 +205,23 @@ Before adding or widening an action type, read
 [Agent Action Request Contract](./agent-action-request-contract.md),
 [Human-Agent Authority Matrix](./human-agent-authority-matrix.md), and
 [Agent Autonomy Rubric](./agent-autonomy-rubric.md).
+
+### Job Scheduling Flow
+
+```text
+Admin Console job schedule form
+  -> /admin/job-scheduling/schedules
+  -> job_schedules with TIME or EVENT trigger
+  -> due-time materializer or event enqueue API
+  -> idempotent job_runs row with copied execution plan
+  -> future deterministic runner, assistant runner, or hybrid runner
+  -> typed service result, assistant run trace, or governed action request
+```
+
+Scheduled jobs orchestrate work; they do not create a hidden mutation lane.
+Deterministic runners must map to cataloged service executors. Agentic or
+hybrid runners must preserve assistant run traces and use the action-request
+contract for staged or executable mutations.
 
 ### Document Ingestion Flow
 
@@ -348,6 +366,7 @@ For assistant, agents, automation, and actions:
 - [Agent Action Request Contract](./agent-action-request-contract.md)
 - [Agent Knowledge Base](./agent-knowledge-base.md)
 - [Agent Role Catalog](./agent-role-catalog.md)
+- [Job Scheduling Architecture](./job-scheduling-architecture.md)
 
 For work objects and queue-led design:
 

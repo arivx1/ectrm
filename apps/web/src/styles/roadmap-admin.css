@@ -496,9 +496,14 @@
   padding: 0.9rem 1rem;
 }
 
+.admin-run-row > div {
+  min-width: 0;
+}
+
 .admin-run-row p {
   color: rgba(15, 23, 42, 0.72);
   margin: 0.25rem 0 0;
+  overflow-wrap: anywhere;
 }
 
 .admin-run-meta {
@@ -507,6 +512,10 @@
   gap: 0.2rem;
   justify-items: end;
   text-align: right;
+}
+
+.admin-run-meta span {
+  overflow-wrap: anywhere;
 }
 
 .admin-weather-row {

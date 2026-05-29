@@ -35,6 +35,7 @@ from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
 from apps.api.app.models.external_series_observation import ExternalSeriesObservation
 from apps.api.app.models.home_view_definition import HomeViewDefinition
+from apps.api.app.models.job_schedule import JobRun, JobSchedule
 from apps.api.app.models.layout_definition import LayoutDefinition
 from apps.api.app.models.messaging_workspace_conversation import MessagingWorkspaceConversation
 from apps.api.app.models.messaging_workspace_message import MessagingWorkspaceMessage
@@ -134,6 +135,8 @@ __all__ = [
     "ExternalSeriesDefinition",
     "ExternalSeriesObservation",
     "HomeViewDefinition",
+    "JobRun",
+    "JobSchedule",
     "LayoutDefinition",
     "MessagingWorkspaceConversation",
     "MessagingWorkspaceMessage",

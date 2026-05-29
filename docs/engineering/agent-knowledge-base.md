@@ -117,6 +117,42 @@ proposal form until a human owner approves the domain rule.
   `npm --prefix apps/web run test -- libraryWorkspace.test.ts documentApi.test.ts`,
   and `npm --prefix apps/web run lint`.
 
+### 2026-05-29 - Scheduled Jobs Materialize Run Intents Only
+
+- Type: lesson
+- Domain: job scheduling, deterministic automation, agentic automation, and
+  action governance
+- Applies to: `apps/api/app/domains/job_scheduling`,
+  `apps/api/app/models/job_schedule.py`,
+  `apps/web/src/workspaces/admin/JobSchedulingPanel.tsx`, and future
+  scheduled-job runners
+- Status: implemented
+- Source:
+  `docs/engineering/job-scheduling-architecture.md`,
+  `apps/api/tests/test_job_scheduling_api.py`,
+  `apps/web/tests/jobSchedulingPanel.test.ts`
+- Lesson: schedules should create durable, idempotent `job_runs` from time or
+  event triggers, then hand execution to cataloged deterministic runners,
+  governed assistant runners, or a hybrid of both. The scheduler itself should
+  not become a business-write path or grant broader authority than the
+  published action/runtime contracts allow.
+- Deterministic opportunity: promote each recurring scheduled task into an
+  explicit catalog key and typed executor with inputs, outputs, stale-state
+  checks, idempotency, result shape, tests, audit, and rollback expectations.
+  Freeform instructions inside a schedule are not enough to define durable
+  business behavior.
+- Agent autonomy impact: scheduled agentic jobs may observe, explain, draft,
+  or stage approved action types. They must preserve assistant run traces and
+  action-request IDs, and they must not execute business mutations, policy
+  changes, permissions changes, or external commitments unless a separate
+  approved bounded-execution lane exists.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_job_scheduling_api`
+- Follow-up: add runner leasing and executor mappings through the execution
+  node platform, extend the Admin Console with retry/failure triage, then add
+  assistant eval coverage when scheduled agentic execution is wired to the
+  assistant runtime.
+
 ### 2026-05-27 - Reports Prompt Uses Typed Read-Only Price Lenses
 
 - Type: algorithm-added

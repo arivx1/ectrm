@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from fastapi import APIRouter, FastAPI
 
 from apps.api.app.domains.accruals.routes import router as accruals_router
+from apps.api.app.domains.job_scheduling.routes import router as job_scheduling_router
 from apps.api.app.domains.operations.routes import router as operations_router
 from apps.api.app.domains.mcp.routes import router as mcp_router
 from apps.api.app.domains.reports.routes import router as reports_router
@@ -74,6 +75,7 @@ HTTP_ROUTE_REGISTRATIONS: tuple[HttpRouteRegistration, ...] = (
     HttpRouteRegistration(domain="roadmap", name="roadmap-admin", router=roadmap_admin_router),
     HttpRouteRegistration(domain="reports", name="reports", router=reports_router),
     HttpRouteRegistration(domain="admin", name="users", router=users_router),
+    HttpRouteRegistration(domain="job-scheduling", name="job-scheduling-admin", router=job_scheduling_router),
     HttpRouteRegistration(domain="weather", name="weather", router=weather_router),
     HttpRouteRegistration(domain="weather", name="weather-admin", router=weather_admin_router),
 )

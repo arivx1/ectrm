@@ -1,4 +1,4 @@
-import { fetchJson, postJson, putJson } from '../../shared/api'
+import { fetchJson, patchJson, postJson, putJson } from '../../shared/api'
 import { buildMutationHeaders, getMutationContext } from '../../shared/mutation'
 import type {
   CounterpartyCreditPreviewRecord,
@@ -82,6 +82,140 @@ export type CreateCodexTaskInput = {
   max_iterations?: number
   continuation_prompt?: string
   target_ref?: string
+}
+
+export type JobScheduleStatus = 'ACTIVE' | 'PAUSED' | 'ARCHIVED'
+export type JobTriggerType = 'TIME' | 'EVENT'
+export type JobExecutionMode = 'DETERMINISTIC' | 'AGENTIC' | 'HYBRID'
+export type JobMaxAuthority = 'OBSERVE' | 'EXPLAIN' | 'DRAFT' | 'STAGE'
+export type JobRecurrenceFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'
+export type JobWeekday = 'MO' | 'TU' | 'WE' | 'TH' | 'FR' | 'SA' | 'SU'
+export type JobRunStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'SKIPPED'
+
+export type JobRecurrence = {
+  frequency: JobRecurrenceFrequency
+  interval?: number
+  by_weekday?: JobWeekday[] | null
+  until_at?: string | null
+  count?: number | null
+}
+
+export type TimeJobTrigger = {
+  starts_at: string
+  timezone: string
+  recurrence?: JobRecurrence | null
+}
+
+export type EventJobTrigger = {
+  event_source: string
+  event_type: string
+  event_filter?: Record<string, unknown>
+}
+
+export type JobExecutionPlan = {
+  mode: JobExecutionMode
+  deterministic_task_key?: string | null
+  agent_id?: string | null
+  allowed_action_types?: string[]
+  max_authority?: JobMaxAuthority
+  payload?: Record<string, unknown>
+}
+
+export type JobScheduleRecord = {
+  id: number
+  name: string
+  description: string | null
+  status: JobScheduleStatus
+  trigger_type: JobTriggerType
+  time_trigger: TimeJobTrigger | null
+  event_trigger: EventJobTrigger | null
+  execution_plan: JobExecutionPlan
+  next_run_at: string | null
+  last_run_at: string | null
+  is_user_enabled: boolean
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type JobRunRecord = {
+  id: number
+  schedule_id: number
+  status: JobRunStatus
+  trigger_type: JobTriggerType
+  scheduled_for: string | null
+  event_source: string | null
+  event_type: string | null
+  trigger_ref: string | null
+  event_payload: Record<string, unknown> | null
+  idempotency_key: string
+  execution_plan: JobExecutionPlan
+  schedule_version: number
+  attempt_count: number
+  started_at: string | null
+  completed_at: string | null
+  action_request_ids: number[]
+  result: Record<string, unknown> | null
+  error_detail: string | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+}
+
+export type JobRunBatchRecord = {
+  count: number
+  items: JobRunRecord[]
+}
+
+export type DeterministicJobCatalogEntry = {
+  key: string
+  label: string
+  description: string
+  risk_level: string
+  expected_output: string
+  authority_note: string
+}
+
+export type CreateJobScheduleInput = {
+  name: string
+  description?: string | null
+  trigger_type: JobTriggerType
+  time_trigger?: TimeJobTrigger | null
+  event_trigger?: EventJobTrigger | null
+  execution_plan: JobExecutionPlan
+}
+
+export type UpdateJobScheduleInput = {
+  name?: string
+  description?: string | null
+  status?: JobScheduleStatus
+  time_trigger?: TimeJobTrigger | null
+  event_trigger?: EventJobTrigger | null
+  execution_plan?: JobExecutionPlan
+}
+
+export type MaterializeDueJobRunsInput = {
+  as_of?: string
+  limit?: number
+}
+
+export type EnqueueEventJobRunsInput = {
+  event_source: string
+  event_type: string
+  event_ref?: string | null
+  occurred_at?: string | null
+  event_payload?: Record<string, unknown>
+  limit?: number
+}
+
+export type UpdateJobRunStatusInput = {
+  status: JobRunStatus
+  result?: Record<string, unknown> | null
+  action_request_ids?: number[]
+  error_detail?: string | null
 }
 
 export type ProjectionAlertChannel = 'ADMIN_WORKSPACE' | 'EMAIL' | 'SLACK' | 'INCIDENT_QUEUE'
@@ -359,6 +493,154 @@ export async function createCodexTask(
     {
       headers: adminMutationHeaders(),
     },
+  )
+}
+
+export async function listDeterministicJobCatalog(apiBase: string): Promise<DeterministicJobCatalogEntry[]> {
+  return fetchJson<DeterministicJobCatalogEntry[]>(
+    `${apiBase}/admin/job-scheduling/catalog/deterministic-jobs`,
+    {
+      headers: adminMutationHeaders(),
+      cache: 'no-store',
+    },
+  )
+}
+
+export async function listJobSchedules(
+  apiBase: string,
+  options?: { status?: JobScheduleStatus; triggerType?: JobTriggerType; limit?: number; offset?: number },
+): Promise<JobScheduleRecord[]> {
+  const params = new URLSearchParams()
+  if (options?.status) {
+    params.set('status', options.status)
+  }
+  if (options?.triggerType) {
+    params.set('trigger_type', options.triggerType)
+  }
+  if (typeof options?.limit === 'number') {
+    params.set('limit', String(options.limit))
+  }
+  if (typeof options?.offset === 'number') {
+    params.set('offset', String(options.offset))
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : ''
+
+  return fetchJson<JobScheduleRecord[]>(`${apiBase}/admin/job-scheduling/schedules${suffix}`, {
+    headers: adminMutationHeaders(),
+    cache: 'no-store',
+  })
+}
+
+export async function createJobSchedule(
+  apiBase: string,
+  payload: CreateJobScheduleInput,
+): Promise<JobScheduleRecord> {
+  return postJson<JobScheduleRecord>(
+    `${apiBase}/admin/job-scheduling/schedules`,
+    {
+      name: payload.name.trim(),
+      ...(payload.description?.trim() ? { description: payload.description.trim() } : {}),
+      trigger_type: payload.trigger_type,
+      ...(payload.time_trigger ? { time_trigger: payload.time_trigger } : {}),
+      ...(payload.event_trigger ? { event_trigger: payload.event_trigger } : {}),
+      execution_plan: payload.execution_plan,
+    },
+    { headers: adminMutationHeaders() },
+  )
+}
+
+export async function updateJobSchedule(
+  apiBase: string,
+  scheduleId: number,
+  payload: UpdateJobScheduleInput,
+): Promise<JobScheduleRecord> {
+  return patchJson<JobScheduleRecord>(
+    `${apiBase}/admin/job-scheduling/schedules/${scheduleId}`,
+    {
+      ...(payload.name?.trim() ? { name: payload.name.trim() } : {}),
+      ...(payload.description !== undefined
+        ? { description: payload.description?.trim() ? payload.description.trim() : null }
+        : {}),
+      ...(payload.status ? { status: payload.status } : {}),
+      ...(payload.time_trigger !== undefined ? { time_trigger: payload.time_trigger } : {}),
+      ...(payload.event_trigger !== undefined ? { event_trigger: payload.event_trigger } : {}),
+      ...(payload.execution_plan ? { execution_plan: payload.execution_plan } : {}),
+    },
+    { headers: adminMutationHeaders() },
+  )
+}
+
+export async function materializeDueJobRuns(
+  apiBase: string,
+  payload?: MaterializeDueJobRunsInput,
+): Promise<JobRunBatchRecord> {
+  return postJson<JobRunBatchRecord>(
+    `${apiBase}/admin/job-scheduling/runs/materialize-due`,
+    {
+      ...(payload?.as_of ? { as_of: payload.as_of } : {}),
+      ...(typeof payload?.limit === 'number' ? { limit: payload.limit } : {}),
+    },
+    { headers: adminMutationHeaders() },
+  )
+}
+
+export async function enqueueEventJobRuns(
+  apiBase: string,
+  payload: EnqueueEventJobRunsInput,
+): Promise<JobRunBatchRecord> {
+  return postJson<JobRunBatchRecord>(
+    `${apiBase}/admin/job-scheduling/runs/enqueue-event`,
+    {
+      event_source: payload.event_source.trim(),
+      event_type: payload.event_type.trim(),
+      ...(payload.event_ref?.trim() ? { event_ref: payload.event_ref.trim() } : {}),
+      ...(payload.occurred_at ? { occurred_at: payload.occurred_at } : {}),
+      event_payload: payload.event_payload ?? {},
+      ...(typeof payload.limit === 'number' ? { limit: payload.limit } : {}),
+    },
+    { headers: adminMutationHeaders() },
+  )
+}
+
+export async function listJobRuns(
+  apiBase: string,
+  options?: { scheduleId?: number; status?: JobRunStatus; limit?: number; offset?: number },
+): Promise<JobRunRecord[]> {
+  const params = new URLSearchParams()
+  if (typeof options?.scheduleId === 'number') {
+    params.set('schedule_id', String(options.scheduleId))
+  }
+  if (options?.status) {
+    params.set('status', options.status)
+  }
+  if (typeof options?.limit === 'number') {
+    params.set('limit', String(options.limit))
+  }
+  if (typeof options?.offset === 'number') {
+    params.set('offset', String(options.offset))
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : ''
+
+  return fetchJson<JobRunRecord[]>(`${apiBase}/admin/job-scheduling/runs${suffix}`, {
+    headers: adminMutationHeaders(),
+    cache: 'no-store',
+  })
+}
+
+export async function updateJobRunStatus(
+  apiBase: string,
+  runId: number,
+  payload: UpdateJobRunStatusInput,
+): Promise<JobRunRecord> {
+  return patchJson<JobRunRecord>(
+    `${apiBase}/admin/job-scheduling/runs/${runId}/status`,
+    {
+      status: payload.status,
+      ...(payload.result ? { result: payload.result } : {}),
+      ...(payload.action_request_ids ? { action_request_ids: payload.action_request_ids } : {}),
+      ...(payload.error_detail?.trim() ? { error_detail: payload.error_detail.trim() } : {}),
+    },
+    { headers: adminMutationHeaders() },
   )
 }
 

@@ -887,6 +887,80 @@
   resize: vertical;
 }
 
+.job-scheduling-grid {
+  grid-template-columns: minmax(22rem, 0.95fr) minmax(0, 1.05fr);
+}
+
+.job-json-field {
+  grid-column: 1 / -1;
+}
+
+.job-json-control {
+  min-height: 7rem;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  font-size: 0.86rem;
+}
+
+.job-weekday-group {
+  grid-column: 1 / -1;
+}
+
+.job-weekday-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.job-weekday-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.72);
+  color: #13293d;
+}
+
+.job-weekday-toggle input {
+  margin: 0;
+}
+
+.job-schedule-row {
+  align-items: flex-start;
+}
+
+.job-schedule-actions {
+  min-width: 8.5rem;
+}
+
+.job-schedule-actions .secondary-button,
+.job-event-enqueue .secondary-button {
+  min-height: 2.25rem;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.86rem;
+}
+
+.job-event-enqueue-head {
+  margin-top: 0.4rem;
+}
+
+.job-event-enqueue {
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.55);
+}
+
 .assistant-draft-playground-toggle {
   display: flex;
   align-items: center;

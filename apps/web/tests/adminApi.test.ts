@@ -1,16 +1,18 @@
 import assert from 'node:assert/strict'
 import { beforeEach, test, vi } from 'vitest'
 
-const { buildMutationHeadersMock, fetchJsonMock, getMutationContextMock, postJsonMock, putJsonMock } = vi.hoisted(() => ({
+const { buildMutationHeadersMock, fetchJsonMock, getMutationContextMock, patchJsonMock, postJsonMock, putJsonMock } = vi.hoisted(() => ({
   buildMutationHeadersMock: vi.fn(),
   fetchJsonMock: vi.fn(),
   getMutationContextMock: vi.fn(),
+  patchJsonMock: vi.fn(),
   postJsonMock: vi.fn(),
   putJsonMock: vi.fn(),
 }))
 
 vi.mock('../src/shared/api.ts', () => ({
   fetchJson: fetchJsonMock,
+  patchJson: patchJsonMock,
   postJson: postJsonMock,
   putJson: putJsonMock,
 }))
@@ -21,9 +23,13 @@ vi.mock('../src/shared/mutation.ts', () => ({
 }))
 
 import {
+  createJobSchedule,
+  enqueueEventJobRuns,
   importCounterpartyCreditSnapshots,
   isExternalDataSyncProvider,
+  listJobSchedules,
   loadTradeProjectionMonitoring,
+  materializeDueJobRuns,
   previewCounterpartyCreditImport,
   runExternalDataSync,
   runNwsWeatherSync,
@@ -31,12 +37,15 @@ import {
   saveTradeProjectionMonitoring,
   seedAssistantAgents,
   seedTradingSources,
+  updateJobRunStatus,
+  updateJobSchedule,
 } from '../src/entities/app/adminApi.ts'
 
 beforeEach(() => {
   buildMutationHeadersMock.mockReset()
   fetchJsonMock.mockReset()
   getMutationContextMock.mockReset()
+  patchJsonMock.mockReset()
   postJsonMock.mockReset()
   putJsonMock.mockReset()
 
@@ -49,6 +58,97 @@ beforeEach(() => {
     actorId: 'ops.admin',
     accessToken: 'admin-token',
     role: 'ADMIN',
+  })
+})
+
+test('job scheduling admin helpers shape schedule and run requests', async () => {
+  const schedule = {
+    id: 1,
+    name: 'Daily EOD readiness',
+    description: 'Check readiness',
+    status: 'ACTIVE',
+    trigger_type: 'TIME',
+    time_trigger: {
+      starts_at: '2026-05-29T14:00:00Z',
+      timezone: 'America/Chicago',
+      recurrence: { frequency: 'DAILY', interval: 1 },
+    },
+    event_trigger: null,
+    execution_plan: {
+      mode: 'HYBRID',
+      deterministic_task_key: 'trading_eod_readiness',
+      agent_id: 'ops-sentinel',
+      allowed_action_types: ['update_trade_workflow_item'],
+      max_authority: 'STAGE',
+      payload: { workspace: 'operations' },
+    },
+    next_run_at: '2026-05-29T14:00:00Z',
+    last_run_at: null,
+    is_user_enabled: true,
+    created_at: '2026-05-29T13:00:00Z',
+    created_by: 'ops.admin',
+    updated_at: '2026-05-29T13:00:00Z',
+    updated_by: 'ops.admin',
+    version: 1,
+  }
+  const runBatch = { count: 1, items: [{ id: 10, schedule_id: 1, status: 'QUEUED' }] }
+  fetchJsonMock.mockResolvedValueOnce([schedule])
+  postJsonMock.mockResolvedValueOnce(schedule)
+  patchJsonMock.mockResolvedValueOnce({ ...schedule, status: 'PAUSED' })
+  postJsonMock.mockResolvedValueOnce(runBatch)
+  postJsonMock.mockResolvedValueOnce(runBatch)
+  patchJsonMock.mockResolvedValueOnce({ id: 10, status: 'SUCCEEDED' })
+
+  await listJobSchedules('http://api.test', { status: 'ACTIVE', triggerType: 'TIME', limit: 25, offset: 5 })
+  await createJobSchedule('http://api.test', {
+    name: ' Daily EOD readiness ',
+    description: ' Check readiness ',
+    trigger_type: 'TIME',
+    time_trigger: schedule.time_trigger,
+    execution_plan: schedule.execution_plan,
+  })
+  await updateJobSchedule('http://api.test', 1, { status: 'PAUSED', description: '  ' })
+  await materializeDueJobRuns('http://api.test', { as_of: '2026-05-29T15:00:00Z', limit: 10 })
+  await enqueueEventJobRuns('http://api.test', {
+    event_source: ' document_workflow ',
+    event_type: ' DOCUMENT_REVIEW_NEEDED ',
+    event_ref: ' doc-1 ',
+    event_payload: { classification: 'BILL_OF_LADING' },
+  })
+  await updateJobRunStatus('http://api.test', 10, {
+    status: 'SUCCEEDED',
+    result: { ok: true },
+    action_request_ids: [101],
+  })
+
+  assert.equal(
+    fetchJsonMock.mock.calls[0][0],
+    'http://api.test/admin/job-scheduling/schedules?status=ACTIVE&trigger_type=TIME&limit=25&offset=5',
+  )
+  assert.equal(postJsonMock.mock.calls[0][0], 'http://api.test/admin/job-scheduling/schedules')
+  assert.deepEqual(postJsonMock.mock.calls[0][1], {
+    name: 'Daily EOD readiness',
+    description: 'Check readiness',
+    trigger_type: 'TIME',
+    time_trigger: schedule.time_trigger,
+    execution_plan: schedule.execution_plan,
+  })
+  assert.equal(patchJsonMock.mock.calls[0][0], 'http://api.test/admin/job-scheduling/schedules/1')
+  assert.deepEqual(patchJsonMock.mock.calls[0][1], { description: null, status: 'PAUSED' })
+  assert.equal(postJsonMock.mock.calls[1][0], 'http://api.test/admin/job-scheduling/runs/materialize-due')
+  assert.deepEqual(postJsonMock.mock.calls[1][1], { as_of: '2026-05-29T15:00:00Z', limit: 10 })
+  assert.equal(postJsonMock.mock.calls[2][0], 'http://api.test/admin/job-scheduling/runs/enqueue-event')
+  assert.deepEqual(postJsonMock.mock.calls[2][1], {
+    event_source: 'document_workflow',
+    event_type: 'DOCUMENT_REVIEW_NEEDED',
+    event_ref: 'doc-1',
+    event_payload: { classification: 'BILL_OF_LADING' },
+  })
+  assert.equal(patchJsonMock.mock.calls[1][0], 'http://api.test/admin/job-scheduling/runs/10/status')
+  assert.deepEqual(patchJsonMock.mock.calls[1][1], {
+    status: 'SUCCEEDED',
+    result: { ok: true },
+    action_request_ids: [101],
   })
 })
 

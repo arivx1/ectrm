@@ -19,6 +19,7 @@ import { AssistantControlTowerPanel } from './AssistantControlTowerPanel'
 import { AssistantOutcomeMetricsPanel } from './AssistantOutcomeMetricsPanel'
 import { CodexTaskPanel } from './CodexTaskPanel'
 import { HomeViewAdminPanel } from './HomeViewAdminPanel'
+import { JobSchedulingPanel } from './JobSchedulingPanel'
 import { ProjectionMonitoringPanel } from './ProjectionMonitoringPanel'
 import { RoadmapAdminPanel } from './RoadmapAdminPanel'
 import { UserManagementPanel } from './UserManagementPanel'
@@ -1930,6 +1931,12 @@ export function AdminWorkspace({
       </div>
 
       <CodexTaskPanel
+        authSession={authSession}
+        formatDate={formatDate}
+        onOpenSettings={onOpenSettings}
+      />
+
+      <JobSchedulingPanel
         authSession={authSession}
         formatDate={formatDate}
         onOpenSettings={onOpenSettings}
