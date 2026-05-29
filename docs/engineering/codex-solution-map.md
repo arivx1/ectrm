@@ -97,7 +97,7 @@ domain-first packages. New business logic should normally live under
 | Operations | `domains/operations` | Confirmations, deliveries, shipments, workflow items, actualization, operational resources, tracking. |
 | Settlement and accruals | `domains/settlement`, `domains/accruals`, settlement-adjacent operations services | Invoice/payment state, settlement posture, accrual lots and entries, settlement exceptions. |
 | Documents | `domains/documents`, `routes/documents.py` | Ingestion, classification, extraction review, deterministic facets, linkage, document action planning. |
-| Reports | `domains/reports` | Aggregation, report definitions, presets, exports, and summaries over governed domain outputs. |
+| Reports | `domains/reports` | Aggregation, report definitions, presets, exports, prompt-resolved read-only report lenses, and summaries over governed domain outputs. |
 | Home view instances | `domains/home_views`, `routes/home_view_definitions.py`, assistant read tools in `domains/assistant/services/tools.py`, recipe registry in `domains/home_views/services/recipes.py` | System Home template metadata, personal and shared Home definitions, card registry and card configuration value validation, deterministic Home view recipes, shared lifecycle/admin inventory, assistant-readable Home catalog/visible-instance inspection, governed personal `create_home_view_instance` staging/execution, scope/audit fields, and reset behavior. Not live business data truth. |
 | Assistant and AI gateway | `domains/assistant`, `routes/assistant.py` | Prompt assembly, live tools, managed agents, run traces, evals, action planning, action governance. |
 | MCP | `domains/mcp` | External read transport and identity bridge. Future writes must map to typed services or action requests. |
@@ -282,7 +282,7 @@ Current risks to keep in view:
 | Document action planning | `document_action_planning.py`, approval/execution/governance services | Document action tests and assistant/action eval coverage when relevant. |
 | Operations/delivery workflow | `domains/operations`, shipment/delivery workspaces | Focused operations/delivery API tests and web tests. |
 | Settlement or accrual state | `domains/settlement`, `domains/accruals`, settlement workspace | Settlement/accrual API tests; ensure immutable correction patterns. |
-| Reports | `domains/reports`, reports workspace | Report API tests; verify rules come from governed services where applicable. |
+| Reports | `domains/reports`, reports workspace | Report API tests and focused web tests; verify rules come from governed services or typed read-only resolvers where applicable. |
 | MCP surface | `domains/mcp`, `apps/api/app/main.py`, MCP docs | `make api-mcp-test`. |
 | Codex task dispatch | `domains/codex/services/tasks.py`, `routes/codex.py`, Admin Codex panel | `make api-codex-smoke` plus focused API tests. |
 | Docs-only change | Owning doc plus inbound links | Check links, headings, and references with `rg`. |

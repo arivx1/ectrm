@@ -9,12 +9,17 @@ import type {
 export async function loadLatestPriceIndexObservations(
   apiBase: string,
   priceIndexCodes: string[],
+  options: { limitPerCode?: number } = {},
 ): Promise<PriceIndexObservationRecord[]> {
   if (priceIndexCodes.length === 0) {
     return []
   }
 
   const params = new URLSearchParams()
+  const limitPerCode = Math.max(1, Math.floor(options.limitPerCode ?? 1))
+  if (limitPerCode > 1) {
+    params.set('limit_per_code', String(limitPerCode))
+  }
   for (const priceIndexCode of priceIndexCodes) {
     params.append('price_index_codes', priceIndexCode)
   }

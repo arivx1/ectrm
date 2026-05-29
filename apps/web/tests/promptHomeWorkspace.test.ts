@@ -10,11 +10,13 @@ import type {
   PriceIndexObservationRecord,
   PriceIndexRecord,
 } from "../src/shared/models";
+import type { StoredAuthSession } from "../src/shared/mutation";
 import { shouldAutoEnsurePromptHomeData } from "../src/workspaces/prompt/promptHomeAutoLoad";
 import { summarizePromptHomeAvailableTokens } from "../src/workspaces/prompt/promptHomeAvailableTokens";
 import {
   buildPromptHomePricesCardViewModel,
   filterPromptHomeDisplayPriceIndices,
+  formatPromptHomePriceChange,
   formatPromptHomePriceDate,
   formatPromptHomePriceDateTime,
   formatPromptHomePriceFrequency,
@@ -25,6 +27,7 @@ import {
   listPromptHomePriceProviders,
   nextPromptHomePriceSortState,
   PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER,
+  promptHomePriceChangeTone,
   selectPromptHomeDisplayPriceIndices,
   sortPromptHomeDisplayPriceIndices,
 } from "../src/workspaces/prompt/promptHomePrices";
@@ -57,6 +60,18 @@ const defaultPriceIndices = [
     location_code: "HENRY_HUB",
   },
 ];
+
+const adminAuthSession: StoredAuthSession = {
+  sessionId: "session-admin",
+  accessToken: "admin-token",
+  expiresAt: "2026-06-01T00:00:00Z",
+  user: {
+    user_id: "ops.admin",
+    email: "ops.admin@example.test",
+    display_name: "Ops Admin",
+    role: "ADMIN",
+  },
+};
 
 function buildPromptHomeVesselDelivery(
   overrides: Partial<DeliveryRecord> = {},
@@ -200,7 +215,15 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   );
   assert.doesNotMatch(markup, /No latest price marks/);
   assert.match(markup, /aria-label="Sort prices by Product"/);
+  assert.match(markup, /aria-label="Sort prices by Change"/);
+  assert.match(markup, /aria-label="Sort prices by Frequency"/);
+  assert.match(markup, /aria-label="Sort prices by Price Datetime"/);
+  assert.doesNotMatch(markup, /aria-label="Sort prices by Time"/);
   assert.match(markup, /aria-label="Sort prices by Updated"/);
+  assert.doesNotMatch(
+    markup,
+    /<button(?=[^>]*aria-label="Sort prices by Product")(?=[^>]*disabled)/,
+  );
   assert.match(
     markup,
     /aria-label="Double-click to open the price report for Henry Hub Natural Gas"/,
@@ -214,6 +237,11 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.match(markup, /All indices/);
   assert.match(markup, /Filter by mark status/);
   assert.match(markup, /0 latest marks across 1 active index/);
+  assert.match(
+    markup,
+    /aria-label="Sync latest prices" title="Admin session required to sync price sources" disabled="">Sync<\/button>/,
+  );
+  assert.match(markup, />Review Sources<\/button>/);
   assert.match(markup, /Open Dashboard/);
   assert.doesNotMatch(markup, /Desk clocks and calendars/);
   assert.match(
@@ -484,6 +512,64 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.doesNotMatch(markup, /prompt-home-review-panel/);
 });
 
+test("prompt home prices enables source sync for admin sessions", () => {
+  const markup = renderToStaticMarkup(
+    createElement(PromptHomeWorkspace, {
+      authSession: adminAuthSession,
+      health: "ok",
+      counts: defaultCounts,
+      priceIndices: defaultPriceIndices,
+      onOpenView: () => undefined,
+    }),
+  );
+
+  assert.match(
+    markup,
+    /aria-label="Sync latest prices" title="Sync latest prices from EIA">Sync<\/button>/,
+  );
+  assert.doesNotMatch(
+    markup,
+    /aria-label="Sync latest prices"[^>]*disabled/,
+  );
+});
+
+test("prompt home price rows use the whole record as the drag surface", () => {
+  const markup = renderToStaticMarkup(
+    createElement(PromptHomeWorkspace, {
+      authSession: null,
+      health: "ok",
+      counts: defaultCounts,
+      priceIndices: [
+        defaultPriceIndices[0],
+        {
+          code: "ERCOT_NORTH",
+          name: "ERCOT North Hub",
+          description: null,
+          is_active: true,
+          commodity_code: "POWER",
+          currency_code: "USD",
+          unit_code: "MWH",
+          provider: "ERCOT",
+          market: "US",
+          location_code: "ERCOT_NORTH",
+        },
+      ],
+      onOpenView: () => undefined,
+    }),
+  );
+
+  assert.match(
+    markup,
+    /prompt-home-price-row prompt-home-price-row-action prompt-home-price-row-draggable/,
+  );
+  assert.match(
+    markup,
+    /title="Click and hold to reorder HH_NATGAS; double-click to open its price report"/,
+  );
+  assert.doesNotMatch(markup, /prompt-home-price-row-drag-handle/);
+  assert.doesNotMatch(markup, />Move<\/button>/);
+});
+
 test("prompt home prices prefer indices with latest synced marks", () => {
   const indices: PriceIndexRecord[] = [
     {
@@ -608,15 +694,28 @@ test("prompt home prices map pricing service output into a card view model", () 
           id: 3,
           price_index_code: "CAISO_SP15_RT5M",
           observation_date: "2026-05-22",
+          value: -8.25,
+          unit_code: "MWH",
+          source_frequency: "5MIN",
+          source_provider: "CAISO",
+          source_series_id: "SP15",
+          source_revision: "2026-05-22T13:00:00:ptid:1",
+          downloaded_at: "2026-05-22T16:35:00Z",
+        }),
+        priceObservation({
+          id: 4,
+          price_index_code: "CAISO_SP15_RT5M",
+          observation_date: "2026-05-22",
           value: -6.75,
           unit_code: "MWH",
+          source_frequency: "5MIN",
           source_provider: "CAISO",
           source_series_id: "SP15",
           source_revision: "2026-05-22T13:05:00:ptid:1",
           downloaded_at: "2026-05-22T16:40:00Z",
         }),
         priceObservation({
-          id: 4,
+          id: 5,
           price_index_code: "UNKNOWN_INDEX",
           observation_date: "2026-05-23",
           value: 99,
@@ -646,10 +745,13 @@ test("prompt home prices map pricing service output into a card view model", () 
       product: viewModel.rows[0]?.product,
       location: viewModel.rows[0]?.location,
       price: viewModel.rows[0]?.price,
+      change: viewModel.rows[0]?.change,
+      changeTone: viewModel.rows[0]?.changeTone,
       unit: viewModel.rows[0]?.unit,
       currency: viewModel.rows[0]?.currency,
-      date: viewModel.rows[0]?.date,
-      time: viewModel.rows[0]?.time,
+      frequency: viewModel.rows[0]?.frequency,
+      dateTime: viewModel.rows[0]?.dateTime,
+      updated: viewModel.rows[0]?.updated,
       source: viewModel.rows[0]?.source,
       hasLatestMark: viewModel.rows[0]?.hasLatestMark,
     },
@@ -657,14 +759,18 @@ test("prompt home prices map pricing service output into a card view model", () 
       product: "POWER",
       location: "SP15",
       price: "-6.75",
+      change: "+1.5",
+      changeTone: "up",
       unit: "MWH",
       currency: "USD",
-      date: "05/22/2026",
-      time: "16:40:00",
-      source: "CAISO · SP15",
+      frequency: "5-min",
+      dateTime: "05/22/2026 13:05:00 PDT",
+      updated: "05/22/2026 16:40:00 UTC",
+      source: "CAISO",
       hasLatestMark: true,
     },
   );
+  assert.equal(viewModel.previousMarksByCode.CAISO_SP15_RT5M?.id, 3);
 });
 
 test("prompt home price filters narrow by query provider and mark state", () => {
@@ -827,9 +933,27 @@ test("prompt home price headers can sort display indices by selected field", () 
       price_index_code: "CAISO_SP15_RT5M",
       value: -6.75,
       unit_code: "MWH",
+      source_frequency: "5MIN",
       observation_date: "2026-05-22",
       source_revision: "2026-05-22T13:05:00:ptid:1",
       downloaded_at: "2026-05-22T16:40:00Z",
+    }),
+  };
+  const previousMarksByCode: Record<string, PriceIndexObservationRecord> = {
+    BRENT_SPOT_D: priceObservation({
+      price_index_code: "BRENT_SPOT_D",
+      value: 71,
+      observation_date: "2026-05-17",
+      downloaded_at: "2026-05-17T10:00:00Z",
+    }),
+    CAISO_SP15_RT5M: priceObservation({
+      price_index_code: "CAISO_SP15_RT5M",
+      value: -7,
+      unit_code: "MWH",
+      source_frequency: "5MIN",
+      observation_date: "2026-05-22",
+      source_revision: "2026-05-22T13:00:00:ptid:1",
+      downloaded_at: "2026-05-22T16:35:00Z",
     }),
   };
 
@@ -848,9 +972,29 @@ test("prompt home price headers can sort display indices by selected field", () 
     ["CAISO_SP15_RT5M", "BRENT_SPOT_D", "CORN_GLOBAL_IMF_M"],
   );
   assert.deepEqual(
+    sortPromptHomeDisplayPriceIndices(
+      indices,
+      latestMarksByCode,
+      {
+        field: "change",
+        direction: "desc",
+      },
+      [],
+      previousMarksByCode,
+    ).map((priceIndex) => priceIndex.code),
+    ["BRENT_SPOT_D", "CAISO_SP15_RT5M", "CORN_GLOBAL_IMF_M"],
+  );
+  assert.deepEqual(
     sortPromptHomeDisplayPriceIndices(indices, latestMarksByCode, {
       field: "updated",
       direction: "desc",
+    }).map((priceIndex) => priceIndex.code),
+    ["CAISO_SP15_RT5M", "BRENT_SPOT_D", "CORN_GLOBAL_IMF_M"],
+  );
+  assert.deepEqual(
+    sortPromptHomeDisplayPriceIndices(indices, latestMarksByCode, {
+      field: "frequency",
+      direction: "asc",
     }).map((priceIndex) => priceIndex.code),
     ["CAISO_SP15_RT5M", "BRENT_SPOT_D", "CORN_GLOBAL_IMF_M"],
   );
@@ -904,6 +1048,16 @@ test("prompt home price headers can sort display indices by selected field", () 
     field: "updated",
     direction: "desc",
   });
+  const changeSort = nextPromptHomePriceSortState(null, "change");
+  assert.deepEqual(changeSort, {
+    field: "change",
+    direction: "desc",
+  });
+  const frequencySort = nextPromptHomePriceSortState(null, "frequency");
+  assert.deepEqual(frequencySort, {
+    field: "frequency",
+    direction: "asc",
+  });
   const updatedReverseSort = nextPromptHomePriceSortState(
     updatedSort,
     "updated",
@@ -920,6 +1074,7 @@ test("prompt home price headers can sort display indices by selected field", () 
 
 test("prompt home price marks format the price date and time", () => {
   const downloadedAt = "2026-05-23T01:02:03Z";
+  const priceIndex = defaultPriceIndices[0] as PriceIndexRecord;
 
   assert.equal(
     formatPromptHomePriceDateTime(
@@ -929,7 +1084,7 @@ test("prompt home price marks format the price date and time", () => {
         downloaded_at: "2026-05-17T10:00:00Z",
       }),
     ),
-    "Daily · source date 05/16/2026 · published 05/16/2026 14:45:00",
+    "05/16/2026 00:00:00 UTC",
   );
   assert.equal(
     formatPromptHomePriceDateTime(
@@ -939,12 +1094,78 @@ test("prompt home price marks format the price date and time", () => {
         downloaded_at: "2026-05-17T10:00:00Z",
       }),
     ),
-    "Daily · source date 05/16/2026 · synced 05/17/2026 10:00:00",
+    "05/16/2026 00:00:00 UTC",
+  );
+  assert.equal(
+    formatPromptHomePriceDateTime(
+      priceObservation({
+        observation_date: "2026-05-22",
+        source_revision: "2026-05-22T13:05:00:ptid:1",
+        downloaded_at: "2026-05-22T16:40:00Z",
+      }),
+    ),
+    "05/22/2026 13:05:00 UTC",
+  );
+  assert.equal(
+    formatPromptHomePriceDateTime(
+      priceObservation({
+        observation_date: "2026-05-22",
+        source_provider: "NYISO",
+        source_revision: "2026-05-22T13:05:00:ptid:1",
+        downloaded_at: "2026-05-22T16:40:00Z",
+      }),
+    ),
+    "05/22/2026 13:05:00 EDT",
+  );
+  assert.equal(
+    formatPromptHomePriceDateTime(
+      priceObservation({
+        observation_date: "2026-05-22",
+        source_revision: "2026-05-22:HE17:I03",
+      }),
+    ),
+    "05/22/2026 16:15:00 PDT",
+  );
+  assert.equal(
+    formatPromptHomePriceDateTime(
+      priceObservation({
+        observation_date: "2026-05-25",
+        source_revision: "2026-05-25:IE2245",
+      }),
+    ),
+    "05/25/2026 22:45:00 CDT",
   );
   assert.equal(formatPromptHomePriceFrequency("5MIN"), "5-min");
   assert.equal(formatPromptHomePriceFrequency("15MIN"), "15-min");
   assert.equal(formatPromptHomePriceFrequency("hourly"), "Hourly");
   assert.equal(formatPromptHomePriceFrequency("posting"), "Posting");
+  assert.equal(
+    formatPromptHomePriceChange(
+      priceObservation({ value: 73.44 }),
+      priceObservation({ value: 72.25 }),
+      priceIndex,
+    ),
+    "+1.19",
+  );
+  assert.equal(
+    formatPromptHomePriceChange(
+      priceObservation({ value: 72.05 }),
+      priceObservation({ value: 72.25 }),
+      priceIndex,
+    ),
+    "-0.2",
+  );
+  assert.equal(
+    formatPromptHomePriceChange(priceObservation({ value: 72.05 }), null, priceIndex),
+    "—",
+  );
+  assert.equal(
+    promptHomePriceChangeTone(
+      priceObservation({ value: 72.25 }),
+      priceObservation({ value: 72.25 }),
+    ),
+    "flat",
+  );
   assert.equal(
     formatPromptHomePriceDate(
       priceObservation({
@@ -952,7 +1173,7 @@ test("prompt home price marks format the price date and time", () => {
         downloaded_at: downloadedAt,
       }),
     ),
-    "05/23/2026",
+    "05/22/2026",
   );
   assert.equal(
     formatPromptHomePriceTime(
@@ -961,7 +1182,7 @@ test("prompt home price marks format the price date and time", () => {
         downloaded_at: downloadedAt,
       }),
     ),
-    "01:02:03",
+    "00:00:00",
   );
   assert.equal(
     formatPromptHomePriceUpdatedAt(
@@ -969,7 +1190,7 @@ test("prompt home price marks format the price date and time", () => {
         downloaded_at: downloadedAt,
       }),
     ),
-    "05/23/2026 01:02:03",
+    "05/23/2026 01:02:03 UTC",
   );
   assert.equal(
     formatPromptHomePriceTime(
@@ -979,7 +1200,7 @@ test("prompt home price marks format the price date and time", () => {
         source_revision: "2026-05-22:HE17:I03",
       }),
     ),
-    "HE17 I03",
+    "16:15:00",
   );
   assert.equal(
     formatPromptHomePriceTime(
@@ -989,7 +1210,17 @@ test("prompt home price marks format the price date and time", () => {
         source_revision: "2026-05-22:IE16:45",
       }),
     ),
-    "IE 16:45",
+    "16:45:00",
+  );
+  assert.equal(
+    formatPromptHomePriceTime(
+      priceObservation({
+        downloaded_at: "",
+        source_published_at: null,
+        source_revision: "2026-05-22:IE2245",
+      }),
+    ),
+    "22:45:00",
   );
   assert.equal(
     formatPromptHomePriceTime(
@@ -1007,7 +1238,7 @@ test("prompt home price marks format the price date and time", () => {
         downloaded_at: "2026-05-22T23:40:00Z",
       }),
     ),
-    "05/22/2026 23:40:00",
+    "05/22/2026 23:40:00 UTC",
   );
   assert.equal(
     formatPromptHomePriceSource(
@@ -1026,7 +1257,7 @@ test("prompt home price marks format the price date and time", () => {
         provider: "ERCOT",
       },
     ),
-    "ERCOT · HB_HOUSTON",
+    "ERCOT",
   );
 });
 
@@ -1221,6 +1452,39 @@ test("prompt home map enables the vessels layer when tracked deliveries are avai
     markup,
     /<input type="checkbox" checked="" disabled=""\/><span>Vessels<\/span>/,
   );
+});
+
+test("prompt home map adds located market prices as a map layer", () => {
+  const markup = renderToStaticMarkup(
+    createElement(PromptHomeWorkspace, {
+      authSession: null,
+      health: "ok",
+      counts: defaultCounts,
+      priceIndices: defaultPriceIndices,
+      locations: [
+        {
+          code: "HENRY_HUB",
+          name: "Henry Hub",
+          description: null,
+          is_active: true,
+          location_kind: "POINT",
+          location_type: "HUB",
+          latitude: 29.8617,
+          longitude: -92.0626,
+          subdivision_code: "US-LA",
+          country_code: "US",
+          continent_code: "NA",
+        },
+      ],
+      onOpenView: () => undefined,
+    }),
+  );
+
+  assert.match(markup, /No asset records match the current filters · 1 market price\./);
+  assert.match(markup, /<input type="checkbox" checked=""\/><span>Market Prices<\/span>/);
+  assert.match(markup, /1 market price visible/);
+  assert.match(markup, /United States/);
+  assert.match(markup, /US-LA/);
 });
 
 test("prompt home map summarizes filtered records and caps the visible map directory at 1000 rows", () => {

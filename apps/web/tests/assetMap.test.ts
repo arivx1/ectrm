@@ -4,12 +4,16 @@ import { test } from "vitest";
 
 import {
   assetMapActivityLabelsForAsset,
+  assetMapCountryCodeForMarketPrice,
   assetMapCountryCodeForWeatherLocation,
+  assetMapGeographyLabelForMarketPrice,
   assetMapGeographyLabelForPoint,
+  assetMapSubdivisionCodeForMarketPrice,
   assetMapSubdivisionCodeForWeatherLocation,
   assetMapSubtypeLabelForAsset,
   buildAssetMapCountryOptions,
   buildAssetMapFeatureCollection,
+  buildAssetMapMarketPriceRecords,
   buildAssetMapSubdivisionOptions,
   buildAssetMapSummary,
   formatAssetMapCountryLabel,
@@ -251,6 +255,105 @@ test("asset map geography labels classify broad operator regions deterministical
     }),
     "APAC",
   );
+});
+
+test("asset map market price records plot active indices with coordinate-backed locations", () => {
+  const records = buildAssetMapMarketPriceRecords({
+    priceIndices: [
+      {
+        code: "HH_NATGAS",
+        name: "Henry Hub Natural Gas",
+        description: null,
+        is_active: true,
+        commodity_code: "NATGAS",
+        currency_code: "USD",
+        unit_code: "MMBTU",
+        provider: "EIA",
+        market: "US",
+        location_code: "HENRY_HUB",
+      },
+      {
+        code: "WAHA_NATGAS",
+        name: "Waha Natural Gas",
+        description: null,
+        is_active: true,
+        commodity_code: "NATGAS",
+        currency_code: "USD",
+        unit_code: "MMBTU",
+        provider: "EIA",
+        market: "US",
+        location_code: "WAHA",
+      },
+      {
+        code: "INACTIVE_NG",
+        name: "Inactive Gas",
+        description: null,
+        is_active: false,
+        commodity_code: "NATGAS",
+        currency_code: "USD",
+        unit_code: "MMBTU",
+        provider: "EIA",
+        market: "US",
+        location_code: "HENRY_HUB",
+      },
+    ],
+    locations: [
+      {
+        code: "HENRY_HUB",
+        name: "Henry Hub",
+        description: null,
+        is_active: true,
+        location_kind: "POINT",
+        location_type: "HUB",
+        latitude: 29.8617,
+        longitude: -92.0626,
+        subdivision_code: "US-LA",
+        country_code: "US",
+        continent_code: "NA",
+      },
+      {
+        code: "WAHA",
+        name: "Waha",
+        description: null,
+        is_active: true,
+        location_kind: "POINT",
+        location_type: "HUB",
+        latitude: null,
+        longitude: null,
+        subdivision_code: "US-TX",
+        country_code: "US",
+        continent_code: "NA",
+      },
+    ],
+    latestMarksByCode: {
+      HH_NATGAS: {
+        id: 101,
+        price_index_code: "HH_NATGAS",
+        observation_date: "2026-05-20",
+        value: 2.74,
+        unit_code: "MMBTU",
+        currency_code: "USD",
+        source_provider: "EIA",
+        source_series_id: "NG.RNGWHHD.D",
+        source_frequency: "DAILY",
+        source_published_at: null,
+        source_revision: null,
+        downloaded_at: "2026-05-21T12:00:00Z",
+        run_id: 11,
+        created_at: "2026-05-21T12:00:00Z",
+        updated_at: "2026-05-21T12:00:00Z",
+      },
+    },
+  });
+
+  assert.equal(records.length, 1);
+  assert.equal(records[0]?.priceIndex.code, "HH_NATGAS");
+  assert.equal(records[0]?.latitude, 29.8617);
+  assert.equal(records[0]?.longitude, -92.0626);
+  assert.equal(records[0]?.latestMark?.value, 2.74);
+  assert.equal(assetMapGeographyLabelForMarketPrice(records[0]!), "North America");
+  assert.equal(assetMapCountryCodeForMarketPrice(records[0]!), "US");
+  assert.equal(assetMapSubdivisionCodeForMarketPrice(records[0]!), "US-LA");
 });
 
 test("asset map country options stay constrained to the currently visible geography-backed records", () => {

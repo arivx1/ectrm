@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from 'react'
 
 import {
   loadActivitySummary,
@@ -10,7 +10,10 @@ import {
   loadTradingEodReport,
   validateReportDefinitionDraft,
 } from '../../entities/reports/api'
-import { loadPriceIndexObservations } from '../../entities/market-data/api'
+import {
+  loadLatestPriceIndexObservations,
+  loadPriceIndexObservations,
+} from '../../entities/market-data/api'
 import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
 import { appConfig } from '../../shared/config'
 import { formatCurrencyAmount } from '../../shared/format'
@@ -26,6 +29,8 @@ import type {
   PnlHistoryReport,
   PortfolioRecord,
   PriceIndexObservationRecord,
+  PriceIndexRecord,
+  LocationRecord,
   ReportDefinitionDraft,
   ReportDefinitionValidationResult,
   ReportingOverview,
@@ -40,8 +45,28 @@ import { MetricValue } from '../../shared/ui/MetricValue'
 import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
 import { TileLayout, type WorkspaceTile } from '../../shared/ui/TileLayout'
 import { WorkspaceHandoffFocusBanner } from '../../shared/ui/WorkspaceHandoffFocusBanner'
+import { MarketNewsPanel } from '../../widgets/news/MarketNewsPanel'
+import {
+  PRICE_REPORT_DEFAULT_COLUMN_ORDER,
+  PRICE_REPORT_INITIAL_OBSERVATION_SORT,
+  formatPriceObservationDateTime,
+  getPriceReportObservationHeader,
+  hiddenPriceReportObservationColumns,
+  hidePriceReportObservationColumn,
+  isPriceReportObservationField,
+  movePriceReportObservationColumn,
+  nextPriceReportObservationSortState,
+  priceReportObservationAriaSort,
+  showPriceReportObservationColumn,
+  sortPriceReportObservations,
+  type PriceReportObservationSortField,
+  type PriceReportObservationSortState,
+} from './priceReportObservations'
 import { reportErrorState } from './reportTileScaffold'
-import { resolvePriceIndexBiReportFilter } from './reportRouteHandoffs'
+import {
+  resolvePriceIndexBiReportFilter,
+  resolvePriceIndexReportRouteFocus,
+} from './reportRouteHandoffs'
 import { buildSettlementReportTiles } from './settlementReportTiles'
 import { ALL_FILTER_VALUE } from './settlementReportLens'
 import { TradingEodSummaryPanel } from './TradingEodSummaryPanel'
@@ -52,9 +77,19 @@ import {
   formatSignedMoney,
   uniqueSorted,
 } from './reportUtils'
+import {
+  resolveReportPromptIntent,
+  type ReportPromptIntent,
+} from './reportPrompt'
+import { ReportPromptPriceReport } from './reportPromptPriceReport'
 import { useSettlementReportLens } from './useSettlementReportLens'
 
 const PRICE_BI_OBSERVATION_LIMIT = 120
+const PRICE_BI_NEWS_LIMIT = 5
+const PRICE_BI_NEWS_LOOKBACK_DAYS = 7
+const PRICE_REPORT_COLUMN_DRAG_TYPE = 'application/x-ectrm-price-report-column'
+const REPORT_PROMPT_UI_ENABLED = false
+const REPORT_PROMPT_PRICE_HISTORY_LIMIT = 10
 
 type ReportsWorkspaceProps = {
   activeTrades: Trade[]
@@ -62,6 +97,8 @@ type ReportsWorkspaceProps = {
   routeHandoff?: AppRouteHandoff | null
   globalFilter: string
   counterpartyCreditReport: CounterpartyCreditReportRow[]
+  priceIndices: PriceIndexRecord[]
+  locations: LocationRecord[]
   portfolios: PortfolioRecord[]
   formatNumber: (value: number | null, digits?: number) => string
   formatMoney: (value: number | null) => string
@@ -71,6 +108,7 @@ type ReportsWorkspaceProps = {
   onOpenSettlement: () => void
   onOpenTrade: (tradeId: string) => void
   onClearHandoff?: () => void
+  onOpenPriceSourcesReview?: () => void
 }
 
 type PortfolioValuationRollup = {
@@ -122,6 +160,457 @@ function formatPriceObservationDelta(
   const delta = latest.value - previous.value
   const sign = delta > 0 ? '+' : ''
   return `${sign}${formatNumber(delta, priceObservationDigits(latest))} ${latest.currency_code ?? ''}/${latest.unit_code}`.trim()
+}
+
+function normalizePriceIndexNewsTerm(value: string | null | undefined): string | null {
+  const trimmedValue = value?.trim()
+  if (!trimmedValue || trimmedValue === '-' || trimmedValue === '—') {
+    return null
+  }
+
+  return trimmedValue
+    .replace(/[·,_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function dedupePriceIndexNewsTerms(values: Array<string | null | undefined>): string[] {
+  const seenTerms = new Set<string>()
+  const terms: string[] = []
+
+  for (const value of values) {
+    const normalizedTerm = normalizePriceIndexNewsTerm(value)
+    const key = normalizedTerm?.toLowerCase()
+    if (!normalizedTerm || !key || seenTerms.has(key)) {
+      continue
+    }
+
+    seenTerms.add(key)
+    terms.push(normalizedTerm)
+  }
+
+  return terms
+}
+
+function buildPriceIndexNewsQuery({
+  priceIndexCode,
+  heroTitle,
+  latestObservation,
+}: {
+  priceIndexCode: string
+  heroTitle: string | null | undefined
+  latestObservation: PriceIndexObservationRecord | null
+}): string {
+  const titleParts = heroTitle?.split(',') ?? []
+  return dedupePriceIndexNewsTerms([
+    ...titleParts,
+    priceIndexCode,
+    latestObservation?.source_provider,
+    latestObservation?.source_series_id,
+  ]).join(' ')
+}
+
+function resolvePriceIndexNewsCommodity({
+  priceIndexCode,
+  heroTitle,
+}: {
+  priceIndexCode: string
+  heroTitle: string | null | undefined
+}): string | null {
+  const productTerm = normalizePriceIndexNewsTerm(heroTitle?.split(',')[0])?.toUpperCase()
+  if (productTerm && !productTerm.startsWith('PRICE REPORT')) {
+    return productTerm
+  }
+
+  const normalizedCode = priceIndexCode.trim().toUpperCase()
+  if (normalizedCode.includes('BRENT')) {
+    return 'BRENT'
+  }
+  if (normalizedCode.includes('WTI')) {
+    return 'WTI'
+  }
+  if (normalizedCode.includes('NATGAS') || normalizedCode.includes('NATURAL_GAS') || normalizedCode.includes('HH')) {
+    return 'NATGAS'
+  }
+  if (normalizedCode.includes('POWER') || normalizedCode.includes('ERCOT') || normalizedCode.includes('CAISO')) {
+    return 'POWER'
+  }
+
+  return null
+}
+
+type PriceReportObservationTableProps = {
+  observations: PriceIndexObservationRecord[]
+  formatNumber: (value: number | null, digits?: number) => string
+  formatDate: (value: string | null | undefined) => string
+  formatDateOnly: (value: string | null | undefined) => string
+}
+
+function priceReportDraggedColumnField(
+  event: DragEvent<HTMLElement>,
+): PriceReportObservationSortField | null {
+  const draggedField = event.dataTransfer.getData(PRICE_REPORT_COLUMN_DRAG_TYPE)
+  return isPriceReportObservationField(draggedField) ? draggedField : null
+}
+
+export function PriceReportObservationTable({
+  observations,
+  formatNumber,
+  formatDate,
+  formatDateOnly,
+}: PriceReportObservationTableProps) {
+  const [sortState, setSortState] = useState<PriceReportObservationSortState>(
+    PRICE_REPORT_INITIAL_OBSERVATION_SORT,
+  )
+  const [visibleColumnFields, setVisibleColumnFields] = useState<PriceReportObservationSortField[]>(
+    PRICE_REPORT_DEFAULT_COLUMN_ORDER,
+  )
+  const [draggingColumnField, setDraggingColumnField] = useState<PriceReportObservationSortField | null>(null)
+  const visibleHeaders = useMemo(
+    () => visibleColumnFields.map((field) => getPriceReportObservationHeader(field)),
+    [visibleColumnFields],
+  )
+  const hiddenColumnFields = useMemo(
+    () => hiddenPriceReportObservationColumns(visibleColumnFields),
+    [visibleColumnFields],
+  )
+  const sortedObservations = useMemo(
+    () => sortPriceReportObservations(observations, sortState),
+    [observations, sortState],
+  )
+
+  function updateVisibleColumnFields(nextVisibleColumnFields: PriceReportObservationSortField[]) {
+    setVisibleColumnFields(nextVisibleColumnFields)
+    const fallbackField = nextVisibleColumnFields[0]
+    if (fallbackField && !nextVisibleColumnFields.includes(sortState.field)) {
+      setSortState((currentSort) => nextPriceReportObservationSortState(currentSort, fallbackField))
+    }
+  }
+
+  function hideVisibleColumn(field: PriceReportObservationSortField) {
+    updateVisibleColumnFields(hidePriceReportObservationColumn(visibleColumnFields, field))
+  }
+
+  function showColumn(field: PriceReportObservationSortField, targetField?: PriceReportObservationSortField) {
+    updateVisibleColumnFields(showPriceReportObservationColumn(visibleColumnFields, field, targetField))
+  }
+
+  function moveColumn(field: PriceReportObservationSortField, targetField: PriceReportObservationSortField) {
+    updateVisibleColumnFields(movePriceReportObservationColumn(visibleColumnFields, field, targetField))
+  }
+
+  function handleColumnDragStart(event: DragEvent<HTMLElement>, field: PriceReportObservationSortField) {
+    event.dataTransfer.setData(PRICE_REPORT_COLUMN_DRAG_TYPE, field)
+    event.dataTransfer.effectAllowed = 'move'
+    setDraggingColumnField(field)
+  }
+
+  function handleColumnDragOver(event: DragEvent<HTMLElement>) {
+    if (priceReportDraggedColumnField(event)) {
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'move'
+    }
+  }
+
+  function handleColumnHeaderDrop(event: DragEvent<HTMLTableCellElement>, targetField: PriceReportObservationSortField) {
+    const draggedField = priceReportDraggedColumnField(event)
+    if (!draggedField) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+    if (visibleColumnFields.includes(draggedField)) {
+      moveColumn(draggedField, targetField)
+    } else {
+      showColumn(draggedField, targetField)
+    }
+    setDraggingColumnField(null)
+  }
+
+  function handleColumnDockDrop(event: DragEvent<HTMLDivElement>) {
+    const draggedField = priceReportDraggedColumnField(event)
+    if (!draggedField) {
+      return
+    }
+
+    event.preventDefault()
+    if (visibleColumnFields.includes(draggedField)) {
+      hideVisibleColumn(draggedField)
+    }
+    setDraggingColumnField(null)
+  }
+
+  function handleTableDrop(event: DragEvent<HTMLDivElement>) {
+    const draggedField = priceReportDraggedColumnField(event)
+    if (!draggedField) {
+      return
+    }
+
+    event.preventDefault()
+    if (visibleColumnFields.includes(draggedField)) {
+      updateVisibleColumnFields([
+        ...visibleColumnFields.filter((field) => field !== draggedField),
+        draggedField,
+      ])
+    } else {
+      showColumn(draggedField)
+    }
+    setDraggingColumnField(null)
+  }
+
+  function renderObservationCell(field: PriceReportObservationSortField, observation: PriceIndexObservationRecord) {
+    switch (field) {
+      case 'observationDateTime':
+        return <strong>{formatPriceObservationDateTime(observation, formatDateOnly)}</strong>
+      case 'price':
+        return (
+          <span className="price-report-observation-price">
+            {formatPriceObservationAmount(observation, formatNumber)}
+          </span>
+        )
+      case 'frequency':
+        return observation.source_frequency || 'Frequency unavailable'
+      case 'revision':
+        return observation.source_revision ? `Revision ${observation.source_revision}` : 'Original'
+      case 'source':
+        return (
+          <span className="price-report-observation-source">
+            <strong>{observation.source_provider}</strong>
+            <small>{observation.source_series_id}</small>
+          </span>
+        )
+      case 'downloaded':
+        return formatDate(observation.downloaded_at)
+      default:
+        return null
+    }
+  }
+
+  return (
+    <div className="price-report-observation-workbench">
+      <div
+        className="price-report-column-dock"
+        aria-label="Hidden price report columns"
+        onDragOver={handleColumnDragOver}
+        onDrop={handleColumnDockDrop}
+      >
+        <span className="price-report-column-dock-label">Columns</span>
+        {hiddenColumnFields.length > 0 ? (
+          <div className="price-report-column-chip-list">
+            {hiddenColumnFields.map((field) => {
+              const header = getPriceReportObservationHeader(field)
+              return (
+                <button
+                  key={field}
+                  type="button"
+                  draggable
+                  className="price-report-column-chip"
+                  title={`Add ${header.label}`}
+                  onClick={() => showColumn(field)}
+                  onDragStart={(event) => handleColumnDragStart(event, field)}
+                  onDragEnd={() => setDraggingColumnField(null)}
+                >
+                  {header.label}
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <span className="price-report-column-dock-placeholder">All visible</span>
+        )}
+      </div>
+
+      <div
+        className="price-report-observation-table-shell"
+        onDragOver={handleColumnDragOver}
+        onDrop={handleTableDrop}
+      >
+        <table
+          className="price-report-observation-table"
+          aria-label="Recent price observations"
+          style={{ minWidth: `${Math.max(visibleColumnFields.length * 9.3, 24)}rem` }}
+        >
+          <thead>
+            <tr>
+              {visibleHeaders.map((header) => {
+                const isActiveSort = sortState.field === header.field
+                return (
+                  <th
+                    key={header.field}
+                    scope="col"
+                    draggable
+                    className={draggingColumnField === header.field ? 'is-dragging' : undefined}
+                    aria-sort={priceReportObservationAriaSort(sortState, header.field)}
+                    title={`Move ${header.label}`}
+                    onDragStart={(event) => handleColumnDragStart(event, header.field)}
+                    onDragEnd={() => setDraggingColumnField(null)}
+                    onDragOver={handleColumnDragOver}
+                    onDrop={(event) => handleColumnHeaderDrop(event, header.field)}
+                  >
+                    <button
+                      type="button"
+                      className={`price-report-observation-sort-button${isActiveSort ? ' is-active' : ''}`}
+                      aria-label={`Sort price observations by ${header.label}`}
+                      onClick={() =>
+                        setSortState((currentSort) =>
+                          nextPriceReportObservationSortState(currentSort, header.field),
+                        )
+                      }
+                    >
+                      <span>{header.label}</span>
+                      <span
+                        className={`price-report-observation-sort-indicator${
+                          isActiveSort && sortState.direction === 'asc' ? ' is-ascending' : ''
+                        }${isActiveSort && sortState.direction === 'desc' ? ' is-descending' : ''}`}
+                        aria-hidden="true"
+                      />
+                    </button>
+                  </th>
+                )
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {sortedObservations.map((observation) => (
+              <tr key={observation.id}>
+                {visibleColumnFields.map((field) => (
+                  <td key={`${observation.id}-${field}`}>{renderObservationCell(field, observation)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+type ReportPromptPanelProps = {
+  value: string
+  activePrompt: string
+  loading: boolean
+  onChange: (value: string) => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onClear: () => void
+}
+
+function ReportPromptPanel({
+  value,
+  activePrompt,
+  loading,
+  onChange,
+  onSubmit,
+  onClear,
+}: ReportPromptPanelProps) {
+  const trimmedValue = value.trim()
+
+  return (
+    <section className="surface report-prompt-panel">
+      <form className="report-prompt-form" onSubmit={onSubmit}>
+        <div className="report-prompt-copy">
+          <span className="eyebrow">Report Prompt</span>
+          <h3>Ask for a report</h3>
+        </div>
+        <label className="field report-prompt-field">
+          <span>Prompt</span>
+          <input
+            type="search"
+            className="control report-prompt-input"
+            value={value}
+            placeholder="Show me power prices in the US"
+            onChange={(event) => onChange(event.target.value)}
+          />
+        </label>
+        <div className="report-prompt-actions">
+          <button
+            type="submit"
+            className="button button-primary"
+            disabled={!trimmedValue || loading}
+          >
+            {loading ? 'Building' : 'Run Report'}
+          </button>
+          {activePrompt ? (
+            <button type="button" className="button button-secondary" onClick={onClear}>
+              Clear
+            </button>
+          ) : null}
+        </div>
+      </form>
+      {activePrompt ? (
+        <div className="report-prompt-active-row">
+          <span className="entity-chip entity-chip-soft">Active prompt</span>
+          <strong>{activePrompt}</strong>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+type ReportPromptResultProps = {
+  intent: ReportPromptIntent
+  observations: PriceIndexObservationRecord[]
+  locations: LocationRecord[]
+  loading: boolean
+  error: string
+  formatNumber: (value: number | null, digits?: number) => string
+  formatDate: (value: string | null | undefined) => string
+  formatDateOnly: (value: string | null | undefined) => string
+}
+
+function ReportPromptResult({
+  intent,
+  observations,
+  locations,
+  loading,
+  error,
+  formatNumber,
+  formatDate,
+  formatDateOnly,
+}: ReportPromptResultProps) {
+  return (
+    <section className="surface report-prompt-result">
+      <div className="report-prompt-result-head">
+        <div>
+          <span className="eyebrow">Prompt Result</span>
+          <h3>{intent.title}</h3>
+          {intent.kind === 'price-index' ? <p>{intent.description}</p> : null}
+        </div>
+        <span className="entity-chip entity-chip-soft">
+          {intent.kind === 'price-index' ? 'Read-only market data' : 'Needs narrower prompt'}
+        </span>
+      </div>
+
+      {intent.kind === 'unsupported' ? (
+        <div className="empty-state report-prompt-unsupported">
+          <strong>{intent.message}</strong>
+          <div className="shipment-card-meta">
+            {intent.hints.map((hint) => (
+              <span key={hint} className="entity-chip entity-chip-soft">
+                {hint}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : loading ? (
+        <div className="skeleton-stack">
+          <div className="skeleton-block" />
+          <div className="skeleton-block" />
+        </div>
+      ) : error ? (
+        reportErrorState(error)
+      ) : (
+        <ReportPromptPriceReport
+          intent={intent}
+          observations={observations}
+          locations={locations}
+          formatNumber={formatNumber}
+          formatDate={formatDate}
+          formatDateOnly={formatDateOnly}
+        />
+      )}
+    </section>
+  )
 }
 
 function attributionTone(category: string): 'active' | 'in-progress' | 'blocked' {
@@ -405,6 +894,8 @@ export function ReportsWorkspace({
   routeHandoff = null,
   globalFilter,
   counterpartyCreditReport,
+  priceIndices,
+  locations,
   portfolios,
   formatNumber,
   formatMoney,
@@ -414,10 +905,12 @@ export function ReportsWorkspace({
   onOpenSettlement,
   onOpenTrade,
   onClearHandoff,
+  onOpenPriceSourcesReview,
 }: ReportsWorkspaceProps) {
   const reportAccessToken = authSession?.accessToken
   const hasGlobalFilter = globalFilter.trim().length > 0
   const priceIndexReportFilter = resolvePriceIndexBiReportFilter(routeHandoff) ?? ''
+  const priceIndexReportRouteFocus = resolvePriceIndexReportRouteFocus(routeHandoff)
   const hasPriceIndexReportFilter = priceIndexReportFilter.trim().length > 0
   const [overview, setOverview] = useState<ReportingOverview | null>(null)
   const [semanticDatasets, setSemanticDatasets] = useState<SemanticDatasetDefinition[]>([])
@@ -446,6 +939,11 @@ export function ReportsWorkspace({
   const [priceBiObservations, setPriceBiObservations] = useState<PriceIndexObservationRecord[]>([])
   const [priceBiLoading, setPriceBiLoading] = useState(false)
   const [priceBiError, setPriceBiError] = useState('')
+  const [reportPromptText, setReportPromptText] = useState('')
+  const [reportPromptIntent, setReportPromptIntent] = useState<ReportPromptIntent | null>(null)
+  const [reportPromptObservations, setReportPromptObservations] = useState<PriceIndexObservationRecord[]>([])
+  const [reportPromptLoading, setReportPromptLoading] = useState(false)
+  const [reportPromptError, setReportPromptError] = useState('')
   const settlement = useSettlementReportLens({ authSession, reportAccessToken })
 
   useEffect(() => {
@@ -541,6 +1039,54 @@ export function ReportsWorkspace({
       cancelled = true
     }
   }, [hasPriceIndexReportFilter, priceIndexReportFilter])
+
+  useEffect(() => {
+    if (reportPromptIntent?.kind !== 'price-index') {
+      setReportPromptObservations([])
+      setReportPromptLoading(false)
+      setReportPromptError('')
+      return
+    }
+
+    const priceIndexCodes = reportPromptIntent.priceIndices.map((priceIndex) => priceIndex.code)
+    if (priceIndexCodes.length === 0) {
+      setReportPromptObservations([])
+      setReportPromptLoading(false)
+      setReportPromptError('')
+      return
+    }
+
+    let cancelled = false
+
+    async function loadReportPromptPrices() {
+      setReportPromptLoading(true)
+      setReportPromptError('')
+
+      try {
+        const observations = await loadLatestPriceIndexObservations(appConfig.apiBase, priceIndexCodes, {
+          limitPerCode: REPORT_PROMPT_PRICE_HISTORY_LIMIT,
+        })
+        if (!cancelled) {
+          setReportPromptObservations(observations)
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setReportPromptObservations([])
+          setReportPromptError(nextError instanceof Error ? nextError.message : 'Unable to load prompt report prices.')
+        }
+      } finally {
+        if (!cancelled) {
+          setReportPromptLoading(false)
+        }
+      }
+    }
+
+    void loadReportPromptPrices()
+
+    return () => {
+      cancelled = true
+    }
+  }, [reportPromptIntent])
 
   const rankedCounterparties = useMemo(() => {
     return [...counterpartyCreditReport].sort((left, right) => {
@@ -924,6 +1470,15 @@ export function ReportsWorkspace({
   const priceBiSourceLabel = latestPriceBiObservation
     ? `${latestPriceBiObservation.source_provider} ${latestPriceBiObservation.source_series_id}`
     : 'No source'
+  const priceBiNewsQuery = buildPriceIndexNewsQuery({
+    priceIndexCode: priceIndexReportFilter,
+    heroTitle: priceIndexReportRouteFocus?.heroTitle,
+    latestObservation: latestPriceBiObservation,
+  })
+  const priceBiNewsCommodity = resolvePriceIndexNewsCommodity({
+    priceIndexCode: priceIndexReportFilter,
+    heroTitle: priceIndexReportRouteFocus?.heroTitle,
+  })
 
   function resetValuationSnapshotFilters() {
     setValuationPortfolioFilter(ALL_FILTER_VALUE)
@@ -961,6 +1516,25 @@ export function ReportsWorkspace({
     } finally {
       setBuilderValidationLoading(false)
     }
+  }
+
+  function submitReportPrompt(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const intent = resolveReportPromptIntent(reportPromptText, {
+      priceIndices,
+      locations,
+    })
+    setReportPromptIntent(intent)
+    setReportPromptError('')
+    setReportPromptObservations([])
+  }
+
+  function clearReportPrompt() {
+    setReportPromptText('')
+    setReportPromptIntent(null)
+    setReportPromptObservations([])
+    setReportPromptError('')
+    setReportPromptLoading(false)
   }
 
   const reportsOverviewCards: TileSectionGridItem[] = [
@@ -1039,7 +1613,7 @@ export function ReportsWorkspace({
         {
           id: 'reports-price-bi',
           eyebrow: 'Prices',
-          title: `Price Report · ${priceIndexReportFilter}`,
+          title: priceIndexReportRouteFocus?.heroTitle ?? `Price Report · ${priceIndexReportFilter}`,
           description: 'Price observation history, range, source provenance, and freshness for the selected price index.',
           span: 'full',
           availableSpans: ['full', 'wide'],
@@ -1062,6 +1636,11 @@ export function ReportsWorkspace({
                   <p>{priceBiSourceLabel}</p>
                 </div>
                 <div className="shipment-card-meta">
+                  {onOpenPriceSourcesReview ? (
+                    <button type="button" className="button button-secondary" onClick={onOpenPriceSourcesReview}>
+                      Review Sources
+                    </button>
+                  ) : null}
                   <span className="entity-chip entity-chip-soft">Price index {priceIndexReportFilter}</span>
                   <span className="entity-chip entity-chip-soft">
                     {formatNumber(priceBiObservationRows.length, 0)} observation
@@ -1107,44 +1686,100 @@ export function ReportsWorkspace({
                 </article>
               </div>
 
-              <div className="position-list">
-                {priceBiObservationRows.slice(0, 18).map((observation) => (
-                  <article key={observation.id} className="position-card shipment-card">
-                    <div className="shipment-card-head">
-                      <div className="shipment-card-copy">
-                        <strong>{formatDateOnly(observation.observation_date)}</strong>
-                        <span>
-                          {observation.source_provider} · {observation.source_series_id}
-                        </span>
-                      </div>
-                      <span className="status-pill status-pill-active">
-                        {formatPriceObservationAmount(observation, formatNumber)}
-                      </span>
-                    </div>
-                    <div className="shipment-card-actions">
-                      <span>
-                        {observation.source_frequency}
-                        {observation.source_revision ? ` · Revision ${observation.source_revision}` : ''}
-                      </span>
-                      <div className="shipment-card-meta">
-                        <span className="entity-chip entity-chip-soft">
-                          Downloaded {formatDate(observation.downloaded_at)}
-                        </span>
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
+              <PriceReportObservationTable
+                observations={priceBiObservationRows.slice(0, 18)}
+                formatNumber={formatNumber}
+                formatDate={formatDate}
+                formatDateOnly={formatDateOnly}
+              />
             </div>
           ) : (
             <div className="empty-state">
               <strong>No price observations yet</strong>
               <p>The selected price index has no loaded observations for the price report.</p>
+              {onOpenPriceSourcesReview ? (
+                <button type="button" className="button button-secondary" onClick={onOpenPriceSourcesReview}>
+                  Review Sources
+                </button>
+              ) : null}
             </div>
+          ),
+        },
+        {
+          id: 'reports-price-news',
+          eyebrow: 'News',
+          title: 'Market News',
+          description: 'Recent external headlines matched to the selected price index.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: (
+            <MarketNewsPanel
+              apiBase={appConfig.apiBase}
+              commodity={priceBiNewsCommodity}
+              query={priceBiNewsQuery}
+              limit={PRICE_BI_NEWS_LIMIT}
+              lookbackDays={PRICE_BI_NEWS_LOOKBACK_DAYS}
+              title="Price Index News"
+              detail="Recent headlines matched to this product, location, and source."
+              formatDate={formatDate}
+            />
           ),
         },
       ]
     : []
+
+  const reportPromptHeaderContent = (
+    <>
+      {REPORT_PROMPT_UI_ENABLED ? (
+        <>
+          <ReportPromptPanel
+            value={reportPromptText}
+            activePrompt={reportPromptIntent?.prompt ?? ''}
+            loading={reportPromptLoading}
+            onChange={setReportPromptText}
+            onSubmit={submitReportPrompt}
+            onClear={clearReportPrompt}
+          />
+          {reportPromptIntent ? (
+            <ReportPromptResult
+              intent={reportPromptIntent}
+              observations={reportPromptObservations}
+              locations={locations}
+              loading={reportPromptLoading}
+              error={reportPromptError}
+              formatNumber={formatNumber}
+              formatDate={formatDate}
+              formatDateOnly={formatDateOnly}
+            />
+          ) : null}
+        </>
+      ) : null}
+      {routeHandoff || hasGlobalFilter ? (
+        <>
+          <WorkspaceHandoffFocusBanner
+            handoff={routeHandoff}
+            currentView="reports"
+            clearLabel="Show Full Reports"
+            onClear={onClearHandoff ?? (() => undefined)}
+          />
+          {hasGlobalFilter ? (
+            <section className="surface workspace-local-filter">
+              <div className="workspace-local-filter-copy">
+                <div>
+                  <span className="eyebrow">Filter</span>
+                  <h3>Global Report Filter</h3>
+                </div>
+                <p>
+                  Global nav filter “{globalFilter.trim()}” is also narrowing the exposure, activity, valuation, and
+                  credit slices on this screen. Existing date and portfolio controls still apply inside each report module.
+                </p>
+              </div>
+            </section>
+          ) : null}
+        </>
+      ) : null}
+    </>
+  )
 
   if (hasPriceIndexReportFilter) {
     return (
@@ -1152,14 +1787,7 @@ export function ReportsWorkspace({
         workspaceId="reports"
         workspaceLabel="Price Report"
         authSession={authSession}
-        headerContent={
-          <WorkspaceHandoffFocusBanner
-            handoff={routeHandoff}
-            currentView="reports"
-            clearLabel="Show Full Reports"
-            onClear={onClearHandoff ?? (() => undefined)}
-          />
-        }
+        headerContent={reportPromptHeaderContent}
         toolbarDescription="Price-only report section filtered to the selected price index."
         sections={[
           {
@@ -1177,32 +1805,7 @@ export function ReportsWorkspace({
       workspaceId="reports"
       workspaceLabel="Reports"
       authSession={authSession}
-      headerContent={
-        routeHandoff || hasGlobalFilter ? (
-          <>
-            <WorkspaceHandoffFocusBanner
-              handoff={routeHandoff}
-              currentView="reports"
-              clearLabel="Show Full Reports"
-              onClear={onClearHandoff ?? (() => undefined)}
-            />
-            {hasGlobalFilter ? (
-              <section className="surface workspace-local-filter">
-                <div className="workspace-local-filter-copy">
-                  <div>
-                    <span className="eyebrow">Filter</span>
-                    <h3>Global Report Filter</h3>
-                  </div>
-                  <p>
-                    Global nav filter “{globalFilter.trim()}” is also narrowing the exposure, activity, valuation, and
-                    credit slices on this screen. Existing date and portfolio controls still apply inside each report module.
-                  </p>
-                </div>
-              </section>
-            ) : null}
-          </>
-        ) : undefined
-      }
+      headerContent={reportPromptHeaderContent}
       sections={[
         {
           id: 'reports-overview-cards',

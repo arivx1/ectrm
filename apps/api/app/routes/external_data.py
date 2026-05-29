@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Annotated
 from typing import List
 from typing import Optional
 
@@ -29,6 +30,14 @@ from apps.api.app.domains.reference_data.services.external_data import (
     sync_world_bank_series,
 )
 from apps.api.app.domains.reference_data.services.external_data.market_context import build_market_context
+from apps.api.app.domains.reference_data.services.external_data.market_news import (
+    DEFAULT_MARKET_NEWS_LIMIT,
+    DEFAULT_MARKET_NEWS_LOOKBACK_DAYS,
+    MAX_MARKET_NEWS_LIMIT,
+    MAX_MARKET_NEWS_LOOKBACK_DAYS,
+    MarketNewsClientError,
+    load_market_news_headlines,
+)
 from apps.api.app.domains.reference_data.services.external_data.price_source_review import (
     list_price_source_review_rows,
 )
@@ -50,6 +59,7 @@ from apps.api.app.schemas.external_data import (
     ExternalSeriesObservationOut,
     ExternalSeriesSyncRequest,
     MarketContextOut,
+    MarketNewsOut,
     PriceSourceReviewOut,
     PriceIndexObservationOut,
 )
@@ -404,6 +414,29 @@ def get_market_context(
     return MarketContextOut(**payload)
 
 
+@router.get("/market-data/news/headlines", response_model=MarketNewsOut)
+def list_market_news_headlines(
+    commodity: Annotated[Optional[str], Query(min_length=1, max_length=50)] = None,
+    query: Annotated[Optional[str], Query(min_length=1, max_length=240)] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_MARKET_NEWS_LIMIT)] = DEFAULT_MARKET_NEWS_LIMIT,
+    lookback_days: Annotated[int, Query(ge=1, le=MAX_MARKET_NEWS_LOOKBACK_DAYS)] = DEFAULT_MARKET_NEWS_LOOKBACK_DAYS,
+) -> MarketNewsOut:
+    try:
+        payload = load_market_news_headlines(
+            query=query,
+            commodity=commodity.strip().upper() if commodity else None,
+            limit=limit,
+            lookback_days=lookback_days,
+        )
+    except MarketNewsClientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    return MarketNewsOut(**payload)
+
+
 @router.get(
     "/market-data/external-series/{series_code}/observations",
     response_model=List[ExternalSeriesObservationOut],
@@ -454,6 +487,7 @@ def get_latest_external_series_observation(
 )
 def list_latest_price_index_observations(
     price_index_codes: List[str] = Query(default=[]),
+    limit_per_code: Annotated[int, Query(ge=1, le=10)] = 1,
     db: Session = Depends(get_db),
 ) -> List[PriceIndexObservationOut]:
     normalized_codes: list[str] = []
@@ -479,12 +513,20 @@ def list_latest_price_index_observations(
         )
     ).scalars().all()
 
-    latest_by_code: dict[str, PriceIndexObservation] = {}
+    rows_by_code: dict[str, list[PriceIndexObservation]] = {
+        code: [] for code in normalized_codes
+    }
     for row in rows:
-        if row.price_index_code not in latest_by_code:
-            latest_by_code[row.price_index_code] = row
+        code_rows = rows_by_code.get(row.price_index_code)
+        if code_rows is None or len(code_rows) >= limit_per_code:
+            continue
+        code_rows.append(row)
 
-    return [_to_observation_out(latest_by_code[code]) for code in normalized_codes if code in latest_by_code]
+    return [
+        _to_observation_out(row)
+        for code in normalized_codes
+        for row in rows_by_code[code]
+    ]
 
 
 @router.get(
@@ -598,6 +640,12 @@ def _to_external_data_provider_status_out(row: dict) -> ExternalDataProviderStat
         latest_run_status=str(row["latest_run_status"]),
         success_sla_hours=int(row["success_sla_hours"]),
         scheduler_interval_minutes=int(row["scheduler_interval_minutes"]),
+        ingestion_method=str(row["ingestion_method"]),
+        ingestion_mode=str(row["ingestion_mode"]),
+        source_system=str(row["source_system"]),
+        source_endpoint=row.get("source_endpoint"),
+        sync_job_name=str(row["sync_job_name"]),
+        default_lookback_days=row.get("default_lookback_days"),
         active_series_count=int(row["active_series_count"]),
         due_for_sync=bool(row["due_for_sync"]),
         last_run_at=row.get("last_run_at"),

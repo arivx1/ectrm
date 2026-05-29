@@ -81,6 +81,28 @@ def list_price_source_review_rows(
                 "source_unit": source.source_unit,
                 "source_currency_code": source.source_currency_code,
                 "transform_rule": source.transform_rule,
+                "ingestion_method": (
+                    str(status["ingestion_method"]) if status is not None else None
+                ),
+                "ingestion_mode": (
+                    str(status["ingestion_mode"]) if status is not None else None
+                ),
+                "source_system": (
+                    str(status["source_system"]) if status is not None else None
+                ),
+                "source_endpoint": (
+                    str(status["source_endpoint"])
+                    if status is not None and status.get("source_endpoint") is not None
+                    else None
+                ),
+                "sync_job_name": (
+                    str(status["sync_job_name"]) if status is not None else None
+                ),
+                "default_lookback_days": (
+                    int(status["default_lookback_days"])
+                    if status is not None and status.get("default_lookback_days") is not None
+                    else None
+                ),
                 "is_active": source.is_active,
                 "review_status": _review_status(
                     source=source,
@@ -92,6 +114,21 @@ def list_price_source_review_rows(
                 ),
                 "provider_health_status": (
                     str(status["health_status"]) if status is not None else None
+                ),
+                "scheduler_interval_minutes": (
+                    int(status["scheduler_interval_minutes"]) if status is not None else None
+                ),
+                "success_sla_hours": (
+                    int(status["success_sla_hours"]) if status is not None else None
+                ),
+                "due_for_sync": (
+                    bool(status["due_for_sync"]) if status is not None else None
+                ),
+                "provider_latest_observation_at": (
+                    status.get("latest_observation_at") if status is not None else None
+                ),
+                "provider_observation_age_hours": (
+                    status.get("observation_age_hours") if status is not None else None
                 ),
                 "latest_run_status": latest_run.status if latest_run is not None else None,
                 "latest_run_id": latest_run.id if latest_run is not None else None,
@@ -115,6 +152,9 @@ def list_price_source_review_rows(
                 ),
                 "latest_source_revision": (
                     observation.source_revision if observation is not None else None
+                ),
+                "latest_source_published_at": (
+                    observation.source_published_at if observation is not None else None
                 ),
                 "latest_downloaded_at": (
                     observation.downloaded_at if observation is not None else None

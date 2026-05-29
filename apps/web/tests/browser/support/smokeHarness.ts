@@ -1970,6 +1970,14 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/home-view-definitions/admin/inventory' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      writeJson(response, homeViewDefinitionRows.map(cloneHomeViewDefinition))
+      return
+    }
+
     if (url.pathname === '/home-view-definitions' && method === 'POST') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
@@ -3469,6 +3477,52 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/admin/external-data/price-sources' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [
+        {
+          id: 1,
+          price_index_code: 'HH_IFERC',
+          price_index_name: 'Henry Hub IFERC',
+          commodity_code: 'HENRY_HUB_GAS',
+          quote_type: 'PHYSICAL',
+          market: 'PHYSICAL',
+          location_code: 'HENRY_HUB',
+          price_unit_code: 'USD/MMBTU',
+          price_currency_code: 'USD',
+          price_index_is_active: true,
+          provider: 'ICE',
+          dataset_code: 'SMOKE',
+          series_id: 'HH_IFERC',
+          frequency: 'daily',
+          source_unit: 'USD/MMBTU',
+          source_currency_code: 'USD',
+          transform_rule: null,
+          is_active: true,
+          review_status: 'current',
+          provider_health_status: 'healthy',
+          latest_run_status: 'success',
+          latest_run_id: 1,
+          last_success_at: '2026-04-11T00:00:00Z',
+          provider_error_summary: null,
+          latest_observation_date: '2026-04-11',
+          latest_value: 3.21,
+          latest_unit_code: 'USD/MMBTU',
+          latest_currency_code: 'USD',
+          latest_source_revision: null,
+          latest_downloaded_at: '2026-04-11T00:00:00Z',
+          latest_observation_run_id: 1,
+          created_at: '2026-04-11T00:00:00Z',
+          updated_at: '2026-04-11T00:00:00Z',
+          version: 1,
+        },
+      ])
+      return
+    }
+
     if (url.pathname === '/admin/trading-sources' && method === 'GET') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
@@ -4925,6 +4979,24 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/market-data/news/headlines' && method === 'GET') {
+      writeJson(response, {
+        generated_at: '2026-04-11T00:00:00Z',
+        commodity: url.searchParams.get('commodity'),
+        search_query: url.searchParams.get('query') ?? 'Henry Hub natural gas',
+        count: 1,
+        items: [
+          {
+            title: 'Henry Hub gas holds steady in smoke fixture',
+            source: 'Smoke News',
+            published_at: '2026-04-11T00:00:00Z',
+            link: 'https://news.example.test/henry-hub-smoke',
+          },
+        ],
+      })
+      return
+    }
+
     if (url.pathname === '/market-data/external-series' && method === 'GET') {
       writeJson(response, [])
       return
@@ -4973,6 +5045,255 @@ async function startMockApiServer(
           updated_at: '2026-04-11T00:00:00Z',
         },
       ])
+      return
+    }
+
+    if (url.pathname === '/reports/counterparty-credit' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/reports/overview' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, {
+        active_trade_count: tradeRows.length,
+        tracked_commodity_count: 1,
+        gross_net_volume: 10000,
+        exposure: [],
+        activity: [],
+      })
+      return
+    }
+
+    if (url.pathname === '/reports/datasets' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/reports/trading-eod' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, {
+        generated_at: '2026-04-11T00:00:00Z',
+        business_date: '2026-04-11',
+        as_of: '2026-04-11',
+        evaluation_timestamp: '2026-04-11T00:00:00Z',
+        basis: 'SMOKE_HARNESS',
+        status: 'READY',
+        blocked_check_count: 0,
+        warning_check_count: 0,
+        ready_check_count: 0,
+        checks: [],
+        coverage_notes: [],
+        trade_summary: {
+          active_trade_count: tradeRows.length,
+          priced_active_count: 1,
+          pending_pricing_count: 0,
+          pending_settlement_count: 0,
+          tracked_book_count: 1,
+          total_active_volume: 10000,
+        },
+        pnl_summary: {
+          basis: 'MARK_TO_MARKET',
+          methodology: 'Smoke report fixture.',
+          total_pnl: 8900,
+          realized_pnl: 1800,
+          unrealized_pnl: 7100,
+          priced_trade_count: 1,
+          realized_trade_count: 0,
+          unrealized_trade_count: 1,
+        },
+        operations_summary: {
+          open_work_item_count: 0,
+          operations_queue_count: 0,
+          settlement_queue_count: 0,
+          attention_count: 0,
+          stale_pricing_count: 0,
+          incomplete_ops_data_count: 0,
+        },
+        settlement_summary: {
+          invoice_count: 0,
+          overdue_invoice_count: 0,
+          disputed_invoice_count: 0,
+          blocked_exception_count: 0,
+          warning_exception_count: 0,
+          payment_due_count: 0,
+          invoice_pending_count: 0,
+        },
+        projection_summary: {
+          structural_issue_count: 0,
+          invariant_issue_count: 0,
+          impacted_trade_count: 0,
+        },
+        accrual_summary: {
+          row_count: 0,
+          lot_count: 0,
+          unbilled_amount_total: 0,
+          billed_uncollected_amount_total: 0,
+          net_open_amount_total: 0,
+          coverage_basis: 'none',
+        },
+      })
+      return
+    }
+
+    if (url.pathname === '/reports/exposure-summary' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/reports/activity-summary' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/reports/settlement-filter-options' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, {
+        books: [],
+        counterparties: [],
+        currencies: ['USD'],
+        exception_types: [],
+        severities: ['blocked', 'in-progress'],
+      })
+      return
+    }
+
+    if (url.pathname === '/reports/settlement-presets' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/reports/settlement-aging' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, {
+        generated_at: '2026-04-11T00:00:00Z',
+        as_of: '2026-04-11',
+        row_count: 0,
+        invoice_count: 0,
+        overdue_invoice_count: 0,
+        disputed_invoice_count: 0,
+        currency_summaries: [],
+        rows: [],
+      })
+      return
+    }
+
+    if (url.pathname === '/reports/cash-forecast' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, {
+        generated_at: '2026-04-11T00:00:00Z',
+        as_of: '2026-04-11',
+        horizon_days: 30,
+        basis: 'SMOKE_HARNESS',
+        row_count: 0,
+        currency_summaries: [],
+        points: [],
+      })
+      return
+    }
+
+    if (url.pathname === '/reports/settlement-exceptions' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, {
+        generated_at: '2026-04-11T00:00:00Z',
+        as_of: '2026-04-11',
+        row_count: 0,
+        blocked_count: 0,
+        warning_count: 0,
+        summaries: [],
+        rows: [],
+      })
+      return
+    }
+
+    if (url.pathname === '/reports/pnl-compare' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const fromAsOf = url.searchParams.get('from_as_of') ?? '2026-04-10'
+      const toAsOf = url.searchParams.get('to_as_of') ?? '2026-04-11'
+      const zeroSummary = {
+        total_pnl: 0,
+        realized_pnl: 0,
+        unrealized_pnl: 0,
+        priced_trade_count: 0,
+        realized_trade_count: 0,
+        unrealized_trade_count: 0,
+      }
+      const attributionSummary = {
+        market_move_pnl: 0,
+        quantity_change_pnl: 0,
+        coverage_change_pnl: 0,
+        other_change_pnl: 0,
+        realization_transfer_pnl: 0,
+        reconciled_pnl_delta: 0,
+      }
+
+      writeJson(response, {
+        generated_at: '2026-04-11T00:00:00Z',
+        basis: 'MARK_TO_MARKET',
+        methodology: 'Smoke report fixture.',
+        from_as_of: fromAsOf,
+        to_as_of: toAsOf,
+        from_snapshot: zeroSummary,
+        to_snapshot: zeroSummary,
+        delta: zeroSummary,
+        attribution_summary: attributionSummary,
+        portfolio_deltas: [],
+        attributions: [],
+        daily_bridge: [
+          {
+            from_as_of: fromAsOf,
+            to_as_of: toAsOf,
+            delta: zeroSummary,
+            attribution_summary: attributionSummary,
+            changed_trade_count: 0,
+            top_driver_trade_id: null,
+            top_driver_category: null,
+            top_driver_pnl_delta: null,
+            top_driver_summary: null,
+          },
+        ],
+      })
       return
     }
 

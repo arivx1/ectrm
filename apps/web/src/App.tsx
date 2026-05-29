@@ -374,6 +374,7 @@ function AuthenticatedWorkspaceShell({
       : HERO_BODY_BY_VIEW[currentView]
   const isPromptHomeView = !showingNavigationSectionLanding && currentView === 'prompt'
   const isMessagingWorkspaceView = !showingNavigationSectionLanding && currentView === 'messages'
+  const isPriceReportRouteFocus = Boolean(priceReportRouteFocus)
   const displayedHeroTitle = isMessagingWorkspaceView ? `Messaging: ${heroTitle}` : heroTitle
   const displayedHeroBody = isMessagingWorkspaceView ? '' : heroBody
   const showHeroBadge = showingNavigationSectionLanding || (currentView !== 'library' && currentView !== 'messages')
@@ -381,6 +382,13 @@ function AuthenticatedWorkspaceShell({
     'main-stage',
     isPromptHomeView ? 'main-stage-prompt' : null,
     isMessagingWorkspaceView ? 'main-stage-messages' : null,
+  ]
+    .filter(Boolean)
+    .join(' ')
+  const heroClassName = [
+    'hero',
+    isMessagingWorkspaceView ? 'hero-compact' : null,
+    isPriceReportRouteFocus ? 'hero-price-report' : null,
   ]
     .filter(Boolean)
     .join(' ')
@@ -792,7 +800,7 @@ function AuthenticatedWorkspaceShell({
             </div>
           </header>
         ) : (
-          <header className={`hero ${isMessagingWorkspaceView ? 'hero-compact' : ''}`}>
+          <header className={heroClassName}>
             <div className="hero-copy">
               {isMessagingWorkspaceView ? (
                 <div className="hero-compact-heading-row">

@@ -46,6 +46,7 @@ import {
   formatAssetMapLocation,
   formatAssetMapPlacement,
   formatAssetMapSource,
+  type AssetMapMarketPriceRecord,
   type AssetMapCountryOption,
   type AssetMapRecord,
   type AssetMapSubdivisionOption,
@@ -226,15 +227,33 @@ function buildVesselPositionSignature(records: AssetMapVesselRecord[]): string {
     .join("|");
 }
 
+function buildMarketPriceSignature(records: AssetMapMarketPriceRecord[]): string {
+  return records
+    .map((record) =>
+      [
+        record.priceIndex.code,
+        record.location.code,
+        record.latitude,
+        record.longitude,
+        record.latestMark?.id ?? "na",
+        record.latestMark?.value ?? "na",
+        record.latestMark?.downloaded_at ?? "na",
+      ].join(":"),
+    )
+    .join("|");
+}
+
 export function buildAssetMapViewportCoordinates({
   recordCoordinates,
   spatialFeatureCoordinates,
   vesselCoordinates,
+  marketPriceCoordinates = [],
   userLocation,
 }: {
   recordCoordinates: AssetMapCoordinate[];
   spatialFeatureCoordinates: AssetMapCoordinate[];
   vesselCoordinates: AssetMapCoordinate[];
+  marketPriceCoordinates?: AssetMapCoordinate[];
   userLocation: AssetMapUserLocation | null;
 }): AssetMapCoordinate[] {
   const userLocationCoordinates: AssetMapCoordinate[] = userLocation
@@ -245,6 +264,7 @@ export function buildAssetMapViewportCoordinates({
     ...recordCoordinates,
     ...spatialFeatureCoordinates,
     ...vesselCoordinates,
+    ...marketPriceCoordinates,
     ...userLocationCoordinates,
   ];
 }
@@ -762,6 +782,14 @@ function formatVesselLayerStatus(vesselCount: number): string {
   return `${vesselCount.toLocaleString()} vessel position${vesselCount === 1 ? "" : "s"} visible`;
 }
 
+function formatMarketPriceLayerStatus(marketPriceCount: number): string {
+  if (marketPriceCount === 0) {
+    return "No located market prices loaded";
+  }
+
+  return `${marketPriceCount.toLocaleString()} market price${marketPriceCount === 1 ? "" : "s"} visible`;
+}
+
 function formatWeatherOverlayModeLabel(
   mode: SelectableWeatherOverlayMode,
 ): string {
@@ -1043,14 +1071,48 @@ function formatVesselPositionDetail(vessel: AssetMapVesselRecord): string {
   return parts.join(" · ") || formatVesselMapSeverity(vessel.healthSeverity);
 }
 
+function formatMarketPriceMarkerValue(
+  record: AssetMapMarketPriceRecord,
+): string {
+  const mark = record.latestMark;
+  if (!mark) {
+    return "No latest mark";
+  }
+
+  const formattedValue = mark.value.toLocaleString(undefined, {
+    maximumFractionDigits: 4,
+  });
+  const currencyCode =
+    mark.currency_code?.trim() || record.priceIndex.currency_code.trim();
+  const unitCode = mark.unit_code.trim() || record.priceIndex.unit_code.trim();
+  const unitLabel = [currencyCode, unitCode].filter(Boolean).join("/");
+
+  return unitLabel ? `${formattedValue} ${unitLabel}` : formattedValue;
+}
+
+function formatMarketPriceMarkerDetail(
+  record: AssetMapMarketPriceRecord,
+): string {
+  return [
+    record.priceIndex.commodity_code,
+    record.location.code,
+    formatMarketPriceMarkerValue(record),
+  ]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join(" · ");
+}
+
 export function AssetMapCanvas({
   records,
   spatialFeatures,
   railRouteSpatialFeatures,
   vesselPositions = [],
+  marketPrices = [],
   showAssets: controlledShowAssets,
   showRailRoutes: controlledShowRailRoutes,
   showVessels: controlledShowVessels,
+  showMarketPrices: controlledShowMarketPrices,
   filterCardStateKey = "asset-map.filters-card",
   assetActivityVisibility = {},
   assetGeographyVisibility = {},
@@ -1064,6 +1126,7 @@ export function AssetMapCanvas({
   onShowAssetsChange,
   onShowRailRoutesChange,
   onShowVesselsChange,
+  onShowMarketPricesChange,
   onToggleAssetActivity = () => undefined,
   onToggleAssetGeography = () => undefined,
   onSelectCountry = () => undefined,
@@ -1084,9 +1147,11 @@ export function AssetMapCanvas({
   spatialFeatures: SpatialFeatureRecord[];
   railRouteSpatialFeatures: SpatialFeatureRecord[];
   vesselPositions?: AssetMapVesselRecord[];
+  marketPrices?: AssetMapMarketPriceRecord[];
   showAssets?: boolean;
   showRailRoutes?: boolean;
   showVessels?: boolean;
+  showMarketPrices?: boolean;
   filterCardStateKey?: string;
   assetActivityVisibility?: Record<string, boolean>;
   assetGeographyVisibility?: Record<string, boolean>;
@@ -1100,6 +1165,7 @@ export function AssetMapCanvas({
   onShowAssetsChange?: (visible: boolean) => void;
   onShowRailRoutesChange?: (visible: boolean) => void;
   onShowVesselsChange?: (visible: boolean) => void;
+  onShowMarketPricesChange?: (visible: boolean) => void;
   onToggleAssetActivity?: (activityLabel: string) => void;
   onToggleAssetGeography?: (geographyLabel: string) => void;
   onSelectCountry?: (countryCode: string) => void;
@@ -1130,6 +1196,9 @@ export function AssetMapCanvas({
   const vesselMarkersRef = useRef<
     Array<InstanceType<MapLibreModule["Marker"]>>
   >([]);
+  const marketPriceMarkersRef = useRef<
+    Array<InstanceType<MapLibreModule["Marker"]>>
+  >([]);
   const userMarkerRef = useRef<InstanceType<MapLibreModule["Marker"]> | null>(
     null,
   );
@@ -1150,6 +1219,8 @@ export function AssetMapCanvas({
   const [uncontrolledShowRailRoutes, setUncontrolledShowRailRoutes] =
     useState(true);
   const [uncontrolledShowVessels, setUncontrolledShowVessels] = useState(true);
+  const [uncontrolledShowMarketPrices, setUncontrolledShowMarketPrices] =
+    useState(true);
   const [showWeather, setShowWeather] = useState(true);
   const [showTooltips, setShowTooltips] = useState(true);
   const [savedFilterPresets, setSavedFilterPresets] = useState<
@@ -1201,6 +1272,8 @@ export function AssetMapCanvas({
   const showRailRoutes =
     controlledShowRailRoutes ?? uncontrolledShowRailRoutes;
   const showVessels = controlledShowVessels ?? uncontrolledShowVessels;
+  const showMarketPrices =
+    controlledShowMarketPrices ?? uncontrolledShowMarketPrices;
   const setShowAssets = useCallback(
     (visible: boolean) => {
       if (controlledShowAssets === undefined) {
@@ -1227,6 +1300,15 @@ export function AssetMapCanvas({
       onShowVesselsChange?.(visible);
     },
     [controlledShowVessels, onShowVesselsChange],
+  );
+  const setShowMarketPrices = useCallback(
+    (visible: boolean) => {
+      if (controlledShowMarketPrices === undefined) {
+        setUncontrolledShowMarketPrices(visible);
+      }
+      onShowMarketPricesChange?.(visible);
+    },
+    [controlledShowMarketPrices, onShowMarketPricesChange],
   );
   const handleMapResizeHandlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1319,6 +1401,7 @@ export function AssetMapCanvas({
   const railRouteOverlayCount = railRouteSpatialFeatures.length;
   const sharedSpatialFeatureCount = spatialFeatures.length;
   const visibleVesselPositionCount = showVessels ? vesselPositions.length : 0;
+  const visibleMarketPriceCount = showMarketPrices ? marketPrices.length : 0;
   const visibleActivityCount = useMemo(
     () =>
       ASSET_MAP_ACTIVITY_LABELS.filter((activityLabel) =>
@@ -1341,6 +1424,7 @@ export function AssetMapCanvas({
       showAssets,
       showRailRoutes,
       showVessels,
+      showMarketPrices && marketPrices.length > 0,
       showWeather,
     ].filter(Boolean).length;
     const visibleGeographyCount = ASSET_MAP_GEOGRAPHY_LABELS.filter(
@@ -1408,6 +1492,14 @@ export function AssetMapCanvas({
       );
     }
 
+    if (showMarketPrices && marketPrices.length > 0) {
+      parts.push(
+        marketPrices.length === 1
+          ? "1 market price"
+          : `${marketPrices.length} market prices`,
+      );
+    }
+
     if (showWeather && activeWeatherOverlayModes.length > 0) {
       parts.push(
         activeWeatherOverlayModes.length === 1
@@ -1427,8 +1519,10 @@ export function AssetMapCanvas({
     showAssets,
     showRailRoutes,
     showVessels,
+    showMarketPrices,
     showUserLocation,
     showWeather,
+    marketPrices.length,
     railRouteOverlayCount,
     sharedSpatialFeatureCount,
     vesselPositions.length,
@@ -1672,6 +1766,8 @@ export function AssetMapCanvas({
       markersRef.current = [];
       vesselMarkersRef.current.forEach((marker) => marker.remove());
       vesselMarkersRef.current = [];
+      marketPriceMarkersRef.current.forEach((marker) => marker.remove());
+      marketPriceMarkersRef.current = [];
       userMarkerRef.current?.remove();
       userMarkerRef.current = null;
       requestedUserLocationRef.current = false;
@@ -1708,6 +1804,10 @@ export function AssetMapCanvas({
   const vesselPositionSignature = useMemo(
     () => buildVesselPositionSignature(vesselPositions),
     [vesselPositions],
+  );
+  const marketPriceSignature = useMemo(
+    () => buildMarketPriceSignature(marketPrices),
+    [marketPrices],
   );
   const spatialFeatureSignature = useMemo(
     () => buildSpatialFeatureSignature(spatialFeatures),
@@ -1828,6 +1928,8 @@ export function AssetMapCanvas({
       showRailRoutes &&
       buildSpatialFeatureExtentCoordinates(railRouteSpatialFeatures).length > 0;
     const hasVisibleVesselData = showVessels && vesselPositions.length > 0;
+    const hasVisibleMarketPriceData =
+      showMarketPrices && marketPrices.length > 0;
 
     if (!showUserLocation || !userLocation) {
       userMarkerRef.current?.remove();
@@ -1860,7 +1962,8 @@ export function AssetMapCanvas({
       !hasCenteredOnUserRef.current &&
       !hasVisibleAssetData &&
       !hasVisibleRailRouteData &&
-      !hasVisibleVesselData
+      !hasVisibleVesselData &&
+      !hasVisibleMarketPriceData
     ) {
       map.easeTo({
         center: [userLocation.longitude, userLocation.latitude],
@@ -1876,9 +1979,12 @@ export function AssetMapCanvas({
     showAssets,
     showRailRoutes,
     showVessels,
+    showMarketPrices,
     showUserLocation,
     showTooltips,
     userLocation,
+    marketPriceSignature,
+    marketPrices,
     vesselPositionSignature,
     vesselPositions,
   ]);
@@ -1924,6 +2030,7 @@ export function AssetMapCanvas({
     const runtime = runtimeRef.current;
     const visibleRecords = showAssets ? records : [];
     const visibleVesselPositions = showVessels ? vesselPositions : [];
+    const visibleMarketPrices = showMarketPrices ? marketPrices : [];
     const visibleSpatialFeatures = [
       ...(showAssets ? spatialFeatures : []),
       ...(showRailRoutes ? railRouteSpatialFeatures : []),
@@ -2152,6 +2259,8 @@ export function AssetMapCanvas({
     markersRef.current = [];
     vesselMarkersRef.current.forEach((marker) => marker.remove());
     vesselMarkersRef.current = [];
+    marketPriceMarkersRef.current.forEach((marker) => marker.remove());
+    marketPriceMarkersRef.current = [];
 
     visibleRecords.forEach((record) => {
       if (record.latitude === null || record.longitude === null) {
@@ -2233,6 +2342,38 @@ export function AssetMapCanvas({
       vesselMarkersRef.current.push(marker);
     });
 
+    visibleMarketPrices.forEach((marketPrice) => {
+      const markerElement = document.createElement("div");
+      const markerLabel = document.createElement("span");
+      markerLabel.className = "asset-map-market-price-marker-label";
+      markerLabel.textContent = "$";
+      markerElement.className = "asset-map-market-price-marker";
+      markerElement.setAttribute("tabindex", "0");
+      markerElement.setAttribute("role", "img");
+      markerElement.setAttribute(
+        "aria-label",
+        `Market price ${marketPrice.priceIndex.code}: ${marketPrice.priceIndex.name} at ${marketPrice.location.code}`,
+      );
+      markerElement.append(markerLabel);
+      if (showTooltips) {
+        markerElement.append(
+          createMapMarkerTooltip(
+            `${marketPrice.priceIndex.code} · ${marketPrice.priceIndex.name}`,
+            formatMarketPriceMarkerDetail(marketPrice),
+          ),
+        );
+      }
+
+      const marker = new runtime.Marker({
+        element: markerElement,
+        anchor: "center",
+      })
+        .setLngLat([marketPrice.longitude, marketPrice.latitude])
+        .addTo(map);
+
+      marketPriceMarkersRef.current.push(marker);
+    });
+
     map.resize();
 
     const spatialFeatureCoordinates = buildSpatialFeatureExtentCoordinates(
@@ -2240,6 +2381,10 @@ export function AssetMapCanvas({
     );
     const vesselCoordinates = visibleVesselPositions.map(
       (vessel) => [vessel.longitude, vessel.latitude] as [number, number],
+    );
+    const marketPriceCoordinates = visibleMarketPrices.map(
+      (marketPrice) =>
+        [marketPrice.longitude, marketPrice.latitude] as [number, number],
     );
 
     const selectedVessel = visibleVesselPositions.find(
@@ -2330,6 +2475,7 @@ export function AssetMapCanvas({
       ),
       spatialFeatureCoordinates,
       vesselCoordinates,
+      marketPriceCoordinates,
       userLocation: showUserLocation ? userLocation : null,
     });
 
@@ -2366,10 +2512,13 @@ export function AssetMapCanvas({
     showAssets,
     showRailRoutes,
     showVessels,
+    showMarketPrices,
     showUserLocation,
     showTooltips,
     spatialFeatureSignature,
     spatialFeatures,
+    marketPriceSignature,
+    marketPrices,
     railRouteSpatialFeatures,
     selectedRailRouteCode,
     vesselPositionSignature,
@@ -2551,6 +2700,18 @@ export function AssetMapCanvas({
             />
             <span>Vessels</span>
           </label>
+          {marketPrices.length > 0 ? (
+            <label className="asset-map-layer-toggle">
+              <input
+                type="checkbox"
+                checked={showMarketPrices}
+                onChange={(event) =>
+                  setShowMarketPrices(event.target.checked)
+                }
+              />
+              <span>Market Prices</span>
+            </label>
+          ) : null}
           <label className="asset-map-layer-toggle">
             <input
               type="checkbox"
@@ -2569,6 +2730,17 @@ export function AssetMapCanvas({
                   <span className="asset-map-vessel-marker-label">V</span>
                 </span>
                 <span>{formatVesselLayerStatus(visibleVesselPositionCount)}</span>
+              </>
+            ) : null}
+            {showMarketPrices && marketPrices.length > 0 ? (
+              <>
+                <span
+                  className="asset-map-market-price-legend-marker"
+                  aria-hidden="true"
+                >
+                  <span className="asset-map-market-price-marker-label">$</span>
+                </span>
+                <span>{formatMarketPriceLayerStatus(visibleMarketPriceCount)}</span>
               </>
             ) : null}
             <label className="asset-map-layer-inline-toggle">

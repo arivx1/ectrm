@@ -727,6 +727,53 @@ test("single-user smoke signs into the prompt home when one-click access is enab
   }
 });
 
+test("home price rows open the filtered price report on double-click", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness();
+
+  try {
+    await seedSignedInSession(page, harness);
+    await page.goto(harness.origin, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const priceRow = page.getByRole("button", {
+      name: "Double-click to open the price report for Henry Hub IFERC",
+    });
+    await expect(priceRow).toBeVisible();
+    await expect(priceRow).toContainText("HENRY_HUB_GAS");
+    await expect(priceRow).toContainText("Price Datetime");
+
+    const homeUrl = page.url();
+    await priceRow.click();
+    await expect(page).toHaveURL(homeUrl);
+
+    await priceRow.dblclick();
+    await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("reports");
+    await expect.poll(() => new URL(page.url()).searchParams.get("focusType")).toBe("report");
+    await expect.poll(() => new URL(page.url()).searchParams.get("focusId")).toBe("reports-price-bi");
+    await expect.poll(() => new URL(page.url()).searchParams.get("focusFilter")).toBe("HH_IFERC");
+    await expect(
+      page.getByRole("heading", {
+        name: "HENRY_HUB_GAS, Henry Hub IFERC, ICE",
+      }),
+    ).toBeVisible();
+    await expect(page.getByText("Price-only report section filtered to the selected price index.")).toBeVisible();
+    await expect(page.getByText("Desk reporting and analyst outputs")).toHaveCount(0);
+    await expect(page.getByText("Latest Price")).toBeVisible();
+
+    await page.getByRole("button", { name: "Review Sources" }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("admin");
+    await expect.poll(() => new URL(page.url()).hash).toBe("#admin-price-sources");
+    await expect(page.getByText(/Price source inventory ·/)).toBeVisible();
+
+    assertNoHarnessRequestFailures(harness);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("prompt home prompt card expands and collapses independently", async ({
   page,
 }) => {

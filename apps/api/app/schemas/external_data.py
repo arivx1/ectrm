@@ -165,6 +165,12 @@ class ExternalDataProviderStatusOut(BaseModel):
     latest_run_status: str
     success_sla_hours: int
     scheduler_interval_minutes: int
+    ingestion_method: str
+    ingestion_mode: str
+    source_system: str
+    source_endpoint: Optional[str]
+    sync_job_name: str
+    default_lookback_days: Optional[int]
     active_series_count: int
     due_for_sync: bool
     last_run_at: Optional[datetime]
@@ -206,9 +212,20 @@ class PriceSourceReviewOut(BaseModel):
     source_unit: str
     source_currency_code: Optional[str]
     transform_rule: Optional[str]
+    ingestion_method: Optional[str]
+    ingestion_mode: Optional[str]
+    source_system: Optional[str]
+    source_endpoint: Optional[str]
+    sync_job_name: Optional[str]
+    default_lookback_days: Optional[int]
     is_active: bool
     review_status: str
     provider_health_status: Optional[str]
+    scheduler_interval_minutes: Optional[int]
+    success_sla_hours: Optional[int]
+    due_for_sync: Optional[bool]
+    provider_latest_observation_at: Optional[datetime]
+    provider_observation_age_hours: Optional[float]
     latest_run_status: Optional[str]
     latest_run_id: Optional[int]
     last_success_at: Optional[datetime]
@@ -218,6 +235,7 @@ class PriceSourceReviewOut(BaseModel):
     latest_unit_code: Optional[str]
     latest_currency_code: Optional[str]
     latest_source_revision: Optional[str]
+    latest_source_published_at: Optional[datetime]
     latest_downloaded_at: Optional[datetime]
     latest_observation_run_id: Optional[int]
     created_at: datetime
@@ -274,6 +292,21 @@ class MarketContextOut(BaseModel):
     macro: list[MarketContextSeriesOut]
     positioning: list[MarketContextSeriesOut]
     freshness: list[MarketContextFreshnessOut]
+
+
+class MarketNewsHeadlineOut(BaseModel):
+    title: str
+    source: Optional[str]
+    published_at: Optional[datetime]
+    link: str
+
+
+class MarketNewsOut(BaseModel):
+    generated_at: datetime
+    commodity: Optional[str]
+    search_query: str
+    count: int
+    items: list[MarketNewsHeadlineOut]
 
 
 class PriceIndexObservationOut(BaseModel):

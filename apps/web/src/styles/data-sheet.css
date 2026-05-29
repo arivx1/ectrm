@@ -1457,7 +1457,9 @@ body.is-map-resizing {
 }
 
 .asset-map-vessel-marker,
-.asset-map-vessel-legend-marker {
+.asset-map-vessel-legend-marker,
+.asset-map-market-price-marker,
+.asset-map-market-price-legend-marker {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -1474,7 +1476,8 @@ body.is-map-resizing {
   color: #ffffff;
 }
 
-.asset-map-vessel-marker {
+.asset-map-vessel-marker,
+.asset-map-market-price-marker {
   cursor: pointer;
   transition:
     transform 180ms ease,
@@ -1483,7 +1486,9 @@ body.is-map-resizing {
 }
 
 .asset-map-vessel-marker:hover,
-.asset-map-vessel-marker.is-selected {
+.asset-map-vessel-marker.is-selected,
+.asset-map-market-price-marker:hover,
+.asset-map-market-price-marker:focus-visible {
   transform: scale(1.12) translateY(-1px);
   box-shadow:
     0 0 0 4px rgba(8, 145, 178, 0.24),
@@ -1517,6 +1522,37 @@ body.is-map-resizing {
   justify-content: center;
   color: #ffffff;
   font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.asset-map-market-price-marker,
+.asset-map-market-price-legend-marker {
+  border-radius: 999px;
+  background: #7c3aed;
+  box-shadow:
+    0 0 0 3px rgba(124, 58, 237, 0.18),
+    0 10px 18px rgba(19, 41, 61, 0.18);
+}
+
+.asset-map-market-price-marker {
+  cursor: default;
+}
+
+.asset-map-market-price-marker:hover,
+.asset-map-market-price-marker:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 4px rgba(124, 58, 237, 0.24),
+    0 14px 24px rgba(19, 41, 61, 0.24);
+}
+
+.asset-map-market-price-marker-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 0.72rem;
   font-weight: 800;
   line-height: 1;
 }
@@ -1587,6 +1623,8 @@ body.is-map-resizing {
 .asset-map-marker:focus-visible .asset-map-marker-tooltip,
 .asset-map-vessel-marker:hover .asset-map-marker-tooltip,
 .asset-map-vessel-marker:focus-visible .asset-map-marker-tooltip,
+.asset-map-market-price-marker:hover .asset-map-marker-tooltip,
+.asset-map-market-price-marker:focus-visible .asset-map-marker-tooltip,
 .asset-map-user-marker:hover .asset-map-marker-tooltip {
   opacity: 1;
   visibility: visible;

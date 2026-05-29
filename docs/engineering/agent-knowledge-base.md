@@ -83,6 +83,37 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-27 - Reports Prompt Uses Typed Read-Only Price Lenses
+
+- Type: algorithm-added
+- Domain: reporting, natural-language report prompts, market data, and
+  reference-data filtering
+- Applies to: `apps/web/src/workspaces/reports/reportPrompt.ts`,
+  `apps/web/src/workspaces/reports/reportPromptPriceReport.tsx`, and
+  `apps/web/src/workspaces/reports/ReportsWorkspace.tsx`
+- Status: implemented
+- Source: Reports prompt work that maps "show me power prices in the US" to
+  active price indices, locations, and latest loaded price observations.
+- Lesson: natural-language report prompts in Reports should resolve into typed,
+  read-only report lenses over governed datasets. The first supported lane
+  deterministically detects price, commodity, market, and geography terms,
+  filters active price-index reference records, and renders loaded market
+  observations as cards, a map, a line chart, and a table. Prompt text does not
+  publish report definitions, mutate business records, or invent market data.
+  The default Reports UI currently keeps this lane hidden until the product
+  experience is ready for promotion.
+- Deterministic opportunity: add future prompt-supported report lanes as
+  explicit resolver functions over approved datasets, with source provenance,
+  no-match stop conditions, and tests before any saved report or export
+  workflow is promoted.
+- Agent autonomy impact: agents and prompt surfaces may explain or assemble
+  read-only report views, but persistence, publication, external delivery, or
+  business-record mutation must remain behind typed services and action
+  governance.
+- Tests or evidence:
+  `npm --prefix apps/web run test -- reportsWorkspace.test.ts workspaceRegistry.test.ts`
+  `npm --prefix apps/web run lint`, and `npm --prefix apps/web run build`.
+
 ### 2026-05-25 - Document-Derived Creates Require Typed Services
 
 - Type: stop-condition

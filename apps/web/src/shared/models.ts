@@ -1798,6 +1798,12 @@ export type ExternalDataProviderStatusRecord = {
   latest_run_status: string
   success_sla_hours: number
   scheduler_interval_minutes: number
+  ingestion_method: string
+  ingestion_mode: string
+  source_system: string
+  source_endpoint: string | null
+  sync_job_name: string
+  default_lookback_days: number | null
   active_series_count: number
   due_for_sync: boolean
   last_run_at: string | null
@@ -1839,9 +1845,20 @@ export type PriceSourceReviewRecord = {
   source_unit: string
   source_currency_code: string | null
   transform_rule: string | null
+  ingestion_method: string | null
+  ingestion_mode: string | null
+  source_system: string | null
+  source_endpoint: string | null
+  sync_job_name: string | null
+  default_lookback_days: number | null
   is_active: boolean
   review_status: string
   provider_health_status: string | null
+  scheduler_interval_minutes: number | null
+  success_sla_hours: number | null
+  due_for_sync: boolean | null
+  provider_latest_observation_at: string | null
+  provider_observation_age_hours: number | null
   latest_run_status: string | null
   latest_run_id: number | null
   last_success_at: string | null
@@ -1851,6 +1868,7 @@ export type PriceSourceReviewRecord = {
   latest_unit_code: string | null
   latest_currency_code: string | null
   latest_source_revision: string | null
+  latest_source_published_at: string | null
   latest_downloaded_at: string | null
   latest_observation_run_id: number | null
   created_at: string
@@ -2834,6 +2852,21 @@ export type MarketContextRecord = {
   macro: MarketContextSeriesRecord[]
   positioning: MarketContextSeriesRecord[]
   freshness: MarketContextFreshnessRecord[]
+}
+
+export type MarketNewsHeadlineRecord = {
+  title: string
+  source: string | null
+  published_at: string | null
+  link: string
+}
+
+export type MarketNewsRecord = {
+  generated_at: string
+  commodity: string | null
+  search_query: string
+  count: number
+  items: MarketNewsHeadlineRecord[]
 }
 
 export type ExternalSeriesDefinitionRecord = {

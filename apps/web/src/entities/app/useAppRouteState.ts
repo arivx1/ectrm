@@ -465,7 +465,7 @@ export function useAppRouteState() {
         handoff: routeHandoff,
       },
       'replace',
-      currentView === 'settings' ? window.location.hash : '',
+      window.location.hash,
       0,
     )
   }, [

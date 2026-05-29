@@ -2324,6 +2324,8 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(filters_by_field["price_index_code"]["options"][0]["code"], "WTI_CUSHING_D")
         self.assertIn("SPOT", filters_by_field["quote_type"]["options"])
         self.assertIn("updated_desc", parameters_by_field["price_sort"]["options"])
+        self.assertIn("change_desc", parameters_by_field["price_sort"]["options"])
+        self.assertIn("frequency_asc", parameters_by_field["price_sort"]["options"])
         self.assertEqual(options_trace.output_preview["card_id"], "prices")
 
         visible_names = {item["name"] for item in instances_result.output["items"]}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { loadLatestPriceIndexObservations } from './api'
 import { appConfig } from '../../shared/config'
@@ -18,7 +18,9 @@ function buildMarksMap(
     if (!normalizedCode) {
       continue
     }
-    nextMarksByCode[normalizedCode] = observation
+    if (!nextMarksByCode[normalizedCode]) {
+      nextMarksByCode[normalizedCode] = observation
+    }
   }
   return nextMarksByCode
 }
@@ -26,6 +28,7 @@ function buildMarksMap(
 export function useLatestPriceIndexMarks(
   priceIndexCodes: Array<string | null | undefined>,
   options: {
+    limitPerCode?: number
     refreshIntervalMs?: number
     pauseWhenHidden?: boolean
   } = {},
@@ -33,9 +36,12 @@ export function useLatestPriceIndexMarks(
   latestMarks: PriceIndexObservationRecord[]
   latestMarksByCode: Record<string, PriceIndexObservationRecord>
   loading: boolean
+  refreshing: boolean
   error: string
+  refresh: () => Promise<PriceIndexObservationRecord[]>
 } {
   const refreshIntervalMs = Math.max(0, options.refreshIntervalMs ?? 0)
+  const limitPerCode = Math.max(1, Math.floor(options.limitPerCode ?? 1))
   const pauseWhenHidden = options.pauseWhenHidden ?? true
   const normalizedCodes = useMemo(
     () =>
@@ -51,7 +57,69 @@ export function useLatestPriceIndexMarks(
   const [latestMarksByCode, setLatestMarksByCode] = useState<Record<string, PriceIndexObservationRecord>>({})
   const [latestMarks, setLatestMarks] = useState<PriceIndexObservationRecord[]>([])
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
+  const mountedRef = useRef(false)
+  const requestSerialRef = useRef(0)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  const refresh = useCallback(
+    async ({ background = false }: { background?: boolean } = {}) => {
+      const requestSerial = requestSerialRef.current + 1
+      requestSerialRef.current = requestSerial
+
+      if (normalizedCodes.length === 0) {
+        if (mountedRef.current) {
+          setLatestMarks([])
+          setLatestMarksByCode({})
+          setError('')
+          setLoading(false)
+          setRefreshing(false)
+        }
+        return []
+      }
+
+      if (mountedRef.current) {
+        if (background) {
+          setRefreshing(true)
+        } else {
+          setLoading(true)
+          setRefreshing(false)
+        }
+        setError('')
+      }
+
+      try {
+        const payload = await loadLatestPriceIndexObservations(appConfig.apiBase, normalizedCodes, {
+          limitPerCode,
+        })
+        if (mountedRef.current && requestSerialRef.current === requestSerial) {
+          setLatestMarks(payload)
+          setLatestMarksByCode(buildMarksMap(payload))
+        }
+        return payload
+      } catch (nextError) {
+        if (mountedRef.current && requestSerialRef.current === requestSerial) {
+          setError(nextError instanceof Error ? nextError.message : 'Could not load latest price index marks.')
+        }
+        throw nextError
+      } finally {
+        if (mountedRef.current && requestSerialRef.current === requestSerial) {
+          if (!background) {
+            setLoading(false)
+          }
+          setRefreshing(false)
+        }
+      }
+    },
+    [limitPerCode, normalizedCodes],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -80,39 +148,17 @@ export function useLatestPriceIndexMarks(
           return
         }
 
-        void load({ background: true })
+        void loadAndSchedule({ background: true })
       }, refreshIntervalMs)
     }
 
-    async function load({ background = false }: { background?: boolean } = {}) {
-      if (normalizedCodes.length === 0) {
-        clearRefreshTimer()
-        setLatestMarks([])
-        setLatestMarksByCode({})
-        setError('')
-        setLoading(false)
-        return
-      }
-
-      if (!background) {
-        setLoading(true)
-      }
-      setError('')
+    async function loadAndSchedule({ background = false }: { background?: boolean } = {}) {
       try {
-        const payload = await loadLatestPriceIndexObservations(appConfig.apiBase, normalizedCodes)
-        if (!cancelled) {
-          setLatestMarks(payload)
-          setLatestMarksByCode(buildMarksMap(payload))
-        }
-      } catch (nextError) {
-        if (!cancelled) {
-          setError(nextError instanceof Error ? nextError.message : 'Could not load latest price index marks.')
-        }
+        await refresh({ background })
+      } catch {
+        // Keep the polling loop alive; the hook state carries the load error.
       } finally {
         if (!cancelled) {
-          if (!background) {
-            setLoading(false)
-          }
           scheduleRefresh()
         }
       }
@@ -130,14 +176,14 @@ export function useLatestPriceIndexMarks(
       }
 
       clearRefreshTimer()
-      void load({ background: true })
+      void loadAndSchedule({ background: true })
     }
 
     if (pauseWhenHidden && typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', handleVisibilityChange)
     }
 
-    void load()
+    void loadAndSchedule()
     return () => {
       cancelled = true
       clearRefreshTimer()
@@ -145,12 +191,14 @@ export function useLatestPriceIndexMarks(
         document.removeEventListener('visibilitychange', handleVisibilityChange)
       }
     }
-  }, [normalizedCodes, pauseWhenHidden, refreshIntervalMs])
+  }, [normalizedCodes.length, pauseWhenHidden, refresh, refreshIntervalMs])
 
   return {
     latestMarks,
     latestMarksByCode,
     loading,
+    refreshing,
     error,
+    refresh,
   }
 }

@@ -22,14 +22,16 @@ export type PromptHomePriceSortField =
   | "product"
   | "location"
   | "price"
+  | "change"
   | "unit"
   | "currency"
+  | "frequency"
   | "date"
-  | "time"
   | "updated"
   | "source";
 
 export type PromptHomePriceSortDirection = "asc" | "desc";
+export type PromptHomePriceChangeTone = "up" | "down" | "flat";
 
 export type PromptHomePriceSortState = {
   field: PromptHomePriceSortField;
@@ -55,15 +57,18 @@ export type PromptHomePriceRowViewModel = {
   product: string;
   location: string;
   price: string;
+  change: string;
+  changeTone: PromptHomePriceChangeTone;
   unit: string;
   currency: string;
-  date: string;
-  time: string;
+  frequency: string;
+  dateTime: string;
   updated: string;
   source: string;
   hasLatestMark: boolean;
   priceIndex: PriceIndexRecord;
   latestMark: PriceIndexObservationRecord | null;
+  previousMark: PriceIndexObservationRecord | null;
 };
 
 export type PromptHomePricesCardViewModel = {
@@ -77,6 +82,7 @@ export type PromptHomePricesCardViewModel = {
   allRows: PromptHomePriceRowViewModel[];
   rows: PromptHomePriceRowViewModel[];
   latestMarksByCode: Record<string, PriceIndexObservationRecord>;
+  previousMarksByCode: Record<string, PriceIndexObservationRecord>;
 };
 
 export const PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER = "ALL";
@@ -92,10 +98,18 @@ const PROMPT_HOME_PRICE_QUOTE_TYPE_LABELS: Record<PriceIndexQuoteType, string> =
 
 const PROMPT_HOME_PRICE_NUMERIC_SORT_FIELDS = new Set<PromptHomePriceSortField>([
   "price",
+  "change",
   "date",
-  "time",
   "updated",
 ]);
+
+const PROMPT_HOME_PRICE_TIME_ZONE_BY_CONTEXT: Record<string, string> = {
+  CAISO: "America/Los_Angeles",
+  ERCOT: "America/Chicago",
+  MISO: "America/Chicago",
+  NYISO: "America/New_York",
+  PJM: "America/New_York",
+};
 
 function normalizePromptHomePriceIndexCode(
   value: string | null | undefined,
@@ -104,27 +118,67 @@ function normalizePromptHomePriceIndexCode(
   return normalized === "" ? null : normalized;
 }
 
-export function buildPromptHomeLatestMarksByCode(
-  latestMarks: readonly PriceIndexObservationRecord[],
-): Record<string, PriceIndexObservationRecord> {
-  const latestMarksByCode: Record<string, PriceIndexObservationRecord> = {};
-  for (const latestMark of latestMarks) {
+type PromptHomePriceMarkPair = {
+  latestMark: PriceIndexObservationRecord;
+  previousMark: PriceIndexObservationRecord | null;
+};
+
+function buildPromptHomePriceMarkPairsByCode(
+  observations: readonly PriceIndexObservationRecord[],
+): Record<string, PromptHomePriceMarkPair> {
+  const markPairsByCode: Record<string, PromptHomePriceMarkPair> = {};
+  for (const observation of observations) {
     const normalizedCode = normalizePromptHomePriceIndexCode(
-      latestMark.price_index_code,
+      observation.price_index_code,
     );
     if (!normalizedCode) {
       continue;
     }
 
-    const existingMark = latestMarksByCode[normalizedCode];
+    const currentPair = markPairsByCode[normalizedCode];
+    if (!currentPair) {
+      markPairsByCode[normalizedCode] = {
+        latestMark: observation,
+        previousMark: null,
+      };
+      continue;
+    }
+
+    if (observation.id === currentPair.latestMark.id) {
+      continue;
+    }
+
+    if (comparePromptHomePriceMarkRecency(observation, currentPair.latestMark) > 0) {
+      markPairsByCode[normalizedCode] = {
+        latestMark: observation,
+        previousMark: currentPair.latestMark,
+      };
+      continue;
+    }
+
     if (
-      !existingMark ||
-      comparePromptHomePriceMarkRecency(latestMark, existingMark) > 0
+      !currentPair.previousMark ||
+      (observation.id !== currentPair.previousMark.id &&
+        comparePromptHomePriceMarkRecency(
+          observation,
+          currentPair.previousMark,
+        ) > 0)
     ) {
-      latestMarksByCode[normalizedCode] = latestMark;
+      currentPair.previousMark = observation;
     }
   }
-  return latestMarksByCode;
+
+  return markPairsByCode;
+}
+
+export function buildPromptHomeLatestMarksByCode(
+  latestMarks: readonly PriceIndexObservationRecord[],
+): Record<string, PriceIndexObservationRecord> {
+  return Object.fromEntries(
+    Object.entries(buildPromptHomePriceMarkPairsByCode(latestMarks)).map(
+      ([priceIndexCode, pair]) => [priceIndexCode, pair.latestMark],
+    ),
+  );
 }
 
 function formatPromptHomeObservationDate(value: string): string {
@@ -155,6 +209,19 @@ function promptHomePriceTimestamp(
   return Number.isNaN(timestamp.getTime()) ? null : timestamp;
 }
 
+function promptHomeObservationDateTimestamp(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+
+  const [, year, month, day] = match;
+  const timestamp = new Date(
+    Date.UTC(Number(year), Number(month) - 1, Number(day)),
+  );
+  return Number.isNaN(timestamp.getTime()) ? null : timestamp;
+}
+
 function promptHomePriceRevisionTimestamp(value: string): Date | null {
   const isoTimestampMatch =
     /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/.exec(value.trim());
@@ -163,6 +230,69 @@ function promptHomePriceRevisionTimestamp(value: string): Date | null {
   }
 
   return promptHomePriceTimestamp(`${isoTimestampMatch[1]}Z`);
+}
+
+function promptHomePriceDeliveryRevisionTimestamp(value: string): Date | null {
+  const deliveryTimestampMatch =
+    /(?:^|:)delivery:(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/.exec(
+      value.trim(),
+    );
+  return deliveryTimestampMatch?.[1]
+    ? promptHomePriceTimestamp(`${deliveryTimestampMatch[1]}Z`)
+    : null;
+}
+
+function promptHomePriceCaisoRevisionTimestamp(value: string): Date | null {
+  const caisoMatch = /^(\d{4}-\d{2}-\d{2}):HE(\d{1,2}):I(\d{1,2})$/i.exec(
+    value.trim(),
+  );
+  if (!caisoMatch?.[1] || !caisoMatch[2] || !caisoMatch[3]) {
+    return null;
+  }
+
+  const baseDate = promptHomeObservationDateTimestamp(caisoMatch[1]);
+  const hourEnding = Number(caisoMatch[2]);
+  const interval = Number(caisoMatch[3]);
+  if (!baseDate || hourEnding < 1 || hourEnding > 24 || interval < 1 || interval > 12) {
+    return null;
+  }
+
+  const intervalEndMinutes = (hourEnding - 1) * 60 + interval * 5;
+  return new Date(baseDate.getTime() + intervalEndMinutes * 60_000);
+}
+
+function promptHomePriceErcotRevisionTimestamp(value: string): Date | null {
+  const ercotMatch = /^(\d{4}-\d{2}-\d{2}):IE\s*(\d{1,2})(?::?(\d{2}))?$/i.exec(
+    value.trim(),
+  );
+  if (!ercotMatch?.[1] || !ercotMatch[2]) {
+    return null;
+  }
+
+  const baseDate = promptHomeObservationDateTimestamp(ercotMatch[1]);
+  const hour = Number(ercotMatch[2]);
+  const minute = Number(ercotMatch[3] ?? 0);
+  if (!baseDate || hour < 0 || hour > 24 || minute < 0 || minute > 59) {
+    return null;
+  }
+
+  return new Date(baseDate.getTime() + (hour * 60 + minute) * 60_000);
+}
+
+function promptHomePriceSourceRevisionTimestamp(
+  value: string | null | undefined,
+): Date | null {
+  const normalizedValue = value?.trim();
+  if (!normalizedValue) {
+    return null;
+  }
+
+  return (
+    promptHomePriceDeliveryRevisionTimestamp(normalizedValue) ??
+    promptHomePriceRevisionTimestamp(normalizedValue) ??
+    promptHomePriceCaisoRevisionTimestamp(normalizedValue) ??
+    promptHomePriceErcotRevisionTimestamp(normalizedValue)
+  );
 }
 
 function formatPromptHomeCompactDatePart(value: number): string {
@@ -189,32 +319,92 @@ function formatPromptHomeObservationTimestamp(value: Date): string {
   return `${formatPromptHomeCompactUtcDate(value)} ${formatPromptHomeObservationTime(value)}`;
 }
 
+function formatPromptHomeObservationTimestampWithTimeZone(
+  value: Date,
+  timeZone: string,
+): string {
+  return `${formatPromptHomeObservationTimestamp(
+    value,
+  )} ${formatPromptHomeTimeZoneLabel(timeZone, value)}`;
+}
+
+function formatPromptHomeTimeZoneLabel(timeZone: string, value: Date): string {
+  const normalizedTimeZone = timeZone.trim() || "UTC";
+  if (normalizedTimeZone.toUpperCase() === "UTC") {
+    return "UTC";
+  }
+
+  try {
+    const referenceDate = new Date(
+      Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate(), 12),
+    );
+    const timeZonePart = new Intl.DateTimeFormat("en-US", {
+      timeZone: normalizedTimeZone,
+      timeZoneName: "short",
+    })
+      .formatToParts(referenceDate)
+      .find((part) => part.type === "timeZoneName")?.value;
+    return timeZonePart?.trim() || normalizedTimeZone;
+  } catch {
+    return normalizedTimeZone;
+  }
+}
+
+function normalizePromptHomePriceTimeZoneContext(
+  value: string | null | undefined,
+): string | null {
+  const normalizedValue = value?.trim().toUpperCase();
+  return normalizedValue ? normalizedValue.replace(/[\s-]+/g, "_") : null;
+}
+
+function promptHomePriceTimeZoneForContext(
+  value: string | null | undefined,
+): string | null {
+  const normalizedValue = normalizePromptHomePriceTimeZoneContext(value);
+  return normalizedValue
+    ? PROMPT_HOME_PRICE_TIME_ZONE_BY_CONTEXT[normalizedValue] ?? null
+    : null;
+}
+
+function promptHomePriceSourceRevisionTimeZone(
+  value: string | null | undefined,
+): string | null {
+  const normalizedValue = value?.trim();
+  if (!normalizedValue) {
+    return null;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}:HE\d{1,2}:I\d{1,2}$/i.test(normalizedValue)) {
+    return PROMPT_HOME_PRICE_TIME_ZONE_BY_CONTEXT.CAISO;
+  }
+  if (/^\d{4}-\d{2}-\d{2}:IE\s*\d{1,2}(?::?\d{2})?$/i.test(normalizedValue)) {
+    return PROMPT_HOME_PRICE_TIME_ZONE_BY_CONTEXT.ERCOT;
+  }
+
+  return null;
+}
+
+function promptHomePriceDisplayTimeZone(
+  observation: PriceIndexObservationRecord | null | undefined,
+  priceIndex?: PriceIndexRecord | null,
+): string {
+  return (
+    promptHomePriceSourceRevisionTimeZone(observation?.source_revision) ??
+    promptHomePriceTimeZoneForContext(priceIndex?.calendar_code) ??
+    promptHomePriceTimeZoneForContext(priceIndex?.market) ??
+    promptHomePriceTimeZoneForContext(observation?.source_provider) ??
+    promptHomePriceTimeZoneForContext(priceIndex?.provider) ??
+    "UTC"
+  );
+}
+
 function formatPromptHomeSourceRevisionTime(
   value: string | null | undefined,
 ): string {
-  const normalizedValue = value?.trim();
-  if (!normalizedValue) {
-    return "—";
-  }
-
-  const isoRevisionTimestamp = promptHomePriceRevisionTimestamp(normalizedValue);
-  if (isoRevisionTimestamp) {
-    return formatPromptHomeObservationTime(isoRevisionTimestamp);
-  }
-
-  const caisoMatch = /^\d{4}-\d{2}-\d{2}:HE(\d{2}):I(\d{2})$/i.exec(
-    normalizedValue,
-  );
-  if (caisoMatch) {
-    return `HE${caisoMatch[1]} I${caisoMatch[2]}`;
-  }
-
-  const ercotMatch = /^\d{4}-\d{2}-\d{2}:IE(.+)$/i.exec(normalizedValue);
-  if (ercotMatch?.[1]) {
-    return `IE ${ercotMatch[1].trim()}`;
-  }
-
-  return "—";
+  const sourceRevisionTimestamp = promptHomePriceSourceRevisionTimestamp(value);
+  return sourceRevisionTimestamp
+    ? formatPromptHomeObservationTime(sourceRevisionTimestamp)
+    : "—";
 }
 
 export function formatPromptHomePriceDate(
@@ -224,10 +414,7 @@ export function formatPromptHomePriceDate(
     return "—";
   }
 
-  const downloadedAt = promptHomePriceTimestamp(observation.downloaded_at);
-  return downloadedAt
-    ? formatPromptHomeCompactUtcDate(downloadedAt)
-    : formatPromptHomeObservationDate(observation.observation_date);
+  return formatPromptHomeObservationDate(observation.observation_date);
 }
 
 export function formatPromptHomePriceTime(
@@ -237,26 +424,19 @@ export function formatPromptHomePriceTime(
     return "—";
   }
 
-  const downloadedAt = promptHomePriceTimestamp(observation.downloaded_at);
-  if (downloadedAt) {
-    return formatPromptHomeObservationTime(downloadedAt);
-  }
-
-  const sourcePublishedAt = promptHomePriceTimestamp(
-    observation.source_published_at,
+  const sourceRevisionTime = formatPromptHomeSourceRevisionTime(
+    observation.source_revision,
   );
-  if (sourcePublishedAt) {
-    return formatPromptHomeObservationTime(sourcePublishedAt);
-  }
-
-  return formatPromptHomeSourceRevisionTime(observation.source_revision);
+  return sourceRevisionTime === "—" ? "00:00:00" : sourceRevisionTime;
 }
 
 export function formatPromptHomePriceUpdatedAt(
   observation: PriceIndexObservationRecord | null | undefined,
 ): string {
   const downloadedAt = promptHomePriceTimestamp(observation?.downloaded_at);
-  return downloadedAt ? formatPromptHomeObservationTimestamp(downloadedAt) : "—";
+  return downloadedAt
+    ? formatPromptHomeObservationTimestampWithTimeZone(downloadedAt, "UTC")
+    : "—";
 }
 
 export function formatPromptHomePriceSource(
@@ -265,10 +445,6 @@ export function formatPromptHomePriceSource(
 ): string {
   const provider =
     observation?.source_provider.trim() || priceIndex.provider.trim();
-  const seriesId = observation?.source_series_id.trim();
-  if (provider && seriesId) {
-    return `${provider} · ${seriesId}`;
-  }
   return provider || "—";
 }
 
@@ -292,6 +468,34 @@ export function formatPromptHomePriceNumber(
     observation.value,
     priceObservationDigits(observation, priceIndex),
   );
+}
+
+export function formatPromptHomePriceChange(
+  latestMark: PriceIndexObservationRecord | null,
+  previousMark: PriceIndexObservationRecord | null,
+  priceIndex: PriceIndexRecord,
+): string {
+  if (!latestMark || !previousMark) {
+    return "—";
+  }
+
+  const delta = latestMark.value - previousMark.value;
+  const sign = delta > 0 ? "+" : "";
+  return `${sign}${formatNumber(
+    delta,
+    priceObservationDigits(latestMark, priceIndex),
+  )}`;
+}
+
+export function promptHomePriceChangeTone(
+  latestMark: PriceIndexObservationRecord | null,
+  previousMark: PriceIndexObservationRecord | null,
+): PromptHomePriceChangeTone {
+  if (!latestMark || !previousMark || latestMark.value === previousMark.value) {
+    return "flat";
+  }
+
+  return latestMark.value > previousMark.value ? "up" : "down";
 }
 
 export function formatPromptHomePriceUnit(
@@ -391,30 +595,86 @@ export function formatPromptHomePriceFrequency(
   }
 }
 
+function formatPromptHomePriceRowFrequency(
+  observation: PriceIndexObservationRecord | null,
+): string {
+  return observation ? formatPromptHomePriceFrequency(observation.source_frequency) : "—";
+}
+
 export function formatPromptHomePriceDateTime(
   observation: PriceIndexObservationRecord | null | undefined,
+  priceIndex?: PriceIndexRecord | null,
 ): string {
   if (!observation) {
     return "No mark yet";
   }
 
-  const frequencyLabel = formatPromptHomePriceFrequency(
-    observation.source_frequency,
+  const displayTimeZone = promptHomePriceDisplayTimeZone(observation, priceIndex);
+  const sourceRevisionTimestamp = promptHomePriceSourceRevisionTimestamp(
+    observation.source_revision,
   );
-  const sourcePublishedAt = promptHomePriceTimestamp(
-    observation.source_published_at,
-  );
-  const observationDate = formatPromptHomeObservationDate(
-    observation.observation_date,
-  );
-  if (sourcePublishedAt) {
-    return `${frequencyLabel} · source date ${observationDate} · published ${formatPromptHomeObservationTimestamp(sourcePublishedAt)}`;
+  if (sourceRevisionTimestamp) {
+    return formatPromptHomeObservationTimestampWithTimeZone(
+      sourceRevisionTimestamp,
+      displayTimeZone,
+    );
   }
 
-  const downloadedAt = promptHomePriceTimestamp(observation.downloaded_at);
-  return downloadedAt
-    ? `${frequencyLabel} · source date ${observationDate} · synced ${formatPromptHomeObservationTimestamp(downloadedAt)}`
-    : `${frequencyLabel} · source date ${observationDate}`;
+  const observationDate = promptHomeObservationDateTimestamp(
+    observation.observation_date,
+  );
+  if (observationDate) {
+    return formatPromptHomeObservationTimestampWithTimeZone(
+      observationDate,
+      displayTimeZone,
+    );
+  }
+
+  return `${formatPromptHomePriceDate(observation)} ${formatPromptHomePriceTime(
+    observation,
+  )} ${formatPromptHomeTimeZoneLabel(displayTimeZone, new Date())}`;
+}
+
+export function formatPromptHomePriceReportTitleDateTime(
+  observation: PriceIndexObservationRecord | null | undefined,
+  priceIndex?: PriceIndexRecord | null,
+): string {
+  if (!observation) {
+    return "";
+  }
+
+  const displayTimeZone = promptHomePriceDisplayTimeZone(observation, priceIndex);
+  const sourceRevisionTimestamp = promptHomePriceSourceRevisionTimestamp(
+    observation.source_revision,
+  );
+  if (sourceRevisionTimestamp) {
+    return formatPromptHomeObservationTimestampWithTimeZone(
+      sourceRevisionTimestamp,
+      displayTimeZone,
+    );
+  }
+
+  const observationDate = observation.observation_date.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(observationDate)) {
+    const observationDateTimestamp =
+      promptHomeObservationDateTimestamp(observationDate);
+    return observationDateTimestamp
+      ? formatPromptHomeObservationTimestampWithTimeZone(
+          observationDateTimestamp,
+          displayTimeZone,
+        )
+      : formatPromptHomePriceDate(observation);
+  }
+
+  const observationTimestamp = promptHomePriceTimestamp(observationDate);
+  if (observationTimestamp) {
+    return formatPromptHomeObservationTimestampWithTimeZone(
+      observationTimestamp,
+      displayTimeZone,
+    );
+  }
+
+  return formatPromptHomePriceDate(observation);
 }
 
 export function normalizePromptHomePriceQuoteType(
@@ -579,6 +839,7 @@ export function sortPromptHomeDisplayPriceIndices(
   latestMarksByCode: Record<string, PriceIndexObservationRecord>,
   sortState: PromptHomePriceSortState | null,
   manualOrder: readonly string[] = [],
+  previousMarksByCode: Record<string, PriceIndexObservationRecord> = {},
 ): PriceIndexRecord[] {
   if (!sortState) {
     return applyPromptHomePriceManualOrder(priceIndices, manualOrder);
@@ -593,6 +854,8 @@ export function sortPromptHomeDisplayPriceIndices(
       leftMark,
       rightMark,
       sortState,
+      previousMarksByCode[left.code] ?? null,
+      previousMarksByCode[right.code] ?? null,
     );
     return fieldCompare !== 0
       ? fieldCompare
@@ -652,6 +915,8 @@ function promptHomePriceSortFieldCompare(
   leftMark: PriceIndexObservationRecord | null,
   rightMark: PriceIndexObservationRecord | null,
   sortState: PromptHomePriceSortState,
+  leftPreviousMark: PriceIndexObservationRecord | null = null,
+  rightPreviousMark: PriceIndexObservationRecord | null = null,
 ): number {
   switch (sortState.field) {
     case "product":
@@ -672,6 +937,12 @@ function promptHomePriceSortFieldCompare(
         rightMark?.value ?? null,
         sortState.direction,
       );
+    case "change":
+      return comparePromptHomePriceNumber(
+        promptHomePriceChangeValue(leftMark, leftPreviousMark),
+        promptHomePriceChangeValue(rightMark, rightPreviousMark),
+        sortState.direction,
+      );
     case "unit":
       return comparePromptHomePriceText(
         leftMark?.unit_code || left.unit_code,
@@ -684,16 +955,16 @@ function promptHomePriceSortFieldCompare(
         rightMark?.currency_code || right.currency_code,
         sortState.direction,
       );
+    case "frequency":
+      return comparePromptHomePriceText(
+        promptHomePriceFrequencySortValue(leftMark),
+        promptHomePriceFrequencySortValue(rightMark),
+        sortState.direction,
+      );
     case "date":
       return comparePromptHomePriceNumber(
         leftMark ? promptHomePriceDisplayTimestamp(leftMark) : null,
         rightMark ? promptHomePriceDisplayTimestamp(rightMark) : null,
-        sortState.direction,
-      );
-    case "time":
-      return comparePromptHomePriceNumber(
-        promptHomePriceMarkTimeOfDay(leftMark),
-        promptHomePriceMarkTimeOfDay(rightMark),
         sortState.direction,
       );
     case "updated":
@@ -738,70 +1009,29 @@ function promptHomePriceSourceValue(
   observation: PriceIndexObservationRecord | null,
   priceIndex: PriceIndexRecord,
 ): string {
-  const provider = observation?.source_provider.trim() || priceIndex.provider.trim();
-  const seriesId = observation?.source_series_id.trim();
-  return [provider, seriesId].filter(Boolean).join(" ");
+  return observation?.source_provider.trim() || priceIndex.provider.trim();
 }
 
-function promptHomePriceMarkTimeOfDay(
-  observation: PriceIndexObservationRecord | null | undefined,
+function promptHomePriceFrequencySortValue(
+  observation: PriceIndexObservationRecord | null,
+): string {
+  return observation ? formatPromptHomePriceFrequency(observation.source_frequency) : "";
+}
+
+function promptHomePriceChangeValue(
+  latestMark: PriceIndexObservationRecord | null,
+  previousMark: PriceIndexObservationRecord | null,
 ): number | null {
-  if (!observation) {
-    return null;
-  }
-
-  const downloadedAt = promptHomePriceTimestamp(observation.downloaded_at);
-  if (downloadedAt) {
-    return promptHomeTimeOfDaySeconds(downloadedAt);
-  }
-
-  const sourcePublishedAt = promptHomePriceTimestamp(
-    observation.source_published_at,
-  );
-  if (sourcePublishedAt) {
-    return promptHomeTimeOfDaySeconds(sourcePublishedAt);
-  }
-
-  const sourceRevision = observation.source_revision?.trim();
-  if (!sourceRevision) {
-    return null;
-  }
-
-  const isoRevisionTimestamp = promptHomePriceRevisionTimestamp(sourceRevision);
-  if (isoRevisionTimestamp) {
-    return promptHomeTimeOfDaySeconds(isoRevisionTimestamp);
-  }
-
-  const caisoMatch = /^\d{4}-\d{2}-\d{2}:HE(\d{2}):I(\d{2})$/i.exec(
-    sourceRevision,
-  );
-  if (caisoMatch?.[1] && caisoMatch[2]) {
-    return Number(caisoMatch[1]) * 3600 + Number(caisoMatch[2]) * 60;
-  }
-
-  const ercotMatch = /^\d{4}-\d{2}-\d{2}:IE(\d{1,2})(?::?(\d{2}))?$/i.exec(
-    sourceRevision,
-  );
-  if (ercotMatch?.[1]) {
-    return Number(ercotMatch[1]) * 3600 + Number(ercotMatch[2] ?? 0) * 60;
-  }
-
-  return null;
+  return latestMark && previousMark ? latestMark.value - previousMark.value : null;
 }
 
 function promptHomePriceDisplayTimestamp(
   observation: PriceIndexObservationRecord,
 ): number {
-  const downloadedTime = promptHomePriceMarkDownloadedTimestamp(observation);
-  return downloadedTime || promptHomePriceMarkTimestamp(observation);
-}
-
-function promptHomeTimeOfDaySeconds(timestamp: Date): number {
-  return (
-    timestamp.getUTCHours() * 3600 +
-    timestamp.getUTCMinutes() * 60 +
-    timestamp.getUTCSeconds()
+  const sourceRevisionTimestamp = promptHomePriceSourceRevisionTimestamp(
+    observation.source_revision,
   );
+  return sourceRevisionTimestamp?.getTime() || promptHomePriceMarkTimestamp(observation);
 }
 
 function comparePromptHomePriceText(
@@ -1003,6 +1233,7 @@ export function countPromptHomeLatestMarks(
 function buildPromptHomePriceRowViewModel(
   priceIndex: PriceIndexRecord,
   latestMark: PriceIndexObservationRecord | null,
+  previousMark: PriceIndexObservationRecord | null,
 ): PromptHomePriceRowViewModel {
   return {
     key: priceIndex.code,
@@ -1010,15 +1241,18 @@ function buildPromptHomePriceRowViewModel(
     product: formatPromptHomePriceProduct(priceIndex),
     location: formatPromptHomePriceLocation(latestMark, priceIndex),
     price: formatPromptHomePriceNumber(latestMark, priceIndex),
+    change: formatPromptHomePriceChange(latestMark, previousMark, priceIndex),
+    changeTone: promptHomePriceChangeTone(latestMark, previousMark),
     unit: formatPromptHomePriceUnit(latestMark, priceIndex),
     currency: formatPromptHomePriceCurrency(latestMark, priceIndex),
-    date: formatPromptHomePriceDate(latestMark),
-    time: formatPromptHomePriceTime(latestMark),
+    frequency: formatPromptHomePriceRowFrequency(latestMark),
+    dateTime: formatPromptHomePriceDateTime(latestMark, priceIndex),
     updated: formatPromptHomePriceUpdatedAt(latestMark),
     source: formatPromptHomePriceSource(latestMark, priceIndex),
     hasLatestMark: Boolean(latestMark),
     priceIndex,
     latestMark,
+    previousMark,
   };
 }
 
@@ -1071,8 +1305,24 @@ export function buildPromptHomePricesCardViewModel(
     quoteTypeOptions,
   );
   const hasActiveFilters = promptHomePriceFiltersAreActive(effectiveFilters);
-  const latestMarksByCode = buildPromptHomeLatestMarksByCode(
+  const markPairsByCode = buildPromptHomePriceMarkPairsByCode(
     source.latestMarks,
+  );
+  const latestMarksByCode = Object.fromEntries(
+    Object.entries(markPairsByCode).map(([priceIndexCode, pair]) => [
+      priceIndexCode,
+      pair.latestMark,
+    ]),
+  );
+  const previousMarksByCode = Object.fromEntries(
+    Object.entries(markPairsByCode)
+      .filter((entry): entry is [string, PromptHomePriceMarkPair] =>
+        Boolean(entry[1].previousMark),
+      )
+      .map(([priceIndexCode, pair]) => [
+        priceIndexCode,
+        pair.previousMark as PriceIndexObservationRecord,
+      ]),
   );
   const sortedPriceIndices = selectPromptHomeDisplayPriceIndices(
     activePriceIndices,
@@ -1088,6 +1338,7 @@ export function buildPromptHomePricesCardViewModel(
     latestMarksByCode,
     options.sortState,
     options.manualOrder,
+    previousMarksByCode,
   );
   const latestMarkCount = countPromptHomeLatestMarks(
     activePriceIndices,
@@ -1102,12 +1353,14 @@ export function buildPromptHomePricesCardViewModel(
     buildPromptHomePriceRowViewModel(
       priceIndex,
       latestMarksByCode[priceIndex.code] ?? null,
+      previousMarksByCode[priceIndex.code] ?? null,
     ),
   );
   const rows = displayedPriceIndices.map((priceIndex) =>
     buildPromptHomePriceRowViewModel(
       priceIndex,
       latestMarksByCode[priceIndex.code] ?? null,
+      previousMarksByCode[priceIndex.code] ?? null,
     ),
   );
 
@@ -1131,5 +1384,6 @@ export function buildPromptHomePricesCardViewModel(
     allRows,
     rows,
     latestMarksByCode,
+    previousMarksByCode,
   };
 }

@@ -10,14 +10,67 @@ export const PRICE_INDEX_BI_REPORT_TITLE = 'Price Report'
 type PriceIndexBiReportHandoffInput = {
   priceIndexCode: string
   priceIndexName?: string | null
+  product?: string | null
+  location?: string | null
+  dateTime?: string | null
+  source?: string | null
+}
+
+function normalizePriceReportTitlePart(value: string | null | undefined): string | null {
+  const trimmedValue = value?.trim()
+  if (!trimmedValue) {
+    return null
+  }
+
+  const normalizedValue = trimmedValue.toLowerCase()
+  if (
+    trimmedValue === '-' ||
+    trimmedValue === '—' ||
+    normalizedValue === 'n/a' ||
+    normalizedValue === 'no mark yet'
+  ) {
+    return null
+  }
+
+  return trimmedValue
+}
+
+export function buildPriceIndexBiReportHeroTitle({
+  priceIndexCode,
+  priceIndexName = null,
+  product = null,
+  location = null,
+  source = null,
+}: PriceIndexBiReportHandoffInput): string {
+  const normalizedCode = priceIndexCode.trim().toUpperCase()
+  const priceIndexLabel = priceIndexName?.trim() || normalizedCode
+  const normalizedProduct = normalizePriceReportTitlePart(product)
+  const normalizedLocation = normalizePriceReportTitlePart(location) ?? (normalizedProduct ? priceIndexLabel : null)
+  const titleParts = [
+    normalizedProduct,
+    normalizedLocation,
+    normalizePriceReportTitlePart(source),
+  ].filter((part): part is string => Boolean(part))
+
+  return titleParts.length > 0 ? titleParts.join(', ') : priceIndexLabel
 }
 
 export function buildPriceIndexBiReportHandoff({
   priceIndexCode,
   priceIndexName = null,
+  product = null,
+  location = null,
+  source = null,
 }: PriceIndexBiReportHandoffInput): AppRouteHandoff {
   const normalizedCode = priceIndexCode.trim().toUpperCase()
   const priceIndexLabel = priceIndexName?.trim() || normalizedCode
+  const heroTitle = buildPriceIndexBiReportHeroTitle({
+    priceIndexCode: normalizedCode,
+    priceIndexName,
+    product,
+    location,
+    source,
+  })
 
   return {
     source: 'home',
@@ -25,7 +78,7 @@ export function buildPriceIndexBiReportHandoff({
     focus: {
       type: 'report',
       id: PRICE_INDEX_BI_REPORT_ID,
-      label: PRICE_INDEX_BI_REPORT_TITLE,
+      label: heroTitle,
     },
     tradeInspectorTab: null,
     eventType: null,
@@ -61,14 +114,19 @@ export function resolvePriceIndexReportRouteFocus(
   badgeLabel: string
   badgeDetail: string
 } | null {
-  const priceIndexCode = resolvePriceIndexBiReportFilter(handoff)
+  const normalizedHandoff = normalizeAppRouteHandoff(handoff)
+  const priceIndexCode = resolvePriceIndexBiReportFilter(normalizedHandoff)
   if (!priceIndexCode) {
     return null
   }
+  const focusLabel = normalizePriceReportTitlePart(normalizedHandoff?.focus.label)
+  const heroTitle = focusLabel && focusLabel !== PRICE_INDEX_BI_REPORT_TITLE
+    ? focusLabel
+    : `Price Report · ${priceIndexCode}`
 
   return {
     priceIndexCode,
-    heroTitle: `Price Report · ${priceIndexCode}`,
+    heroTitle,
     heroBody:
       'Review price observation history, latest mark context, source provenance, and freshness for this selected price index.',
     badgeLabel: 'Price Report',

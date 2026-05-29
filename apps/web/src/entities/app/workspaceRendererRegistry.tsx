@@ -27,6 +27,7 @@ import {
 import type { ViewKey } from '../../shared/models'
 import { resolveTradeFormMetadata } from '../../shared/tradeMetadata'
 import { resolveTradeInspectorTabForEvent } from '../../workspaces/events/eventHelpers'
+import { ADMIN_PRICE_SOURCES_SECTION_ID } from '../../workspaces/admin/adminRouteAnchors'
 import { SETTINGS_CUSTOM_EVENTS_CARD_ANCHOR_ID } from '../../workspaces/settings/userEventsPanelShared'
 
 const PromptHomeWorkspace = lazy(() =>
@@ -886,8 +887,8 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     heroTitle: 'Desk reporting and analyst outputs',
     heroBody:
       'Surface curated credit, exposure, and audit outputs for operators who need answers faster than a spreadsheet refresh.',
-    dataGroups: ['trades', 'reports'],
-    blockingGroups: ['trades', 'reports'],
+    dataGroups: ['trades', 'reference', 'reports'],
+    blockingGroups: ['trades', 'reference', 'reports'],
   },
   library: {
     key: 'library',
@@ -1489,6 +1490,8 @@ export const WORKSPACE_RENDERERS: Record<
         routeHandoff={context.routeHandoff}
         globalFilter={GLOBAL_FILTER_DISABLED}
         counterpartyCreditReport={context.workspaceData.counterpartyCreditReport}
+        priceIndices={context.workspaceData.priceIndices}
+        locations={context.workspaceData.locations}
         portfolios={context.workspaceData.portfolios}
         formatNumber={formatNumber}
         formatMoney={formatMoney}
@@ -1498,6 +1501,11 @@ export const WORKSPACE_RENDERERS: Record<
         onOpenSettlement={() => context.navigateToView('settlement')}
         onOpenTrade={context.navigateToTrade}
         onClearHandoff={() => context.navigateToView('reports', null)}
+        onOpenPriceSourcesReview={() =>
+          context.navigateToView('admin', null, {
+            hash: ADMIN_PRICE_SOURCES_SECTION_ID,
+          })
+        }
       />
     ),
   },

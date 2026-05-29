@@ -23,6 +23,7 @@ import { ProjectionMonitoringPanel } from './ProjectionMonitoringPanel'
 import { RoadmapAdminPanel } from './RoadmapAdminPanel'
 import { UserManagementPanel } from './UserManagementPanel'
 import { WeatherOperationsPanel } from './WeatherOperationsPanel'
+import { ADMIN_PRICE_SOURCES_SECTION_ID } from './adminRouteAnchors'
 import type { AssistantControlTowerSupervisionIntent } from './assistantSupervisionDraft'
 import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
 
@@ -309,6 +310,45 @@ function cadenceLabel(intervalMinutes: number): string {
   return `Every ${intervalMinutes}m`
 }
 
+function successSlaLabel(hours: number | null | undefined): string {
+  if (typeof hours !== 'number') {
+    return 'SLA unknown'
+  }
+
+  if (hours < 24) {
+    return `${hours}h SLA`
+  }
+
+  const days = hours / 24
+  return `${days.toFixed(days >= 10 || Number.isInteger(days) ? 0 : 1)}d SLA`
+}
+
+function lookbackLabel(days: number | null | undefined): string {
+  if (typeof days !== 'number') {
+    return 'Snapshot pull'
+  }
+
+  if (days < 365) {
+    return `${days}d lookback`
+  }
+
+  const years = days / 365
+  return `${years.toFixed(years >= 10 || Number.isInteger(years) ? 0 : 1)}y lookback`
+}
+
+function sourceEndpointLabel(value: string | null | undefined): string {
+  if (!value) {
+    return 'No source endpoint'
+  }
+
+  try {
+    const url = new URL(value)
+    return url.pathname && url.pathname !== '/' ? `${url.hostname}${url.pathname}` : url.hostname
+  } catch {
+    return value
+  }
+}
+
 function weatherHealthTone(status: string): 'active' | 'blocked' | 'in-progress' | 'cancelled' {
   switch (status) {
     case 'healthy':
@@ -469,6 +509,12 @@ function matchesExternalDataProviderFilter(provider: ExternalDataProviderStatusR
     provider.provider,
     provider.label,
     provider.category,
+    provider.ingestion_method,
+    provider.ingestion_mode,
+    provider.source_system,
+    provider.source_endpoint,
+    provider.sync_job_name,
+    provider.default_lookback_days,
     provider.health_status,
     provider.latest_run_status,
     provider.latest_observation_at,
@@ -496,8 +542,19 @@ function matchesPriceSourceReviewFilter(source: PriceSourceReviewRecord, query: 
     source.source_unit,
     source.source_currency_code,
     source.transform_rule,
+    source.ingestion_method,
+    source.ingestion_mode,
+    source.source_system,
+    source.source_endpoint,
+    source.sync_job_name,
+    source.default_lookback_days,
     source.review_status,
     source.provider_health_status,
+    source.scheduler_interval_minutes,
+    source.success_sla_hours,
+    source.due_for_sync,
+    source.provider_latest_observation_at,
+    source.provider_observation_age_hours,
     source.latest_run_status,
     source.latest_run_id,
     source.last_success_at,
@@ -505,6 +562,7 @@ function matchesPriceSourceReviewFilter(source: PriceSourceReviewRecord, query: 
     source.latest_observation_date,
     source.latest_value,
     source.latest_source_revision,
+    source.latest_source_published_at,
     source.latest_downloaded_at,
   ])
 }
@@ -1181,12 +1239,18 @@ export function AdminWorkspace({
                   <div>
                     <strong>{provider.label}</strong>
                     <p>
-                      {provider.provider} · {marketDataCategoryLabel(provider.category)} · {provider.active_series_count} active series
+                      {provider.provider} · {marketDataCategoryLabel(provider.category)} · {provider.ingestion_method}
                     </p>
                     <div className="admin-weather-row-detail">
+                      <span>{provider.active_series_count} active series</span>
+                      <span>{provider.ingestion_mode}</span>
+                      <span>Job {provider.sync_job_name}</span>
+                      <span>Endpoint {sourceEndpointLabel(provider.source_endpoint)}</span>
                       <span>{provider.latest_observation_at ? `Latest data ${formatDate(provider.latest_observation_at)}` : 'No stored observation yet'}</span>
                       <span>{provider.observation_age_hours != null ? formatAgeHours(provider.observation_age_hours) : 'Freshness unknown'}</span>
                       <span>{provider.due_for_sync ? 'Due for sync' : `Cadence ${cadenceLabel(provider.scheduler_interval_minutes)}`}</span>
+                      <span>{successSlaLabel(provider.success_sla_hours)}</span>
+                      <span>{lookbackLabel(provider.default_lookback_days)}</span>
                     </div>
                     {provider.error_summary ? <p>{provider.error_summary}</p> : null}
                   </div>
@@ -1210,7 +1274,7 @@ export function AdminWorkspace({
             )}
           </div>
 
-          <div className="admin-run-list">
+          <div id={ADMIN_PRICE_SOURCES_SECTION_ID} className="admin-run-list">
             <div className="detail-row">
               <span>
                 Price source inventory · {visibleExternalDataPriceSources.length} source{visibleExternalDataPriceSources.length === 1 ? '' : 's'}
@@ -1229,19 +1293,38 @@ export function AdminWorkspace({
                   source.latest_value != null
                     ? `${formatNumber(source.latest_value, 3)} ${source.latest_unit_code ?? source.source_unit}${source.latest_currency_code ? ` ${source.latest_currency_code}` : ''}`
                     : 'No observation'
+                const sourceUnit = `${source.source_unit}${source.source_currency_code ? ` ${source.source_currency_code}` : ''}`
+                const sourceCadence =
+                  source.scheduler_interval_minutes != null
+                    ? cadenceLabel(source.scheduler_interval_minutes)
+                    : source.frequency.toUpperCase()
+                const sourceTransform = source.transform_rule?.trim() ? `Transform ${source.transform_rule}` : 'Raw provider value'
+                const sourceFreshness =
+                  source.provider_observation_age_hours != null
+                    ? formatAgeHours(source.provider_observation_age_hours)
+                    : 'Provider freshness unknown'
 
                 return (
                   <article key={`${source.provider}-${source.series_id}-${source.id}`} className="admin-run-row admin-weather-row">
                     <div>
                       <strong>{source.price_index_code}</strong>
                       <p>
-                        {source.price_index_name ?? 'Unmapped price index'} · {source.provider} · {source.series_id}
+                        {source.price_index_name ?? 'Unmapped price index'} · {source.source_system ?? source.provider} · {source.series_id}
                       </p>
                       <div className="admin-weather-row-detail">
                         <span>{source.commodity_code ?? 'No commodity'}</span>
-                        <span>{source.frequency.toUpperCase()}</span>
-                        <span>{source.market ?? source.dataset_code ?? 'No market'}</span>
+                        <span>{source.ingestion_method ?? 'Provider pull'}</span>
+                        <span>{source.ingestion_mode ?? 'Manual sync'}</span>
+                        <span>Cadence {sourceCadence}</span>
+                        <span>{successSlaLabel(source.success_sla_hours)}</span>
+                        <span>{lookbackLabel(source.default_lookback_days)}</span>
+                        <span>Source freq {source.frequency.toUpperCase()}</span>
+                        <span>Unit {sourceUnit}</span>
+                        <span>Dataset {source.dataset_code ?? 'Provider default'}</span>
+                        <span>Endpoint {sourceEndpointLabel(source.source_endpoint)}</span>
                         <span>{source.location_code ?? 'No location'}</span>
+                        <span>{source.market ?? 'No market'}</span>
+                        <span>{sourceTransform}</span>
                       </div>
                       {source.provider_error_summary ? <p>{source.provider_error_summary}</p> : null}
                     </div>
@@ -1254,8 +1337,11 @@ export function AdminWorkspace({
                           ? `${formatDateOnly(source.latest_observation_date)} · ${latestValue}`
                           : latestValue}
                       </span>
+                      <span>{source.latest_source_published_at ? `Published ${formatDate(source.latest_source_published_at)}` : 'Publication time unknown'}</span>
                       <span>{source.latest_downloaded_at ? `Loaded ${formatDate(source.latest_downloaded_at)}` : 'Never loaded'}</span>
+                      <span>{source.due_for_sync ? 'Provider due for sync' : sourceFreshness}</span>
                       <span>{source.latest_run_id ? `Run #${source.latest_run_id}` : source.latest_run_status ?? 'No run'}</span>
+                      {source.latest_source_revision ? <span>Revision {source.latest_source_revision}</span> : null}
                     </div>
                   </article>
                 )

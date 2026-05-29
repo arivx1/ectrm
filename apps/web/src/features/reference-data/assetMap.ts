@@ -1,6 +1,8 @@
 import type {
   AssetRecord,
   LocationRecord,
+  PriceIndexObservationRecord,
+  PriceIndexRecord,
   SpatialFeatureRecord,
   WeatherLocationRecord,
 } from "../../shared/models";
@@ -44,6 +46,14 @@ export type AssetMapRecord = {
   geometryFeatures: GeoJsonFeature[];
   extentCoordinates: Array<[number, number]>;
   placementStatus: AssetMapPlacementStatus;
+};
+
+export type AssetMapMarketPriceRecord = {
+  priceIndex: PriceIndexRecord;
+  location: LocationRecord;
+  latestMark: PriceIndexObservationRecord | null;
+  latitude: number;
+  longitude: number;
 };
 
 export type AssetMapSummary = {
@@ -670,16 +680,40 @@ export function assetMapGeographyLabelForRecord(
   });
 }
 
+export function assetMapGeographyLabelForMarketPrice(
+  record: Pick<AssetMapMarketPriceRecord, "location" | "latitude" | "longitude">,
+): AssetMapGeographyLabel | null {
+  return assetMapGeographyLabelForPoint({
+    latitude: record.latitude,
+    longitude: record.longitude,
+    countryCode: record.location.country_code ?? null,
+    continentCode: record.location.continent_code ?? null,
+    region: record.location.region ?? null,
+  });
+}
+
 export function assetMapCountryCodeForRecord(
   record: Pick<AssetMapRecord, "location">,
 ): string | null {
   return normalizeCountryCode(record.location?.country_code);
 }
 
+export function assetMapCountryCodeForMarketPrice(
+  record: Pick<AssetMapMarketPriceRecord, "location">,
+): string | null {
+  return normalizeCountryCode(record.location.country_code);
+}
+
 export function assetMapSubdivisionCodeForRecord(
   record: Pick<AssetMapRecord, "location">,
 ): string | null {
   return normalizeSubdivisionCode(record.location?.subdivision_code);
+}
+
+export function assetMapSubdivisionCodeForMarketPrice(
+  record: Pick<AssetMapMarketPriceRecord, "location">,
+): string | null {
+  return normalizeSubdivisionCode(record.location.subdivision_code);
 }
 
 export function assetMapCountryCodeForWeatherLocation(
@@ -739,10 +773,12 @@ export function formatAssetMapSubdivisionLabel(
 
 export function buildAssetMapCountryOptions({
   records,
+  marketPrices = [],
   weatherLocations,
   locationByCode,
 }: {
   records: AssetMapRecord[];
+  marketPrices?: AssetMapMarketPriceRecord[];
   weatherLocations: WeatherLocationRecord[];
   locationByCode: ReadonlyMap<string, LocationRecord>;
 }): AssetMapCountryOption[] {
@@ -750,6 +786,13 @@ export function buildAssetMapCountryOptions({
 
   records.forEach((record) => {
     const countryCode = assetMapCountryCodeForRecord(record);
+    if (countryCode) {
+      countryCodes.add(countryCode);
+    }
+  });
+
+  marketPrices.forEach((record) => {
+    const countryCode = assetMapCountryCodeForMarketPrice(record);
     if (countryCode) {
       countryCodes.add(countryCode);
     }
@@ -779,10 +822,12 @@ export function buildAssetMapCountryOptions({
 
 export function buildAssetMapSubdivisionOptions({
   records,
+  marketPrices = [],
   weatherLocations,
   locationByCode,
 }: {
   records: AssetMapRecord[];
+  marketPrices?: AssetMapMarketPriceRecord[];
   weatherLocations: WeatherLocationRecord[];
   locationByCode: ReadonlyMap<string, LocationRecord>;
 }): AssetMapSubdivisionOption[] {
@@ -790,6 +835,13 @@ export function buildAssetMapSubdivisionOptions({
 
   records.forEach((record) => {
     const subdivisionCode = assetMapSubdivisionCodeForRecord(record);
+    if (subdivisionCode) {
+      subdivisionCodes.add(subdivisionCode);
+    }
+  });
+
+  marketPrices.forEach((record) => {
+    const subdivisionCode = assetMapSubdivisionCodeForMarketPrice(record);
     if (subdivisionCode) {
       subdivisionCodes.add(subdivisionCode);
     }
@@ -817,6 +869,54 @@ export function buildAssetMapSubdivisionOptions({
       countryCode:
         normalizeCountryCode(subdivisionCode.split("-", 1)[0] ?? null) ?? null,
     }));
+}
+
+export function buildAssetMapMarketPriceRecords({
+  priceIndices,
+  locations,
+  latestMarksByCode = {},
+}: {
+  priceIndices: PriceIndexRecord[];
+  locations: LocationRecord[];
+  latestMarksByCode?: Record<string, PriceIndexObservationRecord>;
+}): AssetMapMarketPriceRecord[] {
+  const locationByCode = new Map(
+    locations.map((location) => [
+      normalizeUppercaseText(location.code),
+      location,
+    ]),
+  );
+
+  return priceIndices
+    .flatMap<AssetMapMarketPriceRecord>((priceIndex) => {
+      if (!priceIndex.is_active) {
+        return [];
+      }
+
+      const locationCode = normalizeUppercaseText(priceIndex.location_code);
+      if (!locationCode) {
+        return [];
+      }
+
+      const location = locationByCode.get(locationCode) ?? null;
+      if (!hasCoordinates(location)) {
+        return [];
+      }
+
+      const priceIndexCode = normalizeUppercaseText(priceIndex.code);
+      return [
+        {
+          priceIndex,
+          location,
+          latestMark: latestMarksByCode[priceIndexCode] ?? null,
+          latitude: location.latitude,
+          longitude: location.longitude,
+        },
+      ];
+    })
+    .sort((left, right) =>
+      left.priceIndex.code.localeCompare(right.priceIndex.code),
+    );
 }
 
 export function buildAssetMapSummary(

@@ -57,6 +57,10 @@ import {
   type InvoiceIssueCandidateRecord,
   type TradeAttentionCandidateRecord,
 } from "../../entities/app/api";
+import {
+  isExternalDataSyncProvider,
+  runExternalDataSync,
+} from "../../entities/app/adminApi";
 import { useLatestPriceIndexMarks } from "../../entities/market-data/useLatestPriceIndexMarks";
 import {
   buildPromptNavigationIntentKey,
@@ -81,7 +85,11 @@ import {
   subscribeGoogleCalendarSession,
   type GoogleCalendarSessionSnapshot,
 } from "../../entities/calendar/googleCalendarSession";
-import { sessionHeaders } from "../../entities/app/workspaceDataShared";
+import {
+  hasAdministrativeAccess,
+  sessionHeaders,
+  type ExternalDataSyncProvider,
+} from "../../entities/app/workspaceDataShared";
 import { appConfig } from "../../shared/config";
 import { usePersistentCollapsibleCardState } from "../../shared/collapsibleCardState";
 import { usePersistentPromptHomeCalendarCardState } from "../../shared/promptHomeCalendarSettings";
@@ -116,6 +124,7 @@ import {
   buildPriceIndexBiReportHandoff,
   PRICE_INDEX_BI_REPORT_ID,
 } from "../reports/reportRouteHandoffs";
+import { ADMIN_PRICE_SOURCES_SECTION_ID } from "../admin/adminRouteAnchors";
 import {
   formatTimeDisplayTimeZonePreferenceLabel,
   getTimeDisplaySettingsSnapshot,
@@ -133,12 +142,16 @@ import { useVoiceComposer } from "../../shared/voiceComposer";
 import {
   assetMapActivityLabelsForAsset,
   assetMapCountryCodeForRecord,
+  assetMapCountryCodeForMarketPrice,
   assetMapGeographyLabelForRecord,
+  assetMapGeographyLabelForMarketPrice,
   ASSET_MAP_ACTIVITY_LABELS,
   ASSET_MAP_GEOGRAPHY_LABELS,
+  assetMapSubdivisionCodeForMarketPrice,
   assetMapSubdivisionCodeForRecord,
   assetMapSubtypeLabelForAsset,
   buildAssetMapCountryOptions,
+  buildAssetMapMarketPriceRecords,
   buildAssetMapSubdivisionOptions,
   buildAssetMapSummary,
   formatAssetMapCountryLabel,
@@ -290,10 +303,11 @@ const PROMPT_HOME_PRICE_SORT_HEADERS: {
   { field: "product", label: "Product" },
   { field: "location", label: "Location" },
   { field: "price", label: "Price" },
+  { field: "change", label: "Change" },
   { field: "unit", label: "Unit" },
   { field: "currency", label: "Currency" },
-  { field: "date", label: "Date" },
-  { field: "time", label: "Time" },
+  { field: "frequency", label: "Frequency" },
+  { field: "date", label: "Price Datetime" },
   { field: "updated", label: "Updated" },
   { field: "source", label: "Source" },
 ];
@@ -595,25 +609,31 @@ function formatPromptHomeMapSummary(params: {
   filteredRecordCount: number;
   shownRecordCount: number;
   mapReadyRecordCount: number;
+  marketPriceCount?: number;
 }): string {
   const {
     assetLayerVisible,
     filteredRecordCount,
     shownRecordCount,
     mapReadyRecordCount,
+    marketPriceCount = 0,
   } = params;
+  const marketPriceSuffix =
+    marketPriceCount > 0
+      ? ` · ${marketPriceCount.toLocaleString()} market price${marketPriceCount === 1 ? "" : "s"}`
+      : "";
 
   if (!assetLayerVisible) {
-    return "Assets hidden · 0 shown on map";
+    return `Assets hidden · 0 shown on map${marketPriceSuffix}`;
   }
 
   if (filteredRecordCount === 0) {
-    return "No records match the current filters.";
+    return `No asset records match the current filters${marketPriceSuffix}.`;
   }
 
   const filteredRecordLabel = `${filteredRecordCount.toLocaleString()} filtered`;
   if (mapReadyRecordCount === 0) {
-    return `${filteredRecordLabel} · 0 map-ready`;
+    return `${filteredRecordLabel} · 0 map-ready${marketPriceSuffix}`;
   }
 
   const shownSummary =
@@ -622,10 +642,10 @@ function formatPromptHomeMapSummary(params: {
       : `${shownRecordCount.toLocaleString()} of ${mapReadyRecordCount.toLocaleString()} shown`;
 
   if (filteredRecordCount === mapReadyRecordCount) {
-    return `${shownSummary} on map`;
+    return `${shownSummary} on map${marketPriceSuffix}`;
   }
 
-  return `${filteredRecordLabel} · ${shownSummary} map-ready`;
+  return `${filteredRecordLabel} · ${shownSummary} map-ready${marketPriceSuffix}`;
 }
 
 type PromptHomeExchangeSessionLane = PromptHomeExchangeSessionDefinition & {
@@ -2254,6 +2274,41 @@ function visiblePromptHomeMapGeographiesFromState(
   );
 }
 
+function promptHomeMapPriceIndexMatchesFilters(
+  priceIndex: PriceIndexRecord,
+  filters: {
+    commodityCode: string;
+    locationCode: string;
+    region: string;
+  },
+): boolean {
+  const normalizedCommodityCode = filters.commodityCode.trim().toUpperCase();
+  if (
+    normalizedCommodityCode &&
+    priceIndex.commodity_code.trim().toUpperCase() !== normalizedCommodityCode
+  ) {
+    return false;
+  }
+
+  const normalizedLocationCode = filters.locationCode.trim().toUpperCase();
+  if (
+    normalizedLocationCode &&
+    priceIndex.location_code?.trim().toUpperCase() !== normalizedLocationCode
+  ) {
+    return false;
+  }
+
+  const normalizedRegion = filters.region.trim().toUpperCase();
+  if (
+    normalizedRegion &&
+    priceIndex.market?.trim().toUpperCase() !== normalizedRegion
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function PromptHomePriceRowFields({
   row,
 }: {
@@ -2274,6 +2329,16 @@ function PromptHomePriceRowFields({
         <dd>{row.price}</dd>
       </div>
       <div>
+        <dt>Change</dt>
+        <dd>
+          <span
+            className={`prompt-home-price-change prompt-home-price-change-${row.changeTone}`}
+          >
+            {row.change}
+          </span>
+        </dd>
+      </div>
+      <div>
         <dt>Unit</dt>
         <dd>{row.unit}</dd>
       </div>
@@ -2282,12 +2347,12 @@ function PromptHomePriceRowFields({
         <dd>{row.currency}</dd>
       </div>
       <div>
-        <dt>Date</dt>
-        <dd>{row.date}</dd>
+        <dt>Frequency</dt>
+        <dd>{row.frequency}</dd>
       </div>
       <div>
-        <dt>Time</dt>
-        <dd>{row.time}</dd>
+        <dt>Price Datetime</dt>
+        <dd>{row.dateTime}</dd>
       </div>
       <div>
         <dt>Updated</dt>
@@ -2312,7 +2377,7 @@ function PromptHomePriceRow({
   isDragging = false,
 }: {
   row: PromptHomePriceRowViewModel;
-  onOpenPriceReport: (priceIndex: PriceIndexRecord) => void;
+  onOpenPriceReport: (row: PromptHomePriceRowViewModel) => void;
   dragAttributes?: DraggableAttributes;
   dragListeners?: PromptHomeSortableListeners;
   setDragHandleRef?: (element: HTMLElement | null) => void;
@@ -2320,46 +2385,45 @@ function PromptHomePriceRow({
   style?: CSSProperties;
   isDragging?: boolean;
 }) {
+  const setRowRef = useCallback(
+    (element: HTMLElement | null) => {
+      setNodeRef?.(element);
+      setDragHandleRef?.(element);
+    },
+    [setDragHandleRef, setNodeRef],
+  );
+
   return (
     <article
-      ref={setNodeRef}
+      ref={setRowRef}
       style={style}
       className={mergePromptHomeClassNames(
         "prompt-home-price-row prompt-home-price-row-action",
         dragListeners ? "prompt-home-price-row-draggable" : undefined,
         isDragging ? "is-dragging" : undefined,
       )}
+      {...(dragAttributes ?? {})}
+      {...(dragListeners ?? {})}
       role="button"
       tabIndex={0}
       aria-label={`Double-click to open the price report for ${row.priceIndex.name || row.priceIndexCode}`}
-      title={`Double-click to open the price report for ${row.priceIndexCode}`}
+      title={
+        dragListeners
+          ? `Click and hold to reorder ${row.priceIndexCode}; double-click to open its price report`
+          : `Double-click to open the price report for ${row.priceIndexCode}`
+      }
       onDoubleClick={(event) => {
         event.preventDefault();
-        onOpenPriceReport(row.priceIndex);
+        onOpenPriceReport(row);
       }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") {
           return;
         }
         event.preventDefault();
-        onOpenPriceReport(row.priceIndex);
+        onOpenPriceReport(row);
       }}
     >
-      {dragListeners ? (
-        <button
-          type="button"
-          className="prompt-home-price-row-drag-handle"
-          aria-label={`Drag ${row.priceIndexCode} price row`}
-          title={`Drag ${row.priceIndexCode} to reorder`}
-          ref={setDragHandleRef}
-          onClick={(event) => event.stopPropagation()}
-          onDoubleClick={(event) => event.stopPropagation()}
-          {...dragAttributes}
-          {...dragListeners}
-        >
-          Move
-        </button>
-      ) : null}
       <PromptHomePriceRowFields row={row} />
     </article>
   );
@@ -2370,7 +2434,7 @@ function SortablePromptHomePriceRow({
   onOpenPriceReport,
 }: {
   row: PromptHomePriceRowViewModel;
-  onOpenPriceReport: (priceIndex: PriceIndexRecord) => void;
+  onOpenPriceReport: (row: PromptHomePriceRowViewModel) => void;
 }) {
   const {
     attributes,
@@ -2400,7 +2464,40 @@ function SortablePromptHomePriceRow({
   );
 }
 
+function listPromptHomePriceSyncProviders(
+  priceIndices: readonly PriceIndexRecord[],
+): ExternalDataSyncProvider[] {
+  const providers = new Set<ExternalDataSyncProvider>();
+  for (const priceIndex of priceIndices) {
+    const provider = priceIndex.provider.trim().toUpperCase();
+    if (isExternalDataSyncProvider(provider)) {
+      providers.add(provider);
+    }
+  }
+
+  return Array.from(providers).sort((left, right) =>
+    left.localeCompare(right),
+  );
+}
+
+function formatPromptHomePriceSyncProviders(
+  providers: readonly ExternalDataSyncProvider[],
+): string {
+  if (providers.length === 0) {
+    return "no providers";
+  }
+  if (providers.length === 1) {
+    return providers[0] ?? "provider";
+  }
+  if (providers.length === 2) {
+    return `${providers[0]} and ${providers[1]}`;
+  }
+
+  return `${providers.slice(0, -1).join(", ")}, and ${providers.at(-1)}`;
+}
+
 function PromptHomePricesCard({
+  authSession,
   priceIndices,
   referenceDataLoading,
   homeCard,
@@ -2408,7 +2505,9 @@ function PromptHomePricesCard({
   onHomeCardConfigurationChange,
   onOpenPricesWorkspace,
   onOpenPriceReport,
+  onOpenPriceSourcesReview,
 }: {
+  authSession: StoredAuthSession | null;
   priceIndices: PriceIndexRecord[];
   referenceDataLoading?: boolean;
   homeCard: PromptHomeTemplateCard | null;
@@ -2420,13 +2519,17 @@ function PromptHomePricesCard({
     },
   ) => void;
   onOpenPricesWorkspace: () => void;
-  onOpenPriceReport: (priceIndex: PriceIndexRecord) => void;
+  onOpenPriceReport: (row: PromptHomePriceRowViewModel) => void;
+  onOpenPriceSourcesReview: () => void;
 }) {
   const pricesExpandedState = usePersistentCollapsibleCardState(
     "prompt-home.prices-card",
     true,
   );
   const [priceSearchQuery, setPriceSearchQuery] = useState("");
+  const [priceSyncing, setPriceSyncing] = useState(false);
+  const [priceSyncError, setPriceSyncError] = useState("");
+  const [priceSyncSuccess, setPriceSyncSuccess] = useState("");
   const homeCardFilters = useMemo(
     () => homeCard?.filters ?? {},
     [homeCard],
@@ -2452,9 +2555,15 @@ function PromptHomePricesCard({
   const priceMarkFilter = parsePromptHomePriceMarkStatusParameter(
     homeCardParameters.price_mark_status,
   );
-  const priceSortState = parsePromptHomePriceSortParameter(
-    homeCardParameters.price_sort,
+  const persistedPriceSortState = useMemo(
+    () => parsePromptHomePriceSortParameter(homeCardParameters.price_sort),
+    [homeCardParameters.price_sort],
   );
+  const [priceSortState, setPriceSortState] =
+    useState<PromptHomePriceSortState | null>(persistedPriceSortState);
+  useEffect(() => {
+    setPriceSortState(persistedPriceSortState);
+  }, [persistedPriceSortState]);
   const priceManualOrder = useMemo(
     () => parsePromptHomePriceOrderParameter(homeCardParameters.price_order),
     [homeCardParameters.price_order],
@@ -2469,6 +2578,10 @@ function PromptHomePricesCard({
   const activePriceIndices = useMemo(
     () => selectPromptHomePriceIndices(priceIndices),
     [priceIndices],
+  );
+  const priceSyncProviders = useMemo(
+    () => listPromptHomePriceSyncProviders(activePriceIndices),
+    [activePriceIndices],
   );
   const commodityOptions = useMemo(
     () =>
@@ -2522,8 +2635,14 @@ function PromptHomePricesCard({
     () => activePriceIndices.map((priceIndex) => priceIndex.code),
     [activePriceIndices],
   );
-  const { latestMarks, loading: latestMarksLoading, error } =
+  const {
+    latestMarks,
+    loading: latestMarksLoading,
+    error,
+    refresh: refreshLatestMarks,
+  } =
     useLatestPriceIndexMarks(activePriceIndexCodes, {
+      limitPerCode: 2,
       refreshIntervalMs: PROMPT_HOME_PRICE_REFRESH_INTERVAL_MS,
     });
   const priceFilters = useMemo(
@@ -2562,6 +2681,22 @@ function PromptHomePricesCard({
       }
       onHomeCardConfigurationChange({
         parameters: setPromptHomeCardStringValue(homeCardParameters, key, value),
+      });
+    },
+    [canConfigureHomeCard, homeCardParameters, onHomeCardConfigurationChange],
+  );
+  const updatePriceSortState = useCallback(
+    (nextSortState: PromptHomePriceSortState | null) => {
+      setPriceSortState(nextSortState);
+      if (!canConfigureHomeCard) {
+        return;
+      }
+      onHomeCardConfigurationChange({
+        parameters: setPromptHomeCardStringValue(
+          homeCardParameters,
+          "price_sort",
+          serializePromptHomePriceSortParameter(nextSortState),
+        ),
       });
     },
     [canConfigureHomeCard, homeCardParameters, onHomeCardConfigurationChange],
@@ -2614,12 +2749,17 @@ function PromptHomePricesCard({
   const hasActivePriceFilters = pricesViewModel.hasActiveFilters;
   const { dragHandleAttributes, dragHandleClassName } =
     usePromptHomeCardHeaderDragProps<HTMLDivElement>();
+  const canSyncPriceSources = hasAdministrativeAccess(authSession);
+  const priceSyncProviderSummary =
+    formatPromptHomePriceSyncProviders(priceSyncProviders);
   const activePriceIndexNoun =
     activePriceIndexCount === 1 ? "index" : "indices";
   const latestMarkNoun = latestMarkCount === 1 ? "mark" : "marks";
   const priceToggleSummary =
     pricesViewModel.status === "reference_loading"
       ? "Loading price indices"
+      : priceSyncing
+        ? `Syncing ${priceSyncProviderSummary}`
       : latestMarksLoading && activePriceIndexCount > 0
         ? `Loading marks · ${activePriceIndexCount} active ${activePriceIndexNoun}`
         : `${latestMarkCount} latest ${latestMarkNoun} · ${activePriceIndexCount} active ${activePriceIndexNoun}`;
@@ -2634,6 +2774,101 @@ function PromptHomePricesCard({
     [pricesViewModel.rows],
   );
   const priceRowsMovable = canConfigureHomeCard && priceRowIds.length > 1;
+  const priceSyncButtonTitle = !canSyncPriceSources
+    ? "Admin session required to sync price sources"
+    : priceSyncProviders.length === 0
+      ? "No supported price providers to sync"
+      : `Sync latest prices from ${priceSyncProviderSummary}`;
+  const priceSyncButtonDisabled =
+    priceSyncing ||
+    !canSyncPriceSources ||
+    priceSyncProviders.length === 0 ||
+    pricesViewModel.status === "reference_loading";
+  const handleSyncPrices = useCallback(async () => {
+    if (!authSession || !canSyncPriceSources) {
+      setPriceSyncError("Sign in as an admin to sync price sources.");
+      setPriceSyncSuccess("");
+      return;
+    }
+    if (priceSyncProviders.length === 0) {
+      setPriceSyncError("No supported price providers are available to sync.");
+      setPriceSyncSuccess("");
+      return;
+    }
+
+    setPriceSyncing(true);
+    setPriceSyncError("");
+    setPriceSyncSuccess("");
+    try {
+      const syncResults = await Promise.allSettled(
+        priceSyncProviders.map((provider) =>
+          runExternalDataSync(appConfig.apiBase, provider, {
+            requestedBy: authSession.user.user_id,
+            headers: sessionHeaders(authSession),
+          }),
+        ),
+      );
+      const fulfilledRuns = syncResults.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : [],
+      );
+      const rejectedMessages = syncResults.flatMap((result) =>
+        result.status === "rejected"
+          ? [
+              result.reason instanceof Error
+                ? result.reason.message
+                : "Sync request failed.",
+            ]
+          : [],
+      );
+      const failedRuns = fulfilledRuns.filter(
+        (run) => run.status.trim().toUpperCase() === "FAILED",
+      );
+
+      await refreshLatestMarks();
+
+      const observationCount = fulfilledRuns.reduce(
+        (total, run) => total + run.observation_count,
+        0,
+      );
+      if (failedRuns.length > 0 || rejectedMessages.length > 0) {
+        const runMessages = failedRuns.map(
+          (run) =>
+            `${run.provider} run ${run.id} failed${
+              run.error_summary ? `: ${run.error_summary}` : ""
+            }`,
+        );
+        setPriceSyncError([...runMessages, ...rejectedMessages].join(" "));
+        if (observationCount > 0) {
+          setPriceSyncSuccess(
+            `Loaded ${observationCount} observation${
+              observationCount === 1 ? "" : "s"
+            } before the sync stopped.`,
+          );
+        }
+        return;
+      }
+
+      setPriceSyncSuccess(
+        `Synced ${priceSyncProviderSummary} with ${observationCount} observation${
+          observationCount === 1 ? "" : "s"
+        }.`,
+      );
+    } catch (nextError) {
+      setPriceSyncError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Failed to sync latest prices.",
+      );
+    } finally {
+      setPriceSyncing(false);
+    }
+  }, [
+    authSession,
+    canSyncPriceSources,
+    priceSyncProviderSummary,
+    priceSyncProviders,
+    refreshLatestMarks,
+  ]);
   const handlePriceRowDragEnd = useCallback(
     (event: DragEndEvent) => {
       if (!priceRowsMovable) {
@@ -2728,6 +2963,12 @@ function PromptHomePricesCard({
         ) : (
           <>
             {error ? <p className="form-note form-note-error">{error}</p> : null}
+            {priceSyncError ? (
+              <p className="form-note form-note-error">{priceSyncError}</p>
+            ) : null}
+            {priceSyncSuccess ? (
+              <p className="form-note">{priceSyncSuccess}</p>
+            ) : null}
             {showPriceFilters ? (
               <div className="prompt-home-prices-filter-bar" aria-label="Price filters">
                 <label className="prompt-home-prices-filter-field">
@@ -2907,15 +3148,11 @@ function PromptHomePricesCard({
                             isActiveSort ? "is-active" : undefined,
                           )}
                           aria-label={`Sort prices by ${label}`}
-                          disabled={!canConfigureHomeCard}
                           onClick={() =>
-                            updatePriceCardParameters(
-                              "price_sort",
-                              serializePromptHomePriceSortParameter(
-                                nextPromptHomePriceSortState(
-                                  priceSortState,
-                                  field,
-                                ),
+                            updatePriceSortState(
+                              nextPromptHomePriceSortState(
+                                priceSortState,
+                                field,
                               ),
                             )
                           }
@@ -2973,13 +3210,32 @@ function PromptHomePricesCard({
 
         <div className="prompt-home-prices-card-footer">
           <span>{priceFooterSummary}</span>
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={onOpenPricesWorkspace}
-          >
-            Open Dashboard
-          </button>
+          <div className="prompt-home-prices-card-footer-actions">
+            <button
+              type="button"
+              className="button button-secondary"
+              aria-label="Sync latest prices"
+              title={priceSyncButtonTitle}
+              onClick={() => void handleSyncPrices()}
+              disabled={priceSyncButtonDisabled}
+            >
+              {priceSyncing ? "Syncing..." : "Sync"}
+            </button>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={onOpenPriceSourcesReview}
+            >
+              Review Sources
+            </button>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={onOpenPricesWorkspace}
+            >
+              Open Dashboard
+            </button>
+          </div>
         </div>
       </div>
     </article>
@@ -2991,6 +3247,7 @@ function PromptHomeMapTile({
   assets,
   deliveries,
   locations,
+  priceIndices,
   spatialFeatures,
   referenceDataLoaded,
   homeCard,
@@ -3003,6 +3260,7 @@ function PromptHomeMapTile({
   assets: AssetRecord[];
   deliveries: DeliveryRecord[];
   locations: LocationRecord[];
+  priceIndices: PriceIndexRecord[];
   spatialFeatures: SpatialFeatureRecord[];
   referenceDataLoaded?: boolean;
   homeCard: PromptHomeTemplateCard | null;
@@ -3049,11 +3307,56 @@ function PromptHomeMapTile({
     initialMapAssetLayerVisible,
   );
   const [showVesselLayer, setShowVesselLayer] = useState(true);
+  const [showMarketPriceLayer, setShowMarketPriceLayer] = useState(true);
   const [serverMapScopeSummary, setServerMapScopeSummary] =
     useState<AssetMapScopeSummary | null>(null);
+  const homeCardFilters = useMemo(() => homeCard?.filters ?? {}, [homeCard]);
+  const mapCommodityFilter = getPromptHomeCardStringValue(
+    homeCardFilters,
+    "commodity_code",
+  );
+  const mapLocationFilter = getPromptHomeCardStringValue(
+    homeCardFilters,
+    "location_code",
+  );
+  const mapRegionFilter = getPromptHomeCardStringValue(
+    homeCardFilters,
+    "region",
+  );
+  const mapFilteredPriceIndices = useMemo(
+    () =>
+      priceIndices.filter(
+        (priceIndex) =>
+          priceIndex.is_active &&
+          Boolean(priceIndex.location_code?.trim()) &&
+          promptHomeMapPriceIndexMatchesFilters(priceIndex, {
+            commodityCode: mapCommodityFilter,
+            locationCode: mapLocationFilter,
+            region: mapRegionFilter,
+          }),
+      ),
+    [mapCommodityFilter, mapLocationFilter, mapRegionFilter, priceIndices],
+  );
+  const mapPriceIndexCodes = useMemo(
+    () => mapFilteredPriceIndices.map((priceIndex) => priceIndex.code),
+    [mapFilteredPriceIndices],
+  );
+  const { latestMarksByCode: latestMapPriceMarksByCode } =
+    useLatestPriceIndexMarks(mapPriceIndexCodes, {
+      refreshIntervalMs: PROMPT_HOME_PRICE_REFRESH_INTERVAL_MS,
+    });
   const mapSummary = useMemo(
     () => buildAssetMapSummary(assets, locations),
     [assets, locations],
+  );
+  const marketPriceRecords = useMemo(
+    () =>
+      buildAssetMapMarketPriceRecords({
+        priceIndices: mapFilteredPriceIndices,
+        locations,
+        latestMarksByCode: latestMapPriceMarksByCode,
+      }),
+    [latestMapPriceMarksByCode, locations, mapFilteredPriceIndices],
   );
   const locationByCode = useMemo(
     () =>
@@ -3115,14 +3418,30 @@ function PromptHomeMapTile({
       ),
     [mapSummary.records, normalizedAssetGeographyVisibility],
   );
+  const geographyVisibleMarketPriceCandidates = useMemo(
+    () =>
+      marketPriceRecords.filter(
+        (record) =>
+          assetMapGeographyLabelForMarketPrice(record) === null ||
+          normalizedAssetGeographyVisibility[
+            assetMapGeographyLabelForMarketPrice(record) ?? ""
+          ] !== false,
+      ),
+    [marketPriceRecords, normalizedAssetGeographyVisibility],
+  );
   const countryOptions = useMemo(
     () =>
       buildAssetMapCountryOptions({
         records: geographyVisibleRecordCandidates,
+        marketPrices: geographyVisibleMarketPriceCandidates,
         weatherLocations: [],
         locationByCode,
       }),
-    [geographyVisibleRecordCandidates, locationByCode],
+    [
+      geographyVisibleMarketPriceCandidates,
+      geographyVisibleRecordCandidates,
+      locationByCode,
+    ],
   );
   const activeSelectedCountryCode = useMemo(
     () =>
@@ -3143,14 +3462,24 @@ function PromptHomeMapTile({
       ),
     [activeSelectedCountryCode, geographyVisibleRecordCandidates],
   );
+  const countryVisibleMarketPriceRecords = useMemo(
+    () =>
+      geographyVisibleMarketPriceCandidates.filter(
+        (record) =>
+          !activeSelectedCountryCode ||
+          assetMapCountryCodeForMarketPrice(record) === activeSelectedCountryCode,
+      ),
+    [activeSelectedCountryCode, geographyVisibleMarketPriceCandidates],
+  );
   const subdivisionOptions = useMemo(
     () =>
       buildAssetMapSubdivisionOptions({
         records: countryVisibleRecordCandidates,
+        marketPrices: countryVisibleMarketPriceRecords,
         weatherLocations: [],
         locationByCode,
       }),
-    [countryVisibleRecordCandidates, locationByCode],
+    [countryVisibleMarketPriceRecords, countryVisibleRecordCandidates, locationByCode],
   );
   const activeSelectedSubdivisionCode = useMemo(
     () =>
@@ -3172,6 +3501,16 @@ function PromptHomeMapTile({
             activeSelectedSubdivisionCode,
       ),
     [activeSelectedSubdivisionCode, countryVisibleRecordCandidates],
+  );
+  const subdivisionVisibleMarketPriceRecords = useMemo(
+    () =>
+      countryVisibleMarketPriceRecords.filter(
+        (record) =>
+          !activeSelectedSubdivisionCode ||
+          assetMapSubdivisionCodeForMarketPrice(record) ===
+            activeSelectedSubdivisionCode,
+      ),
+    [activeSelectedSubdivisionCode, countryVisibleMarketPriceRecords],
   );
   const activityVisibleRecordCandidates = useMemo(
     () =>
@@ -3251,6 +3590,10 @@ function PromptHomeMapTile({
     () => (showAssetLayer ? displayedMappedRecords : []),
     [displayedMappedRecords, showAssetLayer],
   );
+  const displayedMarketPriceRecords = useMemo(
+    () => (showMarketPriceLayer ? subdivisionVisibleMarketPriceRecords : []),
+    [showMarketPriceLayer, subdivisionVisibleMarketPriceRecords],
+  );
   const vesselPositions = useMemo(
     () => buildVesselMapRecords(deliveries),
     [deliveries],
@@ -3291,6 +3634,7 @@ function PromptHomeMapTile({
   const exactFilteredMapReadyCount =
     activeServerMapScopeSummary?.filtered_map_ready_count ??
     visibleMappedRecords.length;
+  const visibleMarketPriceCount = displayedMarketPriceRecords.length;
   const mapSummaryLabel = useMemo(
     () =>
       formatPromptHomeMapSummary({
@@ -3298,11 +3642,13 @@ function PromptHomeMapTile({
         filteredRecordCount: exactFilteredRecordCount,
         shownRecordCount: displayedAssetMapRecords.length,
         mapReadyRecordCount: showAssetLayer ? exactFilteredMapReadyCount : 0,
+        marketPriceCount: visibleMarketPriceCount,
       }),
     [
       displayedAssetMapRecords.length,
       exactFilteredMapReadyCount,
       exactFilteredRecordCount,
+      visibleMarketPriceCount,
       showAssetLayer,
     ],
   );
@@ -3325,7 +3671,8 @@ function PromptHomeMapTile({
     [activeSelectedAssetCode, displayedAssetMapRecords],
   );
   const statusTitle =
-    visibleMappedRecords.length === 0
+    visibleMappedRecords.length === 0 &&
+    displayedMarketPriceRecords.length === 0
       ? geographyVisibleRecordCandidates.length === 0
         ? "No selected geographies are visible right now."
         : countryVisibleRecordCandidates.length === 0 &&
@@ -3342,7 +3689,8 @@ function PromptHomeMapTile({
                 : "No map-ready assets yet."
       : null;
   const statusDetail =
-    visibleMappedRecords.length === 0
+    visibleMappedRecords.length === 0 &&
+    displayedMarketPriceRecords.length === 0
       ? geographyVisibleRecordCandidates.length === 0
         ? "Turn at least one geography back on to restore plotted assets."
         : countryVisibleRecordCandidates.length === 0 &&
@@ -3539,8 +3887,10 @@ function PromptHomeMapTile({
           spatialFeatures={activeSharedSpatialFeatures}
           railRouteSpatialFeatures={activeRailRouteSpatialFeatures}
           vesselPositions={vesselPositions}
+          marketPrices={subdivisionVisibleMarketPriceRecords}
           showAssets={showAssetLayer}
           showVessels={showVesselLayer}
+          showMarketPrices={showMarketPriceLayer}
           filterCardStateKey="prompt-home.map-filters-card"
           assetActivityVisibility={normalizedAssetActivityVisibility}
           assetGeographyVisibility={normalizedAssetGeographyVisibility}
@@ -3555,6 +3905,7 @@ function PromptHomeMapTile({
           }
           onShowAssetsChange={setShowAssetLayer}
           onShowVesselsChange={setShowVesselLayer}
+          onShowMarketPricesChange={setShowMarketPriceLayer}
           onToggleAssetActivity={handleToggleAssetActivity}
           onToggleAssetGeography={handleToggleAssetGeography}
           onSelectCountry={handleSelectCountry}
@@ -5553,6 +5904,7 @@ export function PromptHomeWorkspace({
                 ))}
                 {renderHomeCardSlot("prices", (
                   <PromptHomePricesCard
+                    authSession={authSession}
                     priceIndices={priceIndices}
                     referenceDataLoading={referenceDataLoading}
                     homeCard={cardVisibilityState.getCard("prices")}
@@ -5564,12 +5916,20 @@ export function PromptHomeWorkspace({
                       )
                     }
                     onOpenPricesWorkspace={() => onOpenView("dashboard")}
-                    onOpenPriceReport={(priceIndex) =>
+                    onOpenPriceSourcesReview={() =>
+                      onOpenView("admin", null, {
+                        hash: ADMIN_PRICE_SOURCES_SECTION_ID,
+                      })
+                    }
+                    onOpenPriceReport={(row) =>
                       onOpenView(
                         "reports",
                         buildPriceIndexBiReportHandoff({
-                          priceIndexCode: priceIndex.code,
-                          priceIndexName: priceIndex.name,
+                          priceIndexCode: row.priceIndex.code,
+                          priceIndexName: row.priceIndex.name,
+                          product: row.product,
+                          location: row.location,
+                          source: row.source,
                         }),
                         { hash: PRICE_INDEX_BI_REPORT_ID },
                       )
@@ -5582,6 +5942,7 @@ export function PromptHomeWorkspace({
                     assets={assets}
                     deliveries={deliveries}
                     locations={locations}
+                    priceIndices={priceIndices}
                     spatialFeatures={spatialFeatures}
                     referenceDataLoaded={referenceDataLoaded}
                     homeCard={cardVisibilityState.getCard("map")}

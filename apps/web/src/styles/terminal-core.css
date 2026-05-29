@@ -419,6 +419,12 @@
   line-height: 1.08;
 }
 
+.hero.hero-price-report h2 {
+  max-width: 32ch;
+  font-size: clamp(1.9rem, 2.7vw, 2.7rem);
+  line-height: 1.05;
+}
+
 .hero-compact-heading-row .hero-session-pill {
   flex: 0 0 auto;
 }

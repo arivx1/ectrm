@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -26,6 +27,7 @@ from apps.api.app.routes.external_data import (
     list_external_series_definitions,
     list_external_series_observations,
     list_latest_price_index_observations,
+    list_market_news_headlines,
     list_price_index_observations,
     list_external_data_runs,
     list_price_sources_for_review,
@@ -49,6 +51,7 @@ from apps.api.app.schemas.external_data import (
     ExternalSeriesDefinitionUpsertRequest,
     ExternalSeriesSyncRequest,
 )
+from apps.api.app.domains.reference_data.services.external_data.market_news import MarketNewsClientError
 
 
 class ExternalDataApiTests(unittest.TestCase):
@@ -396,8 +399,17 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(source.commodity_code, "WTI")
         self.assertEqual(source.provider, "EIA")
         self.assertEqual(source.series_id, "PET.RWTC.D")
+        self.assertEqual(source.ingestion_method, "EIA API pull")
+        self.assertEqual(source.ingestion_mode, "Admin manual sync or login-triggered due check")
+        self.assertEqual(source.source_system, "U.S. Energy Information Administration")
+        self.assertEqual(source.sync_job_name, "sync_eia_price_data")
+        self.assertEqual(source.scheduler_interval_minutes, 60)
+        self.assertEqual(source.success_sla_hours, 48)
+        self.assertIsInstance(source.due_for_sync, bool)
+        self.assertEqual(source.default_lookback_days, 30)
         self.assertEqual(source.latest_observation_date, date(2026, 3, 10))
         self.assertEqual(source.latest_value, 67.2)
+        self.assertEqual(source.latest_source_published_at, datetime(2026, 3, 10, 17, 0))
         self.assertEqual(source.latest_run_id, 2)
         self.assertEqual(source.latest_run_status, "SUCCEEDED")
         self.assertIn(source.review_status, {"current", "stale"})
@@ -420,6 +432,53 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(payload[0].price_index_code, "WTI_CUSHING_D")
         self.assertEqual(payload[0].observation_date, date(2026, 3, 10))
         self.assertEqual(payload[0].value, 67.2)
+
+    @patch("apps.api.app.routes.external_data.load_market_news_headlines")
+    def test_list_market_news_headlines_normalizes_filters(self, mock_load_market_news_headlines) -> None:
+        mock_load_market_news_headlines.return_value = {
+            "generated_at": datetime(2026, 5, 25, 12, 0, tzinfo=timezone.utc),
+            "commodity": "WTI",
+            "search_query": "cushing storage WTI crude oil when:4d",
+            "count": 1,
+            "items": [
+                {
+                    "title": "WTI rallies on storage draw",
+                    "source": "Reuters",
+                    "published_at": datetime(2026, 5, 25, 11, 30, tzinfo=timezone.utc),
+                    "link": "https://news.google.com/rss/articles/wti",
+                }
+            ],
+        }
+
+        payload = list_market_news_headlines(
+            commodity=" wti ",
+            query="cushing storage",
+            limit=3,
+            lookback_days=4,
+        )
+
+        mock_load_market_news_headlines.assert_called_once_with(
+            query="cushing storage",
+            commodity="WTI",
+            limit=3,
+            lookback_days=4,
+        )
+        self.assertEqual(payload.commodity, "WTI")
+        self.assertEqual(payload.count, 1)
+        self.assertEqual(payload.items[0].title, "WTI rallies on storage draw")
+
+    @patch("apps.api.app.routes.external_data.load_market_news_headlines")
+    def test_list_market_news_headlines_maps_client_errors_to_bad_gateway(
+        self,
+        mock_load_market_news_headlines,
+    ) -> None:
+        mock_load_market_news_headlines.side_effect = MarketNewsClientError("feed unavailable")
+
+        with self.assertRaises(HTTPException) as raised:
+            list_market_news_headlines(query="oil")
+
+        self.assertEqual(getattr(raised.exception, "status_code", None), 502)
+        self.assertEqual(getattr(raised.exception, "detail", None), "feed unavailable")
 
     def test_list_latest_price_index_observations_returns_latest_row_per_requested_code(self) -> None:
         self._seed_rows()
@@ -491,10 +550,20 @@ class ExternalDataApiTests(unittest.TestCase):
                 ["wti_cushing_d", "BRENT_DATED_D", "WTI_CUSHING_D", "UNKNOWN_CODE"],
                 db=session,
             )
+            history_payload = list_latest_price_index_observations(
+                ["wti_cushing_d", "BRENT_DATED_D"],
+                limit_per_code=2,
+                db=session,
+            )
 
         self.assertEqual([row.price_index_code for row in payload], ["WTI_CUSHING_D", "BRENT_DATED_D"])
         self.assertEqual(payload[0].value, 67.2)
         self.assertEqual(payload[1].value, 69.1)
+        self.assertEqual(
+            [row.price_index_code for row in history_payload],
+            ["WTI_CUSHING_D", "WTI_CUSHING_D", "BRENT_DATED_D", "BRENT_DATED_D"],
+        )
+        self.assertEqual([row.value for row in history_payload], [67.2, 66.1, 69.1, 68.9])
 
     def test_list_external_series_definitions_filters_by_provider(self) -> None:
         self._seed_rows()
@@ -877,6 +946,14 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(providers["MISO"].health_status, "unknown")
         self.assertEqual(providers["NYISO"].health_status, "unknown")
         self.assertEqual(providers["KALSHI"].health_status, "healthy")
+        self.assertEqual(providers["EIA"].ingestion_method, "EIA API pull")
+        self.assertEqual(providers["EIA"].ingestion_mode, "Admin manual sync or login-triggered due check")
+        self.assertEqual(providers["EIA"].source_system, "U.S. Energy Information Administration")
+        self.assertEqual(providers["EIA"].source_endpoint, "https://api.eia.gov/v2")
+        self.assertEqual(providers["EIA"].sync_job_name, "sync_eia_price_data")
+        self.assertEqual(providers["EIA"].default_lookback_days, 30)
+        self.assertEqual(providers["CAISO"].ingestion_method, "CAISO OASIS API pull")
+        self.assertIsNone(providers["CAISO"].default_lookback_days)
         self.assertFalse(providers["CAISO"].due_for_sync)
         self.assertFalse(providers["KALSHI"].due_for_sync)
         self.assertEqual(providers["CFTC"].error_summary, "boom")

@@ -26,7 +26,7 @@ describe('workspace registry', () => {
     expect(VIEW_DATA_GROUPS.map).toEqual(['reference', 'deliveries'])
     expect(VIEW_DATA_GROUPS.operations).toEqual(['trades', 'deliveries', 'operations', 'admin'])
     expect(VIEW_BLOCKING_GROUPS.settlement).toEqual(['trades', 'operations', 'settlement'])
-    expect(VIEW_DATA_GROUPS.reports).toEqual(['trades', 'reports'])
+    expect(VIEW_DATA_GROUPS.reports).toEqual(['trades', 'reference', 'reports'])
   })
 
   it('preserves labels and hero copy through the registry', () => {

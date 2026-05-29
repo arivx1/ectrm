@@ -169,6 +169,51 @@
     linear-gradient(180deg, rgba(11, 20, 31, 0.98), rgba(8, 15, 24, 0.98));
 }
 
+:root[data-color-mode='dark'] .price-report-observation-table-shell {
+  border-color: rgba(126, 154, 184, 0.14);
+  background: rgba(8, 15, 24, 0.72);
+}
+
+:root[data-color-mode='dark'] .price-report-column-dock {
+  border-color: rgba(126, 154, 184, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+:root[data-color-mode='dark'] .price-report-column-dock-label,
+:root[data-color-mode='dark'] .price-report-column-dock-placeholder {
+  color: var(--terminal-muted);
+}
+
+:root[data-color-mode='dark'] .price-report-column-chip {
+  border-color: rgba(78, 167, 255, 0.18);
+  background: rgba(78, 167, 255, 0.1);
+  color: var(--terminal-blue);
+}
+
+:root[data-color-mode='dark'] .price-report-observation-table th {
+  color: var(--terminal-muted);
+}
+
+:root[data-color-mode='dark'] .price-report-observation-table td {
+  border-color: rgba(126, 154, 184, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--terminal-text-soft);
+}
+
+:root[data-color-mode='dark'] .price-report-observation-table strong {
+  color: var(--terminal-text);
+}
+
+:root[data-color-mode='dark'] .price-report-observation-price {
+  border-color: rgba(61, 214, 160, 0.2);
+  background: rgba(61, 214, 160, 0.1);
+  color: var(--terminal-accent-strong);
+}
+
+:root[data-color-mode='dark'] .price-report-observation-source small {
+  color: var(--terminal-muted);
+}
+
 .pnl-trend-stat-value-up {
   color: var(--terminal-accent-strong);
 }

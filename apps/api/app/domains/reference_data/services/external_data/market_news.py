@@ -21,6 +21,8 @@ COMMODITY_NEWS_TERMS = {
     "WTI": "WTI crude oil",
     "BRENT": "Brent crude oil",
     "HH": "Henry Hub natural gas",
+    "NATGAS": "natural gas",
+    "NG": "natural gas",
     "NATURAL_GAS": "natural gas",
     "POWER": "power markets electricity grid",
 }

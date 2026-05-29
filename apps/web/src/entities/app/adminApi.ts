@@ -217,7 +217,7 @@ export type TradeProjectionMonitoringRunResult = {
   next_evaluation_at: string | null
 }
 
-const externalDataSyncRouteByProvider = {
+export const externalDataSyncRouteByProvider = {
   EIA: 'eia',
   EIA_FUNDAMENTALS: 'eia-fundamentals',
   FRED: 'fred',
@@ -233,6 +233,10 @@ const externalDataSyncRouteByProvider = {
   KALSHI: 'kalshi',
 } as const satisfies Record<ExternalDataSyncProvider, string>
 
+export function isExternalDataSyncProvider(provider: string): provider is ExternalDataSyncProvider {
+  return Object.prototype.hasOwnProperty.call(externalDataSyncRouteByProvider, provider)
+}
+
 function adminMutationHeaders(): Headers {
   return buildMutationHeaders()
 }
@@ -244,13 +248,18 @@ function authorizationHeaders(accessToken: string): Headers {
 export async function runExternalDataSync(
   apiBase: string,
   provider: ExternalDataSyncProvider,
+  options?: {
+    requestedBy?: string
+    headers?: HeadersInit
+  },
 ): Promise<ExternalDataRunRecord> {
-  const { actorId } = getMutationContext()
+  const requestedBy = options?.requestedBy ?? getMutationContext().actorId
+  const headers = options?.headers ? new Headers(options.headers) : adminMutationHeaders()
 
   return postJson<ExternalDataRunRecord>(
     `${apiBase}/admin/external-data/${externalDataSyncRouteByProvider[provider]}/sync`,
-    { requested_by: actorId },
-    { headers: adminMutationHeaders() },
+    { requested_by: requestedBy },
+    { headers },
   )
 }
 

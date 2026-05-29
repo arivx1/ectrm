@@ -22,6 +22,7 @@ vi.mock('../src/shared/mutation.ts', () => ({
 
 import {
   importCounterpartyCreditSnapshots,
+  isExternalDataSyncProvider,
   loadTradeProjectionMonitoring,
   previewCounterpartyCreditImport,
   runExternalDataSync,
@@ -82,6 +83,32 @@ test('runExternalDataSync supports the full price-provider sync route set', asyn
     const [url] = postJsonMock.mock.calls.at(-1)!
     assert.equal(url, `http://api.test/admin/external-data/${route}/sync`)
   }
+})
+
+test('runExternalDataSync can use an explicit actor and headers outside admin workspace state', async () => {
+  const expected = { id: 103, provider: 'ERCOT' }
+  const headers = new Headers({ Authorization: 'Bearer home-admin-token' })
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await runExternalDataSync('http://api.test', 'ERCOT', {
+    requestedBy: 'home.admin',
+    headers,
+  })
+
+  assert.equal(payload, expected)
+  assert.equal(getMutationContextMock.mock.calls.length, 0)
+  assert.equal(buildMutationHeadersMock.mock.calls.length, 0)
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/external-data/ercot/sync')
+  assert.deepEqual(body, { requested_by: 'home.admin' })
+  const sentHeaders = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(sentHeaders.get('Authorization'), 'Bearer home-admin-token')
+})
+
+test('isExternalDataSyncProvider narrows configured provider routes', () => {
+  assert.equal(isExternalDataSyncProvider('EIA'), true)
+  assert.equal(isExternalDataSyncProvider('ERCOT'), true)
+  assert.equal(isExternalDataSyncProvider('OPIS'), false)
 })
 
 test('previewCounterpartyCreditImport applies the shared preview payload contract', async () => {
