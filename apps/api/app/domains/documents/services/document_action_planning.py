@@ -120,6 +120,21 @@ ACTUALIZATION_RULES_BY_KIND: dict[str, dict[str, tuple[str, ...]]] = {
     },
 }
 
+DELIVERY_SCHEDULE_UPDATE_KINDS: frozenset[str] = frozenset(
+    {
+        "NOMINATION",
+        "PIPELINE_STATEMENT",
+    }
+)
+
+DELIVERY_SCHEDULE_PIPELINE_FIELD_MAP: dict[str, str] = {
+    "pipeline_system": "pipeline_system",
+    "contract_number": "pipeline_contract_number",
+    "receipt_location_code": "receipt_location_code",
+    "delivery_location_code": "delivery_location_code",
+    "nomination_reference": "nomination_reference",
+}
+
 QUANTITY_NUMBER_PATTERN = re.compile(r"[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?")
 
 
@@ -233,6 +248,17 @@ def build_document_action_plan_for_candidate(
 ) -> DocumentActionPlanOut:
     candidates = list(linkage_assessment.candidates)
     if selected_candidate.existing_record:
+        update_plan = _build_existing_delivery_schedule_update_plan(
+            document_id=document_id,
+            candidate=selected_candidate,
+            owner_candidate=_resolve_owner_candidate("DELIVERY", all_candidates=candidates),
+            review_status=review_status,
+            linkage_assessment=linkage_assessment,
+            field_map=_build_document_field_map(pages),
+            document_kind=_dominant_document_kind(pages),
+        )
+        if update_plan is not None:
+            return update_plan
         return _build_attach_plan(
             document_id=document_id,
             candidate=selected_candidate,
@@ -298,6 +324,74 @@ def _build_attach_plan(
             "document_id": document_id,
             "target_record_type": candidate.record_type,
             "target_record_id": candidate.record_id,
+        },
+    )
+
+
+def _build_existing_delivery_schedule_update_plan(
+    *,
+    document_id: str,
+    candidate: DocumentLinkageCandidateOut,
+    owner_candidate: DocumentLinkageCandidateOut | None,
+    review_status: str,
+    linkage_assessment: DocumentLinkageAssessmentOut,
+    field_map: dict[str, str],
+    document_kind: str,
+) -> DocumentActionPlanOut | None:
+    if candidate.record_type != "DELIVERY" or not candidate.record_id:
+        return None
+    if document_kind not in DELIVERY_SCHEDULE_UPDATE_KINDS:
+        return None
+
+    pipeline_detail_changes = {
+        target_key: value
+        for source_key, target_key in DELIVERY_SCHEDULE_PIPELINE_FIELD_MAP.items()
+        if (value := clean_optional_text(field_map.get(source_key))) is not None
+    }
+    if not pipeline_detail_changes:
+        return None
+
+    status = "READY" if review_status == "VERIFIED" else "REVIEW"
+    action_record = _action_record(candidate)
+    owner_record = _action_record(owner_candidate) if owner_candidate is not None else None
+    reasons = [
+        f"{candidate.record_label} is the strongest existing delivery match.",
+        "Reviewed nomination or pipeline schedule identifiers can update the delivery detail record.",
+        candidate.reason,
+        *linkage_assessment.reasons[:2],
+    ]
+    if review_status != "VERIFIED":
+        reasons.insert(0, "Verify the document before executing the delivery schedule update.")
+
+    return DocumentActionPlanOut(
+        status=status,
+        action_type="UPDATE_RECORD_FROM_DOCUMENT",
+        operation_type="update_delivery_schedule_from_document",
+        candidate_state="UPDATE_CANDIDATE",
+        title=f"Update Schedule For {candidate.record_label}",
+        description=(
+            "Apply reviewed nomination and pipeline schedule identifiers to the existing delivery detail "
+            "record, then link this document as supporting evidence."
+        ),
+        confidence=round(candidate.score, 3),
+        target=action_record,
+        owner=owner_record,
+        missing_evidence=_candidate_missing_evidence(candidate),
+        reasons=reasons[:4],
+        payload={
+            "document_id": document_id,
+            "target_record_type": "DELIVERY",
+            "target_record_id": candidate.record_id,
+            "delivery_id": candidate.record_id,
+            "trade_id": field_map.get("trade_id"),
+            "document_kind": document_kind,
+            "pipeline_detail_changes": pipeline_detail_changes,
+            "captured_fields": {
+                key: value
+                for key, value in field_map.items()
+                if key in DELIVERY_SCHEDULE_PIPELINE_FIELD_MAP
+                or key in {"flow_date", "nomination_date", "statement_date", "quantity"}
+            },
         },
     )
 

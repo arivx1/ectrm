@@ -83,6 +83,38 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-05-29 - Nomination Documents Update Delivery Schedule Details
+
+- Type: algorithm-added
+- Domain: document linkage, delivery operations, nomination scheduling, and
+  Library action approvals
+- Applies to: `NOMINATION` and `PIPELINE_STATEMENT` document workflows
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_action_planning.py`,
+  `apps/api/app/domains/documents/services/document_action_execution.py`,
+  `apps/api/app/domains/documents/services/document_action_governance.py`,
+  `apps/api/app/domains/documents/services/document_workflows.py`, and
+  `apps/api/app/domains/operations/services/shipments.py`
+- Lesson: when a reviewed nomination or pipeline statement resolves an
+  existing delivery, the Library should prefer an approval-gated
+  `update_delivery_schedule_from_document` action over a plain attachment.
+  Execution must keep the write inside typed operations services by applying
+  reviewed pipeline identifiers through `update_delivery_pipeline_detail`, then
+  linking the document to the delivery and trade as provenance.
+- Deterministic opportunity: keep document-sourced schedule enrichment limited
+  to explicit field maps and typed delivery detail services. If future
+  nominations need daily schedules, quantities, or allocation commitments,
+  create a canonical schedule/allocation record or event contract instead of
+  overloading freeform document fields.
+- Agent autonomy impact: agents and Library workflows may stage schedule
+  enrichment from reviewed document evidence, but approval remains required and
+  the action does not externally commit a nomination or logistics schedule.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_document_action_planning_service apps.api.tests.test_document_action_approval_requests_service apps.api.tests.test_document_workflows_service apps.api.tests.test_document_action_execution_service apps.api.tests.test_document_action_governance_service`
+- Follow-up: add a first-class schedule or nomination record before promoting
+  document flow dates and quantities beyond evidence capture.
+
 ### 2026-05-29 - Delivery Proof Documents Can Record Actualization
 
 - Type: algorithm-added

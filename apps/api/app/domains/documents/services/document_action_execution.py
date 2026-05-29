@@ -11,6 +11,7 @@ from apps.api.app.domains.operations.services.settlement_invoices import issue_t
 from apps.api.app.domains.operations.services.settlement_payments import create_trade_payment
 from apps.api.app.domains.operations.services.shipments import append_delivery_event
 from apps.api.app.domains.operations.services.shipments import create_delivery_from_document
+from apps.api.app.domains.operations.services.shipments import update_delivery_pipeline_detail
 from apps.api.app.domains.operations.services.trade_confirmations import create_trade_confirmation
 from apps.api.app.domains.operations.services.trade_confirmations import update_trade_confirmation
 from apps.api.app.models.delivery_event import DeliveryEvent
@@ -39,6 +40,7 @@ SUPPORTED_DOCUMENT_ACTION_OPERATIONS: frozenset[str] = frozenset(
         "issue_trade_invoice",
         "create_trade_payment",
         "create_delivery_from_document",
+        "update_delivery_schedule_from_document",
         "record_delivery_event_from_document",
         "record_trade_actualization_from_document",
     }
@@ -266,6 +268,44 @@ def _apply_document_action(
             role="PRIMARY",
         )
         _link_owner_record(db, document=document, actor_id=actor_id, action_plan=action_plan)
+        return True
+
+    if action_plan.operation_type == "update_delivery_schedule_from_document":
+        delivery_id = _require_payload_value(action_plan.payload, "delivery_id")
+        delivery = db.get(DeliveryObligation, delivery_id)
+        if delivery is None:
+            raise LookupError(f"Delivery '{delivery_id}' was not found.")
+        payload_trade_id = _optional_payload_value(action_plan.payload, "trade_id")
+        if payload_trade_id is not None and payload_trade_id != delivery.trade_id:
+            raise ValueError(
+                f"Document action trade '{payload_trade_id}' does not match delivery trade '{delivery.trade_id}'."
+            )
+        pipeline_changes = _payload_mapping(action_plan.payload, "pipeline_detail_changes")
+        if not pipeline_changes:
+            raise ValueError("Document action payload is missing pipeline detail changes.")
+        update_delivery_pipeline_detail(
+            db,
+            delivery_id=delivery_id,
+            actor_id=actor_id,
+            changes=pipeline_changes,
+            now=now,
+        )
+        create_document_record_link(
+            db,
+            document_id=document.document_id,
+            record_type="DELIVERY",
+            record_id=delivery_id,
+            actor_id=actor_id,
+            role="PRIMARY",
+        )
+        create_document_record_link(
+            db,
+            document_id=document.document_id,
+            record_type="TRADE",
+            record_id=delivery.trade_id,
+            actor_id=actor_id,
+            role="SECONDARY",
+        )
         return True
 
     if action_plan.operation_type == "record_delivery_event_from_document":
@@ -585,3 +625,14 @@ def _optional_int_payload_value(payload: dict[str, object], key: str) -> int | N
     if normalized <= 0:
         raise ValueError(f"Document action payload field '{key}' must be greater than zero.")
     return normalized
+
+
+def _payload_mapping(payload: dict[str, object], key: str) -> dict[str, object | None]:
+    value = payload.get(key)
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(field_key): field_value
+        for field_key, field_value in value.items()
+        if str(field_key).strip()
+    }

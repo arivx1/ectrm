@@ -325,6 +325,12 @@ def _workflow_identity(action_plan: DocumentActionPlanOut) -> tuple[str, str, st
             "Match Existing Record",
             "Review ranked record candidates and attach this document to the selected existing record.",
         )
+    if action_plan.operation_type == "update_delivery_schedule_from_document":
+        return (
+            "update_delivery_schedule_from_document",
+            "Update Delivery Schedule",
+            "Apply reviewed nomination or pipeline schedule identifiers to the matched delivery.",
+        )
     target_type = action_plan.target.record_type if action_plan.target is not None else None
     if target_type in CREATE_WORKFLOW_BY_TARGET:
         return CREATE_WORKFLOW_BY_TARGET[target_type]
@@ -361,6 +367,10 @@ def _record_effect(action_plan: DocumentActionPlanOut) -> str:
         if target.record_type == "TRADE_ACTUALIZATION":
             return "Record delivery actualization from reviewed document evidence."
         return f"Stage creation of a new {target.record_type.replace('_', ' ').lower()} from reviewed document evidence."
+    if action_plan.action_type == "UPDATE_RECORD_FROM_DOCUMENT" and target is not None:
+        if action_plan.operation_type == "update_delivery_schedule_from_document":
+            return "Update delivery schedule detail fields from reviewed document evidence."
+        return f"Update existing {target.record_type.replace('_', ' ').lower()} from reviewed document evidence."
     return "Review only; no business record mutation."
 
 

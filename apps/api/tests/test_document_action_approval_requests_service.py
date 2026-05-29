@@ -610,6 +610,83 @@ class DocumentActionApprovalRequestsServiceTests(unittest.TestCase):
         self.assertEqual(delivery_ids, ["DLV-TRD-DLV-SEL-200"])
         self.assertEqual(linked_records, {("DELIVERY", "DLV-TRD-DLV-SEL-200"), ("TRADE", "TRD-DLV-SEL-200")})
 
+    def test_nomination_approval_updates_existing_delivery_schedule_and_links_evidence(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-DLV-SCH-225")
+            delivery, pipeline_detail = self._seed_delivery(
+                trade=trade,
+                delivery_id="DLV-TRD-DLV-SCH-225",
+                nomination_reference="NOM-OLD-225",
+            )
+            document, page = self._seed_verified_document(
+                document_id="DOC-DLV-SCH-225",
+                document_kind="NOMINATION",
+                header_fields=[
+                    {"field_key": "nomination_reference", "value": "NOM-SEL-225"},
+                    {"field_key": "flow_date", "value": "2026-04-15"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-SCH-225"},
+                    {"field_key": "delivery_id", "value": "DLV-TRD-DLV-SCH-225"},
+                    {"field_key": "contract_number", "value": "PIPE-CONTRACT-225"},
+                    {"field_key": "pipeline_system", "value": "NGPL"},
+                    {"field_key": "receipt_location_code", "value": "MIDLAND"},
+                    {"field_key": "delivery_location_code", "value": "BEAUMONT"},
+                ],
+            )
+            session.add_all([trade, delivery, pipeline_detail, document, page])
+            session.commit()
+
+            staged = stage_document_action_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="reviewer",
+                request_comment="Update the existing delivery from the reviewed nomination.",
+            )
+            self.assertEqual(staged.action_type, "UPDATE_RECORD_FROM_DOCUMENT")
+            self.assertEqual(staged.operation_type, "update_delivery_schedule_from_document")
+            self.assertEqual(staged.target_record_type, "DELIVERY")
+            self.assertEqual(staged.target_record_id, "DLV-TRD-DLV-SCH-225")
+            staged_payload = staged.action_plan_snapshot["payload"]
+            self.assertEqual(
+                staged_payload["pipeline_detail_changes"]["nomination_reference"],
+                "NOM-SEL-225",
+            )
+
+            executed = approve_document_action_approval_request(
+                session,
+                document_id=document.document_id,
+                actor_id="approver",
+                decision_comment="Approved delivery schedule update.",
+            )
+            refreshed_detail = session.get(DeliveryPipelineDetail, "DLV-TRD-DLV-SCH-225")
+            links = session.execute(
+                select(DocumentRecordLink)
+                .where(DocumentRecordLink.document_id == document.document_id)
+                .order_by(DocumentRecordLink.record_type.asc())
+            ).scalars().all()
+            linked_records = {(link.record_type, link.record_id) for link in links}
+            executed_status = executed.status
+            refreshed_nomination_reference = (
+                refreshed_detail.nomination_reference if refreshed_detail is not None else None
+            )
+            refreshed_contract_number = refreshed_detail.contract_number if refreshed_detail is not None else None
+            refreshed_receipt_location_code = (
+                refreshed_detail.receipt_location_code if refreshed_detail is not None else None
+            )
+            refreshed_nomination_reference_source = (
+                refreshed_detail.nomination_reference_source if refreshed_detail is not None else None
+            )
+            session.commit()
+
+        self.assertEqual(executed_status, "EXECUTED")
+        self.assertEqual(refreshed_nomination_reference, "NOM-SEL-225")
+        self.assertEqual(refreshed_contract_number, "PIPE-CONTRACT-225")
+        self.assertEqual(refreshed_receipt_location_code, "MIDLAND")
+        self.assertEqual(refreshed_nomination_reference_source, "MANUAL")
+        self.assertEqual(
+            linked_records,
+            {("DELIVERY", "DLV-TRD-DLV-SCH-225"), ("TRADE", "TRD-DLV-SCH-225")},
+        )
+
     def test_selected_delivery_create_candidate_rechecks_missing_record_before_execution(self) -> None:
         with self.SessionLocal() as session:
             trade = self._seed_trade(trade_id="TRD-DLV-SEL-250")

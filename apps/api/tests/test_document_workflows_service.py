@@ -497,7 +497,7 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
         self.assertIn("CREATES_NEW_RECORD", create_workflow.risk_flags)
         self.assertIn("FINANCIAL_MUTATION", create_workflow.risk_flags)
 
-    def test_workflow_summary_exposes_existing_delivery_candidate_for_pipeline_statement(self) -> None:
+    def test_workflow_summary_exposes_delivery_schedule_update_for_pipeline_statement(self) -> None:
         with self.SessionLocal() as session:
             trade = self._seed_trade(session, trade_id="TRD-DLV-WF-200")
             self._seed_delivery(
@@ -525,13 +525,23 @@ class DocumentWorkflowsServiceTests(unittest.TestCase):
 
             workflows = list_document_workflows(session, document_id=document.document_id)
 
-        self.assertEqual(workflows.action_plan.action_type, "ATTACH_EXISTING_RECORD")
-        self.assertEqual(workflows.action_plan.operation_type, "link_document_to_record")
+        self.assertEqual(workflows.action_plan.action_type, "UPDATE_RECORD_FROM_DOCUMENT")
+        self.assertEqual(workflows.action_plan.operation_type, "update_delivery_schedule_from_document")
         self.assertEqual(workflows.action_plan.target.record_type, "DELIVERY")
         self.assertEqual(workflows.action_plan.target.record_id, "DLV-WF-200")
-        self.assertEqual(workflows.action_plan.candidate_state, "ATTACH_READY")
-        self.assertEqual([workflow.workflow_id for workflow in workflows.workflows], ["match_existing_record"])
+        self.assertEqual(workflows.action_plan.candidate_state, "UPDATE_CANDIDATE")
+        self.assertEqual(
+            [workflow.workflow_id for workflow in workflows.workflows],
+            ["update_delivery_schedule_from_document", "match_existing_record"],
+        )
         self.assertEqual(workflows.workflows[0].status, "READY")
+        self.assertEqual(
+            workflows.workflows[0].record_effect,
+            "Update delivery schedule detail fields from reviewed document evidence.",
+        )
+        self.assertTrue(workflows.workflows[0].approval_required)
+        self.assertIn("UPDATES_EXISTING_RECORD", workflows.workflows[0].risk_flags)
+        self.assertIn("OPERATIONAL_MUTATION", workflows.workflows[0].risk_flags)
 
     def test_workflow_summary_exposes_delivery_event_candidate_for_delivery_confirmation(self) -> None:
         with self.SessionLocal() as session:

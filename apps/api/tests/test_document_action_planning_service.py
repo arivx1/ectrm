@@ -384,6 +384,52 @@ class DocumentActionPlanningServiceTests(unittest.TestCase):
         self.assertEqual(plan.payload["trade_id"], "TRD-DLV-ACT-500")
         self.assertEqual(plan.payload["nomination_reference"], "NOM-ACT-500")
 
+    def test_existing_nomination_delivery_plans_schedule_update(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-DLV-SCH-550")
+            delivery, pipeline_detail = self._seed_delivery(trade=trade, delivery_id="DLV-SCH-550")
+            session.add_all([trade, delivery, pipeline_detail])
+            session.commit()
+
+            page = self._reviewed_page(
+                document_kind="NOMINATION",
+                header_fields=[
+                    {"field_key": "nomination_reference", "value": "NOM-SCH-550"},
+                    {"field_key": "flow_date", "value": "2026-04-15"},
+                    {"field_key": "trade_id", "value": "TRD-DLV-SCH-550"},
+                    {"field_key": "delivery_id", "value": "DLV-SCH-550"},
+                    {"field_key": "contract_number", "value": "PIPE-CONTRACT-550"},
+                    {"field_key": "pipeline_system", "value": "NGPL"},
+                    {"field_key": "receipt_location_code", "value": "HOUSTON"},
+                    {"field_key": "delivery_location_code", "value": "BEAUMONT"},
+                ],
+            )
+            linkage = build_document_linkage_assessment(session, pages=[page], review_status="VERIFIED")
+            plan = build_document_action_plan(
+                document_id="DOC-200",
+                pages=[page],
+                review_status="VERIFIED",
+                linkage_assessment=linkage,
+            )
+
+        self.assertEqual(plan.status, "READY")
+        self.assertEqual(plan.action_type, "UPDATE_RECORD_FROM_DOCUMENT")
+        self.assertEqual(plan.operation_type, "update_delivery_schedule_from_document")
+        self.assertEqual(plan.candidate_state, "UPDATE_CANDIDATE")
+        self.assertEqual(plan.target.record_type, "DELIVERY")
+        self.assertEqual(plan.target.record_id, "DLV-SCH-550")
+        self.assertEqual(plan.payload["delivery_id"], "DLV-SCH-550")
+        self.assertEqual(
+            plan.payload["pipeline_detail_changes"],
+            {
+                "pipeline_system": "NGPL",
+                "pipeline_contract_number": "PIPE-CONTRACT-550",
+                "receipt_location_code": "HOUSTON",
+                "delivery_location_code": "BEAUMONT",
+                "nomination_reference": "NOM-SCH-550",
+            },
+        )
+
     def test_delivery_confirmation_plans_delivery_event_under_existing_delivery(self) -> None:
         with self.SessionLocal() as session:
             trade = self._seed_trade(trade_id="TRD-DLV-EVT-600")

@@ -88,12 +88,18 @@ DocumentLinkageCandidateState = Literal[
     "ATTACH_READY",
     "ATTACH_REVIEW",
     "CREATE_CANDIDATE",
+    "UPDATE_CANDIDATE",
     "OWNER_REQUIRED",
     "MANUAL_REVIEW",
     "ALREADY_LINKED",
 ]
 DocumentActionPlanStatus = Literal["READY", "REVIEW", "BLOCKED"]
-DocumentActionType = Literal["ATTACH_EXISTING_RECORD", "CREATE_RECORD_FROM_DOCUMENT", "MANUAL_REVIEW"]
+DocumentActionType = Literal[
+    "ATTACH_EXISTING_RECORD",
+    "CREATE_RECORD_FROM_DOCUMENT",
+    "UPDATE_RECORD_FROM_DOCUMENT",
+    "MANUAL_REVIEW",
+]
 DocumentGmailInboxProvider = Literal["gmail_api"]
 DocumentGmailInboxAuthStatus = Literal["none", "partial", "configured"]
 DocumentWorkflowStatus = Literal["READY", "REVIEW", "BLOCKED", "EXECUTED"]
