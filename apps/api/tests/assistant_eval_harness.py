@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import enum
+import json
 import unittest
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -130,7 +131,15 @@ class AssistantEvalPreTradeRecommendationFixture:
     current_net_position: float = 18000
     related_active_trade_count: int = 2
     latest_mark: float = 3.05
+    latest_mark_available: bool = True
+    latest_mark_freshness: str = "FRESH"
     price_index_code: str = "HH"
+    desk_context_available: bool = True
+    counterparty_credit_available: bool = True
+    counterparty_has_credit_profile: bool = True
+    include_option_exposure: bool = False
+    option_delta: float = 2500
+    option_gamma: float = 0.05
     thesis: str = "Desk hedging review."
     created_at: datetime = datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc)
 
@@ -149,6 +158,7 @@ class AssistantEvalExpectations:
     warning_absent: tuple[str, ...] = ()
     tool_names: tuple[str, ...] | None = None
     tool_call_summary_contains: tuple[str, ...] = ()
+    tool_output_preview_contains: tuple[dict[str, Any], ...] | None = None
     action_request_types: tuple[str, ...] | None = None
     action_request_statuses: tuple[str, ...] | None = None
     action_request_payloads: tuple[dict[str, object], ...] | None = None
@@ -157,6 +167,7 @@ class AssistantEvalExpectations:
     prompt_section_absent_keys: tuple[str, ...] = ()
     prompt_section_content_contains: tuple[tuple[str, tuple[str, ...]], ...] = ()
     provider_request_count: int | None = None
+    provider_request_contains: tuple[str, ...] = ()
     provider_tool_names: tuple[str, ...] | None = None
     provider_tools_key_present: bool | None = None
 
@@ -423,6 +434,28 @@ class AssistantApiEvalHarness(unittest.TestCase):
         for fragment in expectations.tool_call_summary_contains:
             self.assertTrue(any(fragment in summary for summary in tool_call_summaries), msg=case.name)
 
+        if expectations.tool_output_preview_contains is not None:
+            actual_previews = [
+                tool_call.get("output_preview") or {}
+                for tool_call in response_payload["tool_calls"]
+            ]
+            self.assertEqual(
+                len(actual_previews),
+                len(expectations.tool_output_preview_contains),
+                msg=case.name,
+            )
+            for actual_preview, expected_preview in zip(
+                actual_previews,
+                expectations.tool_output_preview_contains,
+                strict=True,
+            ):
+                self._assert_nested_contains(
+                    actual=actual_preview,
+                    expected=expected_preview,
+                    path="tool_output_preview",
+                    msg=case.name,
+                )
+
         if expectations.action_request_types is not None:
             actual_action_types = [action_request["action_type"] for action_request in response_payload["action_requests"]]
             self.assertEqual(actual_action_types, list(expectations.action_request_types), msg=case.name)
@@ -486,6 +519,15 @@ class AssistantApiEvalHarness(unittest.TestCase):
         if expectations.provider_request_count is not None:
             self.assertEqual(len(captured_provider_requests), expectations.provider_request_count, msg=case.name)
 
+        if expectations.provider_request_contains:
+            provider_request_blob = json.dumps(
+                captured_provider_requests,
+                sort_keys=True,
+                default=str,
+            )
+            for fragment in expectations.provider_request_contains:
+                self.assertIn(fragment, provider_request_blob, msg=case.name)
+
         if expectations.provider_tools_key_present is not None:
             has_tools_key = "tools" in captured_provider_requests[0] if captured_provider_requests else False
             self.assertEqual(has_tools_key, expectations.provider_tools_key_present, msg=case.name)
@@ -495,6 +537,68 @@ class AssistantApiEvalHarness(unittest.TestCase):
             if captured_provider_requests:
                 provider_tool_names = [tool["name"] for tool in captured_provider_requests[0].get("tools", [])]
             self.assertEqual(provider_tool_names, list(expectations.provider_tool_names), msg=case.name)
+
+    def _assert_nested_contains(
+        self,
+        *,
+        actual: Any,
+        expected: Any,
+        path: str,
+        msg: str,
+    ) -> None:
+        if isinstance(expected, dict):
+            self.assertIsInstance(actual, dict, msg=f"{msg}: {path}")
+            assert isinstance(actual, dict)
+            for key, expected_value in expected.items():
+                self.assertIn(key, actual, msg=f"{msg}: {path}")
+                self._assert_nested_contains(
+                    actual=actual[key],
+                    expected=expected_value,
+                    path=f"{path}.{key}",
+                    msg=msg,
+                )
+            return
+
+        if isinstance(expected, list):
+            self.assertIsInstance(actual, list, msg=f"{msg}: {path}")
+            assert isinstance(actual, list)
+            for expected_item in expected:
+                if isinstance(expected_item, dict):
+                    self.assertTrue(
+                        any(
+                            isinstance(actual_item, dict)
+                            and self._nested_mapping_matches(actual_item, expected_item)
+                            for actual_item in actual
+                        ),
+                        msg=f"{msg}: {path}",
+                    )
+                else:
+                    self.assertIn(expected_item, actual, msg=f"{msg}: {path}")
+            return
+
+        self.assertEqual(actual, expected, msg=f"{msg}: {path}")
+
+    def _nested_mapping_matches(self, actual: dict[str, Any], expected: dict[str, Any]) -> bool:
+        for key, expected_value in expected.items():
+            if key not in actual:
+                return False
+            actual_value = actual[key]
+            if isinstance(expected_value, dict):
+                if not isinstance(actual_value, dict):
+                    return False
+                if not self._nested_mapping_matches(actual_value, expected_value):
+                    return False
+                continue
+            if isinstance(expected_value, list):
+                if not isinstance(actual_value, list):
+                    return False
+                for expected_item in expected_value:
+                    if expected_item not in actual_value:
+                        return False
+                continue
+            if actual_value != expected_value:
+                return False
+        return True
 
     def _run_follow_up_action(
         self,
@@ -730,69 +834,108 @@ class AssistantApiEvalHarness(unittest.TestCase):
             price_unit_code="USD_MMBTU",
             location_code="HENRY_HUB",
         )
-        snapshots = [
-            PreTradeRecommendationSourceSnapshot(
-                source_key="desk-context",
-                source_type="INTERNAL",
-                source_available=True,
-                freshness="FRESH",
-                summary="Desk context loaded.",
-                provenance=PreTradeRecommendationSourceProvenance(
-                    provider="Desk Exposure Service",
-                    dataset="active-trades-and-positions",
-                    record_id=f"desk-{fixture.source_scenario_id or fixture.source_review_id or 0}",
-                    observed_at=fixture.created_at,
-                    ingested_at=fixture.created_at,
-                    captured_by=fixture.actor_id,
-                ),
-                payload={
-                    "related_active_trade_count": fixture.related_active_trade_count,
-                    "current_net_position": fixture.current_net_position,
-                    "current_counterparty_exposure": 125000,
-                },
-            ),
-            PreTradeRecommendationSourceSnapshot(
-                source_key="counterparty-credit",
-                source_type="INTERNAL",
-                source_available=True,
-                freshness="FRESH",
-                summary="Counterparty credit loaded.",
-                provenance=PreTradeRecommendationSourceProvenance(
-                    provider="Credit Service",
-                    dataset="counterparty-credit-profiles",
-                    record_id="ACME",
-                    observed_at=fixture.created_at,
-                    ingested_at=fixture.created_at,
-                    captured_by=fixture.actor_id,
-                ),
-                payload={
-                    "has_credit_profile": True,
-                    "credit_limit_amount": 500000,
-                    "breach_action": "MONITOR",
-                    "credit_rating": "BBB",
-                },
-            ),
+        snapshots: list[PreTradeRecommendationSourceSnapshot] = []
+        if fixture.desk_context_available:
+            snapshots.append(
+                PreTradeRecommendationSourceSnapshot(
+                    source_key="desk-context",
+                    source_type="INTERNAL",
+                    source_available=True,
+                    freshness="FRESH",
+                    summary="Desk context loaded.",
+                    provenance=PreTradeRecommendationSourceProvenance(
+                        provider="Desk Exposure Service",
+                        dataset="active-trades-and-positions",
+                        record_id=f"desk-{fixture.source_scenario_id or fixture.source_review_id or 0}",
+                        observed_at=fixture.created_at,
+                        ingested_at=fixture.created_at,
+                        captured_by=fixture.actor_id,
+                    ),
+                    payload={
+                        "related_active_trade_count": fixture.related_active_trade_count,
+                        "current_net_position": fixture.current_net_position,
+                        "current_counterparty_exposure": 125000,
+                    },
+                )
+            )
+        if fixture.counterparty_credit_available:
+            snapshots.append(
+                PreTradeRecommendationSourceSnapshot(
+                    source_key="counterparty-credit",
+                    source_type="INTERNAL",
+                    source_available=True,
+                    freshness="FRESH",
+                    summary="Counterparty credit loaded.",
+                    provenance=PreTradeRecommendationSourceProvenance(
+                        provider="Credit Service",
+                        dataset="counterparty-credit-profiles",
+                        record_id="ACME",
+                        observed_at=fixture.created_at,
+                        ingested_at=fixture.created_at,
+                        captured_by=fixture.actor_id,
+                    ),
+                    payload={
+                        "has_credit_profile": fixture.counterparty_has_credit_profile,
+                        "credit_limit_amount": 500000 if fixture.counterparty_has_credit_profile else None,
+                        "breach_action": "MONITOR",
+                        "credit_rating": "BBB" if fixture.counterparty_has_credit_profile else None,
+                    },
+                )
+            )
+        snapshots.append(
             PreTradeRecommendationSourceSnapshot(
                 source_key="latest-mark",
                 source_type="EXTERNAL",
-                source_available=True,
-                freshness="FRESH",
-                summary="Latest mark loaded.",
+                source_available=fixture.latest_mark_available,
+                freshness=fixture.latest_mark_freshness,
+                summary=(
+                    "Latest mark loaded."
+                    if fixture.latest_mark_available
+                    else "No latest mark was captured."
+                ),
                 provenance=PreTradeRecommendationSourceProvenance(
                     provider="Price Service",
                     dataset="price-index-observations",
                     record_id=fixture.price_index_code,
-                    observed_at=fixture.created_at,
-                    ingested_at=fixture.created_at,
+                    observed_at=fixture.created_at if fixture.latest_mark_available else None,
+                    ingested_at=fixture.created_at if fixture.latest_mark_available else None,
                     captured_by=fixture.actor_id,
                 ),
-                payload={
-                    "latest_mark": fixture.latest_mark,
-                    "price_index_code": fixture.price_index_code,
-                    "observation_date": fixture.created_at.date().isoformat(),
-                },
-            ),
-        ]
+                payload=(
+                    {
+                        "latest_mark": fixture.latest_mark,
+                        "price_index_code": fixture.price_index_code,
+                        "observation_date": fixture.created_at.date().isoformat(),
+                    }
+                    if fixture.latest_mark_available
+                    else {}
+                ),
+            )
+        )
+        if fixture.include_option_exposure:
+            snapshots.append(
+                PreTradeRecommendationSourceSnapshot(
+                    source_key="option-exposure",
+                    source_type="DERIVED",
+                    source_available=True,
+                    freshness="FRESH",
+                    summary="Option exposure loaded.",
+                    provenance=PreTradeRecommendationSourceProvenance(
+                        provider="Risk Service",
+                        dataset="option-exposures",
+                        record_id=f"option-{fixture.source_scenario_id or fixture.source_review_id or 0}",
+                        observed_at=fixture.created_at,
+                        ingested_at=fixture.created_at,
+                        captured_by=fixture.actor_id,
+                    ),
+                    payload={
+                        "has_option_exposure": True,
+                        "option_delta": fixture.option_delta,
+                        "option_gamma": fixture.option_gamma,
+                        "option_vega": 0.2,
+                    },
+                )
+            )
         evaluation = prepare_pretrade_recommendation_evaluation(
             draft=draft,
             input_snapshots=snapshots,

@@ -1186,7 +1186,11 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(analysis["comparison"]["previous_run_id"], previous_run_id)
         self.assertEqual(analysis["recommendation"]["stance"], "ESCALATE")
         self.assertEqual(analysis["recommendation"]["opportunity_summary"]["category"], "MARK_GAP")
-        self.assertEqual(analysis["recommendation"]["hedge_recommendation"]["instrument_type"], "SWAP")
+        self.assertEqual(analysis["recommendation"]["hedge_recommendation"]["instrument_type"], "WAIT_FOR_DATA")
+        self.assertEqual(
+            analysis["recommendation"]["hedge_recommendation"]["decision_key"],
+            "wait_linear_policy_or_curve",
+        )
         self.assertEqual(trace.tool_name, "analyze_pretrade_scenario_draft")
         self.assertEqual(trace.record_count, 1)
         self.assertIn("scenario 17 draft", trace.summary)
@@ -2312,11 +2316,12 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
                 {"scope": "SHARED", "include_cards": False},
             )
 
-        self.assertEqual(cards_result.output["card_count"], 6)
+        self.assertEqual(cards_result.output["card_count"], 7)
         self.assertIn("prices", cards_trace.output_preview["card_ids"])
+        self.assertIn("news", cards_trace.output_preview["card_ids"])
         self.assertEqual(template_result.output["template_key"], "system_home")
         self.assertTrue(template_result.output["immutable"])
-        self.assertEqual(template_trace.output_preview["card_count"], 6)
+        self.assertEqual(template_trace.output_preview["card_count"], 7)
 
         price_options = options_result.output["cards"][0]
         filters_by_field = {field["field"]: field for field in price_options["filters"]}

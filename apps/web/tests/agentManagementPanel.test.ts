@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentManagementPanel } from '../src/workspaces/admin/AgentManagementPanel'
 
@@ -17,7 +17,17 @@ const adminSession = {
 }
 
 describe('AgentManagementPanel', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   it('keeps the create draft skills selector isolated from edit-only controls on the server', () => {
+    vi.stubGlobal('window', {
+      location: {
+        hash: '#assistant-agent-builder',
+      },
+    })
+
     const markup = renderToStaticMarkup(
       createElement(AgentManagementPanel, {
         authSession: adminSession,

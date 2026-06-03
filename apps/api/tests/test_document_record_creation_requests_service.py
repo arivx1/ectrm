@@ -16,6 +16,10 @@ from apps.api.app.domains.documents.services.document_record_creation_requests i
     stage_document_record_creation_request,
 )
 from apps.api.app.domains.documents.services.document_workflows import list_document_workflows
+from apps.api.app.domains.operations.services.document_intake_work_items import (
+    DOCUMENT_RECORD_CREATION_WORK_ITEM_RESOURCE_DESCRIPTOR,
+    list_document_record_creation_work_items,
+)
 from apps.api.app.models import Base
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
@@ -165,6 +169,52 @@ class DocumentRecordCreationRequestsServiceTests(unittest.TestCase):
         session.add(trade)
         return trade
 
+    def _seed_record_creation_request(
+        self,
+        session,
+        *,
+        document_id: str,
+        target_record_type: str,
+        status: str = "OPEN",
+        requested_at: datetime | None = None,
+        required_owner_record_types: list[str] | None = None,
+        owner_record_type: str | None = None,
+        owner_record_id: str | None = None,
+    ) -> DocumentRecordCreationRequest:
+        now = requested_at or datetime(2026, 5, 29, 9, 0, tzinfo=timezone.utc)
+        label = target_record_type.replace("_", " ").title()
+        request = DocumentRecordCreationRequest(
+            document_id=document_id,
+            status=status,
+            document_kind="NOMINATION" if target_record_type == "DELIVERY" else "PURCHASE_ORDER",
+            target_record_type=target_record_type,
+            target_record_label=label,
+            owner_record_type=owner_record_type,
+            owner_record_id=owner_record_id,
+            required_owner_record_types=required_owner_record_types or [],
+            matched_keys=[],
+            missing_evidence=["typed_creation_service"] if target_record_type == "TRADE" else [],
+            captured_fields={"external_reference": f"{document_id}-REF"},
+            title=f"Record Needed: {label}",
+            description="The document implies a missing record that needs human-owned creation.",
+            request_comment=None,
+            resolution_comment=None,
+            linkage_snapshot={},
+            action_plan_snapshot={},
+            resolved_record_type=None,
+            resolved_record_id=None,
+            requested_at=now,
+            requested_by="ops@example.com",
+            resolved_at=None,
+            resolved_by=None,
+            updated_at=now,
+            updated_by="ops@example.com",
+            version=1,
+        )
+        session.add(request)
+        session.flush()
+        return request
+
     def test_stages_missing_owner_invoice_creation_request_and_dedupes_open_request(self) -> None:
         with self.SessionLocal() as session:
             document = self._seed_verified_document(
@@ -245,6 +295,81 @@ class DocumentRecordCreationRequestsServiceTests(unittest.TestCase):
         )
         self.assertEqual(intake_workflow.status, "EXECUTED")
         self.assertIn("already open", intake_workflow.disabled_reason)
+
+    def test_routes_document_record_creation_requests_to_domain_work_queues(self) -> None:
+        requested_at = datetime(2026, 5, 27, 9, 0, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            trade_doc = self._seed_verified_document(
+                session,
+                document_id="DOC-RCR-WQ-TRADE",
+                document_kind="PURCHASE_ORDER",
+                header_fields=[],
+            )
+            delivery_doc = self._seed_verified_document(
+                session,
+                document_id="DOC-RCR-WQ-DELIVERY",
+                document_kind="NOMINATION",
+                header_fields=[],
+            )
+            invoice_doc = self._seed_verified_document(
+                session,
+                document_id="DOC-RCR-WQ-INVOICE",
+                document_kind="INVOICE",
+                header_fields=[],
+            )
+            closed_doc = self._seed_verified_document(
+                session,
+                document_id="DOC-RCR-WQ-CLOSED",
+                document_kind="PURCHASE_ORDER",
+                header_fields=[],
+            )
+            trade_request = self._seed_record_creation_request(
+                session,
+                document_id=trade_doc.document_id,
+                target_record_type="TRADE",
+                requested_at=requested_at,
+            )
+            delivery_request = self._seed_record_creation_request(
+                session,
+                document_id=delivery_doc.document_id,
+                target_record_type="DELIVERY",
+                required_owner_record_types=["TRADE"],
+                requested_at=datetime(2026, 5, 28, 9, 0, tzinfo=timezone.utc),
+            )
+            invoice_request = self._seed_record_creation_request(
+                session,
+                document_id=invoice_doc.document_id,
+                target_record_type="TRADE_INVOICE",
+                required_owner_record_types=["TRADE"],
+                requested_at=datetime(2026, 5, 28, 10, 0, tzinfo=timezone.utc),
+            )
+            closed_request = self._seed_record_creation_request(
+                session,
+                document_id=closed_doc.document_id,
+                target_record_type="TRADE",
+                status="RESOLVED",
+            )
+            session.commit()
+
+            operations_items = list_document_record_creation_work_items(
+                session,
+                queue="operations",
+                now=datetime(2026, 5, 29, 12, 0, tzinfo=timezone.utc),
+            )
+            settlement_items = list_document_record_creation_work_items(session, queue="settlement")
+            all_with_closed = list_document_record_creation_work_items(session, include_closed=True)
+
+        self.assertEqual([item.request_id for item in operations_items], [trade_request.request_id, delivery_request.request_id])
+        self.assertEqual([item.queue for item in operations_items], ["operations", "operations"])
+        self.assertEqual(operations_items[0].handoff_type, "trade_capture")
+        self.assertEqual(operations_items[0].age_days, 2)
+        self.assertEqual(operations_items[1].priority, "BLOCKED")
+        self.assertEqual(operations_items[1].blocking_reasons, ["Missing owning Trade record"])
+        self.assertEqual([item.request_id for item in settlement_items], [invoice_request.request_id])
+        self.assertEqual(settlement_items[0].handoff_type, "invoice_creation")
+        self.assertNotIn(closed_request.request_id, [item.request_id for item in operations_items + settlement_items])
+        self.assertIn(closed_request.request_id, [item.request_id for item in all_with_closed])
+        self.assertEqual(DOCUMENT_RECORD_CREATION_WORK_ITEM_RESOURCE_DESCRIPTOR.resource_key, "document_record_creation_requests")
 
     def test_does_not_stage_intake_when_create_action_is_ready_for_approval(self) -> None:
         with self.SessionLocal() as session:

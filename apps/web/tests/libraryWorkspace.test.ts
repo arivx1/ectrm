@@ -419,6 +419,7 @@ function buildController(overrides: Partial<DocumentIngestionController> = {}): 
     handleVerifyDocument: async () => undefined,
     handleSetDocumentKind: async () => undefined,
     handleSavePage: async () => undefined,
+    handleSaveLogicalDocuments: async () => undefined,
     handleReprocessDocument: async () => undefined,
     handleExecuteActionPlan: async () => undefined,
     setSchemaFieldValue: () => undefined,
@@ -849,6 +850,46 @@ describe('LibraryWorkspace', () => {
                 ],
               },
             ],
+            logical_documents: [
+              {
+                logical_document_id: 'DOC-225186:LD-001',
+                document_id: 'DOC-225186',
+                logical_document_key: 'LD-001',
+                sequence_number: 1,
+                page_start: 1,
+                page_end: 2,
+                page_count: 2,
+                page_numbers: [1, 2],
+                document_kind: 'BILL_OF_LADING',
+                document_subtype: null,
+                classification_status: 'ANALYZED',
+                classification_confidence: 0.88,
+                review_status: 'UNREVIEWED',
+                review_notes: null,
+                reviewed_at: null,
+                reviewed_by: null,
+                provenance: {
+                  source: 'system_packet_structure',
+                  split_strategy: 'packet_structure_signal_run',
+                  split_confidence: 0.82,
+                  split_evidence: [
+                    {
+                      type: 'section_title_boundary',
+                      confidence: 0.82,
+                      summary: 'Page 2 also contains INVOICE section evidence, so it is shared across the packet boundary.',
+                    },
+                  ],
+                  source_page_numbers: [1, 2],
+                },
+                page_memberships: [],
+                routing_assessment: null,
+                created_at: '2026-05-15T21:28:00Z',
+                created_by: 'document_processor',
+                updated_at: '2026-05-15T21:28:00Z',
+                updated_by: 'document_processor',
+                version: 1,
+              },
+            ],
           },
         ],
         pagePreviewUrls: {
@@ -888,6 +929,10 @@ describe('LibraryWorkspace', () => {
     expect(markup).toContain('Mode of Transportation: Vessel')
     expect(markup).toContain('Edit Document Tags')
     expect(markup).toContain('Edit Page Tags')
+    expect(markup).toContain('Packet Split')
+    expect(markup).toContain('82% split confidence')
+    expect(markup).toContain('Page 2 also contains INVOICE section evidence')
+    expect(markup).toContain('Save Split')
     expect(markup).toContain('Pages')
     expect(markup).toContain('Page 1')
     expect(markup).toContain('Page 2')

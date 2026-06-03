@@ -195,6 +195,10 @@
   align-items: center;
 }
 
+.messaging-desk-channel-header-meta {
+  justify-content: flex-end;
+}
+
 .messaging-desk-channel-title-row strong {
   color: #13293d;
   font-size: 1.3rem;
@@ -212,6 +216,13 @@
   color: #127c6c;
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+.messaging-desk-sync-button {
+  min-height: 1.9rem;
+  padding: 0.24rem 0.7rem;
+  border-radius: 0.5rem;
+  white-space: nowrap;
 }
 
 .messaging-desk-channel-copy p,

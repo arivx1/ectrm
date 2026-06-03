@@ -272,10 +272,12 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
         self.assertEqual(payload["immutable"], True)
         self.assertEqual(
             [card["card_id"] for card in payload["cards"]],
-            ["timeframe", "prices", "map", "documents", "communication", "prompt"],
+            ["timeframe", "prices", "news", "map", "documents", "communication", "prompt"],
         )
         self.assertEqual(payload["cards"][1]["kind"], "market_prices")
         self.assertEqual(payload["cards"][1]["label"], "Market Prices")
+        self.assertEqual(payload["cards"][2]["kind"], "market_news")
+        self.assertEqual(payload["cards"][2]["label"], "Market News")
 
     def test_home_view_definitions_are_personal_named_instances(self) -> None:
         admin_session = self._bootstrap_admin()
@@ -310,9 +312,9 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
         self.assertTrue(created["definition_key"].startswith("home_view_"))
         self.assertEqual(
             [card["card_id"] for card in created["cards"]],
-            ["prices", "map", "timeframe", "documents", "communication", "prompt"],
+            ["prices", "map", "timeframe", "news", "documents", "communication", "prompt"],
         )
-        self.assertEqual([card["placement"]["order"] for card in created["cards"]], [0, 1, 2, 3, 4, 5])
+        self.assertEqual([card["placement"]["order"] for card in created["cards"]], [0, 1, 2, 3, 4, 5, 6])
         self.assertEqual(created["cards"][0]["kind"], "market_prices")
         self.assertEqual(created["cards"][0]["label"], "Market Prices")
         self.assertEqual(created["cards"][0]["parameters"], {"price_sort": "updated_desc"})
@@ -378,7 +380,7 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
         self.assertEqual(reset["global_filters"], {})
         self.assertEqual(
             [card["card_id"] for card in reset["cards"]],
-            ["timeframe", "prices", "map", "documents", "communication", "prompt"],
+            ["timeframe", "prices", "news", "map", "documents", "communication", "prompt"],
         )
         self.assertEqual(reset["cards"][1]["parameters"], {})
         self.assertEqual(reset["cards"][1]["filters"], {})
@@ -463,6 +465,22 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
         self.assertIn("Parameters are not supported", response.text)
+
+        invalid_news_parameter = self._home_view_payload(name="Invalid News Parameter")
+        invalid_news_parameter["cards"] = [
+            {
+                "card_id": "news",
+                "placement": {"order": 0, "column_span": 2, "row_span": 1},
+                "parameters": {"news_lookback_days": 30},
+            }
+        ]
+        response = self.client.post(
+            "/home-view-definitions",
+            json=invalid_news_parameter,
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("news_lookback_days must be between 1 and 14", response.text)
 
         invalid_binding = self._home_view_payload(name="Invalid Binding")
         invalid_binding["cards"] = [

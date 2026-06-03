@@ -172,7 +172,9 @@ export type WorkspaceCollectionKey =
   | 'deliveries'
   | 'confirmations'
   | 'operationsWorkItems'
+  | 'operationsDocumentRecordCreationRequests'
   | 'settlementWorkItems'
+  | 'settlementDocumentRecordCreationRequests'
   | 'invoices'
   | 'payments'
 
@@ -709,11 +711,10 @@ function buildSettlementWindowNotices({
 const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = {
   prompt: {
     key: 'prompt',
-    label: 'Home',
-    kicker: 'Ask',
-    heroTitle: 'Start from the prompt',
-    heroBody:
-      'Describe the job in front of you, then let the assistant answer, clarify, or route you into the right old-school workspace.',
+    label: 'Start',
+    kicker: 'Start',
+    heroTitle: 'Start',
+    heroBody: 'Describe the job in front of you, then let the assistant answer, clarify, or route you into the right workspace.',
     dataGroups: [],
     blockingGroups: [],
   },
@@ -1286,6 +1287,7 @@ export const WORKSPACE_RENDERERS: Record<
         formatDate={formatDate}
         formatDateOnly={formatDateOnly}
         onOpenTrade={context.navigateToTrade}
+        onOpenPreTrade={() => context.navigateToView('pretrade')}
         onOptionLifecycleEvent={context.tradeActions.handleTradeOptionLifecycleEvent}
         optionLifecycleSubmittingEvent={context.tradeActions.optionLifecycleSubmittingEvent}
         optionLifecycleSubmittingTradeId={context.tradeActions.optionLifecycleSubmittingTradeId}
@@ -1389,6 +1391,7 @@ export const WORKSPACE_RENDERERS: Record<
         activeTrades={context.summary.activeTrades}
         confirmations={context.workspaceData.tradeConfirmations}
         deliveries={context.workspaceData.deliveries}
+        documentRecordCreationRequests={context.workspaceData.operationsDocumentRecordCreationRequests}
         workItems={context.workspaceData.tradeWorkflowItems}
         externalDataSyncStatus={context.workspaceData.externalDataSyncStatus}
         weatherSyncStatus={context.workspaceData.weatherSyncStatus}
@@ -1408,6 +1411,7 @@ export const WORKSPACE_RENDERERS: Record<
         onRespondConfirmation={context.workspaceData.handleRespondTradeConfirmation}
         onCreateWorkflowItem={context.workspaceData.handleCreateWorkflowItem}
         onClearHandoff={() => context.replaceView('operations')}
+        onOpenView={context.navigateToView}
         onOpenTrade={context.navigateToTrade}
         onOptionLifecycleEvent={context.tradeActions.handleTradeOptionLifecycleEvent}
         optionLifecycleSubmittingEvent={context.tradeActions.optionLifecycleSubmittingEvent}
@@ -1428,6 +1432,7 @@ export const WORKSPACE_RENDERERS: Record<
         activeTrades={context.summary.activeTrades}
         invoices={context.workspaceData.tradeInvoices}
         payments={context.workspaceData.tradePayments}
+        documentRecordCreationRequests={context.workspaceData.settlementDocumentRecordCreationRequests}
         settlementSummary={context.workspaceData.workspaceBootstrapSummary?.settlement ?? null}
         workItems={context.workspaceData.tradeWorkflowItems}
         operationalResourceDescriptors={context.workspaceData.operationalResourceDescriptors}

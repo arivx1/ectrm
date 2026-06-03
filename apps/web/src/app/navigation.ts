@@ -8,7 +8,7 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
     key: 'overview',
     label: 'Start',
     kicker: 'Start here',
-    heroTitle: 'Home',
+    heroTitle: 'Start',
     heroBody: '',
     landingBody: '',
     landingViewKey: 'prompt',

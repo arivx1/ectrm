@@ -764,6 +764,43 @@ def _build_tool_output_preview(tool_name: str, output: dict[str, Any]) -> dict[s
         }
         return {key: value for key, value in preview.items() if value not in (None, [], "")}
 
+    if tool_name == "analyze_pretrade_scenario_draft":
+        analysis = output.get("analysis")
+        if not isinstance(analysis, dict):
+            return None
+        recommendation = analysis.get("recommendation")
+        comparison = analysis.get("comparison")
+        preview = _build_pretrade_recommendation_tool_preview(
+            recommendation if isinstance(recommendation, dict) else {},
+            source_scenario_id=analysis.get("source_scenario_id"),
+            source_review_id=analysis.get("source_review_id"),
+            input_snapshot_count=len(list(analysis.get("input_snapshots") or [])),
+        )
+        if isinstance(comparison, dict):
+            preview["comparison_previous_run_id"] = comparison.get("previous_run_id")
+            preview["comparison_stance_delta"] = comparison.get("stance_delta")
+        return {key: value for key, value in preview.items() if value not in (None, [], "")}
+
+    if tool_name == "get_pretrade_recommendation_run":
+        if not output.get("found"):
+            return {
+                "found": False,
+                "lookup": output.get("lookup"),
+            }
+        run = output.get("run")
+        if not isinstance(run, dict):
+            return {"found": True}
+        recommendation = run.get("recommendation")
+        preview = _build_pretrade_recommendation_tool_preview(
+            recommendation if isinstance(recommendation, dict) else {},
+            run_id=run.get("run_id"),
+            source_scenario_id=run.get("source_scenario_id"),
+            source_review_id=run.get("source_review_id"),
+            input_snapshot_count=len(list(run.get("input_snapshots") or [])),
+        )
+        preview["found"] = True
+        return {key: value for key, value in preview.items() if value not in (None, [], "")}
+
     if tool_name == "get_document_type_counts":
         segments = list(output.get("segments") or [])
         top_segment = segments[0] if segments and isinstance(segments[0], dict) else {}
@@ -776,6 +813,74 @@ def _build_tool_output_preview(tool_name: str, output: dict[str, Any]) -> dict[s
         return {key: value for key, value in preview.items() if value not in (None, [], "")}
 
     return None
+
+
+def _build_pretrade_recommendation_tool_preview(
+    recommendation: dict[str, Any],
+    *,
+    run_id: object | None = None,
+    source_scenario_id: object | None = None,
+    source_review_id: object | None = None,
+    input_snapshot_count: int | None = None,
+) -> dict[str, Any]:
+    opportunity_summary = recommendation.get("opportunity_summary")
+    residual_exposure = recommendation.get("residual_exposure")
+    hedge_recommendation = recommendation.get("hedge_recommendation")
+    netting_candidates = recommendation.get("netting_candidates")
+    missing_evidence = recommendation.get("missing_evidence")
+
+    return {
+        "run_id": run_id,
+        "source_scenario_id": source_scenario_id,
+        "source_review_id": source_review_id,
+        "stance": recommendation.get("stance"),
+        "opportunity_category": (
+            opportunity_summary.get("category")
+            if isinstance(opportunity_summary, dict)
+            else None
+        ),
+        "residual_exposure_effect": (
+            residual_exposure.get("exposure_effect")
+            if isinstance(residual_exposure, dict)
+            else None
+        ),
+        "residual_after_trade": (
+            residual_exposure.get("residual_after_trade")
+            if isinstance(residual_exposure, dict)
+            else None
+        ),
+        "netting_match_qualities": [
+            candidate.get("match_quality")
+            for candidate in list(netting_candidates or [])
+            if isinstance(candidate, dict)
+        ],
+        "hedge_instrument_type": (
+            hedge_recommendation.get("instrument_type")
+            if isinstance(hedge_recommendation, dict)
+            else None
+        ),
+        "hedge_decision_key": (
+            hedge_recommendation.get("decision_key")
+            if isinstance(hedge_recommendation, dict)
+            else None
+        ),
+        "hedge_decision_factors": (
+            list(hedge_recommendation.get("decision_factors") or [])
+            if isinstance(hedge_recommendation, dict)
+            else []
+        ),
+        "hedge_policy_stops": (
+            list(hedge_recommendation.get("policy_stops") or [])
+            if isinstance(hedge_recommendation, dict)
+            else []
+        ),
+        "missing_evidence_keys": [
+            item.get("evidence_key")
+            for item in list(missing_evidence or [])
+            if isinstance(item, dict)
+        ],
+        "input_snapshot_count": input_snapshot_count,
+    }
 
 
 class AssistantToolServiceError(Exception):
@@ -1541,7 +1646,7 @@ def build_tool_definitions(*, actor_id: str | None = None) -> list[AssistantTool
                 "properties": {
                     "card_id": {
                         "type": "string",
-                        "description": "Optional Home card id to focus, such as prices, map, documents, communication, timeframe, or prompt.",
+                        "description": "Optional Home card id to focus, such as prices, news, map, documents, communication, timeframe, or prompt.",
                     },
                     "include_reference_options": {
                         "type": "boolean",
@@ -2554,6 +2659,41 @@ def _home_view_parameter_options(parameter_name: str) -> dict[str, Any]:
             "source": "home_view_contract.range",
             "minimum": 1,
             "maximum": 5000,
+            "options": [],
+            "option_count": 0,
+            "truncated": False,
+        }
+    if parameter_name == "news_limit":
+        return {
+            "field": parameter_name,
+            "kind": "parameter",
+            "value_shape": "integer",
+            "source": "home_view_contract.range",
+            "minimum": 1,
+            "maximum": 10,
+            "options": [],
+            "option_count": 0,
+            "truncated": False,
+        }
+    if parameter_name == "news_lookback_days":
+        return {
+            "field": parameter_name,
+            "kind": "parameter",
+            "value_shape": "integer",
+            "source": "home_view_contract.range",
+            "minimum": 1,
+            "maximum": 14,
+            "options": [],
+            "option_count": 0,
+            "truncated": False,
+        }
+    if parameter_name == "news_query":
+        return {
+            "field": parameter_name,
+            "kind": "parameter",
+            "value_shape": "text",
+            "source": "home_view_contract.free_text",
+            "maximum_length": 240,
             "options": [],
             "option_count": 0,
             "truncated": False,

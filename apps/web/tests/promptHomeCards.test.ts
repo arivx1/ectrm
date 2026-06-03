@@ -20,6 +20,7 @@ test("prompt home card registry keeps stable card ids and labels", () => {
   assert.deepEqual(PROMPT_HOME_CARD_KEYS, [
     "timeframe",
     "prices",
+    "news",
     "map",
     "documents",
     "communication",
@@ -30,6 +31,7 @@ test("prompt home card registry keeps stable card ids and labels", () => {
     [
       "Desk Time",
       "Market Prices",
+      "Market News",
       "Asset map",
       "Upload documents",
       "Communication center",
@@ -55,11 +57,11 @@ test("prompt home system template is built from the registry", () => {
   );
   assert.deepEqual(
     template.cards.map((card) => card.placement.order),
-    [0, 1, 2, 3, 4, 5],
+    [0, 1, 2, 3, 4, 5, 6],
   );
   assert.deepEqual(
     template.cards.map((card) => card.visible),
-    [true, true, true, true, true, true],
+    [true, true, true, true, true, true, true],
   );
   assert.deepEqual(PROMPT_HOME_SYSTEM_TEMPLATE, template);
   assert.equal(Object.isFrozen(PROMPT_HOME_SYSTEM_TEMPLATE), true);
@@ -110,11 +112,11 @@ test("prompt home template normalization drops unknown cards and appends new def
 
   assert.deepEqual(
     cards.map((card) => card.cardId),
-    ["prices", "map", "timeframe", "documents", "communication", "prompt"],
+    ["prices", "map", "timeframe", "news", "documents", "communication", "prompt"],
   );
   assert.deepEqual(
     cards.map((card) => card.placement.order),
-    [0, 1, 2, 3, 4, 5],
+    [0, 1, 2, 3, 4, 5, 6],
   );
   assert.equal(cards[0]?.visible, false);
   assert.deepEqual(cards[0]?.parameters, {
@@ -132,9 +134,11 @@ test("prompt home template normalization drops unknown cards and appends new def
 test("prompt home registry definitions expose allowed parameters and data bindings", () => {
   const definitions = listPromptHomeCardDefinitions();
   const prices = definitions.find((definition) => definition.cardId === "prices");
+  const news = definitions.find((definition) => definition.cardId === "news");
   const prompt = definitions.find((definition) => definition.cardId === "prompt");
 
   assert.ok(prices);
+  assert.ok(news);
   assert.ok(prompt);
   assert.deepEqual(prices.allowedFilterFields, [
     "commodity_code",
@@ -146,6 +150,15 @@ test("prompt home registry definitions expose allowed parameters and data bindin
   ]);
   assert.deepEqual(prices.dataBindings, [
     "latest_price_marks",
+    "market_price_indices",
+  ]);
+  assert.deepEqual(news.allowedParameters, [
+    "news_limit",
+    "news_lookback_days",
+    "news_query",
+  ]);
+  assert.deepEqual(news.dataBindings, [
+    "market_news_headlines",
     "market_price_indices",
   ]);
   assert.deepEqual(prompt.allowedParameters, [

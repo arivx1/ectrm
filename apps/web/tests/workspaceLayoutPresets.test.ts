@@ -98,6 +98,7 @@ describe('workspace layout presets', () => {
         tileSpec('risk-summary'),
         tileSpec('risk-exposure', ['full', 'wide', 'half']),
         tileSpec('risk-pricing', ['full', 'wide', 'half']),
+        tileSpec('risk-pretrade-triage'),
         tileSpec('risk-option-expiry-queue'),
         tileSpec('risk-open-option-marks'),
         tileSpec('risk-option-settlements'),
@@ -149,9 +150,8 @@ describe('workspace layout presets', () => {
       }),
     )
 
-    assert.match(markup, /Monitor preset/)
-    assert.match(markup, /Personal layout/)
-    assert.match(markup, /Market Overview/)
+    assert.match(markup, /Customize view/)
+    assert.match(markup, /2 of 2 tiles visible/)
     assert.match(markup, /id="desk-snapshot"/)
   })
 })

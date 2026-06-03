@@ -216,6 +216,38 @@ class OperationalResourceSurfaceOut(BaseModel):
     summary_stats: list[OperationalResourceSummaryStatOut] = Field(default_factory=list)
 
 
+class DocumentRecordCreationWorkItemOut(BaseModel):
+    request_id: int
+    document_id: str
+    status: str
+    queue: str
+    handoff_type: str
+    routing_label: str
+    next_action_label: str
+    priority: str
+    document_kind: Optional[str]
+    target_record_type: str
+    target_record_label: str
+    owner_record_type: Optional[str]
+    owner_record_id: Optional[str]
+    required_owner_record_types: list[str] = Field(default_factory=list)
+    matched_keys: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    blocking_reasons: list[str] = Field(default_factory=list)
+    next_steps: list[str] = Field(default_factory=list)
+    captured_fields: dict[str, Any] = Field(default_factory=dict)
+    title: str
+    description: str
+    request_comment: Optional[str]
+    requested_at: datetime
+    requested_by: str
+    updated_at: datetime
+    updated_by: str
+    age_days: int
+    is_closed: bool
+    version: int
+
+
 class TradeCreditApprovalDecisionOut(BaseModel):
     decision_id: int
     trade_id: str

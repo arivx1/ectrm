@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from time import perf_counter
@@ -16,6 +17,12 @@ DEFAULT_MARKET_NEWS_LIMIT = 5
 MAX_MARKET_NEWS_LIMIT = 10
 DEFAULT_MARKET_NEWS_LOOKBACK_DAYS = 2
 MAX_MARKET_NEWS_LOOKBACK_DAYS = 14
+MARKET_NEWS_CANDIDATE_MULTIPLIER = 6
+MARKET_NEWS_MIN_MARKET_IMPACT_SCORE = 2
+MARKET_NEWS_MARKET_IMPACT_SEARCH_EXPRESSION = (
+    "(price OR prices OR supply OR demand OR production OR output OR exports OR imports "
+    "OR shortage OR futures OR market)"
+)
 
 COMMODITY_NEWS_TERMS = {
     "WTI": "WTI crude oil",
@@ -24,8 +31,138 @@ COMMODITY_NEWS_TERMS = {
     "NATGAS": "natural gas",
     "NG": "natural gas",
     "NATURAL_GAS": "natural gas",
+    "BEEF": "cattle beef livestock markets",
+    "CATTLE": "live cattle beef markets",
+    "CORN": "corn grain markets",
+    "WHEAT": "wheat grain markets",
+    "SOY": "soybean oilseed markets",
+    "SOYBEAN": "soybean oilseed markets",
+    "LNG": "liquefied natural gas LNG markets",
+    "COAL": "coal markets",
+    "FISH": "(seafood OR aquaculture OR fisheries OR fishery OR salmon OR shrimp OR tuna OR fish)",
+    "SEAFOOD": "(seafood OR aquaculture OR fisheries OR fishery OR salmon OR shrimp OR tuna)",
     "POWER": "power markets electricity grid",
 }
+
+COMMODITY_MARKET_RELEVANCE_PATTERNS = {
+    "BEEF": [
+        r"\bcattle\b",
+        r"\bbeef\b",
+        r"\blivestock\b",
+        r"\bfeedlots?\b",
+        r"\bpackers?\b",
+    ],
+    "CATTLE": [
+        r"\bcattle\b",
+        r"\bbeef\b",
+        r"\blivestock\b",
+        r"\bfeedlots?\b",
+        r"\bpackers?\b",
+    ],
+    "FISH": [
+        r"\bseafood\b",
+        r"\baquaculture\b",
+        r"\bfisher(?:y|ies)\b",
+        r"\bfishmeal\b",
+        r"\bsalmon\b",
+        r"\bshrimp\b",
+        r"\btuna\b",
+        r"\bcod\b",
+        r"\bpollock\b",
+        r"\btilapia\b",
+    ],
+    "SEAFOOD": [
+        r"\bseafood\b",
+        r"\baquaculture\b",
+        r"\bfisher(?:y|ies)\b",
+        r"\bfishmeal\b",
+        r"\bsalmon\b",
+        r"\bshrimp\b",
+        r"\btuna\b",
+        r"\bcod\b",
+        r"\bpollock\b",
+        r"\btilapia\b",
+    ],
+}
+
+MARKET_IMPACT_PATTERNS = [
+    r"\bprices?\b",
+    r"\bfutures?\b",
+    r"\bspreads?\b",
+    r"\bmarkets?\b",
+    r"\bsupply\b",
+    r"\bdemand\b",
+    r"\bexports?\b",
+    r"\bimports?\b",
+    r"\bproduction\b",
+    r"\boutput\b",
+    r"\bcapacity\b",
+    r"\binventor(?:y|ies)\b",
+    r"\bstocks?\b",
+    r"\bshortage\b",
+    r"\bshortfall\b",
+    r"\bsurplus\b",
+    r"\btariffs?\b",
+    r"\bquotas?\b",
+    r"\bsanctions?\b",
+    r"\boutages?\b",
+    r"\bstrikes?\b",
+    r"\bdisease\b",
+    r"\bharvest\b",
+    r"\bcatch\b",
+    r"\bshipping\b",
+    r"\bfreight\b",
+]
+
+MARKET_DIRECTION_PATTERNS = [
+    r"\brall(?:y|ies|ied)\b",
+    r"\brises?\b",
+    r"\bjumps?\b",
+    r"\bsurges?\b",
+    r"\bclimbs?\b",
+    r"\bfalls?\b",
+    r"\bdrops?\b",
+    r"\bslumps?\b",
+    r"\bslides?\b",
+    r"\btightens?\b",
+    r"\beases?\b",
+    r"\bweakens?\b",
+    r"\bstrengthens?\b",
+]
+
+MARKET_SOURCE_BONUS_PATTERNS = [
+    r"\breuters\b",
+    r"\bbloomberg\b",
+    r"\bmarketwatch\b",
+    r"\binvesting\.com\b",
+    r"\bcnbc\b",
+    r"\bnasdaq\b",
+    r"\bcme\b",
+    r"\busda\b",
+    r"\beia\b",
+    r"\bagweb\b",
+    r"\bfeedstuffs\b",
+    r"\bseafoodsource\b",
+    r"\bundercurrent news\b",
+    r"\bintrafish\b",
+]
+
+MARKET_NEWS_NOISE_PATTERNS = [
+    r"\bbehind the badge\b",
+    r"\bgame and fish\b",
+    r"\bwildlife\b",
+    r"\bconservation award\b",
+    r"\bcountry music\b",
+    r"\bfried our fish\b",
+    r"\brestaurant\b",
+    r"\bfishing in protected\b",
+    r"\bprotected (?:waters|channel|islands)\b",
+    r"\brecreational\b",
+    r"\banglers?\b",
+    r"\boutdoor news\b",
+    r"\brivers?\b.*\bcleanup\b",
+    r"\bmussels?\b.*\brivers?\b",
+]
 
 logger = get_logger(__name__)
 
@@ -161,6 +298,7 @@ def _build_search_query(
         terms.append(COMMODITY_NEWS_TERMS.get(commodity, commodity))
     if not terms:
         terms.append("commodity markets")
+    terms.append(MARKET_NEWS_MARKET_IMPACT_SEARCH_EXPRESSION)
     terms.append(f"when:{lookback_days}d")
     return " ".join(_dedupe_preserving_order(terms))
 
@@ -177,7 +315,8 @@ def _parse_market_news_feed(
     except ElementTree.ParseError as exc:
         raise MarketNewsClientError("Market news feed did not return valid RSS.") from exc
 
-    items: list[dict[str, Any]] = []
+    scored_items: list[tuple[int, int, dict[str, Any]]] = []
+    candidate_limit = max(limit * MARKET_NEWS_CANDIDATE_MULTIPLIER, limit)
     for item in root.findall("./channel/item"):
         title = _normalize_optional_text(item.findtext("title"))
         link = _normalize_optional_text(item.findtext("link"))
@@ -186,16 +325,29 @@ def _parse_market_news_feed(
         if not title or not link:
             continue
         cleaned_title = _strip_title_source_suffix(title, source)
-        items.append(
-            {
-                "title": cleaned_title,
-                "source": source,
-                "published_at": published_at,
-                "link": link,
-            }
+        score = _market_news_impact_score(
+            title=cleaned_title,
+            source=source,
+            commodity=commodity,
         )
-        if len(items) >= limit:
+        if score >= MARKET_NEWS_MIN_MARKET_IMPACT_SCORE:
+            scored_items.append(
+                (
+                    score,
+                    len(scored_items),
+                    {
+                        "title": cleaned_title,
+                        "source": source,
+                        "published_at": published_at,
+                        "link": link,
+                    },
+                )
+            )
+        if len(scored_items) >= candidate_limit:
             break
+
+    scored_items.sort(key=lambda item: (-item[0], item[1]))
+    items = [item for _, _, item in scored_items[:limit]]
 
     return {
         "generated_at": datetime.now(timezone.utc),
@@ -225,6 +377,37 @@ def _strip_title_source_suffix(title: str, source: Optional[str]) -> str:
 def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
     normalized = str(value or "").strip()
     return normalized or None
+
+
+def _market_news_impact_score(
+    *,
+    title: str,
+    source: Optional[str],
+    commodity: Optional[str],
+) -> int:
+    normalized_title = title.lower()
+    normalized_source = str(source or "").lower()
+    text = f"{normalized_title} {normalized_source}".strip()
+    score = 0
+
+    score += 2 * _count_matching_patterns(normalized_title, MARKET_IMPACT_PATTERNS)
+    if _count_matching_patterns(normalized_title, MARKET_DIRECTION_PATTERNS) > 0:
+        score += 1
+    if _count_matching_patterns(normalized_source, MARKET_SOURCE_BONUS_PATTERNS) > 0:
+        score += 1
+
+    if commodity:
+        for pattern in COMMODITY_MARKET_RELEVANCE_PATTERNS.get(commodity, []):
+            if re.search(pattern, normalized_title):
+                score += 1
+                break
+
+    score -= 4 * _count_matching_patterns(text, MARKET_NEWS_NOISE_PATTERNS)
+    return score
+
+
+def _count_matching_patterns(value: str, patterns: list[str]) -> int:
+    return sum(1 for pattern in patterns if re.search(pattern, value))
 
 
 def _dedupe_preserving_order(values: list[str]) -> list[str]:

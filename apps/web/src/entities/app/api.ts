@@ -18,6 +18,7 @@ import type {
   CounterpartyStandards,
   CurrencyRecord,
   DeliveryRecord,
+  DocumentRecordCreationWorkItemRecord,
   EventRow,
   ExternalDataRunRecord,
   ExternalDataSyncStatusRecord,
@@ -213,6 +214,7 @@ export type InvoiceIssueCandidateList = {
 export type OperationalResourceKey =
   | 'confirmations'
   | 'deliveries'
+  | 'document_record_creation_requests'
   | 'shipments'
   | 'invoices'
   | 'payments'
@@ -316,6 +318,8 @@ export type OperationsWorkspaceBootstrap = {
   confirmationsWindow: WorkspaceCollectionWindow
   workItems: TradeWorkflowItemRecord[]
   workItemsWindow: WorkspaceCollectionWindow
+  operationsDocumentRecordCreationRequests: DocumentRecordCreationWorkItemRecord[]
+  operationsDocumentRecordCreationRequestsWindow: WorkspaceCollectionWindow
 }
 
 export type SettlementWorkspaceBootstrap = {
@@ -325,6 +329,8 @@ export type SettlementWorkspaceBootstrap = {
   paymentsWindow: WorkspaceCollectionWindow
   workItems: TradeWorkflowItemRecord[]
   workItemsWindow: WorkspaceCollectionWindow
+  settlementDocumentRecordCreationRequests: DocumentRecordCreationWorkItemRecord[]
+  settlementDocumentRecordCreationRequestsWindow: WorkspaceCollectionWindow
 }
 
 export type ReferenceWorkspaceBootstrap = {
@@ -591,6 +597,16 @@ function toSizedWindowedPage<T>(rows: T[], windowSize: number): WindowedPage<T> 
   }
 }
 
+function emptyWindowedPage<T>(): WindowedPage<T> {
+  return {
+    rows: [],
+    window: {
+      loadedCount: 0,
+      hasMore: false,
+    },
+  }
+}
+
 async function fetchWindowedPage<T>(
   apiBase: string,
   path: string,
@@ -692,6 +708,24 @@ export async function loadTradeWorkflowItemsWindow(
   const workItemsPath = withQueue('/operations/work-items', queue)
 
   return fetchWindowedPage<TradeWorkflowItemRecord>(
+    apiBase,
+    offset > 0 ? withOffset(workItemsPath, offset) : workItemsPath,
+    options,
+    { cache: 'no-store' },
+    windowSize,
+  )
+}
+
+export async function loadDocumentRecordCreationWorkItemsWindow(
+  apiBase: string,
+  queue: WorkflowQueue,
+  options?: ReadWorkspaceOptions,
+  offset = 0,
+  windowSize = bootstrapQueryLimits.workspaceRecords,
+): Promise<WindowedPage<DocumentRecordCreationWorkItemRecord>> {
+  const workItemsPath = withQueue('/operations/document-record-creation-requests', queue)
+
+  return fetchWindowedPage<DocumentRecordCreationWorkItemRecord>(
     apiBase,
     offset > 0 ? withOffset(workItemsPath, offset) : workItemsPath,
     options,
@@ -905,9 +939,12 @@ export async function loadOperationsWorkspaceBootstrap(
   apiBase: string,
   options?: ReadWorkspaceOptions,
 ): Promise<OperationsWorkspaceBootstrap> {
-  const [confirmationsPage, workItemsPage] = await Promise.all([
+  const [confirmationsPage, workItemsPage, documentRecordCreationRequestsPage] = await Promise.all([
     loadTradeConfirmationsWindow(apiBase, options),
     loadTradeWorkflowItemsWindow(apiBase, 'operations', options),
+    loadDocumentRecordCreationWorkItemsWindow(apiBase, 'operations', options).catch(() =>
+      emptyWindowedPage<DocumentRecordCreationWorkItemRecord>(),
+    ),
   ])
 
   return {
@@ -915,6 +952,8 @@ export async function loadOperationsWorkspaceBootstrap(
     confirmationsWindow: confirmationsPage.window,
     workItems: workItemsPage.rows,
     workItemsWindow: workItemsPage.window,
+    operationsDocumentRecordCreationRequests: documentRecordCreationRequestsPage.rows,
+    operationsDocumentRecordCreationRequestsWindow: documentRecordCreationRequestsPage.window,
   }
 }
 
@@ -922,10 +961,13 @@ export async function loadSettlementWorkspaceBootstrap(
   apiBase: string,
   options?: ReadWorkspaceOptions,
 ): Promise<SettlementWorkspaceBootstrap> {
-  const [invoicesPage, paymentsPage, workItemsPage] = await Promise.all([
+  const [invoicesPage, paymentsPage, workItemsPage, documentRecordCreationRequestsPage] = await Promise.all([
     loadTradeInvoicesWindow(apiBase, options),
     loadTradePaymentsWindow(apiBase, options),
     loadTradeWorkflowItemsWindow(apiBase, 'settlement', options),
+    loadDocumentRecordCreationWorkItemsWindow(apiBase, 'settlement', options).catch(() =>
+      emptyWindowedPage<DocumentRecordCreationWorkItemRecord>(),
+    ),
   ])
 
   return {
@@ -935,6 +977,8 @@ export async function loadSettlementWorkspaceBootstrap(
     paymentsWindow: paymentsPage.window,
     workItems: workItemsPage.rows,
     workItemsWindow: workItemsPage.window,
+    settlementDocumentRecordCreationRequests: documentRecordCreationRequestsPage.rows,
+    settlementDocumentRecordCreationRequestsWindow: documentRecordCreationRequestsPage.window,
   }
 }
 

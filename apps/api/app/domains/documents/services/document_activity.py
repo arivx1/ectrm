@@ -241,6 +241,14 @@ def _activity_label_and_detail(
             else "logical document page ranges"
         )
         return "Packet Split Updated", f"{actor} updated packet metadata for {count_text}."
+    if event.event_type == "DocumentPacketSplitCorrectionCaptured":
+        accepted_count = _coerce_int(payload.get("accepted_logical_document_count"))
+        count_text = (
+            f"{accepted_count} logical document{'' if accepted_count == 1 else 's'}"
+            if accepted_count is not None
+            else "the accepted logical document layout"
+        )
+        return "Packet Split Correction", f"{actor} corrected the packet split for {count_text}."
     if event.event_type == "DocumentReprocessRequested":
         previous = _dict_payload(payload.get("previous_classification"))
         processor = _processor_detail(payload, provider_key="processor_provider", model_key="processor_model")

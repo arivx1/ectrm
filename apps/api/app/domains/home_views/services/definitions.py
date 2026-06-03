@@ -63,6 +63,10 @@ HOME_VIEW_PRICE_SORT_FIELDS = (
 )
 HOME_VIEW_PRICE_SORT_DIRECTIONS = ("asc", "desc")
 HOME_VIEW_PRICE_QUOTE_TYPES = ("SPOT", "FUTURE", "FORWARD", "INDEX", "OTHER")
+HOME_VIEW_NEWS_LIMIT_MIN = 1
+HOME_VIEW_NEWS_LIMIT_MAX = 10
+HOME_VIEW_NEWS_LOOKBACK_DAYS_MIN = 1
+HOME_VIEW_NEWS_LOOKBACK_DAYS_MAX = 14
 
 
 class HomeViewDefinitionConflictError(ValueError):
@@ -251,6 +255,22 @@ def _normalize_price_sort(value: object) -> str:
     return normalized
 
 
+def _normalize_integer_parameter(
+    value: object,
+    *,
+    field_name: str,
+    minimum: int,
+    maximum: int,
+) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise HomeViewDefinitionValidationError(f"{field_name} must be an integer.")
+    if value < minimum or value > maximum:
+        raise HomeViewDefinitionValidationError(
+            f"{field_name} must be between {minimum} and {maximum}."
+        )
+    return value
+
+
 def _normalize_card_parameters(card_id: str, parameters: dict[str, object]) -> dict[str, object]:
     normalized_parameters = dict(parameters)
 
@@ -272,12 +292,37 @@ def _normalize_card_parameters(card_id: str, parameters: dict[str, object]) -> d
             )
 
     if card_id == "map" and "map_record_limit" in normalized_parameters:
-        limit_value = normalized_parameters["map_record_limit"]
-        if isinstance(limit_value, bool) or not isinstance(limit_value, int):
-            raise HomeViewDefinitionValidationError("map_record_limit must be an integer.")
-        if limit_value < 1 or limit_value > 5000:
-            raise HomeViewDefinitionValidationError("map_record_limit must be between 1 and 5000.")
-        normalized_parameters["map_record_limit"] = limit_value
+        normalized_parameters["map_record_limit"] = _normalize_integer_parameter(
+            normalized_parameters["map_record_limit"],
+            field_name="map_record_limit",
+            minimum=1,
+            maximum=5000,
+        )
+
+    if card_id == "news":
+        if "news_limit" in normalized_parameters:
+            normalized_parameters["news_limit"] = _normalize_integer_parameter(
+                normalized_parameters["news_limit"],
+                field_name="news_limit",
+                minimum=HOME_VIEW_NEWS_LIMIT_MIN,
+                maximum=HOME_VIEW_NEWS_LIMIT_MAX,
+            )
+        if "news_lookback_days" in normalized_parameters:
+            normalized_parameters["news_lookback_days"] = _normalize_integer_parameter(
+                normalized_parameters["news_lookback_days"],
+                field_name="news_lookback_days",
+                minimum=HOME_VIEW_NEWS_LOOKBACK_DAYS_MIN,
+                maximum=HOME_VIEW_NEWS_LOOKBACK_DAYS_MAX,
+            )
+        if "news_query" in normalized_parameters:
+            news_query = _clean_text_value(
+                normalized_parameters["news_query"],
+                field_name="news_query",
+                uppercase=False,
+            )
+            if len(news_query) > 240:
+                raise HomeViewDefinitionValidationError("news_query must be 240 characters or fewer.")
+            normalized_parameters["news_query"] = news_query
 
     return normalized_parameters
 

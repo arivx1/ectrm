@@ -3,6 +3,7 @@ import type {
   MessagingWorkspaceConversationRecord,
   MessagingWorkspaceMessageRecord,
   MessagingWorkspacePostSource,
+  MessagingWorkspaceSourceProvider,
 } from '../../entities/messages/api'
 
 export type MessagingInboxMessageType =
@@ -109,6 +110,7 @@ export type MessagingWorkspaceChannel = {
   metrics: MessagingWorkspaceChannelMetric[]
   members: MessagingWorkspaceMember[]
   timeline: MessagingWorkspaceTimelineItem[]
+  sourceProvider: MessagingWorkspaceSourceProvider
 }
 
 export type MessagingWorkspacePost = {
@@ -540,6 +542,9 @@ export function buildMessagingWorkspaceChannelsFromRecords(
               },
             ]
           }),
+          sourceProvider:
+            record.source_provider ??
+            (record.conversation_id.startsWith('slack-') ? 'slack' : 'ectrm'),
         },
         record.timeline.flatMap<MessagingWorkspaceTimelineItem>((item) => {
           if (item.kind === 'system') {
@@ -723,6 +728,7 @@ export function buildMessagingWorkspaceChannels(
           ],
         },
       ],
+      sourceProvider: 'ectrm',
     },
     {
       id: 'counterparty-email',
@@ -794,6 +800,7 @@ export function buildMessagingWorkspaceChannels(
           ],
         },
       ],
+      sourceProvider: 'ectrm',
     },
     {
       id: 'ops-follow-through',
@@ -849,6 +856,7 @@ export function buildMessagingWorkspaceChannels(
           reactions: ['yes 4'],
         },
       ],
+      sourceProvider: 'ectrm',
     },
     {
       id: 'desk-attention',
@@ -904,6 +912,7 @@ export function buildMessagingWorkspaceChannels(
           ],
         },
       ],
+      sourceProvider: 'ectrm',
     },
     {
       id: 'settlement-control',
@@ -958,6 +967,7 @@ export function buildMessagingWorkspaceChannels(
           reactions: ['thanks 1'],
         },
       ],
+      sourceProvider: 'ectrm',
     },
   ]
 }

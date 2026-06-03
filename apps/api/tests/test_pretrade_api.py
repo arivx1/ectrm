@@ -525,6 +525,24 @@ class PreTradeApiTests(unittest.TestCase):
         response = self.client.get("/pretrade/governance/export")
         self.assertEqual(response.status_code, 401)
 
+        response = self.client.get("/pretrade/netting-sets")
+        self.assertEqual(response.status_code, 401)
+
+        response = self.client.post("/pretrade/netting-sets/from-promotion", json={})
+        self.assertEqual(response.status_code, 401)
+
+        response = self.client.get("/pretrade/hedge-recommendations")
+        self.assertEqual(response.status_code, 401)
+
+        response = self.client.post("/pretrade/hedge-recommendations/from-promotion", json={})
+        self.assertEqual(response.status_code, 401)
+
+        response = self.client.get("/pretrade/risk-scenarios")
+        self.assertEqual(response.status_code, 401)
+
+        response = self.client.post("/pretrade/risk-scenarios/from-promotion", json={})
+        self.assertEqual(response.status_code, 401)
+
         response = self.client.get("/pretrade/reviews/1/drift")
         self.assertEqual(response.status_code, 401)
 
@@ -873,6 +891,201 @@ class PreTradeApiTests(unittest.TestCase):
             headers=self.trader_two_headers,
         )
         self.assertEqual(missing_scenario_response.status_code, 404)
+
+    def test_governance_promotion_signals_track_reviewer_reuse(self) -> None:
+        scenario_payload = self._scenario_payload()
+        scenario_payload["name"] = "May gas offset"
+        scenario_payload["draft"] = {
+            **scenario_payload["draft"],  # type: ignore[arg-type]
+            "trade_side": "SELL",
+            "target_volume": 1000,
+        }
+        scenario_response = self.client.post(
+            "/pretrade/scenarios",
+            json=scenario_payload,
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(scenario_response.status_code, 201)
+        scenario_id = scenario_response.json()["scenario_id"]
+
+        recommendation_response = self.client.post(
+            "/pretrade/recommendations/runs",
+            json={
+                "name": "Offset recommendation",
+                "source_scenario_id": scenario_id,
+                "input_snapshots": self._recommendation_input_snapshots(),
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(recommendation_response.status_code, 201)
+        recommendation_run = recommendation_response.json()
+        self.assertEqual(recommendation_run["recommendation"]["netting_candidates"][0]["match_quality"], "EXACT")
+
+        review_response = self.client.post(
+            "/pretrade/reviews",
+            json={
+                "name": "Risk triage offset review",
+                "thesis": "Queue exact offset for the next durable scenario review.",
+                "source_scenario_id": scenario_id,
+                "recommendation_run_id": recommendation_run["run_id"],
+                "review_notes": "Risk workspace triage: exact current-position offset for governance reuse.",
+                "draft": scenario_payload["draft"],
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(review_response.status_code, 201)
+        review_id = review_response.json()["review_id"]
+
+        approve_response = self.client.patch(
+            f"/pretrade/reviews/{review_id}",
+            json={
+                "review_status": "APPROVED",
+                "activity_comment": "Approved exact offset pattern for reuse tracking.",
+            },
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(approve_response.status_code, 200)
+
+        governance_response = self.client.get(
+            "/pretrade/governance/summary",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(governance_response.status_code, 200)
+        governance = governance_response.json()
+        self.assertEqual(governance["promotion_candidate_count"], 2)
+        self.assertEqual(governance["top_promotion_candidate_type"], "NETTING_SET")
+
+        governance_items_response = self.client.get(
+            "/pretrade/governance/items",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(governance_items_response.status_code, 200)
+        governance_items = governance_items_response.json()
+        candidates = {
+            candidate["candidate_type"]: candidate
+            for candidate in governance_items["promotion_candidates"]
+        }
+        self.assertEqual(set(candidates), {"NETTING_SET", "RISK_SCENARIO"})
+        self.assertEqual(candidates["NETTING_SET"]["approved_review_count"], 1)
+        self.assertEqual(candidates["NETTING_SET"]["latest_review_id"], review_id)
+        self.assertEqual(candidates["NETTING_SET"]["latest_run_id"], recommendation_run["run_id"])
+        self.assertNotIn(
+            "Only partial netting evidence is visible; define matching tolerances before creating a durable netting set.",
+            candidates["NETTING_SET"]["stop_reasons"],
+        )
+        self.assertEqual(candidates["RISK_SCENARIO"]["sample_review_ids"], [review_id])
+
+        risk_list_before_response = self.client.get(
+            "/pretrade/risk-scenarios",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(risk_list_before_response.status_code, 200)
+        self.assertEqual(risk_list_before_response.json(), [])
+
+        list_before_response = self.client.get(
+            "/pretrade/netting-sets",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(list_before_response.status_code, 200)
+        self.assertEqual(list_before_response.json(), [])
+
+        promote_response = self.client.post(
+            "/pretrade/netting-sets/from-promotion",
+            json={
+                "owner": "risk.owner",
+                "review_note": "Owner review requested from exact offset promotion signal.",
+            },
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(promote_response.status_code, 201)
+        netting_set = promote_response.json()
+        self.assertEqual(netting_set["status"], "REVIEW_DRAFT")
+        self.assertEqual(netting_set["owner"], "risk.owner")
+        self.assertEqual(netting_set["source_promotion_candidate_type"], "NETTING_SET")
+        self.assertEqual(netting_set["source_latest_review_id"], review_id)
+        self.assertEqual(netting_set["source_latest_run_id"], recommendation_run["run_id"])
+        self.assertEqual(netting_set["source_promotion_score"], candidates["NETTING_SET"]["score"])
+        self.assertEqual(netting_set["draft"]["trade_side"], "SELL")
+        self.assertEqual(netting_set["netting_candidates"][0]["match_quality"], "EXACT")
+        self.assertIn("No booked trade has reused this pattern yet.", netting_set["source_stop_reasons"])
+
+        duplicate_promote_response = self.client.post(
+            "/pretrade/netting-sets/from-promotion",
+            json={},
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(duplicate_promote_response.status_code, 201)
+        self.assertEqual(duplicate_promote_response.json()["netting_set_id"], netting_set["netting_set_id"])
+
+        list_after_response = self.client.get(
+            "/pretrade/netting-sets",
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(list_after_response.status_code, 200)
+        self.assertEqual(len(list_after_response.json()), 1)
+        self.assertEqual(list_after_response.json()[0]["netting_set_id"], netting_set["netting_set_id"])
+
+        risk_promote_response = self.client.post(
+            "/pretrade/risk-scenarios/from-promotion",
+            json={
+                "owner": "risk.owner",
+                "review_note": "Owner review requested from Risk triage promotion signal.",
+            },
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(risk_promote_response.status_code, 201)
+        risk_scenario = risk_promote_response.json()
+        self.assertEqual(risk_scenario["status"], "REVIEW_DRAFT")
+        self.assertEqual(risk_scenario["owner"], "risk.owner")
+        self.assertEqual(risk_scenario["source_promotion_candidate_type"], "RISK_SCENARIO")
+        self.assertEqual(risk_scenario["source_latest_review_id"], review_id)
+        self.assertEqual(risk_scenario["source_latest_run_id"], recommendation_run["run_id"])
+        self.assertEqual(risk_scenario["source_promotion_score"], candidates["RISK_SCENARIO"]["score"])
+        self.assertEqual(risk_scenario["source_review_name"], "Risk triage offset review")
+        self.assertEqual(risk_scenario["source_review_status"], "APPROVED")
+        self.assertEqual(risk_scenario["draft"]["trade_side"], "SELL")
+        self.assertEqual(risk_scenario["source_recommendation_stance"], "PROCEED")
+        self.assertEqual(risk_scenario["source_recommendation_score"], recommendation_run["recommendation"]["score"])
+        self.assertEqual(risk_scenario["residual_exposure"]["exposure_effect"], "OFFSETS")
+        self.assertGreater(len(risk_scenario["input_snapshots"]), 0)
+        self.assertIn("No booked trade has reused this pattern yet.", risk_scenario["source_stop_reasons"])
+
+        duplicate_risk_promote_response = self.client.post(
+            "/pretrade/risk-scenarios/from-promotion",
+            json={},
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(duplicate_risk_promote_response.status_code, 201)
+        self.assertEqual(
+            duplicate_risk_promote_response.json()["risk_scenario_id"],
+            risk_scenario["risk_scenario_id"],
+        )
+
+        risk_list_after_response = self.client.get(
+            "/pretrade/risk-scenarios",
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(risk_list_after_response.status_code, 200)
+        self.assertEqual(len(risk_list_after_response.json()), 1)
+        self.assertEqual(
+            risk_list_after_response.json()[0]["risk_scenario_id"],
+            risk_scenario["risk_scenario_id"],
+        )
+
+        governance_export_response = self.client.get(
+            "/pretrade/governance/export",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(governance_export_response.status_code, 200)
+        governance_export = governance_export_response.json()
+        self.assertTrue(
+            any(
+                row["category"] == "PROMOTION_CANDIDATE"
+                and row["promotion_candidate_type"] == "NETTING_SET"
+                and row["promotion_status"] == "WATCH"
+                for row in governance_export["audit_rows"]
+            )
+        )
 
     def test_draft_analysis_uses_shared_recommendation_contract_without_persisting_run(self) -> None:
         scenario_response = self.client.post(
@@ -1291,6 +1504,8 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(governance["unresolved_risky_recommendation_count"], 0)
         self.assertEqual(governance["override_count"], 1)
         self.assertEqual(governance["booked_with_override_count"], 1)
+        self.assertEqual(governance["promotion_candidate_count"], 1)
+        self.assertEqual(governance["top_promotion_candidate_type"], "HEDGE_RECOMMENDATION")
 
         governance_items_response = self.client.get(
             "/pretrade/governance/items",
@@ -1305,6 +1520,67 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(governance_items["override_reviews"][0]["recommendation_override_by"], "trader_two")
         self.assertEqual(len(governance_items["booked_with_override_reviews"]), 1)
         self.assertEqual(governance_items["booked_with_override_reviews"][0]["linked_trade_id"], "TRD-21001")
+        self.assertEqual(len(governance_items["promotion_candidates"]), 1)
+        hedge_candidate = governance_items["promotion_candidates"][0]
+        self.assertEqual(hedge_candidate["candidate_type"], "HEDGE_RECOMMENDATION")
+        self.assertEqual(hedge_candidate["booked_review_count"], 1)
+        self.assertEqual(hedge_candidate["override_count"], 1)
+        self.assertEqual(hedge_candidate["status"], "WATCH")
+
+        hedge_list_before_response = self.client.get(
+            "/pretrade/hedge-recommendations",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(hedge_list_before_response.status_code, 200)
+        self.assertEqual(hedge_list_before_response.json(), [])
+
+        hedge_promote_response = self.client.post(
+            "/pretrade/hedge-recommendations/from-promotion",
+            json={
+                "owner": "risk.owner",
+                "review_note": "Owner review requested from booked hedge promotion signal.",
+            },
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(hedge_promote_response.status_code, 201)
+        hedge_draft = hedge_promote_response.json()
+        self.assertEqual(hedge_draft["status"], "REVIEW_DRAFT")
+        self.assertEqual(hedge_draft["owner"], "risk.owner")
+        self.assertEqual(hedge_draft["source_promotion_candidate_type"], "HEDGE_RECOMMENDATION")
+        self.assertEqual(hedge_draft["source_latest_review_id"], review_id)
+        self.assertEqual(hedge_draft["source_latest_run_id"], recommendation_run_id)
+        self.assertEqual(hedge_draft["source_promotion_score"], hedge_candidate["score"])
+        self.assertEqual(hedge_draft["source_recommendation_stance"], "ESCALATE")
+        self.assertEqual(hedge_draft["source_recommendation_score"], 70)
+        self.assertEqual(hedge_draft["draft"]["commodity"], "HENRY_HUB")
+        self.assertEqual(hedge_draft["hedge_recommendation"]["instrument_type"], "SWAP")
+        self.assertTrue(hedge_draft["rejected_alternatives"])
+        self.assertIn(
+            "Promotion evidence includes override decisions; confirm the durable rule with the policy owner first.",
+            hedge_draft["source_stop_reasons"],
+        )
+
+        duplicate_hedge_promote_response = self.client.post(
+            "/pretrade/hedge-recommendations/from-promotion",
+            json={},
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(duplicate_hedge_promote_response.status_code, 201)
+        self.assertEqual(
+            duplicate_hedge_promote_response.json()["hedge_recommendation_id"],
+            hedge_draft["hedge_recommendation_id"],
+        )
+
+        hedge_list_after_response = self.client.get(
+            "/pretrade/hedge-recommendations",
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(hedge_list_after_response.status_code, 200)
+        self.assertEqual(len(hedge_list_after_response.json()), 1)
+        self.assertEqual(
+            hedge_list_after_response.json()[0]["hedge_recommendation_id"],
+            hedge_draft["hedge_recommendation_id"],
+        )
 
         governance_export_response = self.client.get(
             "/pretrade/governance/export",
@@ -1317,6 +1593,13 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertTrue(
             any(
                 row["category"] == "BOOKED_WITH_OVERRIDE" and row["linked_trade_id"] == "TRD-21001"
+                for row in governance_export["audit_rows"]
+            )
+        )
+        self.assertTrue(
+            any(
+                row["category"] == "PROMOTION_CANDIDATE"
+                and row["promotion_candidate_type"] == "HEDGE_RECOMMENDATION"
                 for row in governance_export["audit_rows"]
             )
         )

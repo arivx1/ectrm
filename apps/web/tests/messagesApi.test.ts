@@ -3,8 +3,11 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
 import {
+  createMessagingSlackPost,
   createMessagingWorkspacePost,
+  loadMessagingSlackSettings,
   loadMessagingWorkspaceState,
+  syncMessagingSlackWorkspace,
   updateMessagingWorkspacePost,
 } from '../src/entities/messages/api'
 
@@ -274,6 +277,146 @@ test('updateMessagingWorkspacePost can persist explicit reaction changes', async
       requests[0]?.init?.body,
       JSON.stringify({
         reactions: ['👍', '👀'],
+      }),
+    )
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('loadMessagingSlackSettings targets the Slack messaging settings endpoint', async () => {
+  const originalFetch = global.fetch
+  const requests: { url: string; init?: RequestInit }[] = []
+
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({ url: String(input), init })
+    return new Response(
+      JSON.stringify({
+        enabled: true,
+        configured: true,
+        provider: 'slack_web_api',
+        auth_status: 'configured',
+        configured_channel_count: 1,
+        channel_limit: 10,
+        history_limit: 20,
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    )
+  }) as typeof fetch
+
+  try {
+    const result = await loadMessagingSlackSettings('http://localhost:8000')
+    assert.equal(result.configured, true)
+    assert.equal(result.provider, 'slack_web_api')
+    assert.equal(requests[0]?.url, 'http://localhost:8000/messages/workspace/slack/settings')
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('syncMessagingSlackWorkspace posts to the authenticated Slack sync endpoint', async () => {
+  const originalFetch = global.fetch
+  const requests: { url: string; init?: RequestInit }[] = []
+
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({ url: String(input), init })
+    return new Response(
+      JSON.stringify({
+        provider: 'slack_web_api',
+        synced_channel_count: 1,
+        created_conversation_count: 1,
+        updated_conversation_count: 0,
+        scanned_message_count: 2,
+        imported_message_count: 2,
+        updated_message_count: 0,
+        skipped_message_count: 0,
+        warnings: [],
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    )
+  }) as typeof fetch
+
+  try {
+    const result = await syncMessagingSlackWorkspace('http://localhost:8000', {
+      accessToken: 'session-token',
+    })
+    assert.equal(result.imported_message_count, 2)
+    assert.equal(requests[0]?.url, 'http://localhost:8000/messages/workspace/slack/sync')
+    assert.equal(requests[0]?.init?.method, 'POST')
+    assert.equal((requests[0]?.init?.headers as Headers).get('Authorization'), 'Bearer session-token')
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('createMessagingSlackPost sends Slack-backed messages to the Slack post endpoint', async () => {
+  const originalFetch = global.fetch
+  const requests: { url: string; init?: RequestInit }[] = []
+
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push({ url: String(input), init })
+    return new Response(
+      JSON.stringify({
+        message_id: 'slack-C123-1770000060_000200',
+        conversation_id: 'slack-C123',
+        source: 'human',
+        body: 'Post to Slack',
+        parent_message_id: null,
+        thread_root_message_id: 'slack-C123-1770000060_000200',
+        author: {
+          name: 'Messaging Admin',
+          title: 'Desk operator via Slack',
+          presence: 'Posted to Slack',
+          initials: 'MA',
+          tone: 'human',
+        },
+        assistant_run_id: null,
+        assistant_agent_id: null,
+        assistant_agent_name: null,
+        created_by_user_id: 'messaging.admin',
+        created_by_session_id: 'session-1',
+        created_by_role: 'OPS_ADMIN',
+        reactions: [],
+        attachment: null,
+        edited_at: null,
+        deleted_at: null,
+        pinned_at: null,
+        created_at: '2026-02-02T10:01:00Z',
+      }),
+      {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    )
+  }) as typeof fetch
+
+  try {
+    const result = await createMessagingSlackPost(
+      'http://localhost:8000',
+      {
+        conversation_id: 'slack-C123',
+        body: 'Post to Slack',
+      },
+      {
+        accessToken: 'session-token',
+      },
+    )
+
+    assert.equal(result.message_id, 'slack-C123-1770000060_000200')
+    assert.equal(requests[0]?.url, 'http://localhost:8000/messages/workspace/slack/posts')
+    assert.equal(requests[0]?.init?.method, 'POST')
+    assert.equal((requests[0]?.init?.headers as Headers).get('Authorization'), 'Bearer session-token')
+    assert.equal(
+      requests[0]?.init?.body,
+      JSON.stringify({
+        conversation_id: 'slack-C123',
+        body: 'Post to Slack',
       }),
     )
   } finally {

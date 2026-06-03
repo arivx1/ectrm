@@ -10,11 +10,17 @@ import {
   createPreTradeScenario,
   deletePreTradeScenario,
   loadPreTradeGovernanceAuditExport,
+  loadPreTradeHedgeRecommendations,
   loadPreTradeGovernanceItems,
   loadPreTradeGovernanceSummary,
+  loadPreTradeNettingSets,
   loadPreTradeRecommendationRuns,
   loadPreTradeReviewItems,
+  loadPreTradeRiskScenarios,
   loadPreTradeScenarios,
+  promotePreTradeHedgeRecommendationFromGovernance,
+  promotePreTradeNettingSetFromGovernance,
+  promotePreTradeRiskScenarioFromGovernance,
   updatePreTradeReviewItem,
   updatePreTradeScenario,
 } from '../../entities/pretrade/api'
@@ -28,15 +34,19 @@ import type {
   LocationRecord,
   MarketContextRecord,
   PortfolioRecord,
-  PreTradeRecommendationDraftAnalysisRecord,
   PreTradeGovernanceAuditExportRecord,
+  PreTradeHedgeRecommendationRecord,
   PreTradeGovernanceItemsRecord,
+  PreTradeGovernancePromotionCandidateRecord,
   PreTradeGovernanceSummaryRecord,
+  PreTradeNettingSetRecord,
+  PreTradeRecommendationDraftAnalysisRecord,
   PreTradeRecommendationStance,
   PreTradeRecommendationRunRecord,
   PreTradeReviewCaptureContext,
   PreTradeReviewItemRecord,
   PreTradeReviewStatus,
+  PreTradeRiskScenarioRecord,
   PreTradeScenarioDraft,
   PreTradeScenarioRecord,
   PriceIndexRecord,
@@ -51,6 +61,7 @@ import {
   buildPreTradeScenarioEnrichmentFromAnalysis,
   buildPreTradeScenarioEnrichmentFromRun,
 } from './preTradeScenarioEnrichment'
+import { buildPreTradeRecommendationWorkspaceBrief } from './preTradeRecommendations'
 import { buildPreTradeStructuringDraftPacket } from './preTradeStructuringDraft'
 import {
   findLatestCounterpartyExternalSnapshot,
@@ -60,8 +71,8 @@ import {
   type PositionedRow,
 } from './preTradeWorkspaceSupport'
 
-type GovernanceBucketKey = 'pending' | 'risky' | 'overrides' | 'stale-evidence' | 'booked-with-override'
-type GovernanceReviewBucketKey = Exclude<GovernanceBucketKey, 'stale-evidence'>
+type GovernanceBucketKey = 'pending' | 'risky' | 'overrides' | 'stale-evidence' | 'promotion-candidates' | 'booked-with-override'
+type GovernanceReviewBucketKey = Exclude<GovernanceBucketKey, 'stale-evidence' | 'promotion-candidates'>
 type ReviewQueueFilterKey = 'all' | GovernanceReviewBucketKey
 
 const GOVERNANCE_BUCKET_LABELS: Record<GovernanceBucketKey, string> = {
@@ -69,6 +80,7 @@ const GOVERNANCE_BUCKET_LABELS: Record<GovernanceBucketKey, string> = {
   risky: 'Risky Recommendations',
   overrides: 'Overrides',
   'stale-evidence': 'Stale Evidence',
+  'promotion-candidates': 'Promotion Signals',
   'booked-with-override': 'Booked With Override',
 }
 
@@ -307,6 +319,10 @@ function governanceStatusLabel(status: PreTradeGovernanceSummaryRecord['risk_sta
   }
 }
 
+function promotionCandidateTone(status: PreTradeGovernancePromotionCandidateRecord['status']): 'active' | 'in-progress' {
+  return status === 'CANDIDATE' ? 'active' : 'in-progress'
+}
+
 function recommendationRequiresOverride(stance: PreTradeRecommendationStance | null | undefined): boolean {
   return stance === 'ESCALATE' || stance === 'WAIT_FOR_DATA'
 }
@@ -392,6 +408,9 @@ export function PreTradeWorkspace({
   const [recommendationRuns, setRecommendationRuns] = useState<PreTradeRecommendationRunRecord[]>([])
   const [governanceSummary, setGovernanceSummary] = useState<PreTradeGovernanceSummaryRecord | null>(null)
   const [governanceItems, setGovernanceItems] = useState<PreTradeGovernanceItemsRecord | null>(null)
+  const [nettingSets, setNettingSets] = useState<PreTradeNettingSetRecord[]>([])
+  const [hedgeRecommendations, setHedgeRecommendations] = useState<PreTradeHedgeRecommendationRecord[]>([])
+  const [riskScenarios, setRiskScenarios] = useState<PreTradeRiskScenarioRecord[]>([])
   const [selectedGovernanceBucket, setSelectedGovernanceBucket] = useState<GovernanceBucketKey>('pending')
   const [reviewQueueFilter, setReviewQueueFilter] = useState<ReviewQueueFilterKey>('all')
   const [focusedReviewId, setFocusedReviewId] = useState<number | null>(null)
@@ -436,18 +455,33 @@ export function PreTradeWorkspace({
     setCollectionLoading(true)
     setCollectionError('')
     try {
-      const [nextScenarios, nextReviews, nextRecommendationRuns, nextGovernanceSummary, nextGovernanceItems] = await Promise.all([
+      const [
+        nextScenarios,
+        nextReviews,
+        nextRecommendationRuns,
+        nextGovernanceSummary,
+        nextGovernanceItems,
+        nextNettingSets,
+        nextHedgeRecommendations,
+        nextRiskScenarios,
+      ] = await Promise.all([
         loadPreTradeScenarios(appConfig.apiBase, accessToken),
         loadPreTradeReviewItems(appConfig.apiBase, accessToken),
         loadPreTradeRecommendationRuns(appConfig.apiBase, accessToken, { limit: 20 }),
         loadPreTradeGovernanceSummary(appConfig.apiBase, accessToken),
         loadPreTradeGovernanceItems(appConfig.apiBase, accessToken),
+        loadPreTradeNettingSets(appConfig.apiBase, accessToken),
+        loadPreTradeHedgeRecommendations(appConfig.apiBase, accessToken),
+        loadPreTradeRiskScenarios(appConfig.apiBase, accessToken),
       ])
       setScenarios(nextScenarios)
       setReviews(nextReviews)
       setRecommendationRuns(nextRecommendationRuns)
       setGovernanceSummary(nextGovernanceSummary)
       setGovernanceItems(nextGovernanceItems)
+      setNettingSets(nextNettingSets)
+      setHedgeRecommendations(nextHedgeRecommendations)
+      setRiskScenarios(nextRiskScenarios)
     } catch (error) {
       setCollectionError(error instanceof Error ? error.message : 'Could not load pre-trade scenarios or review queue.')
     } finally {
@@ -465,6 +499,9 @@ export function PreTradeWorkspace({
       setRecommendationRuns([])
       setGovernanceSummary(null)
       setGovernanceItems(null)
+      setNettingSets([])
+      setHedgeRecommendations([])
+      setRiskScenarios([])
       setReviewQueueFilter('all')
       setFocusedReviewId(null)
       setCollectionError('')
@@ -656,6 +693,10 @@ export function PreTradeWorkspace({
       selectedExternalSnapshot,
       weatherOverview?.headline,
     ],
+  )
+  const recommendationBrief = useMemo(
+    () => buildPreTradeRecommendationWorkspaceBrief(draftAnalysis),
+    [draftAnalysis],
   )
 
   function patchDraft(changes: Partial<PreTradeScenarioDraft>) {
@@ -962,6 +1003,54 @@ export function PreTradeWorkspace({
     })
   }
 
+  async function handlePromoteNettingCandidate(candidate: PreTradeGovernancePromotionCandidateRecord) {
+    if (candidate.candidate_type !== 'NETTING_SET') {
+      setActionError('Only netting-set promotion signals can create a netting-set review draft right now.')
+      setActionMessage('')
+      return
+    }
+
+    await withAuthenticatedAction('promote-netting-set', async (accessToken) => {
+      const created = await promotePreTradeNettingSetFromGovernance(appConfig.apiBase, accessToken, {
+        review_note: candidate.promotion_rationale,
+      })
+      await refreshPersistedState(accessToken)
+      setActionMessage(`Created netting-set review draft "${created.name}".`)
+    })
+  }
+
+  async function handlePromoteHedgeRecommendationCandidate(candidate: PreTradeGovernancePromotionCandidateRecord) {
+    if (candidate.candidate_type !== 'HEDGE_RECOMMENDATION') {
+      setActionError('Only hedge-recommendation promotion signals can create a hedge review draft right now.')
+      setActionMessage('')
+      return
+    }
+
+    await withAuthenticatedAction('promote-hedge-recommendation', async (accessToken) => {
+      const created = await promotePreTradeHedgeRecommendationFromGovernance(appConfig.apiBase, accessToken, {
+        review_note: candidate.promotion_rationale,
+      })
+      await refreshPersistedState(accessToken)
+      setActionMessage(`Created hedge recommendation review draft "${created.name}".`)
+    })
+  }
+
+  async function handlePromoteRiskScenarioCandidate(candidate: PreTradeGovernancePromotionCandidateRecord) {
+    if (candidate.candidate_type !== 'RISK_SCENARIO') {
+      setActionError('Only risk-scenario promotion signals can create a risk scenario review draft right now.')
+      setActionMessage('')
+      return
+    }
+
+    await withAuthenticatedAction('promote-risk-scenario', async (accessToken) => {
+      const created = await promotePreTradeRiskScenarioFromGovernance(appConfig.apiBase, accessToken, {
+        review_note: candidate.promotion_rationale,
+      })
+      await refreshPersistedState(accessToken)
+      setActionMessage(`Created risk scenario review draft "${created.name}".`)
+    })
+  }
+
   const governanceReviewItemsForBucket = useCallback((bucket: GovernanceReviewBucketKey): PreTradeReviewItemRecord[] => {
     switch (bucket) {
       case 'pending':
@@ -977,7 +1066,7 @@ export function PreTradeWorkspace({
 
   function handleGovernanceMetricSelect(bucket: GovernanceBucketKey) {
     setSelectedGovernanceBucket(bucket)
-    if (bucket !== 'stale-evidence') {
+    if (bucket !== 'stale-evidence' && bucket !== 'promotion-candidates') {
       setReviewQueueFilter(bucket)
       setFocusedReviewId(null)
     }
@@ -1001,25 +1090,33 @@ export function PreTradeWorkspace({
         ? `${governanceSummary.stale_evidence_run_count} recommendation run${governanceSummary.stale_evidence_run_count === 1 ? '' : 's'} include stale, degraded, or missing source evidence.`
         : governanceSummary.pending_review_count > 0
           ? `${governanceSummary.pending_review_count} review${governanceSummary.pending_review_count === 1 ? '' : 's'} remain open or in review.`
-          : 'No open review queue blockers are visible right now.'
+          : governanceSummary.promotion_candidate_count > 0
+            ? `${governanceSummary.promotion_candidate_count} promotion signal${governanceSummary.promotion_candidate_count === 1 ? '' : 's'} are ready for reviewer reuse triage.`
+            : 'No open review queue blockers are visible right now.'
     : 'Sign in to load queue-level controls across reviews, recommendation risk, and booking overrides.'
   const governanceMetricCards: Array<{ bucket: GovernanceBucketKey; label: string; count: number | null }> = [
     { bucket: 'pending', label: GOVERNANCE_BUCKET_LABELS.pending, count: governanceSummary?.pending_review_count ?? null },
     { bucket: 'risky', label: GOVERNANCE_BUCKET_LABELS.risky, count: governanceSummary?.risky_recommendation_count ?? null },
     { bucket: 'overrides', label: GOVERNANCE_BUCKET_LABELS.overrides, count: governanceSummary?.override_count ?? null },
     { bucket: 'stale-evidence', label: GOVERNANCE_BUCKET_LABELS['stale-evidence'], count: governanceSummary?.stale_evidence_run_count ?? null },
+    { bucket: 'promotion-candidates', label: GOVERNANCE_BUCKET_LABELS['promotion-candidates'], count: governanceSummary?.promotion_candidate_count ?? null },
     {
       bucket: 'booked-with-override',
       label: GOVERNANCE_BUCKET_LABELS['booked-with-override'],
       count: governanceSummary?.booked_with_override_count ?? null,
     },
   ]
-  const selectedGovernanceReviewBucket = selectedGovernanceBucket === 'stale-evidence' ? null : selectedGovernanceBucket
+  const selectedGovernanceReviewBucket = selectedGovernanceBucket === 'stale-evidence' || selectedGovernanceBucket === 'promotion-candidates'
+    ? null
+    : selectedGovernanceBucket
   const selectedGovernanceReviewItems = selectedGovernanceReviewBucket
     ? governanceReviewItemsForBucket(selectedGovernanceReviewBucket)
     : []
   const selectedGovernanceStaleEvidenceRuns = selectedGovernanceBucket === 'stale-evidence'
     ? (governanceItems?.stale_evidence_runs ?? [])
+    : []
+  const selectedGovernancePromotionCandidates = selectedGovernanceBucket === 'promotion-candidates'
+    ? (governanceItems?.promotion_candidates ?? [])
     : []
   const selectedGovernanceMetric = governanceMetricCards.find((metric) => metric.bucket === selectedGovernanceBucket)
   const filteredReviews = useMemo(() => {
@@ -1065,7 +1162,7 @@ export function PreTradeWorkspace({
       id: 'pretrade-governance',
       eyebrow: 'Governance',
       title: governanceTitle,
-      description: 'Queue-level controls for reviews, recommendation risk, source evidence, and override booking.',
+      description: 'Queue-level controls for reviews, recommendation risk, source evidence, promotion signals, and override booking.',
       span: 'wide',
       availableSpans: ['full', 'wide', 'half'],
       content: (
@@ -1106,7 +1203,7 @@ export function PreTradeWorkspace({
             <p>{governanceReadout}</p>
             {governanceSummary ? (
               <p className="form-note">
-                {governanceSummary.open_review_count} open | {governanceSummary.in_review_count} in review | {governanceSummary.approved_review_count} approved | {governanceSummary.rejected_review_count} rejected | {governanceSummary.stale_evidence_source_count} impaired source snapshots | {governanceSummary.recommendation_run_count} recommendation runs
+                {governanceSummary.open_review_count} open | {governanceSummary.in_review_count} in review | {governanceSummary.approved_review_count} approved | {governanceSummary.rejected_review_count} rejected | {governanceSummary.stale_evidence_source_count} impaired source snapshots | {governanceSummary.recommendation_run_count} recommendation runs | {governanceSummary.promotion_candidate_count} promotion signals
               </p>
             ) : null}
           </div>
@@ -1153,6 +1250,245 @@ export function PreTradeWorkspace({
                 ))}
                 {!collectionLoading && selectedGovernanceStaleEvidenceRuns.length === 0 ? (
                   <p className="form-note">No impaired latest recommendation evidence is currently visible for this bucket.</p>
+                ) : null}
+              </div>
+            ) : selectedGovernanceBucket === 'promotion-candidates' ? (
+              <div className="pretrade-card-list">
+                {selectedGovernancePromotionCandidates.map((candidate) => {
+                  const existingNettingSet = candidate.candidate_type === 'NETTING_SET'
+                    ? nettingSets.find((item) =>
+                      item.source_latest_run_id === candidate.latest_run_id
+                      && item.source_latest_review_id === candidate.latest_review_id,
+                    ) ?? null
+                    : null
+                  const existingHedgeRecommendation = candidate.candidate_type === 'HEDGE_RECOMMENDATION'
+                    ? hedgeRecommendations.find((item) =>
+                      item.source_latest_run_id === candidate.latest_run_id
+                      && item.source_latest_review_id === candidate.latest_review_id,
+                    ) ?? null
+                    : null
+                  const existingRiskScenario = candidate.candidate_type === 'RISK_SCENARIO'
+                    ? riskScenarios.find((item) =>
+                      item.source_latest_run_id === candidate.latest_run_id
+                      && item.source_latest_review_id === candidate.latest_review_id,
+                    ) ?? null
+                    : null
+                  return (
+                    <article key={candidate.candidate_type} className="pretrade-record-card pretrade-record-static">
+                      <div className="pretrade-review-head">
+                        <div>
+                          <strong>{candidate.label}</strong>
+                          <span>
+                            score {candidate.score} | {candidate.evidence_summary}
+                          </span>
+                        </div>
+                        <span className={`status-pill status-pill-${promotionCandidateTone(candidate.status)}`}>
+                          {candidate.status.replaceAll('_', ' ')}
+                        </span>
+                      </div>
+                      <p>{candidate.promotion_rationale}</p>
+                      {candidate.stop_reasons.length > 0 ? (
+                        <div className="pretrade-card-list">
+                          {candidate.stop_reasons.map((reason) => (
+                            <small key={reason}>{reason}</small>
+                          ))}
+                        </div>
+                      ) : null}
+                      <small>
+                        Samples: reviews {candidate.sample_review_ids.length > 0 ? candidate.sample_review_ids.join(', ') : 'none'} | runs {candidate.sample_run_ids.length > 0 ? candidate.sample_run_ids.join(', ') : 'none'}
+                      </small>
+                      {existingNettingSet ? (
+                        <small>Netting draft: {existingNettingSet.name} | {existingNettingSet.status.replaceAll('_', ' ')}</small>
+                      ) : null}
+                      {existingHedgeRecommendation ? (
+                        <small>
+                          Hedge draft: {existingHedgeRecommendation.name} | {existingHedgeRecommendation.status.replaceAll('_', ' ')}
+                        </small>
+                      ) : null}
+                      {existingRiskScenario ? (
+                        <small>
+                          Risk scenario draft: {existingRiskScenario.name} | {existingRiskScenario.status.replaceAll('_', ' ')}
+                        </small>
+                      ) : null}
+                      <div className="pretrade-inline-actions">
+                        {candidate.candidate_type === 'NETTING_SET' ? (
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => void handlePromoteNettingCandidate(candidate)}
+                            disabled={actionPending !== '' || !authSession}
+                          >
+                            {existingNettingSet ? 'Refresh Netting Draft' : 'Create Netting Draft'}
+                          </button>
+                        ) : null}
+                        {candidate.candidate_type === 'HEDGE_RECOMMENDATION' ? (
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => void handlePromoteHedgeRecommendationCandidate(candidate)}
+                            disabled={actionPending !== '' || !authSession}
+                          >
+                            {existingHedgeRecommendation ? 'Refresh Hedge Draft' : 'Create Hedge Draft'}
+                          </button>
+                        ) : null}
+                        {candidate.candidate_type === 'RISK_SCENARIO' ? (
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => void handlePromoteRiskScenarioCandidate(candidate)}
+                            disabled={actionPending !== '' || !authSession}
+                          >
+                            {existingRiskScenario ? 'Refresh Risk Scenario Draft' : 'Create Risk Scenario Draft'}
+                          </button>
+                        ) : null}
+                        {candidate.latest_review_id ? (
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => {
+                              setReviewQueueFilter('all')
+                              setFocusedReviewId(candidate.latest_review_id)
+                              setReviewFocusSequence((current) => current + 1)
+                            }}
+                          >
+                            Focus Latest Review
+                          </button>
+                        ) : null}
+                      </div>
+                    </article>
+                  )
+                })}
+                {nettingSets.length > 0 ? (
+                  <div className="pretrade-card-list">
+                    <span className="eyebrow">Netting Set Drafts</span>
+                    {nettingSets.map((nettingSet) => (
+                      <article key={nettingSet.netting_set_id} className="pretrade-record-card pretrade-record-static">
+                        <div className="pretrade-review-head">
+                          <div>
+                            <strong>{nettingSet.name}</strong>
+                            <span>
+                              {nettingSet.status.replaceAll('_', ' ')} | score {nettingSet.source_promotion_score} | {nettingSet.source_evidence_summary}
+                            </span>
+                          </div>
+                          <span className="status-pill status-pill-in-progress">Review Draft</span>
+                        </div>
+                        <p>{nettingSet.review_note ?? nettingSet.source_promotion_rationale}</p>
+                        {nettingSet.netting_candidates.map((candidate) => (
+                          <small key={`${nettingSet.netting_set_id}-${candidate.candidate_id}`}>
+                            {candidate.label}: {candidate.match_quality.replaceAll('_', ' ')}
+                            {candidate.matched_quantity !== null ? ` | matched ${formatNumber(candidate.matched_quantity)}` : ''}
+                            {candidate.residual_quantity !== null ? ` | residual ${formatNumber(candidate.residual_quantity)}` : ''}
+                          </small>
+                        ))}
+                        {nettingSet.source_stop_reasons.length > 0 ? (
+                          <small>{nettingSet.source_stop_reasons.join(' | ')}</small>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+                {hedgeRecommendations.length > 0 ? (
+                  <div className="pretrade-card-list">
+                    <span className="eyebrow">Hedge Recommendation Drafts</span>
+                    {hedgeRecommendations.map((hedgeDraft) => (
+                      <article key={hedgeDraft.hedge_recommendation_id} className="pretrade-record-card pretrade-record-static">
+                        <div className="pretrade-review-head">
+                          <div>
+                            <strong>{hedgeDraft.name}</strong>
+                            <span>
+                              {hedgeDraft.status.replaceAll('_', ' ')} | score {hedgeDraft.source_promotion_score} | {hedgeDraft.source_evidence_summary}
+                            </span>
+                          </div>
+                          <span className="status-pill status-pill-in-progress">Review Draft</span>
+                        </div>
+                        <p>{hedgeDraft.review_note ?? hedgeDraft.source_promotion_rationale}</p>
+                        <small>
+                          {hedgeDraft.hedge_recommendation.instrument_type.replaceAll('_', ' ')}
+                          {hedgeDraft.hedge_recommendation.target_delta !== null
+                            ? ` | target ${formatNumber(hedgeDraft.hedge_recommendation.target_delta)}`
+                            : ''}
+                          {hedgeDraft.hedge_recommendation.hedge_ratio !== null
+                            ? ` | ratio ${formatNumber(hedgeDraft.hedge_recommendation.hedge_ratio, 2)}`
+                            : ''}
+                        </small>
+                        <small>{hedgeDraft.hedge_recommendation.rationale}</small>
+                        {hedgeDraft.hedge_recommendation.policy_stops.length > 0 ? (
+                          <small>Policy stops: {hedgeDraft.hedge_recommendation.policy_stops.join(' | ')}</small>
+                        ) : null}
+                        {hedgeDraft.rejected_alternatives.slice(0, 3).map((alternative) => (
+                          <small key={`${hedgeDraft.hedge_recommendation_id}-${alternative.alternative}`}>
+                            Rejected {alternative.alternative.replaceAll('_', ' ')}: {alternative.reason}
+                          </small>
+                        ))}
+                        {hedgeDraft.source_stop_reasons.length > 0 ? (
+                          <small>{hedgeDraft.source_stop_reasons.join(' | ')}</small>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+                {riskScenarios.length > 0 ? (
+                  <div className="pretrade-card-list">
+                    <span className="eyebrow">Risk Scenario Drafts</span>
+                    {riskScenarios.map((riskScenario) => (
+                      <article key={riskScenario.risk_scenario_id} className="pretrade-record-card pretrade-record-static">
+                        <div className="pretrade-review-head">
+                          <div>
+                            <strong>{riskScenario.name}</strong>
+                            <span>
+                              {riskScenario.status.replaceAll('_', ' ')} | score {riskScenario.source_promotion_score} | {riskScenario.source_evidence_summary}
+                            </span>
+                          </div>
+                          <span className={`status-pill status-pill-${reviewStatusTone(riskScenario.source_review_status)}`}>
+                            {riskScenario.source_review_status.replaceAll('_', ' ')}
+                          </span>
+                        </div>
+                        <p>{riskScenario.review_note ?? riskScenario.source_review_thesis ?? riskScenario.source_promotion_rationale}</p>
+                        <small>
+                          Source review: {riskScenario.source_review_name} | owner {riskScenario.source_review_owner ?? riskScenario.owner ?? 'unassigned'}
+                        </small>
+                        {riskScenario.source_recommendation_stance ? (
+                          <small>
+                            Recommendation {riskScenario.source_recommendation_stance.replaceAll('_', ' ')}
+                            {riskScenario.source_recommendation_score !== null ? ` | score ${riskScenario.source_recommendation_score}` : ''}
+                            {riskScenario.source_recommendation_headline ? ` | ${riskScenario.source_recommendation_headline}` : ''}
+                          </small>
+                        ) : null}
+                        {riskScenario.residual_exposure ? (
+                          <small>
+                            Residual {riskScenario.residual_exposure.exposure_effect.replaceAll('_', ' ')}
+                            {riskScenario.residual_exposure.residual_after_trade !== null
+                              ? ` | after ${formatNumber(riskScenario.residual_exposure.residual_after_trade, 0)}`
+                              : ''}
+                            {riskScenario.residual_exposure.detail ? ` | ${riskScenario.residual_exposure.detail}` : ''}
+                          </small>
+                        ) : null}
+                        {riskScenario.enrichment?.residual_exposure_summary ? (
+                          <small>{riskScenario.enrichment.residual_exposure_summary}</small>
+                        ) : null}
+                        {riskScenario.input_snapshots.length > 0 ? (
+                          <small>
+                            Evidence: {riskScenario.input_snapshots.slice(0, 3).map((snapshot) => snapshot.adapter_label ?? snapshot.source_key).join(' | ')}
+                            {riskScenario.input_snapshots.length > 3 ? ` | +${riskScenario.input_snapshots.length - 3} more` : ''}
+                          </small>
+                        ) : null}
+                        {riskScenario.reviewer_focus.slice(0, 4).map((focus) => (
+                          <small key={`${riskScenario.risk_scenario_id}-${focus}`}>Focus: {focus}</small>
+                        ))}
+                        {riskScenario.missing_evidence.slice(0, 3).map((missing) => (
+                          <small key={`${riskScenario.risk_scenario_id}-${missing.evidence_key}`}>
+                            Missing {missing.severity.toLowerCase()}: {missing.label} | {missing.detail}
+                          </small>
+                        ))}
+                        {riskScenario.source_stop_reasons.length > 0 ? (
+                          <small>{riskScenario.source_stop_reasons.join(' | ')}</small>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+                {!collectionLoading && selectedGovernancePromotionCandidates.length === 0 ? (
+                  <p className="form-note">No reviewer reuse promotion signals are currently visible for this bucket.</p>
                 ) : null}
               </div>
             ) : (
@@ -1623,6 +1959,58 @@ export function PreTradeWorkspace({
             </button>
           </div>
           {draftAnalysisError ? <p className="form-note">{draftAnalysisError}</p> : null}
+          <div className={`surface pretrade-next-actions pretrade-readiness-panel pretrade-readiness-panel-${recommendationBrief.tone}`}>
+            <div className="pretrade-readiness-head">
+              <div>
+                <span className="eyebrow">Review Readiness</span>
+                <strong>{recommendationBrief.headline}</strong>
+                <small>
+                  {recommendationBrief.sourceSummary} | {recommendationBrief.missingEvidenceSummary}
+                </small>
+              </div>
+              <span className={`status-pill status-pill-${recommendationBrief.tone}`}>
+                {recommendationBrief.stanceLabel}
+              </span>
+            </div>
+            <p>{recommendationBrief.summary}</p>
+            <div className="pretrade-readiness-grid">
+              {recommendationBrief.sections.map((section) => (
+                <div key={section.key} className={`pretrade-readiness-item pretrade-readiness-item-${section.tone}`}>
+                  <span>{section.label}</span>
+                  <strong>{section.headline}</strong>
+                  <p>{section.detail}</p>
+                  {section.bullets.length > 0 ? (
+                    <ul className="pretrade-bullet-list">
+                      {section.bullets.map((bullet) => (
+                        <li key={bullet}>{bullet}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+            {recommendationBrief.primaryFocus.length > 0 ? (
+              <div className="pretrade-readiness-focus">
+                <span>Reviewer focus</span>
+                <ul className="pretrade-bullet-list">
+                  {recommendationBrief.primaryFocus.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <div className="pretrade-action-row pretrade-readiness-actions">
+              <button type="button" className="button" onClick={() => void handleSaveScenario()} disabled={actionPending !== ''}>
+                {selectedScenarioId !== null ? 'Update Scenario' : 'Save Scenario'}
+              </button>
+              <button type="button" className="button button-secondary" onClick={() => void handleSubmitReview()} disabled={actionPending !== ''}>
+                Submit For Review
+              </button>
+              <button type="button" className="button button-secondary" onClick={() => onOpenTradeCapture(draft)}>
+                Open In Trade Capture
+              </button>
+            </div>
+          </div>
           {!recommendation ? (
             <div className="surface pretrade-next-actions">
               <span className="eyebrow">Live Evidence</span>
@@ -1735,6 +2123,13 @@ export function PreTradeWorkspace({
                 <div className="surface pretrade-next-actions">
                   <span className="eyebrow">Hedge Draft</span>
                   <p>{recommendation.hedge_recommendation.rationale}</p>
+                  {recommendation.hedge_recommendation.decision_factors?.length ? (
+                    <ul className="pretrade-bullet-list">
+                      {recommendation.hedge_recommendation.decision_factors.map((factor) => (
+                        <li key={factor}>{factor}</li>
+                      ))}
+                    </ul>
+                  ) : null}
                   {recommendation.hedge_recommendation.policy_stops.length > 0 ? (
                     <ul className="pretrade-bullet-list">
                       {recommendation.hedge_recommendation.policy_stops.map((stop) => (
@@ -1755,7 +2150,9 @@ export function PreTradeWorkspace({
                           <span>{candidate.match_quality.replaceAll('_', ' ')}</span>
                         </div>
                         <small>
-                          Matched {formatNumber(candidate.matched_quantity, 0)} | residual {formatNumber(candidate.residual_quantity, 0)}
+                          Gross {formatNumber(candidate.gross_exposure ?? null, 0)} | offset{' '}
+                          {formatNumber(candidate.offset_quantity ?? candidate.matched_quantity, 0)} | residual{' '}
+                          {formatNumber(candidate.residual_exposure ?? candidate.residual_quantity, 0)}
                         </small>
                         {candidate.rejection_reasons.length > 0 ? <p>{candidate.rejection_reasons.join(' ')}</p> : null}
                       </article>

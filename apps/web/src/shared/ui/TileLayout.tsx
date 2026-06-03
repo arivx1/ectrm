@@ -81,9 +81,35 @@ const TILE_SPAN_LABELS: Record<TileSpan, string> = {
   half: 'Half',
   side: 'Side',
 }
+const LEGACY_SETTLEMENT_TILE_ORDER = [
+  'settlement-summary',
+  'settlement-status',
+  'settlement-disputes',
+  'settlement-document-record-creation',
+  'settlement-queue',
+]
 
 function uniqueValues<T extends string>(values: T[]): T[] {
   return [...new Set(values)]
+}
+
+function arraysMatch(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+function migrateWorkspaceLayoutOrder(
+  workspaceId: PersonalizableWorkspaceId,
+  layout: TileLayoutState,
+  defaultOrder: string[],
+): TileLayoutState {
+  if (workspaceId === 'settlement' && arraysMatch(layout.order, LEGACY_SETTLEMENT_TILE_ORDER)) {
+    return {
+      ...layout,
+      order: [...defaultOrder],
+    }
+  }
+
+  return layout
 }
 
 function storageKey(workspaceId: string): string {
@@ -146,10 +172,12 @@ function replaceVisibleOrder(currentOrder: string[], hiddenIds: string[], nextVi
 
 function SortableTileCard({
   tile,
+  isCustomizingLayout,
   onHide,
   onSpanChange,
 }: {
   tile: WorkspaceTile
+  isCustomizingLayout: boolean
   onHide: (tileId: string) => void
   onSpanChange: (tileId: string, nextSpan: TileSpan) => void
 }) {
@@ -175,42 +203,44 @@ function SortableTileCard({
           <h3>{tile.title}</h3>
           <p>{tile.description}</p>
         </div>
-        <div className="workspace-tile-controls">
-          {availableSpans.length > 1 ? (
-            <div className="workspace-tile-size-group" role="group" aria-label={`Resize ${tile.title} tile`}>
-              {availableSpans.map((span) => (
-                <button
-                  key={span}
-                  type="button"
-                  className={`workspace-tile-size-button ${tile.span === span ? 'is-active' : ''}`}
-                  onClick={() => onSpanChange(tile.id, span)}
-                  aria-pressed={tile.span === span}
-                >
-                  {TILE_SPAN_LABELS[span]}
-                </button>
-              ))}
+        {isCustomizingLayout ? (
+          <div className="workspace-tile-controls">
+            {availableSpans.length > 1 ? (
+              <div className="workspace-tile-size-group" role="group" aria-label={`Resize ${tile.title} tile`}>
+                {availableSpans.map((span) => (
+                  <button
+                    key={span}
+                    type="button"
+                    className={`workspace-tile-size-button ${tile.span === span ? 'is-active' : ''}`}
+                    onClick={() => onSpanChange(tile.id, span)}
+                    aria-pressed={tile.span === span}
+                  >
+                    {TILE_SPAN_LABELS[span]}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <div className="workspace-tile-tools">
+              <button
+                type="button"
+                className="button button-ghost workspace-tile-handle"
+                aria-label={`Drag ${tile.title} tile`}
+                {...attributes}
+                {...listeners}
+              >
+                Move
+              </button>
+              <button
+                type="button"
+                className="button button-ghost workspace-tile-remove"
+                onClick={() => onHide(tile.id)}
+                aria-label={`Remove ${tile.title} tile from the workspace`}
+              >
+                Remove
+              </button>
             </div>
-          ) : null}
-          <div className="workspace-tile-tools">
-            <button
-              type="button"
-              className="button button-ghost workspace-tile-handle"
-              aria-label={`Drag ${tile.title} tile`}
-              {...attributes}
-              {...listeners}
-            >
-              Move
-            </button>
-            <button
-              type="button"
-              className="button button-ghost workspace-tile-remove"
-              onClick={() => onHide(tile.id)}
-              aria-label={`Remove ${tile.title} tile from the workspace`}
-            >
-              Remove
-            </button>
           </div>
-        </div>
+        ) : null}
       </div>
 
       <div className="workspace-tile-body">{tile.content}</div>
@@ -250,8 +280,11 @@ export function TileLayout({
     () => JSON.parse(sectionDefinitionSignature) as WorkspaceTileSectionLayoutSpec[],
     [sectionDefinitionSignature],
   )
-  const tileIds = tileLayoutSpec.map((tile) => tile.id)
-  const [layout, setLayout] = useState<TileLayoutState>(() => readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec))
+  const tileIds = useMemo(() => tileLayoutSpec.map((tile) => tile.id), [tileLayoutSpec])
+  const [layout, setLayout] = useState<TileLayoutState>(() =>
+    migrateWorkspaceLayoutOrder(workspaceId, readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec), tileIds),
+  )
+  const [isCustomizingLayout, setIsCustomizingLayout] = useState(false)
   const remoteHydrationInFlightRef = useRef(false)
   const remoteSnapshotRef = useRef<string | null>(null)
   const accessToken = authSession?.accessToken ?? null
@@ -276,10 +309,14 @@ export function TileLayout({
 
   useEffect(() => {
     setLayout((current) => {
-      const nextLayout = sanitizeLayout(tileLayoutSpec, sectionLayoutSpec, current)
+      const nextLayout = migrateWorkspaceLayoutOrder(
+        workspaceId,
+        sanitizeLayout(tileLayoutSpec, sectionLayoutSpec, current),
+        tileIds,
+      )
       return layoutsMatch(current, nextLayout) ? current : nextLayout
     })
-  }, [sectionLayoutSpec, tileLayoutSpec])
+  }, [sectionLayoutSpec, tileIds, tileLayoutSpec, workspaceId])
 
   useEffect(() => {
     if (!accessToken) {
@@ -300,13 +337,21 @@ export function TileLayout({
         }
 
         if (record) {
-          const nextLayout = sanitizeLayout(tileLayoutSpec, sectionLayoutSpec, record)
+          const nextLayout = migrateWorkspaceLayoutOrder(
+            workspaceId,
+            sanitizeLayout(tileLayoutSpec, sectionLayoutSpec, record),
+            tileIds,
+          )
           setLayout(nextLayout)
           remoteSnapshotRef.current = JSON.stringify(nextLayout)
           return
         }
 
-        const fallbackLayout = readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec)
+        const fallbackLayout = migrateWorkspaceLayoutOrder(
+          workspaceId,
+          readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec),
+          tileIds,
+        )
         setLayout(fallbackLayout)
         remoteSnapshotRef.current = hasStoredLayout(workspaceId) ? null : JSON.stringify(fallbackLayout)
       } catch {
@@ -314,7 +359,11 @@ export function TileLayout({
           return
         }
 
-        const fallbackLayout = readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec)
+        const fallbackLayout = migrateWorkspaceLayoutOrder(
+          workspaceId,
+          readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec),
+          tileIds,
+        )
         setLayout(fallbackLayout)
         remoteSnapshotRef.current = JSON.stringify(fallbackLayout)
       } finally {
@@ -329,7 +378,7 @@ export function TileLayout({
     return () => {
       cancelled = true
     }
-  }, [accessToken, sectionLayoutSpec, tileLayoutSpec, workspaceId])
+  }, [accessToken, sectionLayoutSpec, tileIds, tileLayoutSpec, workspaceId])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -521,6 +570,7 @@ export function TileLayout({
   }
 
   const sectionContextValue: TileLayoutSectionContextValue = {
+    isCustomizingLayout,
     getSectionOrder: (sectionId, itemIds) => sanitizeSectionOrder(itemIds, layout.sections[sectionId]),
     moveSectionItem: handleMoveSectionItem,
   }
@@ -529,69 +579,94 @@ export function TileLayout({
     <TileLayoutSectionContext.Provider value={sectionContextValue}>
       <div className="tile-layout-shell">
         {headerContent}
-        <section className="surface tile-layout-toolbar">
-          <div className="tile-layout-toolbar-head">
-            <div>
-              <span className="eyebrow">Layout</span>
-              <h3>{workspaceLabel} Tiles</h3>
+        {isCustomizingLayout ? (
+          <section className="surface tile-layout-toolbar">
+            <div className="tile-layout-toolbar-head">
+              <div>
+                <span className="eyebrow">Layout</span>
+                <h3>{workspaceLabel} Tiles</h3>
+              </div>
+              <span className="entity-chip entity-chip-soft">
+                {visibleTiles.length} of {tiles.length} on screen
+              </span>
             </div>
+            <p id={toolbarDescriptionId}>{resolvedToolbarDescription}</p>
+            {layoutPresets.length > 0 ? (
+              <div className="tile-layout-preset-bar">
+                <label className="tile-layout-preset-picker" htmlFor={presetSelectId}>
+                  <span className="eyebrow">Monitor preset</span>
+                  <select
+                    id={presetSelectId}
+                    className="control"
+                    value={presetSelectValue}
+                    onChange={(event) => {
+                      if (event.target.value !== 'custom') {
+                        handleApplyPreset(event.target.value)
+                      }
+                    }}
+                  >
+                    <option value="custom">Personal layout</option>
+                    {layoutPresets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="tile-layout-preset-note">{presetStatus}</p>
+              </div>
+            ) : null}
+            <div className="tile-layout-toolbar-actions">
+              {hiddenTiles.length > 0 ? (
+                hiddenTiles.map((tile) => (
+                  <button
+                    key={tile.id}
+                    type="button"
+                    className="button button-ghost tile-layout-add-button"
+                    onClick={() => handleShowTile(tile.id)}
+                  >
+                    Add {tile.title}
+                  </button>
+                ))
+              ) : (
+                <span className="entity-chip">All tiles are visible</span>
+              )}
+              <button type="button" className="button button-secondary tile-layout-reset-button" onClick={handleResetLayout}>
+                Reset layout
+              </button>
+              <button type="button" className="button button-primary" onClick={() => setIsCustomizingLayout(false)}>
+                Done
+              </button>
+            </div>
+          </section>
+        ) : (
+          <section className="surface tile-layout-customize-bar">
             <span className="entity-chip entity-chip-soft">
-              {visibleTiles.length} of {tiles.length} on screen
+              {visibleTiles.length} of {tiles.length} tiles visible
             </span>
-          </div>
-          <p id={toolbarDescriptionId}>{resolvedToolbarDescription}</p>
-          {layoutPresets.length > 0 ? (
-            <div className="tile-layout-preset-bar">
-              <label className="tile-layout-preset-picker" htmlFor={presetSelectId}>
-                <span className="eyebrow">Monitor preset</span>
-                <select
-                  id={presetSelectId}
-                  className="control"
-                  value={presetSelectValue}
-                  onChange={(event) => {
-                    if (event.target.value !== 'custom') {
-                      handleApplyPreset(event.target.value)
-                    }
-                  }}
-                >
-                  <option value="custom">Personal layout</option>
-                  {layoutPresets.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p className="tile-layout-preset-note">{presetStatus}</p>
-            </div>
-          ) : null}
-          <div className="tile-layout-toolbar-actions">
-            {hiddenTiles.length > 0 ? (
-              hiddenTiles.map((tile) => (
-                <button
-                  key={tile.id}
-                  type="button"
-                  className="button button-ghost tile-layout-add-button"
-                  onClick={() => handleShowTile(tile.id)}
-                >
-                  Add {tile.title}
-                </button>
-              ))
-            ) : (
-              <span className="entity-chip">All tiles are visible</span>
-            )}
-            <button type="button" className="button button-secondary tile-layout-reset-button" onClick={handleResetLayout}>
-              Reset layout
+            <button
+              type="button"
+              className="button button-secondary"
+              aria-expanded={false}
+              onClick={() => setIsCustomizingLayout(true)}
+            >
+              Customize view
             </button>
-          </div>
-        </section>
+          </section>
+        )}
 
         {visibleTiles.length > 0 ? (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={visibleTiles.map((tile) => tile.id)} strategy={rectSortingStrategy}>
-              <div className="tile-workspace-grid" aria-describedby={toolbarDescriptionId}>
+              <div className="tile-workspace-grid" aria-describedby={isCustomizingLayout ? toolbarDescriptionId : undefined}>
                 {visibleTiles.map((tile) => (
-                  <SortableTileCard key={tile.id} tile={tile} onHide={handleHideTile} onSpanChange={handleSetTileSpan} />
+                  <SortableTileCard
+                    key={tile.id}
+                    tile={tile}
+                    isCustomizingLayout={isCustomizingLayout}
+                    onHide={handleHideTile}
+                    onSpanChange={handleSetTileSpan}
+                  />
                 ))}
               </div>
             </SortableContext>

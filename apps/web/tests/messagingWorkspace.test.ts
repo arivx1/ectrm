@@ -374,6 +374,91 @@ test("messaging workspace renders assistant chart artifacts in message bodies", 
   assert.doesNotMatch(markup, /```ectrm-chart/);
 });
 
+test("messaging workspace marks Slack-backed conversations and gates posting behind sign-in", () => {
+  const slackWorkspaceState = {
+    conversations: [
+      {
+        conversation_id: "slack-C123SLACK",
+        section: "Channels" as const,
+        kind: "channel" as const,
+        label: "#desk-ops",
+        connected_workspace: "Slack",
+        assistant_workspace: "assistant",
+        description: "Synced from Slack through the configured Slack Web API connector.",
+        topic: "Desk operations in Slack.",
+        composer_hint: "Messages sent here post to Slack and are mirrored locally.",
+        sort_order: 900,
+        preview: "Slack note imported into the ECTRM messaging center.",
+        unread_count: 0,
+        latest_activity_at: "2026-02-02T10:00:00Z",
+        highlights: ["Synced from Slack into the durable ECTRM messaging center."],
+        metrics: [{ label: "Source", value: "Slack" }],
+        members: [
+          {
+            name: "Slack Operator",
+            title: "Slack user",
+            presence: "Synced from Slack",
+            initials: "SO",
+            tone: "human" as const,
+          },
+        ],
+        source_provider: "slack" as const,
+        timeline: [
+          {
+            id: "slack-C123SLACK-1770000000_000100",
+            kind: "message" as const,
+            created_at: "2026-02-02T10:00:00Z",
+            source: "human",
+            label: null,
+            detail: null,
+            author: {
+              name: "Slack Operator",
+              title: "Slack user",
+              presence: "Synced from Slack",
+              initials: "SO",
+              tone: "human" as const,
+            },
+            body: ["Slack note imported into the ECTRM messaging center."],
+            reactions: [":eyes: 2"],
+            attachment: null,
+            parent_message_id: null,
+            thread_root_message_id: "slack-C123SLACK-1770000000_000100",
+            reply_count: 0,
+            thread_participants: [],
+            created_by_user_id: null,
+            created_by_role: null,
+            edited_at: null,
+            deleted_at: null,
+            pinned_at: null,
+          },
+        ],
+      },
+    ],
+  };
+
+  const markup = renderToStaticMarkup(
+    createElement(MessagingWorkspace, {
+      authSession: null,
+      counts: defaultCounts,
+      onSessionSync: () => undefined,
+      onOpenPrompt: () => undefined,
+      onOpenAssistant: () => undefined,
+      onOpenOperations: () => undefined,
+      onOpenSettlement: () => undefined,
+      onSelectConversation: () => undefined,
+      selectedConversationId: "slack-C123SLACK",
+      initialWorkspaceState: slackWorkspaceState,
+    }),
+  );
+
+  assert.match(markup, /Message #desk-ops/);
+  assert.match(markup, /Slack mirror/);
+  assert.match(markup, /Sync Slack/);
+  assert.match(markup, /Send to Slack/);
+  assert.match(markup, /Sign in to post to Slack/);
+  assert.match(markup, /Slack note imported into the ECTRM messaging center/);
+});
+
 test("messaging workspace honors the selected conversation instead of hard-wiring the first lane", () => {
   const markup = renderToStaticMarkup(
     createElement(MessagingWorkspace, {

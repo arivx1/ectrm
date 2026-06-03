@@ -147,6 +147,13 @@ class Settings(BaseSettings):
     GMAIL_INBOX_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
     GMAIL_INBOX_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
     GMAIL_INBOX_API_BASE_URL: str = "https://gmail.googleapis.com/gmail/v1"
+    SLACK_MESSAGING_ENABLED: bool = False
+    SLACK_BOT_TOKEN: str = ""
+    SLACK_MESSAGING_CHANNEL_IDS: str = ""
+    SLACK_MESSAGING_CHANNEL_LIMIT: int = Field(default=10, ge=1, le=100)
+    SLACK_MESSAGING_HISTORY_LIMIT: int = Field(default=20, ge=1, le=200)
+    SLACK_MESSAGING_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    SLACK_API_BASE_URL: str = "https://slack.com/api"
     EIA_API_KEY: str = ""
     EIA_BASE_URL: str = "https://api.eia.gov/v2"
     EIA_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)

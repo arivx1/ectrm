@@ -1466,14 +1466,23 @@ def _plan_create_trade(
     if not _mentions_create_trade(message_lower):
         return None
 
+    payload = _merge_trade_payload_context(context_fields)
+    payload["status"] = str(payload.get("status") or "ACTIVE").strip().upper()
+    missing_fields = _missing_create_trade_fields(payload)
+
     trade_id = _first_present_value(context_fields, "trade_id")
     if trade_id:
         trade_id = trade_id.strip().upper() or None
     if trade_id is None:
         trade_id = _resolve_trade_id(message, None)
     if trade_id is None:
+        missing_fields = ["trade_id", *missing_fields]
         return AssistantActionPlanningCandidate(
-            warning="No trade_id was provided for a governed trade-create request."
+            warning=(
+                "Create-trade requests need structured fields before create_trade can run: "
+                + ", ".join(missing_fields)
+                + "."
+            )
         )
 
     if db.execute(select(Trade).where(Trade.trade_id == trade_id)).scalars().first() is not None:
@@ -1481,23 +1490,6 @@ def _plan_create_trade(
             warning=f"Trade {trade_id} already exists, so no create-trade action was staged."
         )
 
-    payload = _merge_trade_payload_context(context_fields)
-    payload["status"] = str(payload.get("status") or "ACTIVE").strip().upper()
-
-    pricing_type = str(payload.get("pricing_type") or "FIXED").strip().upper()
-    trade_structure = str(payload.get("trade_structure") or "SINGLE").strip().upper()
-    missing_fields = [
-        label
-        for label, present in (
-            ("book", bool(payload.get("book"))),
-            ("commodity_class", bool(payload.get("commodity_class"))),
-            ("commodity", bool(payload.get("commodity"))),
-            ("volume", trade_structure != "SINGLE" or payload.get("volume") is not None or bool(payload.get("legs"))),
-            ("price", pricing_type not in {"FIXED", "HYBRID"} or payload.get("price") is not None),
-            ("price_index_code", pricing_type not in {"INDEX", "HYBRID"} or bool(payload.get("price_index_code"))),
-        )
-        if not present
-    ]
     if missing_fields:
         return AssistantActionPlanningCandidate(
             warning=(
@@ -1552,6 +1544,23 @@ def _plan_create_trade(
             ),
         )
     )
+
+
+def _missing_create_trade_fields(payload: dict[str, object]) -> list[str]:
+    pricing_type = str(payload.get("pricing_type") or "FIXED").strip().upper()
+    trade_structure = str(payload.get("trade_structure") or "SINGLE").strip().upper()
+    return [
+        label
+        for label, present in (
+            ("book", bool(payload.get("book"))),
+            ("commodity_class", bool(payload.get("commodity_class"))),
+            ("commodity", bool(payload.get("commodity"))),
+            ("volume", trade_structure != "SINGLE" or payload.get("volume") is not None or bool(payload.get("legs"))),
+            ("price", pricing_type not in {"FIXED", "HYBRID"} or payload.get("price") is not None),
+            ("price_index_code", pricing_type not in {"INDEX", "HYBRID"} or bool(payload.get("price_index_code"))),
+        )
+        if not present
+    ]
 
 
 def _plan_amend_trade(
@@ -3337,7 +3346,7 @@ def _mentions_issue_confirmation(message_lower: str) -> bool:
 
 
 def _mentions_create_trade(message_lower: str) -> bool:
-    return any(
+    if any(
         phrase in message_lower
         for phrase in (
             "create trade",
@@ -3346,7 +3355,9 @@ def _mentions_create_trade(message_lower: str) -> bool:
             "create a trade",
             "book a trade",
         )
-    )
+    ):
+        return True
+    return re.search(r"\b(?:do|make|put on)\s+(?:a\s+|the\s+)?(?:[a-z0-9_-]+\s+){0,4}trade\b", message_lower) is not None
 
 
 def _mentions_amend_trade(message_lower: str) -> bool:

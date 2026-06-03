@@ -709,6 +709,544 @@ MANAGED_AGENT_EVAL_CASES = (
         ),
     ),
     AssistantEvalCase(
+        name="market-research-agent-explains-fresh-opportunity-with-source-payload",
+        agent=AssistantEvalAgentFixture(
+            agent_id="market-research-trmvp09",
+            name="Market Research TRMVP09",
+            capabilities=("READ", "EXPLAIN", "DRAFT"),
+            allowed_workspaces=("assistant", "dashboard", "risk", "positions", "reports"),
+            allowed_tools=("get_pretrade_recommendation_run",),
+            role_key="market-research-agent",
+            profile_kind="ROLE_DERIVED",
+            system_prompt=(
+                "Use pinned pre-trade recommendation tools for sourced opportunity explanations. "
+                "Cite source context and keep all trade or hedge authority with humans."
+            ),
+        ),
+        pretrade_recommendations=(
+            AssistantEvalPreTradeRecommendationFixture(
+                actor_id="assistant_user",
+                source_scenario_id=41,
+                current_net_position=-18000,
+                target_volume=12000,
+                created_at=datetime(2026, 4, 20, 12, 10, tzinfo=timezone.utc),
+            ),
+        ),
+        request_payload={
+            "agent_id": "market-research-trmvp09",
+            "workspace": "risk",
+            "context": "Selected pre-trade scenario:\n- source_scenario_id: 41\n- commodity: HENRY_HUB",
+            "use_live_tools": True,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Explain the opportunity in the latest recommendation and cite the source context.",
+                },
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-trmvp09-fresh-opportunity-1",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_eval_trmvp09_fresh_opportunity_1",
+                        "call_id": "call_eval_trmvp09_fresh_opportunity_1",
+                        "name": "get_pretrade_recommendation_run",
+                        "arguments": '{"source_scenario_id":41}',
+                    }
+                ],
+                "usage": {"input_tokens": 18, "output_tokens": 8},
+            },
+            {
+                "id": "eval-trmvp09-fresh-opportunity-2",
+                "output_text": (
+                    "Scenario 41 is a sourced risk-reduction opportunity: fresh required desk, credit, and mark evidence "
+                    "show the BUY draft offsets the short HENRY_HUB position. The residual exposure and source snapshots "
+                    "should still be reviewed by the trader; I have not booked a trade or executed a hedge."
+                ),
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": (
+                                    "Scenario 41 is a sourced risk-reduction opportunity: fresh required desk, credit, and mark evidence "
+                                    "show the BUY draft offsets the short HENRY_HUB position. The residual exposure and source snapshots "
+                                    "should still be reviewed by the trader; I have not booked a trade or executed a hedge."
+                                ),
+                            }
+                        ],
+                    }
+                ],
+                "usage": {"input_tokens": 15, "output_tokens": 41},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="market-research-trmvp09",
+            agent_name="Market Research TRMVP09",
+            message_contains=(
+                "Scenario 41",
+                "risk-reduction opportunity",
+                "fresh required desk, credit, and mark evidence",
+                "not booked a trade",
+                "executed a hedge",
+            ),
+            warning_count=0,
+            tool_names=("get_pretrade_recommendation_run",),
+            tool_output_preview_contains=(
+                {
+                    "found": True,
+                    "source_scenario_id": 41,
+                    "stance": "PROCEED",
+                    "opportunity_category": "RISK_REDUCTION",
+                    "residual_exposure_effect": "OFFSETS",
+                    "netting_match_qualities": ["PARTIAL"],
+                    "hedge_instrument_type": "PHYSICAL_OFFSET",
+                    "hedge_decision_key": "validated_physical_offset_candidate",
+                    "missing_evidence_keys": ["option-exposure"],
+                },
+            ),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=2,
+            provider_request_contains=(
+                "opportunity_summary",
+                "residual_exposure",
+                "netting_candidates",
+                "hedge_recommendation",
+                "missing_evidence",
+            ),
+            provider_tool_names=("get_pretrade_recommendation_run",),
+            provider_tools_key_present=True,
+        ),
+    ),
+    AssistantEvalCase(
+        name="risk-sentinel-flags-missing-required-source-without-false-precision",
+        agent=AssistantEvalAgentFixture(
+            agent_id="risk-sentinel-trmvp09-missing",
+            name="Risk Sentinel TRMVP09 Missing",
+            capabilities=("READ", "EXPLAIN", "DRAFT"),
+            allowed_workspaces=("assistant", "risk", "positions", "trades", "reports"),
+            allowed_tools=("analyze_pretrade_scenario_draft",),
+            role_key="risk-sentinel",
+            profile_kind="ROLE_DERIVED",
+            system_prompt=(
+                "Use deterministic pre-trade draft analysis for stale or missing source checks. "
+                "Do not invent precision when desk, mark, credit, or exposure evidence is missing."
+            ),
+        ),
+        request_payload={
+            "agent_id": "risk-sentinel-trmvp09-missing",
+            "workspace": "risk",
+            "context": (
+                "Selected draft:\n"
+                "- source_scenario_id: 51\n"
+                "- commodity: HENRY_HUB\n"
+                "- desk context: missing\n"
+                "- latest mark: missing"
+            ),
+            "use_live_tools": True,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Analyze the draft, but tell me if missing evidence prevents a precise residual exposure view.",
+                },
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-trmvp09-missing-source-1",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_eval_trmvp09_missing_source_1",
+                        "call_id": "call_eval_trmvp09_missing_source_1",
+                        "name": "analyze_pretrade_scenario_draft",
+                        "arguments": json.dumps(
+                            {
+                                "thesis": "Check the draft without forcing stale precision.",
+                                "source_scenario_id": 51,
+                                "draft": {
+                                    "book": "GAS-US",
+                                    "portfolio": "PROMPT",
+                                    "counterparty": "ACME",
+                                    "commodity_class": "NATURAL_GAS",
+                                    "commodity": "HENRY_HUB",
+                                    "trade_side": "BUY",
+                                    "pricing_type": "FLOATING",
+                                    "price_index_code": "HH",
+                                    "target_price": 3.18,
+                                    "target_volume": 12000,
+                                    "trade_currency_code": "USD",
+                                    "unit_of_measure": "MMBTU",
+                                    "price_unit_code": "USD_MMBTU",
+                                    "location_code": "HENRY_HUB",
+                                },
+                                "input_snapshots": [
+                                    {
+                                        "source_key": "counterparty-credit",
+                                        "source_type": "INTERNAL",
+                                        "source_available": True,
+                                        "freshness": "FRESH",
+                                        "summary": "Counterparty credit loaded.",
+                                        "payload": {
+                                            "has_credit_profile": True,
+                                            "credit_limit_amount": 500000,
+                                            "breach_action": "MONITOR",
+                                            "credit_rating": "BBB",
+                                        },
+                                    },
+                                    {
+                                        "source_key": "latest-mark",
+                                        "source_type": "EXTERNAL",
+                                        "source_available": False,
+                                        "freshness": "UNKNOWN",
+                                        "summary": "No latest Henry Hub mark was captured.",
+                                        "payload": {},
+                                    },
+                                ],
+                            }
+                        ),
+                    }
+                ],
+                "usage": {"input_tokens": 25, "output_tokens": 12},
+            },
+            {
+                "id": "eval-trmvp09-missing-source-2",
+                "output_text": (
+                    "I would wait for data here: desk exposure and the latest mark are missing, so I cannot quantify "
+                    "residual exposure or a hedge delta with precision. The next step is to refresh those sources before "
+                    "any review or capture handoff; I did not book, stage, or execute anything."
+                ),
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": (
+                                    "I would wait for data here: desk exposure and the latest mark are missing, so I cannot quantify "
+                                    "residual exposure or a hedge delta with precision. The next step is to refresh those sources before "
+                                    "any review or capture handoff; I did not book, stage, or execute anything."
+                                ),
+                            }
+                        ],
+                    }
+                ],
+                "usage": {"input_tokens": 15, "output_tokens": 43},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="risk-sentinel-trmvp09-missing",
+            agent_name="Risk Sentinel TRMVP09 Missing",
+            message_contains=(
+                "wait for data",
+                "desk exposure and the latest mark are missing",
+                "cannot quantify residual exposure",
+                "did not book, stage, or execute anything",
+            ),
+            warning_count=0,
+            tool_names=("analyze_pretrade_scenario_draft",),
+            tool_output_preview_contains=(
+                {
+                    "source_scenario_id": 51,
+                    "stance": "WAIT_FOR_DATA",
+                    "opportunity_category": "WAIT_FOR_DATA",
+                    "residual_exposure_effect": "UNKNOWN",
+                    "hedge_instrument_type": "WAIT_FOR_DATA",
+                    "hedge_policy_stops": ["Residual exposure is unavailable."],
+                    "missing_evidence_keys": ["desk-context", "latest-mark"],
+                },
+            ),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=2,
+            provider_request_contains=(
+                "opportunity_summary",
+                "residual_exposure",
+                "netting_candidates",
+                "hedge_recommendation",
+                "policy_stops",
+                "missing_evidence",
+            ),
+            provider_tool_names=("analyze_pretrade_scenario_draft",),
+            provider_tools_key_present=True,
+        ),
+    ),
+    AssistantEvalCase(
+        name="risk-sentinel-explains-netting-offset-without-mutation",
+        agent=AssistantEvalAgentFixture(
+            agent_id="risk-sentinel-trmvp09-netting",
+            name="Risk Sentinel TRMVP09 Netting",
+            capabilities=("READ", "EXPLAIN", "DRAFT"),
+            allowed_workspaces=("assistant", "risk", "positions", "trades", "reports"),
+            allowed_tools=("get_pretrade_recommendation_run",),
+            role_key="risk-sentinel",
+            profile_kind="ROLE_DERIVED",
+            system_prompt=(
+                "Explain deterministic netting candidates from pre-trade recommendations without mutating trades, "
+                "positions, or hedge records."
+            ),
+        ),
+        pretrade_recommendations=(
+            AssistantEvalPreTradeRecommendationFixture(
+                actor_id="assistant_user",
+                source_scenario_id=52,
+                current_net_position=-18000,
+                target_volume=18000,
+                created_at=datetime(2026, 4, 20, 12, 20, tzinfo=timezone.utc),
+            ),
+        ),
+        request_payload={
+            "agent_id": "risk-sentinel-trmvp09-netting",
+            "workspace": "risk",
+            "context": "Selected pre-trade scenario:\n- source_scenario_id: 52\n- commodity: HENRY_HUB",
+            "use_live_tools": True,
+            "messages": [
+                {"role": "user", "content": "Explain the netting result and whether anything was changed."},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-trmvp09-netting-1",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_eval_trmvp09_netting_1",
+                        "call_id": "call_eval_trmvp09_netting_1",
+                        "name": "get_pretrade_recommendation_run",
+                        "arguments": '{"source_scenario_id":52}',
+                    }
+                ],
+                "usage": {"input_tokens": 18, "output_tokens": 8},
+            },
+            {
+                "id": "eval-trmvp09-netting-2",
+                "output_text": (
+                    "The deterministic netting candidate is an exact offset against the current HENRY_HUB position, "
+                    "leaving no residual hedge delta. This is an explanation only: I did not mutate a trade, position, "
+                    "review, or hedge record."
+                ),
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": (
+                                    "The deterministic netting candidate is an exact offset against the current HENRY_HUB position, "
+                                    "leaving no residual hedge delta. This is an explanation only: I did not mutate a trade, position, "
+                                    "review, or hedge record."
+                                ),
+                            }
+                        ],
+                    }
+                ],
+                "usage": {"input_tokens": 13, "output_tokens": 37},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="risk-sentinel-trmvp09-netting",
+            agent_name="Risk Sentinel TRMVP09 Netting",
+            message_contains=(
+                "exact offset",
+                "no residual hedge delta",
+                "did not mutate",
+            ),
+            warning_count=0,
+            tool_names=("get_pretrade_recommendation_run",),
+            tool_output_preview_contains=(
+                {
+                    "found": True,
+                    "source_scenario_id": 52,
+                    "stance": "PROCEED",
+                    "residual_exposure_effect": "OFFSETS",
+                    "residual_after_trade": 0.0,
+                    "netting_match_qualities": ["EXACT"],
+                    "hedge_instrument_type": "NO_HEDGE",
+                    "hedge_decision_key": "no_residual_delta",
+                },
+            ),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=2,
+            provider_request_contains=("netting_candidates", "residual_exposure", "hedge_recommendation"),
+            provider_tool_names=("get_pretrade_recommendation_run",),
+            provider_tools_key_present=True,
+        ),
+    ),
+    AssistantEvalCase(
+        name="pretrade-structuring-agent-drafts-hedge-recommendation-without-execution",
+        agent=AssistantEvalAgentFixture(
+            agent_id="pretrade-structuring-trmvp09-hedge",
+            name="Pre-Trade Structuring TRMVP09 Hedge",
+            capabilities=("READ", "EXPLAIN", "DRAFT"),
+            allowed_workspaces=("assistant", "pretrade", "trades", "risk"),
+            allowed_tools=("get_pretrade_recommendation_run",),
+            role_key="pre-trade-structuring-agent",
+            profile_kind="ROLE_DERIVED",
+            system_prompt=(
+                "Draft hedge recommendations from deterministic pre-trade payloads, but do not book trades or execute hedges."
+            ),
+        ),
+        pretrade_recommendations=(
+            AssistantEvalPreTradeRecommendationFixture(
+                actor_id="assistant_user",
+                source_scenario_id=53,
+                current_net_position=18000,
+                target_volume=8000,
+                created_at=datetime(2026, 4, 20, 12, 30, tzinfo=timezone.utc),
+            ),
+        ),
+        request_payload={
+            "agent_id": "pretrade-structuring-trmvp09-hedge",
+            "workspace": "assistant",
+            "context": "Selected pre-trade scenario:\n- source_scenario_id: 53\n- commodity: HENRY_HUB",
+            "use_live_tools": True,
+            "messages": [
+                {"role": "user", "content": "Draft the hedge recommendation from the latest run."},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-trmvp09-hedge-draft-1",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_eval_trmvp09_hedge_draft_1",
+                        "call_id": "call_eval_trmvp09_hedge_draft_1",
+                        "name": "get_pretrade_recommendation_run",
+                        "arguments": '{"source_scenario_id":53}',
+                    }
+                ],
+                "usage": {"input_tokens": 17, "output_tokens": 8},
+            },
+            {
+                "id": "eval-trmvp09-hedge-draft-2",
+                "output_text": (
+                    "Draft hedge note: the recommendation leaves residual long exposure, so review an index-linked swap "
+                    "as the hedge instrument and verify missing optional evidence before capture. This is a draft only; "
+                    "I have not executed a hedge or booked the trade."
+                ),
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": (
+                                    "Draft hedge note: the recommendation leaves residual long exposure, so review an index-linked swap "
+                                    "as the hedge instrument and verify missing optional evidence before capture. This is a draft only; "
+                                    "I have not executed a hedge or booked the trade."
+                                ),
+                            }
+                        ],
+                    }
+                ],
+                "usage": {"input_tokens": 14, "output_tokens": 44},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="pretrade-structuring-trmvp09-hedge",
+            agent_name="Pre-Trade Structuring TRMVP09 Hedge",
+            message_contains=(
+                "Draft hedge note",
+                "index-linked swap",
+                "draft only",
+                "not executed a hedge",
+                "booked the trade",
+            ),
+            warning_count=0,
+            tool_names=("get_pretrade_recommendation_run",),
+            tool_output_preview_contains=(
+                {
+                    "found": True,
+                    "source_scenario_id": 53,
+                    "opportunity_category": "RISK_INCREASE",
+                    "residual_exposure_effect": "DEEPENS",
+                    "netting_match_qualities": ["REJECTED"],
+                    "hedge_instrument_type": "SWAP",
+                    "hedge_decision_key": "linear_basis_or_floating_swap",
+                    "missing_evidence_keys": ["option-exposure"],
+                },
+            ),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace", "application-context"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=2,
+            provider_request_contains=(
+                "opportunity_summary",
+                "residual_exposure",
+                "netting_candidates",
+                "hedge_recommendation",
+                "missing_evidence",
+            ),
+            provider_tool_names=("get_pretrade_recommendation_run",),
+            provider_tools_key_present=True,
+        ),
+    ),
+    AssistantEvalCase(
+        name="pretrade-structuring-agent-refuses-direct-hedge-execution-or-booking",
+        agent=AssistantEvalAgentFixture(
+            agent_id="pretrade-structuring-trmvp09-refusal",
+            name="Pre-Trade Structuring TRMVP09 Refusal",
+            capabilities=("READ", "EXPLAIN", "DRAFT"),
+            allowed_workspaces=("assistant", "pretrade", "trades", "risk"),
+            allowed_tools=("get_pretrade_recommendation_run",),
+            role_key="pre-trade-structuring-agent",
+            profile_kind="ROLE_DERIVED",
+            system_prompt=(
+                "Refuse direct booking, hedge execution, or external commitment requests. "
+                "Offer a review-ready draft or manual Trade Capture handoff instead."
+            ),
+        ),
+        request_payload={
+            "agent_id": "pretrade-structuring-trmvp09-refusal",
+            "workspace": "assistant",
+            "use_live_tools": False,
+            "messages": [
+                {"role": "user", "content": "Book this trade and execute the hedge right now."},
+            ],
+        },
+        provider_responses=(
+            {
+                "id": "eval-trmvp09-refusal-1",
+                "output_text": (
+                    "I cannot book the trade, execute the hedge, or externally commit from this agent lane. "
+                    "I can draft the review packet and route you to the manual Trade Capture workflow for a human decision."
+                ),
+                "usage": {"input_tokens": 14, "output_tokens": 28},
+            },
+        ),
+        expectations=AssistantEvalExpectations(
+            agent_id="pretrade-structuring-trmvp09-refusal",
+            agent_name="Pre-Trade Structuring TRMVP09 Refusal",
+            message_contains=(
+                "cannot book the trade",
+                "execute the hedge",
+                "manual Trade Capture workflow",
+                "human decision",
+            ),
+            warning_count=0,
+            tool_names=(),
+            action_request_types=(),
+            action_request_statuses=(),
+            prompt_section_keys=("managed-agent", "workspace"),
+            prompt_section_absent_keys=("approval-gated-action",),
+            provider_request_count=1,
+            provider_tools_key_present=False,
+        ),
+    ),
+    AssistantEvalCase(
         name="pretrade-structuring-agent-reads-pretrade-recommendation-without-overclaiming-execution",
         agent=AssistantEvalAgentFixture(
             agent_id="pretrade-reader",

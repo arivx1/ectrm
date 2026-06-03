@@ -26,6 +26,7 @@ import { UserManagementPanel } from './UserManagementPanel'
 import { WeatherOperationsPanel } from './WeatherOperationsPanel'
 import {
   ADMIN_PRICE_SOURCES_SECTION_ID,
+  ADMIN_PRICE_SOURCE_DETAIL_PREFIX,
   adminPriceSourceDetailAnchorId,
   readAdminPriceSourceIdFromHash,
 } from './adminRouteAnchors'
@@ -99,6 +100,51 @@ type SchemaEntityKey =
   | 'reference_books'
   | 'reference_commodities'
   | 'reference_price_indices'
+
+type AdminSectionKey =
+  | 'overview'
+  | 'external-data'
+  | 'assistant-governance'
+  | 'automation'
+  | 'access-planning'
+  | 'explainability'
+
+const ADMIN_SECTIONS: Array<{
+  key: AdminSectionKey
+  label: string
+  description: string
+}> = [
+  {
+    key: 'overview',
+    label: 'Overview',
+    description: 'Only the posture and next places to look.',
+  },
+  {
+    key: 'external-data',
+    label: 'External Data',
+    description: 'Weather, market sources, D&B preview, and source register.',
+  },
+  {
+    key: 'assistant-governance',
+    label: 'Assistant',
+    description: 'Control tower, agents, outcomes, and approvals.',
+  },
+  {
+    key: 'automation',
+    label: 'Automation',
+    description: 'Codex dispatch, scheduled jobs, and projections.',
+  },
+  {
+    key: 'access-planning',
+    label: 'Access & Planning',
+    description: 'Users, roadmap, shared Home inventory, and governance setup.',
+  },
+  {
+    key: 'explainability',
+    label: 'Explainability',
+    description: 'System atlas, lifecycle trace, schema, and provenance.',
+  },
+]
 
 type AdminWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -360,6 +406,43 @@ function readSelectedPriceSourceIdFromLocation(): number | null {
   }
 
   return readAdminPriceSourceIdFromHash(window.location.hash)
+}
+
+function readAdminSectionFromHash(hash: string): AdminSectionKey | null {
+  const normalizedHash = hash.replace(/^#/, '').trim()
+
+  if (
+    normalizedHash === ADMIN_PRICE_SOURCES_SECTION_ID ||
+    normalizedHash.startsWith(ADMIN_PRICE_SOURCE_DETAIL_PREFIX)
+  ) {
+    return 'external-data'
+  }
+
+  if (
+    normalizedHash === 'assistant-agent-management' ||
+    normalizedHash === 'assistant-agent-work-packages' ||
+    normalizedHash === 'assistant-agent-profile-requests' ||
+    normalizedHash === 'assistant-agent-builder' ||
+    normalizedHash === 'assistant-agent-editor' ||
+    normalizedHash === 'assistant-outcome-metrics' ||
+    normalizedHash === 'assistant-approval-inbox'
+  ) {
+    return 'assistant-governance'
+  }
+
+  if (normalizedHash === 'job-scheduling') {
+    return 'automation'
+  }
+
+  return null
+}
+
+function readInitialAdminSection(): AdminSectionKey {
+  if (typeof window === 'undefined') {
+    return 'overview'
+  }
+
+  return readAdminSectionFromHash(window.location.hash) ?? 'overview'
 }
 
 function weatherHealthTone(status: string): 'active' | 'blocked' | 'in-progress' | 'cancelled' {
@@ -719,13 +802,19 @@ export function AdminWorkspace({
   const [selectedPriceSourceId, setSelectedPriceSourceId] = useState<number | null>(
     readSelectedPriceSourceIdFromLocation,
   )
+  const [activeAdminSection, setActiveAdminSection] = useState<AdminSectionKey>(readInitialAdminSection)
   const [screenFilter, setScreenFilter] = useState('')
   const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
   const hasScreenFilter = effectiveScreenFilter.trim().length > 0
 
   useEffect(() => {
     function handleHashChange() {
+      const hash = window.location.hash
       setSelectedPriceSourceId(readSelectedPriceSourceIdFromLocation())
+      const hashSection = readAdminSectionFromHash(hash)
+      if (hashSection) {
+        setActiveAdminSection(hashSection)
+      }
     }
 
     handleHashChange()
@@ -734,7 +823,7 @@ export function AdminWorkspace({
   }, [])
 
   useEffect(() => {
-    if (selectedPriceSourceId === null) {
+    if (selectedPriceSourceId === null || activeAdminSection !== 'external-data') {
       return
     }
 
@@ -742,7 +831,22 @@ export function AdminWorkspace({
     window.requestAnimationFrame(() => {
       document.getElementById(anchorId)?.scrollIntoView({ block: 'start' })
     })
-  }, [selectedPriceSourceId])
+  }, [activeAdminSection, selectedPriceSourceId])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const anchorId = window.location.hash.replace(/^#/, '').trim()
+    if (!anchorId) {
+      return
+    }
+
+    window.requestAnimationFrame(() => {
+      document.getElementById(anchorId)?.scrollIntoView({ block: 'start' })
+    })
+  }, [activeAdminSection])
 
   const visibleEvents = useMemo(
     () => events.filter((event) => matchesAdminEventFilter(event, effectiveScreenFilter)),
@@ -1073,77 +1177,186 @@ export function AdminWorkspace({
   }, [visibleTradingSources])
   const selectedTradeHiddenByFilter =
     hasScreenFilter && selectedTrade !== null && !matchesAdminTradeFilter(selectedTrade, effectiveScreenFilter)
+  const weatherAttentionCount = weatherSyncStatus
+    ? weatherSyncStatus.stale_location_count +
+      weatherSyncStatus.missing_location_count +
+      (weatherSyncStatus.health_status === 'failed' ? 1 : 0)
+    : 0
+  const totalExternalAttentionCount = marketDataAttentionCount + priceSourceAttentionCount + weatherAttentionCount
+  const activeAdminSectionMeta =
+    ADMIN_SECTIONS.find((section) => section.key === activeAdminSection) ?? ADMIN_SECTIONS[0]
+  const adminOverviewCards = [
+    {
+      key: 'external-data' as const,
+      eyebrow: 'External Data',
+      title:
+        totalExternalAttentionCount > 0
+          ? `${totalExternalAttentionCount} item${totalExternalAttentionCount === 1 ? '' : 's'} need attention`
+          : 'Feeds look stable',
+      detail: `${marketDataAttentionCount} provider issue${marketDataAttentionCount === 1 ? '' : 's'} · ${priceSourceAttentionCount} price source issue${priceSourceAttentionCount === 1 ? '' : 's'} · ${weatherAttentionCount} weather issue${weatherAttentionCount === 1 ? '' : 's'}`,
+      actionLabel: 'Open External Data',
+    },
+    {
+      key: 'assistant-governance' as const,
+      eyebrow: 'Assistant',
+      title: 'Governance lanes',
+      detail: 'Review agent posture, pending approvals, outcome metrics, and profile changes without mixing them into data operations.',
+      actionLabel: 'Open Assistant Governance',
+    },
+    {
+      key: 'automation' as const,
+      eyebrow: 'Automation',
+      title: projectionFreshnessLabel,
+      detail: latestTradeProjectionUpdate
+        ? `Projection monitoring, scheduled jobs, and Codex dispatch. Latest trade projection ${formatDate(latestTradeProjectionUpdate.updated_at)}.`
+        : 'Projection monitoring, scheduled jobs, and Codex dispatch.',
+      actionLabel: 'Open Automation',
+    },
+    {
+      key: 'access-planning' as const,
+      eyebrow: 'Access',
+      title: authSession ? `${authSession.user.role} signed in` : 'No admin session',
+      detail: 'Manage users, roadmap metadata, shared Home inventory, and longer-lived governance setup.',
+      actionLabel: 'Open Access & Planning',
+    },
+    {
+      key: 'explainability' as const,
+      eyebrow: 'Explainability',
+      title: `${events.length} event${events.length === 1 ? '' : 's'} loaded`,
+      detail: 'Trace domains, schema, selected trade lifecycle, and live provenance separately from operational controls.',
+      actionLabel: 'Open Explainability',
+    },
+  ]
 
   return (
     <div className="stack">
-      <SystemStatusPanel />
-      <WorkspaceLocalFilterBar
-        value={screenFilter}
-        onChange={setScreenFilter}
-        placeholder="Trade, event, provider, weather location, D&B preview row, source register, or schema concept"
-        description="Keep admin filtering local to this screen so you can narrow live operational records and explainability cards without changing the rest of the app."
-        totalCount={
-          events.length +
-          trades.length +
-          positions.length +
-          activeBooks.length +
-          activeCommodities.length +
-          priceIndices.length +
-          externalDataRuns.length +
-          externalDataPriceSources.length +
-          tradingSources.length +
-          weatherLocations.length +
-          (counterpartyCreditPreview?.rows.length ?? 0)
-        }
-        matchedCount={
-          visibleEvents.length +
-          visibleTrades.length +
-          visiblePositions.length +
-          visibleActiveBooks.length +
-          visibleActiveCommodities.length +
-          visiblePriceIndices.length +
-          visibleExternalDataRuns.length +
-          visibleExternalDataPriceSources.length +
-          visibleTradingSources.length +
-          visibleWeatherLocations.length +
-          visibleCounterpartyCreditPreviewRows.length
-        }
-        resultLabel="admin records"
-        globalValue={globalFilter}
-        note={
-          selectedTradeHiddenByFilter
-            ? `The selected trade trace stays synced to ${selectedTrade?.trade_id}, even though it falls outside the current admin filters. Dedicated admin sub-panels below keep their own controls.`
-            : 'Dedicated admin sub-panels below keep their own controls.'
-        }
-      />
+      <section className="surface feature-panel admin-command-center">
+        <div className="section-head">
+          <div>
+            <span className="eyebrow">Admin Console</span>
+            <h3>{activeAdminSectionMeta.label}</h3>
+          </div>
+          <p>{activeAdminSectionMeta.description}</p>
+        </div>
 
+        <div className="admin-section-tabs" role="tablist" aria-label="Admin console sections">
+          {ADMIN_SECTIONS.map((section) => (
+            <button
+              key={section.key}
+              type="button"
+              className={`admin-section-tab${activeAdminSection === section.key ? ' is-active' : ''}`}
+              aria-pressed={activeAdminSection === section.key}
+              onClick={() => setActiveAdminSection(section.key)}
+            >
+              <strong>{section.label}</strong>
+              <span>{section.description}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {activeAdminSection === 'overview' ? (
+        <section className="surface feature-panel admin-overview-panel">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Command Center</span>
+              <h3>What Needs Attention</h3>
+            </div>
+            <p>Start with posture and the next best place to inspect, instead of every privileged control at once.</p>
+          </div>
+
+          <div className="admin-summary-grid">
+            {adminSummaryCards.map((card) => (
+              <article key={card.label} className="admin-summary-card">
+                <span>
+                  <InlineTooltipLabel tooltip={card.tooltip} tooltipLabel={`More information about ${card.label}`} align="start">
+                    {card.label}
+                  </InlineTooltipLabel>
+                </span>
+                {card.valueTooltip ? (
+                  <Tooltip content={card.valueTooltip} focusable>
+                    <strong className="tooltip-trigger-hint">{card.value}</strong>
+                  </Tooltip>
+                ) : (
+                  <strong>{card.value}</strong>
+                )}
+                <p>{card.note}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="admin-overview-grid">
+            <SystemStatusPanel variant="compact" />
+            <div className="admin-overview-action-grid">
+              {adminOverviewCards.map((card) => (
+                <article key={card.key} className="admin-overview-action-card">
+                  <span className="eyebrow">{card.eyebrow}</span>
+                  <strong>{card.title}</strong>
+                  <p>{card.detail}</p>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => setActiveAdminSection(card.key)}
+                  >
+                    {card.actionLabel}
+                  </button>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {activeAdminSection === 'external-data' || activeAdminSection === 'explainability' ? (
+        <WorkspaceLocalFilterBar
+          value={screenFilter}
+          onChange={setScreenFilter}
+          placeholder="Trade, event, provider, weather location, D&B preview row, source register, or schema concept"
+          description="Keep admin filtering local to this screen so you can narrow the active Admin section without changing the rest of the app."
+          totalCount={
+            events.length +
+            trades.length +
+            positions.length +
+            activeBooks.length +
+            activeCommodities.length +
+            priceIndices.length +
+            externalDataRuns.length +
+            externalDataPriceSources.length +
+            tradingSources.length +
+            weatherLocations.length +
+            (counterpartyCreditPreview?.rows.length ?? 0)
+          }
+          matchedCount={
+            visibleEvents.length +
+            visibleTrades.length +
+            visiblePositions.length +
+            visibleActiveBooks.length +
+            visibleActiveCommodities.length +
+            visiblePriceIndices.length +
+            visibleExternalDataRuns.length +
+            visibleExternalDataPriceSources.length +
+            visibleTradingSources.length +
+            visibleWeatherLocations.length +
+            visibleCounterpartyCreditPreviewRows.length
+          }
+          resultLabel="admin records"
+          globalValue={globalFilter}
+          note={
+            selectedTradeHiddenByFilter
+              ? `The selected trade trace stays synced to ${selectedTrade?.trade_id}, even though it falls outside the current admin filters. Dedicated admin sub-panels keep their own controls.`
+              : 'Dedicated admin sub-panels keep their own controls.'
+          }
+        />
+      ) : null}
+
+      {activeAdminSection === 'external-data' ? (
       <section className="surface feature-panel admin-hero-surface">
         <div className="section-head">
           <div>
-            <span className="eyebrow">How It Works</span>
-            <h3>System Atlas</h3>
+            <span className="eyebrow">Operations</span>
+            <h3>External Data Operations</h3>
           </div>
-          <p>Read the product as a set of connected domains, events, projections, and governed records rather than isolated pages.</p>
-        </div>
-
-        <div className="admin-summary-grid">
-          {adminSummaryCards.map((card) => (
-            <article key={card.label} className="admin-summary-card">
-              <span>
-                <InlineTooltipLabel tooltip={card.tooltip} tooltipLabel={`More information about ${card.label}`} align="start">
-                  {card.label}
-                </InlineTooltipLabel>
-              </span>
-              {card.valueTooltip ? (
-                <Tooltip content={card.valueTooltip} focusable>
-                  <strong className="tooltip-trigger-hint">{card.value}</strong>
-                </Tooltip>
-              ) : (
-                <strong>{card.value}</strong>
-              )}
-              <p>{card.note}</p>
-            </article>
-          ))}
+          <p>Run and supervise external feeds, source freshness, weather coverage, credit imports, and source-register seeding from one lane.</p>
         </div>
 
         <WeatherOperationsPanel
@@ -1945,6 +2158,39 @@ export function AdminWorkspace({
           </div>
         </div>
       </section>
+      ) : null}
+
+      {activeAdminSection === 'explainability' ? (
+      <>
+      <section className="surface feature-panel admin-hero-surface">
+        <div className="section-head">
+          <div>
+            <span className="eyebrow">How It Works</span>
+            <h3>System Atlas</h3>
+          </div>
+          <p>Read the product as connected domains, events, projections, and governed records without mixing that educational view into daily operations.</p>
+        </div>
+
+        <div className="admin-summary-grid">
+          {adminSummaryCards.map((card) => (
+            <article key={card.label} className="admin-summary-card">
+              <span>
+                <InlineTooltipLabel tooltip={card.tooltip} tooltipLabel={`More information about ${card.label}`} align="start">
+                  {card.label}
+                </InlineTooltipLabel>
+              </span>
+              {card.valueTooltip ? (
+                <Tooltip content={card.valueTooltip} focusable>
+                  <strong className="tooltip-trigger-hint">{card.value}</strong>
+                </Tooltip>
+              ) : (
+                <strong>{card.value}</strong>
+              )}
+              <p>{card.note}</p>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <section className="admin-explainability-grid">
         <article className="surface feature-panel">
@@ -2155,98 +2401,112 @@ export function AdminWorkspace({
           </div>
         </article>
       </section>
+      </>
+      ) : null}
 
-      <RoadmapAdminPanel
-        authSession={authSession}
-        formatDate={formatDate}
-        onOpenSettings={onOpenSettings}
-        onRoadmapPublished={onRoadmapPublished}
-      />
+      {activeAdminSection === 'assistant-governance' ? (
+        <>
+          <AssistantControlTowerPanel
+            authSession={authSession}
+            formatDate={formatDate}
+            onOpenSettings={onOpenSettings}
+            onStartSupervisionIntent={setAssistantSupervisionIntent}
+          />
 
-      <HomeViewAdminPanel
-        authSession={authSession}
-        formatDate={formatDate}
-        onOpenSettings={onOpenSettings}
-      />
-
-      <AssistantControlTowerPanel
-        authSession={authSession}
-        formatDate={formatDate}
-        onOpenSettings={onOpenSettings}
-        onStartSupervisionIntent={setAssistantSupervisionIntent}
-      />
-
-      <div id="assistant-agent-management">
-        <AgentManagementPanel
-          authSession={authSession}
-          formatDate={formatDate}
-          onOpenSettings={onOpenSettings}
-          controlTowerIntent={assistantSupervisionIntent}
-        />
-      </div>
-
-      <div id="assistant-outcome-metrics">
-        <AssistantOutcomeMetricsPanel
-          authSession={authSession}
-          formatDate={formatDate}
-          onOpenSettings={onOpenSettings}
-        />
-      </div>
-
-      <div id="assistant-approval-inbox">
-        <AssistantApprovalInboxPanel
-          authSession={authSession}
-          formatDate={formatDate}
-          onOpenSettings={onOpenSettings}
-          onRefreshData={onRefreshData}
-        />
-      </div>
-
-      <CodexTaskPanel
-        authSession={authSession}
-        formatDate={formatDate}
-        onOpenSettings={onOpenSettings}
-      />
-
-      <JobSchedulingPanel
-        authSession={authSession}
-        formatDate={formatDate}
-        onOpenSettings={onOpenSettings}
-      />
-
-      <UserManagementPanel
-        authSession={authSession}
-        formatDate={formatDate}
-        onOpenSettings={onOpenSettings}
-      />
-
-      <ProjectionMonitoringPanel
-        authSession={authSession}
-        formatDate={formatDate}
-        onOpenSettings={onOpenSettings}
-        onRefreshData={onRefreshData}
-      />
-
-      <section className="surface">
-        <div className="section-head">
-          <div>
-            <span className="eyebrow">Controls</span>
-            <h3>Governance and Operations</h3>
+          <div id="assistant-agent-management">
+            <AgentManagementPanel
+              authSession={authSession}
+              formatDate={formatDate}
+              onOpenSettings={onOpenSettings}
+              controlTowerIntent={assistantSupervisionIntent}
+            />
           </div>
-          <p>Operational actions still live here, but now below the product-facing explainability layer.</p>
-        </div>
 
-        <div className="admin-grid">
-          <article className="admin-card">
-            <strong>Reference Governance</strong>
-            <p>Add maker-checker review, deactivation safeguards, and audit history for sensitive master data.</p>
-          </article>
-          <article className="admin-card">
-            <strong>Roles and Access</strong>
-            <p>Split trader, operations, and admin capabilities so only the right users can amend reference data.</p>
-          </article>
-        </div>
-      </section>
+          <div id="assistant-outcome-metrics">
+            <AssistantOutcomeMetricsPanel
+              authSession={authSession}
+              formatDate={formatDate}
+              onOpenSettings={onOpenSettings}
+            />
+          </div>
+
+          <div id="assistant-approval-inbox">
+            <AssistantApprovalInboxPanel
+              authSession={authSession}
+              formatDate={formatDate}
+              onOpenSettings={onOpenSettings}
+              onRefreshData={onRefreshData}
+            />
+          </div>
+        </>
+      ) : null}
+
+      {activeAdminSection === 'automation' ? (
+        <>
+          <CodexTaskPanel
+            authSession={authSession}
+            formatDate={formatDate}
+            onOpenSettings={onOpenSettings}
+          />
+
+          <JobSchedulingPanel
+            authSession={authSession}
+            formatDate={formatDate}
+            onOpenSettings={onOpenSettings}
+          />
+
+          <ProjectionMonitoringPanel
+            authSession={authSession}
+            formatDate={formatDate}
+            onOpenSettings={onOpenSettings}
+            onRefreshData={onRefreshData}
+          />
+        </>
+      ) : null}
+
+      {activeAdminSection === 'access-planning' ? (
+        <>
+          <RoadmapAdminPanel
+            authSession={authSession}
+            formatDate={formatDate}
+            onOpenSettings={onOpenSettings}
+            onRoadmapPublished={onRoadmapPublished}
+          />
+
+          <HomeViewAdminPanel
+            authSession={authSession}
+            formatDate={formatDate}
+            onOpenSettings={onOpenSettings}
+          />
+
+          <UserManagementPanel
+            authSession={authSession}
+            formatDate={formatDate}
+            onOpenSettings={onOpenSettings}
+          />
+
+          <section className="surface">
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Controls</span>
+                <h3>Governance and Operations</h3>
+              </div>
+              <p>Longer-lived governance setup stays separate from daily operational triage.</p>
+            </div>
+
+            <div className="admin-grid">
+              <article className="admin-card">
+                <strong>Reference Governance</strong>
+                <p>Add maker-checker review, deactivation safeguards, and audit history for sensitive master data.</p>
+              </article>
+              <article className="admin-card">
+                <strong>Roles and Access</strong>
+                <p>Split trader, operations, and admin capabilities so only the right users can amend reference data.</p>
+              </article>
+            </div>
+          </section>
+        </>
+      ) : null}
     </div>
   )
 }

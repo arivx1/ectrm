@@ -9,6 +9,7 @@ HOME_SYSTEM_TEMPLATE_VERSION = 1
 HomeViewCardId = Literal[
     "timeframe",
     "prices",
+    "news",
     "map",
     "documents",
     "communication",
@@ -17,6 +18,7 @@ HomeViewCardId = Literal[
 HomeViewCardKind = Literal[
     "desk_time",
     "market_prices",
+    "market_news",
     "asset_map",
     "document_upload",
     "communication_center",
@@ -66,6 +68,24 @@ HOME_VIEW_CARD_REGISTRY: tuple[HomeViewCardRegistryEntry, ...] = (
             "region",
         ),
         data_bindings=("latest_price_marks", "market_price_indices"),
+    ),
+    HomeViewCardRegistryEntry(
+        card_id="news",
+        kind="market_news",
+        label="Market News",
+        default_visible=True,
+        default_column_span=2,
+        default_row_span=1,
+        allowed_parameters=("news_limit", "news_lookback_days", "news_query"),
+        allowed_filter_fields=(
+            "commodity_code",
+            "location_code",
+            "price_index_code",
+            "provider",
+            "quote_type",
+            "region",
+        ),
+        data_bindings=("market_news_headlines", "market_price_indices"),
     ),
     HomeViewCardRegistryEntry(
         card_id="map",

@@ -9,6 +9,7 @@ export type MessagingWorkspaceConversationSection =
 export type MessagingWorkspaceConversationKind = 'channel' | 'dm'
 export type MessagingWorkspaceMemberTone = 'desk' | 'human' | 'ops' | 'system'
 export type MessagingWorkspacePostSource = 'human' | 'assistant'
+export type MessagingWorkspaceSourceProvider = 'ectrm' | 'slack'
 export type MessagingWorkspaceTimelineItemKind = 'system' | 'message'
 
 export type MessagingWorkspaceConversationRecord = {
@@ -29,6 +30,7 @@ export type MessagingWorkspaceConversationRecord = {
   metrics: MessagingWorkspaceMetricRecord[]
   members: MessagingWorkspaceMemberRecord[]
   timeline: MessagingWorkspaceTimelineItemRecord[]
+  source_provider?: MessagingWorkspaceSourceProvider
 }
 
 export type MessagingWorkspaceMemberRecord = {
@@ -99,6 +101,28 @@ export type MessagingWorkspaceState = {
   conversations: MessagingWorkspaceConversationRecord[]
 }
 
+export type MessagingSlackRuntimeSettings = {
+  enabled: boolean
+  configured: boolean
+  provider: 'slack_web_api'
+  auth_status: 'none' | 'partial' | 'configured'
+  configured_channel_count: number
+  channel_limit: number
+  history_limit: number
+}
+
+export type MessagingSlackSyncResult = {
+  provider: 'slack_web_api'
+  synced_channel_count: number
+  created_conversation_count: number
+  updated_conversation_count: number
+  scanned_message_count: number
+  imported_message_count: number
+  updated_message_count: number
+  skipped_message_count: number
+  warnings: string[]
+}
+
 export type CreateMessagingWorkspacePostInput = {
   conversation_id: string
   body: string
@@ -142,6 +166,39 @@ export async function createMessagingWorkspacePost(
 ): Promise<MessagingWorkspaceMessageRecord> {
   return postJson<MessagingWorkspaceMessageRecord>(
     `${apiBase}/messages/workspace/posts`,
+    payload as Record<string, unknown>,
+    {
+      headers: optionalAuthHeaders(init?.accessToken),
+    },
+  )
+}
+
+export async function loadMessagingSlackSettings(
+  apiBase: string,
+): Promise<MessagingSlackRuntimeSettings> {
+  return fetchJson<MessagingSlackRuntimeSettings>(`${apiBase}/messages/workspace/slack/settings`)
+}
+
+export async function syncMessagingSlackWorkspace(
+  apiBase: string,
+  init?: { accessToken?: string },
+): Promise<MessagingSlackSyncResult> {
+  return postJson<MessagingSlackSyncResult>(
+    `${apiBase}/messages/workspace/slack/sync`,
+    {},
+    {
+      headers: optionalAuthHeaders(init?.accessToken),
+    },
+  )
+}
+
+export async function createMessagingSlackPost(
+  apiBase: string,
+  payload: CreateMessagingWorkspacePostInput,
+  init?: { accessToken?: string },
+): Promise<MessagingWorkspaceMessageRecord> {
+  return postJson<MessagingWorkspaceMessageRecord>(
+    `${apiBase}/messages/workspace/slack/posts`,
     payload as Record<string, unknown>,
     {
       headers: optionalAuthHeaders(init?.accessToken),

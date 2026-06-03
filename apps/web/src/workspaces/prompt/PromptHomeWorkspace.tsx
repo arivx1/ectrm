@@ -27,6 +27,7 @@ import {
   useSyncExternalStore,
   type CSSProperties,
   type FormEvent,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 
@@ -162,7 +163,9 @@ import {
   createDefaultWeatherOverlayVisibilityState,
   type WeatherOverlayVisibilityState,
 } from "../../entities/weather/mapOverlay";
-import { type PromptHomeCounts } from "./promptHomeStarters";
+import {
+  type PromptHomeCounts,
+} from "./promptHomeStarters";
 import { shouldAutoEnsurePromptHomeData } from "./promptHomeAutoLoad";
 import { PromptHomeCommunicationCard } from "./PromptHomeCommunicationCard";
 import { PromptHomeDocumentUploadCard } from "./PromptHomeDocumentUploadCard";
@@ -185,6 +188,8 @@ import {
 import {
   buildPromptHomePricesCardViewModel,
   formatPromptHomePriceQuoteTypeCode,
+  listPromptHomePriceProviders,
+  listPromptHomePriceQuoteTypes,
   normalizePromptHomePriceManualOrder,
   nextPromptHomePriceSortState,
   PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER,
@@ -213,6 +218,13 @@ import {
   syncAssetSubtypeVisibilityState,
 } from "../reference-data/tabs/AssetMapPanel";
 import { SETTINGS_CUSTOM_EVENTS_CARD_ANCHOR_ID } from "../settings/userEventsPanelShared";
+import {
+  MarketNewsPanel,
+  normalizeMarketNewsEffectFilter,
+  normalizeMarketNewsHorizonFilter,
+  type MarketNewsEffectFilter,
+  type MarketNewsHorizonFilter,
+} from "../../widgets/news/MarketNewsPanel";
 
 type PromptHomeWorkspaceProps = {
   authSession: StoredAuthSession | null;
@@ -260,6 +272,26 @@ type PromptHomeMessage = {
   activityLabel?: string;
 };
 
+type PromptHomeComposerKeyEvent = {
+  key: string;
+  ctrlKey?: boolean;
+  shiftKey?: boolean;
+  nativeEvent?: {
+    isComposing?: boolean;
+  };
+};
+
+export function shouldSubmitPromptHomeComposerKey(
+  event: PromptHomeComposerKeyEvent,
+): boolean {
+  return (
+    event.key === "Enter" &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.nativeEvent?.isComposing
+  );
+}
+
 type PromptHomeAssistantActivity = {
   id: string;
   label: string;
@@ -276,6 +308,7 @@ const PROMPT_HOME_DAY_PANEL_ID = "prompt-home-day-panel";
 const PROMPT_HOME_WEEK_PANEL_ID = "prompt-home-week-panel";
 const PROMPT_HOME_MONTH_PANEL_ID = "prompt-home-month-panel";
 const PROMPT_HOME_PRICES_PANEL_ID = "prompt-home-prices-panel";
+const PROMPT_HOME_NEWS_PANEL_ID = "prompt-home-news-panel";
 const PROMPT_HOME_MAP_PANEL_ID = "prompt-home-map-panel";
 const PROMPT_HOME_INITIAL_WEATHER_OVERLAY_VISIBILITY: WeatherOverlayVisibilityState = {
   ...createDefaultWeatherOverlayVisibilityState(),
@@ -330,6 +363,30 @@ const PROMPT_HOME_WEEKDAY_FULL_LABELS = [
   "Saturday",
 ] as const;
 const PROMPT_HOME_VERBALIZE_STORAGE_KEY = "ectrm.prompt-home.verbalize";
+const PROMPT_HOME_NEWS_DEFAULT_LIMIT = 5;
+const PROMPT_HOME_NEWS_DEFAULT_LOOKBACK_DAYS = 3;
+const PROMPT_HOME_NEWS_DEFAULT_QUERY = "commodity markets";
+const PROMPT_HOME_NEWS_LOOKBACK_DAY_OPTIONS = [1, 2, 3, 7, 14] as const;
+const PROMPT_HOME_NEWS_EFFECT_FILTER_OPTIONS: Array<{
+  value: MarketNewsEffectFilter;
+  label: string;
+}> = [
+  { value: "all", label: "All effects" },
+  { value: "positive", label: "Positive" },
+  { value: "negative", label: "Negative" },
+  { value: "neutral", label: "Neutral" },
+];
+const PROMPT_HOME_NEWS_HORIZON_FILTER_OPTIONS: Array<{
+  value: MarketNewsHorizonFilter;
+  label: string;
+}> = [
+  { value: "all", label: "All terms" },
+  { value: "immediate", label: "Immediate" },
+  { value: "near_term", label: "Near Term" },
+  { value: "mid_term", label: "Mid Term" },
+  { value: "long_term", label: "Long Term" },
+  { value: "very_long_term", label: "Very Long Term" },
+];
 
 function usePromptHomeCardHeaderDragProps<T extends HTMLElement>() {
   const { className, ...dragHandleAttributes } =
@@ -2131,6 +2188,105 @@ function setPromptHomeCardStringValue(
   return nextValues;
 }
 
+function setPromptHomeCardIntegerValue(
+  values: Record<string, unknown>,
+  key: string,
+  value: number | null,
+): Record<string, unknown> {
+  const nextValues = { ...values };
+  if (typeof value === "number" && Number.isFinite(value)) {
+    nextValues[key] = Math.floor(value);
+  } else {
+    delete nextValues[key];
+  }
+  return nextValues;
+}
+
+function parsePromptHomeIntegerParameter(
+  value: unknown,
+  {
+    fallback,
+    minimum,
+    maximum,
+  }: {
+    fallback: number;
+    minimum: number;
+    maximum: number;
+  },
+): number {
+  const parsedValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseInt(value, 10)
+        : Number.NaN;
+  if (!Number.isFinite(parsedValue)) {
+    return fallback;
+  }
+  return Math.max(minimum, Math.min(Math.floor(parsedValue), maximum));
+}
+
+function normalizePromptHomeNewsTerm(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value
+    ?.replace(/[·,_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized || normalized === "-") {
+    return null;
+  }
+  return normalized;
+}
+
+function dedupePromptHomeNewsTerms(
+  values: Array<string | null | undefined>,
+): string[] {
+  const seenTerms = new Set<string>();
+  const terms: string[] = [];
+
+  for (const value of values) {
+    const normalizedTerm = normalizePromptHomeNewsTerm(value);
+    const key = normalizedTerm?.toLowerCase();
+    if (!normalizedTerm || !key || seenTerms.has(key)) {
+      continue;
+    }
+
+    seenTerms.add(key);
+    terms.push(normalizedTerm);
+  }
+
+  return terms;
+}
+
+function buildPromptHomeNewsSearchQuery({
+  newsQuery,
+  priceIndex,
+  provider,
+  quoteType,
+  locationCode,
+  region,
+}: {
+  newsQuery: string;
+  priceIndex: PriceIndexRecord | null;
+  provider: string;
+  quoteType: string;
+  locationCode: string;
+  region: string;
+}): string {
+  return dedupePromptHomeNewsTerms([
+    newsQuery,
+    priceIndex?.name,
+    priceIndex?.code,
+    priceIndex?.provider,
+    priceIndex?.location_code,
+    provider === PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER ? null : provider,
+    quoteType === PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE ? null : quoteType,
+    locationCode,
+    region,
+  ]).join(" ");
+}
+
 function parsePromptHomePriceMarkStatusParameter(
   value: unknown,
 ): PromptHomePriceMarkFilter {
@@ -3234,6 +3390,586 @@ function PromptHomePricesCard({
               onClick={onOpenPricesWorkspace}
             >
               Open Dashboard
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function PromptHomeNewsCard({
+  priceIndices,
+  referenceDataLoading,
+  homeCard,
+  canConfigureHomeCard,
+  onHomeCardConfigurationChange,
+  onOpenReportsWorkspace,
+}: {
+  priceIndices: PriceIndexRecord[];
+  referenceDataLoading?: boolean;
+  homeCard: PromptHomeTemplateCard | null;
+  canConfigureHomeCard: boolean;
+  onHomeCardConfigurationChange: (
+    patch: {
+      parameters?: Record<string, unknown>;
+      filters?: Record<string, unknown>;
+    },
+  ) => void;
+  onOpenReportsWorkspace: () => void;
+}) {
+  const newsExpandedState = usePersistentCollapsibleCardState(
+    "prompt-home.news-card",
+    true,
+  );
+  const [refreshKey, setRefreshKey] = useState(0);
+  const homeCardFilters = useMemo(
+    () => homeCard?.filters ?? {},
+    [homeCard],
+  );
+  const homeCardParameters = useMemo(
+    () => homeCard?.parameters ?? {},
+    [homeCard],
+  );
+  const newsCommodityFilter = getPromptHomeCardStringValue(
+    homeCardFilters,
+    "commodity_code",
+  );
+  const newsPriceIndexCodeFilter = getPromptHomeCardStringValue(
+    homeCardFilters,
+    "price_index_code",
+  );
+  const newsProviderFilter =
+    getPromptHomeCardStringValue(homeCardFilters, "provider") ||
+    PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER;
+  const newsQuoteTypeFilter =
+    getPromptHomeCardStringValue(homeCardFilters, "quote_type") ||
+    PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE;
+  const newsLocationCodeFilter = getPromptHomeCardStringValue(
+    homeCardFilters,
+    "location_code",
+  );
+  const newsRegionFilter = getPromptHomeCardStringValue(
+    homeCardFilters,
+    "region",
+  );
+  const newsMarketLocationFilter = getPromptHomeCardStringValue(
+    homeCardFilters,
+    "market_location",
+  );
+  const newsHorizonFilter = normalizeMarketNewsHorizonFilter(
+    getPromptHomeCardStringValue(homeCardFilters, "impact_horizon"),
+  );
+  const newsSupplyEffectFilter = normalizeMarketNewsEffectFilter(
+    getPromptHomeCardStringValue(homeCardFilters, "supply_effect"),
+  );
+  const newsDemandEffectFilter = normalizeMarketNewsEffectFilter(
+    getPromptHomeCardStringValue(homeCardFilters, "demand_effect"),
+  );
+  const newsQueryParameter = getPromptHomeCardStringValue(
+    homeCardParameters,
+    "news_query",
+  );
+  const newsLimit = parsePromptHomeIntegerParameter(
+    homeCardParameters.news_limit,
+    {
+      fallback: PROMPT_HOME_NEWS_DEFAULT_LIMIT,
+      minimum: 1,
+      maximum: 10,
+    },
+  );
+  const newsLookbackDays = parsePromptHomeIntegerParameter(
+    homeCardParameters.news_lookback_days,
+    {
+      fallback: PROMPT_HOME_NEWS_DEFAULT_LOOKBACK_DAYS,
+      minimum: 1,
+      maximum: 14,
+    },
+  );
+  const activePriceIndices = useMemo(
+    () => selectPromptHomePriceIndices(priceIndices),
+    [priceIndices],
+  );
+  const newsProviderOptions = useMemo(
+    () => listPromptHomePriceProviders(activePriceIndices),
+    [activePriceIndices],
+  );
+  const newsQuoteTypeOptions = useMemo(
+    () => listPromptHomePriceQuoteTypes(activePriceIndices),
+    [activePriceIndices],
+  );
+  const newsCommodityOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          activePriceIndices
+            .map((priceIndex) => priceIndex.commodity_code.trim().toUpperCase())
+            .filter(Boolean),
+        ),
+      ).sort((left, right) => left.localeCompare(right)),
+    [activePriceIndices],
+  );
+  const newsPriceIndexOptions = useMemo(
+    () =>
+      activePriceIndices
+        .filter((priceIndex) => {
+          if (
+            newsCommodityFilter &&
+            priceIndex.commodity_code.trim().toUpperCase() !==
+              newsCommodityFilter.trim().toUpperCase()
+          ) {
+            return false;
+          }
+          if (
+            newsProviderFilter !== PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER &&
+            priceIndex.provider.trim() !== newsProviderFilter
+          ) {
+            return false;
+          }
+          if (
+            newsQuoteTypeFilter !== PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE &&
+            priceIndex.quote_type?.trim().toUpperCase() !==
+              newsQuoteTypeFilter.trim().toUpperCase()
+          ) {
+            return false;
+          }
+          if (
+            newsLocationCodeFilter &&
+            priceIndex.location_code?.trim().toUpperCase() !==
+              newsLocationCodeFilter.trim().toUpperCase()
+          ) {
+            return false;
+          }
+          return true;
+        })
+        .map((priceIndex) => ({
+          code: priceIndex.code,
+          label: `${priceIndex.code} · ${priceIndex.name}`,
+        })),
+    [
+      activePriceIndices,
+      newsCommodityFilter,
+      newsLocationCodeFilter,
+      newsProviderFilter,
+      newsQuoteTypeFilter,
+    ],
+  );
+  const selectedNewsPriceIndex = useMemo(
+    () =>
+      activePriceIndices.find(
+        (priceIndex) => priceIndex.code === newsPriceIndexCodeFilter,
+      ) ?? null,
+    [activePriceIndices, newsPriceIndexCodeFilter],
+  );
+  const resolvedNewsCommodity =
+    selectedNewsPriceIndex?.commodity_code.trim().toUpperCase() ||
+    newsCommodityFilter ||
+    null;
+  const resolvedNewsQuery = buildPromptHomeNewsSearchQuery({
+    newsQuery: newsQueryParameter,
+    priceIndex: selectedNewsPriceIndex,
+    provider: newsProviderFilter,
+    quoteType: newsQuoteTypeFilter,
+    locationCode: newsLocationCodeFilter,
+    region: newsRegionFilter,
+  });
+  const marketNewsQuery =
+    resolvedNewsQuery || (resolvedNewsCommodity ? null : PROMPT_HOME_NEWS_DEFAULT_QUERY);
+  const marketNewsTableFilters = useMemo(
+    () => ({
+      marketLocation: newsMarketLocationFilter,
+      horizon: newsHorizonFilter,
+      supplyEffect: newsSupplyEffectFilter,
+      demandEffect: newsDemandEffectFilter,
+    }),
+    [
+      newsDemandEffectFilter,
+      newsHorizonFilter,
+      newsMarketLocationFilter,
+      newsSupplyEffectFilter,
+    ],
+  );
+  const hasActiveNewsFilters = Boolean(
+    newsCommodityFilter ||
+      newsPriceIndexCodeFilter ||
+      newsProviderFilter !== PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER ||
+      newsQuoteTypeFilter !== PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE ||
+      newsLocationCodeFilter ||
+      newsRegionFilter ||
+      newsMarketLocationFilter ||
+      newsHorizonFilter !== "all" ||
+      newsSupplyEffectFilter !== "all" ||
+      newsDemandEffectFilter !== "all" ||
+      newsQueryParameter ||
+      newsLimit !== PROMPT_HOME_NEWS_DEFAULT_LIMIT ||
+      newsLookbackDays !== PROMPT_HOME_NEWS_DEFAULT_LOOKBACK_DAYS,
+  );
+  const newsToggleSummary = `${resolvedNewsCommodity ?? "Markets"} · ${newsLookbackDays}d`;
+  const newsDetail = selectedNewsPriceIndex
+    ? `Live headlines matched to ${selectedNewsPriceIndex.name}.`
+    : resolvedNewsCommodity
+      ? `Live headlines matched to ${resolvedNewsCommodity}.`
+      : "Live commodity-market headlines.";
+  const updateNewsCardFilters = useCallback(
+    (key: string, value: string) => {
+      if (!canConfigureHomeCard) {
+        return;
+      }
+      onHomeCardConfigurationChange({
+        filters: setPromptHomeCardStringValue(homeCardFilters, key, value),
+      });
+    },
+    [canConfigureHomeCard, homeCardFilters, onHomeCardConfigurationChange],
+  );
+  const updateNewsCardStringParameter = useCallback(
+    (key: string, value: string) => {
+      if (!canConfigureHomeCard) {
+        return;
+      }
+      onHomeCardConfigurationChange({
+        parameters: setPromptHomeCardStringValue(homeCardParameters, key, value),
+      });
+    },
+    [canConfigureHomeCard, homeCardParameters, onHomeCardConfigurationChange],
+  );
+  const updateNewsCardIntegerParameter = useCallback(
+    (key: string, value: number | null) => {
+      if (!canConfigureHomeCard) {
+        return;
+      }
+      onHomeCardConfigurationChange({
+        parameters: setPromptHomeCardIntegerValue(
+          homeCardParameters,
+          key,
+          value,
+        ),
+      });
+    },
+    [canConfigureHomeCard, homeCardParameters, onHomeCardConfigurationChange],
+  );
+  const clearNewsContext = useCallback(() => {
+    if (!canConfigureHomeCard) {
+      return;
+    }
+    onHomeCardConfigurationChange({
+      filters: {},
+      parameters: {},
+    });
+  }, [canConfigureHomeCard, onHomeCardConfigurationChange]);
+  const {
+    dragHandleAttributes,
+    dragHandleClassName,
+  } =
+    usePromptHomeCardHeaderDragProps<HTMLDivElement>();
+
+  return (
+    <article className="prompt-home-news-card">
+      <div
+        {...dragHandleAttributes}
+        className={mergePromptHomeClassNames(
+          "prompt-home-news-card-head",
+          dragHandleClassName,
+        )}
+      >
+        <div className="prompt-home-news-card-copy">
+          <span className="eyebrow">News</span>
+          <strong>Market News</strong>
+          <p>Live headline context</p>
+        </div>
+        <div className="prompt-home-news-card-toggle-side">
+          <button
+            type="button"
+            className="prompt-home-news-card-toggle"
+            aria-expanded={newsExpandedState.expanded}
+            aria-controls={PROMPT_HOME_NEWS_PANEL_ID}
+            onClick={() =>
+              newsExpandedState.setExpanded((current) => !current)
+            }
+          >
+            <div className="prompt-home-news-card-toggle-meta">
+              <small>{newsToggleSummary}</small>
+              <span
+                className="prompt-home-support-toggle-indicator"
+                aria-hidden="true"
+              >
+                {newsExpandedState.expanded ? "−" : "+"}
+              </span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <div
+        id={PROMPT_HOME_NEWS_PANEL_ID}
+        className="prompt-home-news-card-body"
+        hidden={!newsExpandedState.expanded}
+      >
+        {referenceDataLoading ? (
+          <p className="form-note">Loading market context for headline filters.</p>
+        ) : null}
+        <div className="prompt-home-news-filter-bar" aria-label="News filters">
+          <label className="prompt-home-prices-filter-field">
+            <span>Search</span>
+            <input
+              type="search"
+              value={newsQueryParameter}
+              placeholder="OPEC, LNG, storm impacts"
+              disabled={!canConfigureHomeCard}
+              onChange={(event) =>
+                updateNewsCardStringParameter("news_query", event.target.value)
+              }
+            />
+          </label>
+          <label className="prompt-home-prices-filter-field">
+            <span>Commodity</span>
+            <select
+              value={newsCommodityFilter}
+              disabled={!canConfigureHomeCard}
+              onChange={(event) =>
+                updateNewsCardFilters("commodity_code", event.target.value)
+              }
+            >
+              <option value="">All commodities</option>
+              {newsCommodityFilter &&
+              !newsCommodityOptions.includes(newsCommodityFilter) ? (
+                <option value={newsCommodityFilter}>
+                  {newsCommodityFilter} (unavailable)
+                </option>
+              ) : null}
+              {newsCommodityOptions.map((commodityCode) => (
+                <option key={commodityCode} value={commodityCode}>
+                  {commodityCode}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="prompt-home-prices-filter-field">
+            <span>Market Location</span>
+            <input
+              type="search"
+              value={newsMarketLocationFilter}
+              placeholder="Region, country, city"
+              disabled={!canConfigureHomeCard}
+              onChange={(event) =>
+                updateNewsCardFilters("market_location", event.target.value)
+              }
+            />
+          </label>
+          <label className="prompt-home-prices-filter-field">
+            <span>Index</span>
+            <select
+              value={newsPriceIndexCodeFilter}
+              disabled={!canConfigureHomeCard}
+              onChange={(event) =>
+                updateNewsCardFilters("price_index_code", event.target.value)
+              }
+            >
+              <option value="">All indices</option>
+              {newsPriceIndexCodeFilter &&
+              !newsPriceIndexOptions.some(
+                (priceIndexOption) =>
+                  priceIndexOption.code === newsPriceIndexCodeFilter,
+              ) ? (
+                <option value={newsPriceIndexCodeFilter}>
+                  {newsPriceIndexCodeFilter} (unavailable)
+                </option>
+              ) : null}
+              {newsPriceIndexOptions.map((priceIndexOption) => (
+                <option key={priceIndexOption.code} value={priceIndexOption.code}>
+                  {priceIndexOption.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="prompt-home-prices-filter-field">
+            <span>Provider</span>
+            <select
+              value={newsProviderFilter}
+              disabled={!canConfigureHomeCard}
+              onChange={(event) =>
+                updateNewsCardFilters(
+                  "provider",
+                  event.target.value === PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER
+                    ? ""
+                    : event.target.value,
+                )
+              }
+            >
+              <option value={PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER}>All providers</option>
+              {newsProviderOptions.map((provider) => (
+                <option key={provider} value={provider}>
+                  {provider}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="prompt-home-prices-filter-field">
+            <span>Type</span>
+            <select
+              value={newsQuoteTypeFilter}
+              disabled={!canConfigureHomeCard}
+              onChange={(event) =>
+                updateNewsCardFilters(
+                  "quote_type",
+                  event.target.value === PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE
+                    ? ""
+                    : event.target.value,
+                )
+              }
+            >
+              <option value={PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE}>All types</option>
+              {newsQuoteTypeOptions.map((quoteType) => (
+                <option key={quoteType} value={quoteType}>
+                  {formatPromptHomePriceQuoteTypeCode(quoteType)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="prompt-home-prices-filter-field">
+            <span>Term</span>
+            <select
+              value={newsHorizonFilter}
+              disabled={!canConfigureHomeCard}
+              onChange={(event) => {
+                const nextFilter = normalizeMarketNewsHorizonFilter(
+                  event.target.value,
+                );
+                updateNewsCardFilters(
+                  "impact_horizon",
+                  nextFilter === "all" ? "" : nextFilter,
+                );
+              }}
+            >
+              {PROMPT_HOME_NEWS_HORIZON_FILTER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="prompt-home-prices-filter-field">
+            <span>Supply Effect</span>
+            <select
+              value={newsSupplyEffectFilter}
+              disabled={!canConfigureHomeCard}
+              onChange={(event) => {
+                const nextFilter = normalizeMarketNewsEffectFilter(
+                  event.target.value,
+                );
+                updateNewsCardFilters(
+                  "supply_effect",
+                  nextFilter === "all" ? "" : nextFilter,
+                );
+              }}
+            >
+              {PROMPT_HOME_NEWS_EFFECT_FILTER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.value === "all" ? "All supply effects" : option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="prompt-home-prices-filter-field">
+            <span>Demand Effect</span>
+            <select
+              value={newsDemandEffectFilter}
+              disabled={!canConfigureHomeCard}
+              onChange={(event) => {
+                const nextFilter = normalizeMarketNewsEffectFilter(
+                  event.target.value,
+                );
+                updateNewsCardFilters(
+                  "demand_effect",
+                  nextFilter === "all" ? "" : nextFilter,
+                );
+              }}
+            >
+              {PROMPT_HOME_NEWS_EFFECT_FILTER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.value === "all" ? "All demand effects" : option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="prompt-home-prices-filter-field">
+            <span>Lookback</span>
+            <select
+              value={String(newsLookbackDays)}
+              disabled={!canConfigureHomeCard}
+              onChange={(event) =>
+                updateNewsCardIntegerParameter(
+                  "news_lookback_days",
+                  Number.parseInt(event.target.value, 10),
+                )
+              }
+            >
+              {PROMPT_HOME_NEWS_LOOKBACK_DAY_OPTIONS.map((days) => (
+                <option key={days} value={days}>
+                  {days}d
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="prompt-home-prices-filter-field">
+            <span>Headlines</span>
+            <select
+              value={String(newsLimit)}
+              disabled={!canConfigureHomeCard}
+              onChange={(event) =>
+                updateNewsCardIntegerParameter(
+                  "news_limit",
+                  Number.parseInt(event.target.value, 10),
+                )
+              }
+            >
+              {[3, 5, 8, 10].map((limit) => (
+                <option key={limit} value={limit}>
+                  {limit}
+                </option>
+              ))}
+            </select>
+          </label>
+          {hasActiveNewsFilters ? (
+            <button
+              type="button"
+              className="button button-secondary prompt-home-prices-filter-clear"
+              disabled={!canConfigureHomeCard}
+              onClick={clearNewsContext}
+            >
+              Clear filters
+            </button>
+          ) : null}
+        </div>
+
+        <MarketNewsPanel
+          key={refreshKey}
+          apiBase={appConfig.apiBase}
+          commodity={resolvedNewsCommodity}
+          query={marketNewsQuery}
+          limit={newsLimit}
+          lookbackDays={newsLookbackDays}
+          variant="table"
+          title="Latest Headlines"
+          detail={newsDetail}
+          filters={marketNewsTableFilters}
+        />
+
+        <div className="prompt-home-news-card-footer">
+          <span>{marketNewsQuery || resolvedNewsCommodity || PROMPT_HOME_NEWS_DEFAULT_QUERY}</span>
+          <div className="prompt-home-news-card-footer-actions">
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => setRefreshKey((current) => current + 1)}
+            >
+              Refresh
+            </button>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={onOpenReportsWorkspace}
+            >
+              Open Reports
             </button>
           </div>
         </div>
@@ -5376,6 +6112,21 @@ export function PromptHomeWorkspace({
     void submitPrompt(draft, draftSummaryTargets, draftApplicationContext);
   }
 
+  function handlePromptComposerKeyDown(
+    event: KeyboardEvent<HTMLTextAreaElement>,
+  ) {
+    if (!shouldSubmitPromptHomeComposerKey(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    if (!draft.trim() || submitting || voiceComposer.listening) {
+      return;
+    }
+
+    event.currentTarget.form?.requestSubmit();
+  }
+
   function handleSignIn() {
     const trimmedDraft = draft.trim();
     if (trimmedDraft) {
@@ -5634,25 +6385,7 @@ export function PromptHomeWorkspace({
 
   return (
     <div className="prompt-home">
-      <section className="surface prompt-home-composer-panel">
-        <div className="prompt-home-heading-row">
-          <div className="prompt-home-heading">
-            <span className="eyebrow">Home</span>
-          </div>
-          {!authSession ? (
-            <div className="prompt-home-heading-actions">
-              <button
-                type="button"
-                className="button button-ghost prompt-home-secondary-action"
-                onClick={handleSignIn}
-              >
-                Sign In
-              </button>
-            </div>
-          ) : null}
-        </div>
-
-        <section className="prompt-home-card-filter">
+      <section className="prompt-home-card-filter">
           <div className="prompt-home-card-filter-head">
             <div className="prompt-home-card-filter-copy">
               <span className="eyebrow">Cards</span>
@@ -5936,6 +6669,18 @@ export function PromptHomeWorkspace({
                     }
                   />
                 ))}
+                {renderHomeCardSlot("news", (
+                  <PromptHomeNewsCard
+                    priceIndices={priceIndices}
+                    referenceDataLoading={referenceDataLoading}
+                    homeCard={cardVisibilityState.getCard("news")}
+                    canConfigureHomeCard={canConfigureActiveHomeCards}
+                    onHomeCardConfigurationChange={(patch) =>
+                      cardVisibilityState.updateCardConfiguration("news", patch)
+                    }
+                    onOpenReportsWorkspace={() => onOpenView("reports")}
+                  />
+                ))}
                 {renderHomeCardSlot("map", (
                   <PromptHomeMapTile
                     authSession={authSession}
@@ -5989,6 +6734,7 @@ export function PromptHomeWorkspace({
                         setDraft(event.target.value);
                         setSubmitError("");
                       }}
+                      onKeyDown={handlePromptComposerKeyDown}
                       placeholder="Ask what needs attention, where to go next, or how to handle a trade, queue, exposure, invoice, or report question."
                     />
                   </label>
@@ -6426,7 +7172,6 @@ export function PromptHomeWorkspace({
               </>,
             )
           : null}
-      </section>
     </div>
   );
 }

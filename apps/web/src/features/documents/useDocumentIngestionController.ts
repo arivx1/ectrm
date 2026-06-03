@@ -17,9 +17,11 @@ import {
   listDocumentIngestions,
   listDocumentSchemaRegistry,
   reprocessDocumentIngestion,
+  updateDocumentLogicalDocuments,
   updateDocumentIngestion,
   updateDocumentPage,
   uploadPdfDocument,
+  type UpdateDocumentLogicalDocumentsInput,
 } from '../../entities/documents/api'
 import { ApiError } from '../../shared/api'
 import {
@@ -167,6 +169,10 @@ export type DocumentIngestionController = {
   handleVerifyDocument: (document: DocumentIngestionRecord) => Promise<void>
   handleSetDocumentKind: (document: DocumentIngestionRecord, documentKind: string) => Promise<void>
   handleSavePage: (document: DocumentIngestionRecord, page: DocumentIngestionPageRecord) => Promise<void>
+  handleSaveLogicalDocuments: (
+    document: DocumentIngestionRecord,
+    payload: UpdateDocumentLogicalDocumentsInput,
+  ) => Promise<void>
   handleReprocessDocument: (document: DocumentIngestionRecord) => Promise<void>
   handleExecuteActionPlan: (document: DocumentIngestionRecord) => Promise<void>
   setSchemaFieldValue: (documentId: string, pageId: number, fieldKey: string, label: string, nextValue: string) => void
@@ -949,6 +955,31 @@ export function useDocumentIngestionController({
     }
   }
 
+  async function handleSaveLogicalDocuments(
+    document: DocumentIngestionRecord,
+    payload: UpdateDocumentLogicalDocumentsInput,
+  ) {
+    if (!authSession) {
+      return
+    }
+    const target = `logical-documents:${document.document_id}`
+    clearSaveError(target)
+    setSavingTarget(target)
+    try {
+      const updated = await updateDocumentLogicalDocuments(
+        appConfig.apiBase,
+        authSession,
+        document.document_id,
+        payload,
+      )
+      replaceDocument(updated)
+    } catch (error) {
+      setSaveError(target, error instanceof Error ? error.message : 'Unable to save the packet split.')
+    } finally {
+      setSavingTarget(null)
+    }
+  }
+
   async function handleReprocessDocument(document: DocumentIngestionRecord) {
     if (!authSession) {
       return
@@ -1338,6 +1369,7 @@ export function useDocumentIngestionController({
     handleVerifyDocument,
     handleSetDocumentKind,
     handleSavePage,
+    handleSaveLogicalDocuments,
     handleReprocessDocument,
     handleExecuteActionPlan,
     setSchemaFieldValue,

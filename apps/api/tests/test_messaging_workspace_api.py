@@ -3,6 +3,7 @@ from __future__ import annotations
 import enum
 import unittest
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 if not hasattr(enum, "StrEnum"):
     class _CompatStrEnum(str, enum.Enum):
@@ -19,11 +20,61 @@ from apps.api.app.config import settings
 from apps.api.app.core.auth import hash_password
 from apps.api.app.deps.db import get_db
 from apps.api.app.main import app
+from apps.api.app.domains.integrations.services.slack_messaging import (
+    SlackConversation,
+    SlackPostedMessage,
+    SlackUser,
+)
 from apps.api.app.models import Base
 from apps.api.app.models.messaging_workspace_conversation import MessagingWorkspaceConversation
 from apps.api.app.models.messaging_workspace_message import MessagingWorkspaceMessage
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
+
+
+class _FakeSlackClient:
+    posted_messages: list[dict[str, str | None]] = []
+
+    def __init__(self, config) -> None:
+        self.config = config
+
+    def list_conversations(self) -> list[SlackConversation]:
+        return [
+            SlackConversation(
+                channel_id="C123SLACK",
+                name="desk-ops",
+                is_im=False,
+                is_mpim=False,
+                is_private=False,
+                topic="Desk operations in Slack.",
+                purpose="Coordinate desk work.",
+                member_count=4,
+            )
+        ]
+
+    def conversation_history(self, channel_id: str) -> list[dict[str, object]]:
+        return [
+            {
+                "type": "message",
+                "user": "U123",
+                "text": "Slack note imported into the ECTRM messaging center.",
+                "ts": "1770000000.000100",
+                "reactions": [{"name": "eyes", "count": 2}],
+            }
+        ]
+
+    def user_info(self, user_id: str) -> SlackUser:
+        return SlackUser(user_id=user_id, display_name="Slack Operator", title="Slack user")
+
+    def post_message(
+        self,
+        *,
+        channel_id: str,
+        text: str,
+        thread_ts: str | None = None,
+    ) -> SlackPostedMessage:
+        self.posted_messages.append({"channel_id": channel_id, "text": text, "thread_ts": thread_ts})
+        return SlackPostedMessage(channel_id=channel_id, message_ts="1770000060.000200")
 
 
 class MessagingWorkspaceApiTests(unittest.TestCase):
@@ -60,7 +111,24 @@ class MessagingWorkspaceApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.now = datetime(2026, 5, 16, 21, 0, tzinfo=timezone.utc)
         self._previous_bootstrap_admin_token = settings.BOOTSTRAP_ADMIN_TOKEN
+        self._previous_slack_settings = {
+            "SLACK_MESSAGING_ENABLED": settings.SLACK_MESSAGING_ENABLED,
+            "SLACK_BOT_TOKEN": settings.SLACK_BOT_TOKEN,
+            "SLACK_MESSAGING_CHANNEL_IDS": settings.SLACK_MESSAGING_CHANNEL_IDS,
+            "SLACK_MESSAGING_CHANNEL_LIMIT": settings.SLACK_MESSAGING_CHANNEL_LIMIT,
+            "SLACK_MESSAGING_HISTORY_LIMIT": settings.SLACK_MESSAGING_HISTORY_LIMIT,
+            "SLACK_MESSAGING_TIMEOUT_SECONDS": settings.SLACK_MESSAGING_TIMEOUT_SECONDS,
+            "SLACK_API_BASE_URL": settings.SLACK_API_BASE_URL,
+        }
         settings.BOOTSTRAP_ADMIN_TOKEN = "messaging-bootstrap-secret"
+        settings.SLACK_MESSAGING_ENABLED = False
+        settings.SLACK_BOT_TOKEN = ""
+        settings.SLACK_MESSAGING_CHANNEL_IDS = ""
+        settings.SLACK_MESSAGING_CHANNEL_LIMIT = 10
+        settings.SLACK_MESSAGING_HISTORY_LIMIT = 20
+        settings.SLACK_MESSAGING_TIMEOUT_SECONDS = 20
+        settings.SLACK_API_BASE_URL = "https://slack.com/api"
+        _FakeSlackClient.posted_messages = []
         MessagingWorkspaceConversation.__table__.create(bind=self.engine, checkfirst=True)
         MessagingWorkspaceMessage.__table__.create(bind=self.engine, checkfirst=True)
 
@@ -73,6 +141,8 @@ class MessagingWorkspaceApiTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         settings.BOOTSTRAP_ADMIN_TOKEN = self._previous_bootstrap_admin_token
+        for setting_name, setting_value in self._previous_slack_settings.items():
+            setattr(settings, setting_name, setting_value)
 
     def _bootstrap_admin(self) -> str:
         response = self.client.post(
@@ -443,3 +513,108 @@ class MessagingWorkspaceApiTests(unittest.TestCase):
         finally:
             MessagingWorkspaceConversation.__table__.create(bind=self.engine, checkfirst=True)
             MessagingWorkspaceMessage.__table__.create(bind=self.engine, checkfirst=True)
+
+    def test_slack_settings_report_configured_state_without_exposing_token(self) -> None:
+        response = self.client.get("/messages/workspace/slack/settings")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["enabled"])
+        self.assertFalse(response.json()["configured"])
+        self.assertEqual(response.json()["auth_status"], "none")
+        self.assertNotIn("token", response.text.lower())
+
+        settings.SLACK_MESSAGING_ENABLED = True
+        settings.SLACK_BOT_TOKEN = "xoxb-test-token"
+        settings.SLACK_MESSAGING_CHANNEL_IDS = "C123SLACK"
+
+        configured_response = self.client.get("/messages/workspace/slack/settings")
+        self.assertEqual(configured_response.status_code, 200)
+        payload = configured_response.json()
+        self.assertTrue(payload["enabled"])
+        self.assertTrue(payload["configured"])
+        self.assertEqual(payload["auth_status"], "configured")
+        self.assertEqual(payload["configured_channel_count"], 1)
+        self.assertNotIn("xoxb", configured_response.text)
+
+    def test_slack_sync_imports_messages_as_durable_workspace_conversations(self) -> None:
+        access_token = self._bootstrap_admin()
+        settings.SLACK_MESSAGING_ENABLED = True
+        settings.SLACK_BOT_TOKEN = "xoxb-test-token"
+        settings.SLACK_MESSAGING_CHANNEL_IDS = "C123SLACK"
+
+        with patch(
+            "apps.api.app.domains.integrations.services.slack_messaging.SlackMessagingClient",
+            _FakeSlackClient,
+        ):
+            response = self.client.post(
+                "/messages/workspace/slack/sync",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["synced_channel_count"], 1)
+        self.assertEqual(payload["created_conversation_count"], 1)
+        self.assertEqual(payload["imported_message_count"], 1)
+        self.assertEqual(payload["updated_message_count"], 0)
+
+        reload_response = self.client.get("/messages/workspace")
+        self.assertEqual(reload_response.status_code, 200)
+        slack_conversation = next(
+            item
+            for item in reload_response.json()["conversations"]
+            if item["conversation_id"] == "slack-C123SLACK"
+        )
+        self.assertEqual(slack_conversation["source_provider"], "slack")
+        self.assertEqual(slack_conversation["label"], "#desk-ops")
+        self.assertEqual(slack_conversation["connected_workspace"], "Slack")
+        self.assertEqual(slack_conversation["timeline"][-1]["author"]["name"], "Slack Operator")
+        self.assertEqual(
+            slack_conversation["timeline"][-1]["body"],
+            ["Slack note imported into the ECTRM messaging center."],
+        )
+        self.assertEqual(slack_conversation["timeline"][-1]["reactions"], [":eyes: 2"])
+
+        with patch(
+            "apps.api.app.domains.integrations.services.slack_messaging.SlackMessagingClient",
+            _FakeSlackClient,
+        ):
+            second_response = self.client.post(
+                "/messages/workspace/slack/sync",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.json()["imported_message_count"], 0)
+
+    def test_slack_post_sends_to_slack_and_persists_the_returned_message_timestamp(self) -> None:
+        access_token = self._bootstrap_admin()
+        settings.SLACK_MESSAGING_ENABLED = True
+        settings.SLACK_BOT_TOKEN = "xoxb-test-token"
+        settings.SLACK_MESSAGING_CHANNEL_IDS = "C123SLACK"
+
+        with patch(
+            "apps.api.app.domains.integrations.services.slack_messaging.SlackMessagingClient",
+            _FakeSlackClient,
+        ):
+            sync_response = self.client.post(
+                "/messages/workspace/slack/sync",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            self.assertEqual(sync_response.status_code, 200)
+
+            post_response = self.client.post(
+                "/messages/workspace/slack/posts",
+                headers={"Authorization": f"Bearer {access_token}"},
+                json={
+                    "conversation_id": "slack-C123SLACK",
+                    "body": "Posting from ECTRM into Slack.",
+                },
+            )
+
+        self.assertEqual(post_response.status_code, 201)
+        payload = post_response.json()
+        self.assertEqual(payload["message_id"], "slack-C123SLACK-1770000060_000200")
+        self.assertEqual(payload["conversation_id"], "slack-C123SLACK")
+        self.assertEqual(payload["body"], "Posting from ECTRM into Slack.")
+        self.assertEqual(payload["author"]["name"], "Messaging Admin")
+        self.assertEqual(payload["author"]["presence"], "Posted to Slack")
+        self.assertEqual(_FakeSlackClient.posted_messages[-1]["channel_id"], "C123SLACK")
+        self.assertEqual(_FakeSlackClient.posted_messages[-1]["text"], "Posting from ECTRM into Slack.")

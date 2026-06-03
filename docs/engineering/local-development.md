@@ -100,6 +100,7 @@ make api-contract-check
 make api-mcp-test
 make api-assistant-evals
 make api-document-classification-evals
+make api-document-packet-split-evals
 make api-test
 make web-build
 make web-lint
@@ -148,6 +149,11 @@ Use `make api-document-classification-evals` explicitly whenever changes affect
 deterministic document typing, classification evidence weights, ambiguity
 handling, or reviewed-example reuse for uploaded documents.
 
+Use `make api-document-packet-split-evals` explicitly whenever changes affect
+logical-document packet split detection, shared-page inference, packet
+correction capture, or replay fixture handling. This lane is also part of the
+repo-level `make verify` contract and the backend pull-request CI path.
+
 To export a sanitized replay fixture from reviewed document pages in the
 configured database, run:
 
@@ -162,6 +168,15 @@ Then replay it through the same scorer lane with:
 ```bash
 ./.venv/bin/python apps/api/scripts/run_document_classification_evals.py \
   --corpus tmp/document-classification-reviewed-replay.json --check
+```
+
+To replay captured packet split correction fixtures against the deterministic
+split detector, run:
+
+```bash
+./.venv/bin/python apps/api/scripts/run_document_packet_split_correction_replay.py \
+  --fixture apps/api/tests/fixtures/document_packet_split_correction_eval_corpus.json \
+  --check
 ```
 
 Use `make api-mcp-test` explicitly whenever changes affect the ChatGPT MCP

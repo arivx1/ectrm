@@ -83,6 +83,295 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-06-02 - Market News Uses Market-Impact Filtering
+
+- Type: algorithm-added
+- Domain: market data, external news ingestion, Home news card, and assistant
+  market context
+- Applies to:
+  `apps/api/app/domains/reference_data/services/external_data/market_news.py`,
+  `apps/web/src/widgets/news/MarketNewsPanel.tsx`,
+  `apps/api/tests/test_market_news_service.py`, and
+  `apps/web/tests/marketNewsPanel.test.ts`
+- Status: implemented
+- Source: Home news card returning broad `FISH` results such as game-and-fish,
+  conservation, music, restaurant, and recreational fishing headlines instead
+  of rows likely to affect commodity supply, demand, prices, or trade flows.
+- Lesson: commodity-only news queries are too broad for market context. Expand
+  commodity aliases into market terms, append explicit market-impact query
+  terms, parse a broader RSS candidate set, rank by deterministic
+  market-impact signals, subtract known non-market noise, and return no rows
+  rather than filling the card with irrelevant headlines. When rendering
+  non-neutral supply/demand effects, pair the deterministic direction with a
+  horizon tag: immediate for shocks/current price moves, near term for current
+  flow pressure, mid term for quarterly/seasonal/year performance, long term
+  for investment/capacity/infrastructure, and very long term for climate or
+  multi-year/decades language. Neutral effects should stay visually quiet and
+  omit the horizon tag. Market-location display should use explicit place
+  signals from headline/source text, including regions, countries, states,
+  provinces, territories, and cities, and fall back to `Unspecified` when no
+  defensible location is present; dotted abbreviations such as `U.S.` should
+  resolve to the country unless a more specific region such as `U.S. Gulf
+  Coast` matches first. Home news table filters should stay
+  deterministic over the same enriched row metadata: commodity controls shape
+  the server query, while market location, term horizon, supply effect, and
+  demand effect filter the loaded rows by inferred location and
+  positive/negative/neutral impact. Supply/demand effects should classify
+  explicit market drivers rather than generic price or equity movement:
+  `prices rise`, `stocks jump`, or `shares hit highs` alone stays neutral,
+  while `supply-risk`, `supply concerns`, `supply tightens`, and explicit
+  demand language drive the relevant axis. Production/output language such as
+  `beef output hits record` is physical supply evidence and should classify as
+  supply up; disease, drought, or dry-spell pressure should classify as
+  supply down.
+- Deterministic opportunity: keep this as typed external-data filtering over
+  RSS title/source/date/link inputs. Future tuning should add approved source
+  bonuses, commodity packs, and noise rules with tests rather than asking an
+  agent to judge every headline ad hoc.
+- Agent autonomy impact: agents may summarize or explain the filtered
+  headlines, but they should not turn headline text into business records,
+  price marks, risk conclusions, or external commitments without governed
+  domain services and reviewer-visible evidence.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_market_news_service apps.api.tests.test_external_data_api`
+  and
+  `npm --prefix apps/web test -- marketNewsPanel.test.ts newsApi.test.ts promptHomeWorkspace.test.ts`.
+- Follow-up: if desk usage converges on approved provider/source sets or
+  commodity-specific rule packs, move those into explicit configured lists and
+  keep the empty-result stop condition when no headline clears the
+  market-impact threshold.
+
+### 2026-06-02 - Provider-Empty Action Prompts Use Governed Stop Conditions
+
+- Type: stop-condition
+- Domain: assistant governed action runtime and trade-create staging
+- Applies to:
+  `apps/api/app/domains/assistant/services/execution.py`,
+  `apps/api/app/domains/assistant/services/action_planners.py`, and
+  `apps/api/tests/test_assistant_api.py`
+- Status: implemented
+- Source: prompt-first demo trade request that produced a provider-empty
+  response after governed context was prepared.
+- Lesson: when a model provider returns no response text after the
+  deterministic action runtime has already produced a governed action proposal
+  or stop-condition warning, `/assistant/respond` should complete with a
+  platform-authored fallback message instead of surfacing a generic provider
+  failure. The fallback must make clear whether an action request was prepared
+  or why no action was staged, and it must not let chat text mutate business
+  records.
+- Deterministic opportunity: keep trade-create readiness in the typed planner:
+  demo-style language such as "do a crude trade" may indicate create-trade
+  intent, but missing `trade_id`, book, commodity, volume, or pricing fields
+  remains a stop condition until structured evidence is supplied.
+- Agent autonomy impact: agents may explain the missing structured fields or
+  expose a reviewable typed action request. They may not invent trade economics
+  or book a trade from ambiguous demo prose.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_assistant_api.AssistantApiTests.test_assistant_prompt_uses_governed_stop_condition_when_provider_returns_empty_text`
+  and `make api-assistant-evals`.
+- Follow-up: extend the same fallback pattern only when another typed action
+  planner has an explicit proposal or stop condition; do not hide generic model
+  outages for ordinary non-action chat.
+
+### 2026-06-01 - Risk Promotion Creates Review Drafts Only
+
+- Type: algorithm-added
+- Domain: pre-trade risk-scenario promotion, reviewer reuse, and trader/risk
+  work objects
+- Applies to:
+  `apps/api/app/domains/reports/services/pretrade_risk_scenarios.py`,
+  `apps/api/app/routes/pretrade.py`, `apps/api/app/schemas/pretrade.py`,
+  `apps/api/tests/test_pretrade_api.py`,
+  `apps/web/src/entities/pretrade/api.ts`,
+  `apps/web/src/shared/models.ts`, and
+  `apps/web/src/workspaces/pretrade/PreTradeWorkspace.tsx`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-14.
+- Lesson: a governance `RISK_SCENARIO` promotion signal may now create a
+  shared durable `REVIEW_DRAFT` risk-scenario object, but only when the current
+  signal has a linked pre-trade review. The draft preserves source score,
+  evidence counts, latest review/run ids, sample ids, rationale, stop reasons,
+  source review status/thesis/notes/owner, optional recommendation
+  stance/score/headline, scenario draft, enrichment, residual exposure, input
+  snapshots, missing evidence, and reviewer focus. Creation is idempotent for
+  the same latest review/run evidence.
+- Deterministic opportunity: use this review-draft object as the
+  owner-visible intake point for future stress-methodology review, scenario
+  library curation, risk workflow policy, exposure-limit design, or market
+  opportunity promotion. Those next steps need separate domain owner approval,
+  policy rules, stale-state checks, audit, idempotency, and rollback before any
+  risk, trade, hedge, credit, settlement, or external-commitment mutation
+  exists.
+- Agent autonomy impact: agents may summarize risk-scenario review drafts,
+  compare source evidence, and draft reviewer notes. They may not treat the
+  draft as official risk methodology, a limit change, a credit approval, a
+  hedge order, an executed hedge, a booked trade, a policy override, or an
+  external commitment.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api`,
+  `npm --prefix apps/web run test -- preTradeApi.test.ts`,
+  `npm --prefix apps/web run build`, `npm --prefix apps/web run lint`, and
+  `npm --prefix apps/web run test:smoke -- --grep "pre-trade smoke"`.
+- Follow-up: promote the next strongest owner-approved governance signal into
+  a market-opportunity review object or add review-outcome metrics before
+  considering any higher-authority workflow.
+
+### 2026-06-01 - Hedge Promotion Creates Review Drafts Only
+
+- Type: algorithm-added
+- Domain: pre-trade hedge recommendation promotion, reviewer reuse, and
+  trader/risk work objects
+- Applies to:
+  `apps/api/app/domains/reports/services/pretrade_hedge_recommendations.py`,
+  `apps/api/app/routes/pretrade.py`, `apps/api/app/schemas/pretrade.py`,
+  `apps/api/tests/test_pretrade_api.py`,
+  `apps/web/src/entities/pretrade/api.ts`,
+  `apps/web/src/shared/models.ts`, and
+  `apps/web/src/workspaces/pretrade/PreTradeWorkspace.tsx`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-13.
+- Lesson: a governance `HEDGE_RECOMMENDATION` promotion signal may now create
+  a shared durable `REVIEW_DRAFT` hedge-recommendation object, but only when
+  the current signal has a linked recommendation run and a supported
+  deterministic hedge instrument recommendation. The draft preserves source
+  score, evidence counts, latest review/run ids, sample ids, rationale, stop
+  reasons, recommendation stance/score/headline, scenario draft, residual
+  exposure, hedge recommendation, rejected alternatives, and missing evidence,
+  and creation is idempotent for the same latest run/review evidence.
+- Deterministic opportunity: use this review-draft object as the
+  owner-visible intake point for future hedge workflow policy, hedge-accounting
+  review, margin/treasury analysis, or execution design. Those next steps need
+  separate domain owner approval, policy rules, stale-state checks, audit,
+  idempotency, and rollback before any business mutation or external
+  commitment exists.
+- Agent autonomy impact: agents may summarize hedge-recommendation review
+  drafts, compare source evidence, and draft reviewer notes. They may not treat
+  the draft as a hedge order, executed hedge, hedge-accounting designation,
+  credit approval, settlement approval, policy override, booked trade, or
+  external commitment.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api`,
+  `npm --prefix apps/web run test -- preTradeApi.test.ts`,
+  `npm --prefix apps/web run build`, `npm --prefix apps/web run lint`, and
+  `npm --prefix apps/web run test:smoke -- --grep "pre-trade smoke"`.
+- Follow-up: promote the next strongest owner-approved governance signal into
+  a first-class risk scenario or market-opportunity review object before
+  considering execution authority.
+
+### 2026-06-01 - Netting Promotion Creates Review Drafts Only
+
+- Type: algorithm-added
+- Domain: pre-trade netting promotion, reviewer reuse, and trader/risk work
+  objects
+- Applies to:
+  `apps/api/app/domains/reports/services/pretrade_netting_sets.py`,
+  `apps/api/app/routes/pretrade.py`, `apps/api/app/schemas/pretrade.py`,
+  `apps/api/tests/test_pretrade_api.py`,
+  `apps/web/src/entities/pretrade/api.ts`,
+  `apps/web/src/shared/models.ts`, and
+  `apps/web/src/workspaces/pretrade/PreTradeWorkspace.tsx`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-12.
+- Lesson: a governance `NETTING_SET` promotion signal may now create a shared
+  durable `REVIEW_DRAFT` netting-set object, but only when the current signal
+  has a linked recommendation run and supported `EXACT` or `PARTIAL` netting
+  candidates. The draft preserves source score, evidence counts, latest
+  review/run ids, sample ids, rationale, stop reasons, scenario draft, and
+  candidate details, and creation is idempotent for the same latest run/review
+  evidence.
+- Deterministic opportunity: use this review-draft object as the owner-visible
+  intake point for future legal-netting, settlement-netting, book-transfer, or
+  flattening-trade policy design. Those next steps require separate domain
+  owner approval, policy rules, stale-state checks, audit, and rollback before
+  any business mutation exists.
+- Agent autonomy impact: agents may summarize netting-set review drafts,
+  compare source evidence, and draft reviewer notes. They may not treat the
+  draft as legal netting, settlement netting, a position transfer, a booked
+  trade, a hedge execution, a credit decision, or an external commitment.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api`,
+  `npm --prefix apps/web run test -- preTradeApi.test.ts`,
+  `npm --prefix apps/web run build`, and `npm --prefix apps/web run lint`.
+- Follow-up: promote the next strongest owner-approved governance signal into
+  a hedge-recommendation workflow object or first-class risk scenario before
+  considering execution authority.
+
+### 2026-05-29 - Pre-Trade Governance Tracks Promotion Signals
+
+- Type: algorithm-added
+- Domain: pre-trade review governance, deterministic recommendation reuse,
+  netting, hedge drafts, and Risk triage
+- Applies to:
+  `apps/api/app/domains/reports/services/pretrade_governance.py`,
+  `apps/api/app/schemas/pretrade.py`,
+  `apps/api/tests/test_pretrade_api.py`,
+  `apps/web/src/shared/models.ts`, and
+  `apps/web/src/workspaces/pretrade/PreTradeWorkspace.tsx`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-11.
+- Lesson: pre-trade governance now emits read-only promotion candidates when
+  visible human review behavior reuses supported netting matches, hedge
+  recommendations, or Risk workspace triage patterns. Candidate records include
+  status, score, review/run evidence counts, latest ids, rationale, stop
+  reasons, and sample ids, and audit export rows preserve the signal.
+- Deterministic opportunity: use governance promotion candidates as the intake
+  queue for the next durable work object. Promote only the strongest
+  owner-approved candidate into a netting set, hedge recommendation workflow
+  object, or risk scenario after its stop reasons and source contracts are
+  resolved.
+- Agent autonomy impact: agents may summarize promotion signals and explain
+  why a candidate is watch-only or ready for owner review. They may not create
+  durable netting sets, execute hedges, book trades, approve reviews, override
+  policy, or turn a promotion signal into an external commitment.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api`
+- Follow-up: once enough candidates accumulate, define human-owned thresholds
+  for durable netting-set creation, hedge-recommendation workflow objects, or
+  first-class risk scenarios.
+
+### 2026-05-29 - Packet Split Corrections Feed Deterministic Replay
+
+- Type: algorithm-added
+- Domain: document ingestion, logical-document packet splitting, and reviewer
+  correction capture
+- Applies to:
+  `apps/api/app/domains/documents/services/document_logical_documents.py`,
+  `apps/api/app/domains/documents/services/document_packet_split_corrections.py`,
+  `apps/api/app/domains/documents/services/document_ingestion_review.py`, and
+  `apps/api/scripts/run_document_packet_split_correction_replay.py`
+- Status: implemented
+- Source: page-level document classification and logical-document packet split
+  review flow.
+- Lesson: when an operator saves a logical-document split that differs from the
+  prior non-human system suggestion, the backend now emits a typed
+  `DocumentPacketSplitCorrectionCaptured` activity with previous and accepted
+  memberships, page ids, document kinds, shared-page choices, and split
+  evidence. The correction payload can be exported with persisted pages into a
+  deterministic replay fixture for improving `build_logical_document_estimates`;
+  the packet split correction replay runner batches captured events into a
+  fixture suite and scores the current detector against accepted layouts. A
+  checked-in correction corpus now covers shared BOL/invoice pages, repeated
+  same-kind invoice identity splits, and attachment/supporting-document
+  boundaries, with mismatch reports grouped by cause. The corpus replay is now
+  part of `make verify` and backend pull-request CI.
+- Deterministic opportunity: mine accepted corrections for stable split rules,
+  especially shared boundary pages, repeated same-kind identity changes, and
+  attachment/supporting-document transitions. Promote recurring corrections into
+  deterministic structure signals before relying on prompt instructions.
+- Agent autonomy impact: agents may summarize corrections, propose detector
+  rule updates, and generate replay fixtures. Humans still review packet
+  memberships before business records are created or linked.
+- Tests or evidence:
+  `make api-document-packet-split-evals` and
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_logical_document_split_patch_allows_shared_source_pages apps.api.tests.test_document_packet_split_correction_replay`
+- Follow-up: periodically export production correction suites and use mismatched
+  replay cases to promote stable reviewer patterns into deterministic split
+  signals.
+
 ### 2026-05-29 - Pre-Trade Triage Emits Typed Arbitrage Economics
 
 - Type: algorithm-added
@@ -118,9 +407,257 @@ proposal form until a human owner approves the domain rule.
   `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_pretrade_recommendation_triage apps.api.tests.test_pretrade_api apps.api.tests.test_assistant_tooling`,
   `npm --prefix apps/web run test -- preTradeApi.test.ts preTradeStructuringDraft.test.ts preTradeWorkspaceSupport.test.ts`,
   `npm --prefix apps/web run build`, and `make api-assistant-evals`.
-- Follow-up: TRMVP-04 should persist the triage rationale into saved
-  scenarios, review items, and Trade Capture handoff context without increasing
-  agent authority.
+- Follow-up: watch reviewer reuse before promoting netting sets, hedge
+  recommendations, or risk scenarios into durable work objects.
+
+### 2026-05-29 - Pre-Trade Scenario Enrichment Preserves Review Rationale
+
+- Type: algorithm-added
+- Domain: pre-trade scenario persistence, shared review handoffs, and Trade
+  Capture workflow notes
+- Applies to:
+  `apps/api/app/schemas/pretrade.py`,
+  `apps/api/app/routes/pretrade.py`,
+  `apps/api/app/domains/reports/services/pretrade_recommendations.py`,
+  `apps/api/app/domains/reports/services/pretrade_reviews.py`,
+  `apps/web/src/workspaces/pretrade/preTradeScenarioEnrichment.ts`,
+  `apps/web/src/features/trades/preTradeCapture.ts`, and
+  `apps/web/src/workspaces/pretrade/PreTradeWorkspace.tsx`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-04.
+- Lesson: saved pre-trade scenarios and shared review items now carry an
+  optional typed `enrichment` object for opportunity category, hedge intent,
+  residual exposure summary, source freshness summary, reviewer focus, and
+  recommendation-run reference fields. Review creation derives this context
+  from the attached recommendation run when present, otherwise it carries the
+  source scenario's saved enrichment forward. Approved review handoffs into
+  Trade Capture include the enrichment in the workflow note.
+- Deterministic opportunity: keep handoff rationale as typed metadata derived
+  from recommendation runs and source snapshots. If humans begin editing the
+  same enrichment fields repeatedly, promote the edits into explicit review
+  fields or rule-owned recommendation output rather than freeform notes.
+- Agent autonomy impact: agents may read and explain scenario enrichment and
+  draft follow-up notes from it. The enrichment does not grant authority to
+  book trades, approve reviews, execute hedges, change limits, or externally
+  commit the firm.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api`,
+  `npm --prefix apps/web run test -- preTradeApi.test.ts preTradeCapture.test.ts preTradeScenarioEnrichment.test.ts preTradeStructuringDraft.test.ts`,
+  `npm --prefix apps/web run build`, `make web-lint`, and
+  `make api-assistant-evals`.
+- Follow-up: watch reviewer reuse before promoting netting sets, hedge
+  recommendations, or risk scenarios into durable work objects.
+
+### 2026-05-29 - Pre-Trade Workspace Brief Keeps Handoff Evidence Scannable
+
+- Type: lesson
+- Domain: pre-trade workspace review flow, recommendation evidence, and
+  review-to-capture handoff UX
+- Applies to:
+  `apps/web/src/workspaces/pretrade/preTradeRecommendations.ts`,
+  `apps/web/src/workspaces/pretrade/PreTradeWorkspace.tsx`,
+  `apps/web/src/styles/pretrade.css`, and
+  `apps/web/tests/preTradeRecommendations.test.ts`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-05.
+- Lesson: the Pre-Trade workspace should summarize deterministic
+  recommendation analysis into a compact review brief before asking a human to
+  save, submit, or capture. The brief keeps stance, opportunity, residual
+  exposure, source freshness, missing evidence, hedge draft, and reviewer focus
+  adjacent to the handoff actions so operators do not need raw source JSON to
+  understand the recommendation.
+- Deterministic opportunity: keep the brief as a view-model over typed
+  recommendation output. If reviewers repeatedly change the same focus or
+  readiness decisions, promote those edits into recommendation rules, review
+  fields, or a typed action contract rather than encoding them only in UI copy.
+- Agent autonomy impact: agents may read or explain the workspace brief, but
+  the brief remains decision support. It does not authorize trade booking,
+  hedge execution, approval overrides, limit changes, or external commitments.
+- Tests or evidence:
+  `npm --prefix apps/web run test -- preTradeRecommendations.test.ts preTradeScenarioEnrichment.test.ts preTradeStructuringDraft.test.ts preTradeApi.test.ts preTradeCapture.test.ts preTradeWorkspaceSupport.test.ts`
+- Follow-up: watch reviewer reuse before promoting netting sets, hedge
+  recommendations, or risk scenarios into durable work objects.
+
+### 2026-05-29 - Pre-Trade Review-To-Capture Handoff Has Browser Smoke Coverage
+
+- Type: lesson
+- Domain: pre-trade browser smoke, review approval, Trade Capture handoff, and
+  workflow-note provenance
+- Applies to:
+  `apps/web/tests/browser/support/smokeHarness.ts`,
+  `apps/web/tests/browser/smokeHarness.spec.ts`,
+  `apps/web/src/workspaces/pretrade/PreTradeWorkspace.tsx`,
+  `apps/web/src/features/trades/preTradeCapture.ts`, and
+  `apps/web/src/entities/app/useAppTradeActions.ts`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-10.
+- Lesson: the browser smoke harness now treats the pre-trade
+  recommendation-to-review-to-capture path as a protected cross-workspace
+  workflow. The seeded mock API returns deterministic draft analysis, stale
+  source evidence, recommendation runs, review items, approval drift checks,
+  and confirmation workflow-note creation so smoke coverage fails if review
+  context, source freshness, draft fields, or workflow-note provenance are lost.
+- Deterministic opportunity: keep smoke fixtures aligned with typed pre-trade
+  payloads instead of hardcoding text-only UI state. When new netting, hedge,
+  or assistant fields join the handoff, extend the typed smoke fixture and
+  workflow-note assertions in the same change.
+- Agent autonomy impact: browser coverage proves the human handoff path, not
+  autonomous authority. Agents may explain or draft recommendation context, but
+  humans still approve reviews, open Trade Capture, and book any resulting
+  trade.
+- Tests or evidence:
+  `npm --prefix apps/web run test:smoke -- --grep "pre-trade smoke"`
+- Follow-up: watch reviewer reuse before promoting netting sets, hedge
+  recommendations, or risk scenarios into durable work objects.
+
+### 2026-05-29 - Trader/Risk Assistant Evals Gate Recommendation Authority
+
+- Type: lesson
+- Domain: trader/risk assistant evals, pre-trade recommendation tools, source
+  freshness, netting explanation, hedge draft authority, and refusal behavior
+- Applies to:
+  `apps/api/tests/test_assistant_evals.py`,
+  `apps/api/tests/assistant_eval_harness.py`,
+  `apps/api/app/domains/assistant/services/tools.py`,
+  `apps/api/app/domains/assistant/services/role_archetypes.py`, and
+  `apps/api/app/domains/reports/services/pretrade_recommendations.py`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-09.
+- Lesson: trader/risk assistant behavior is now gated by assistant evals that
+  exercise the same deterministic pre-trade recommendation payloads used by the
+  UI. The eval suite checks fresh opportunity explanation, missing source
+  fallback with policy stops, netting explanation without mutation, hedge draft
+  wording without execution claims, and direct refusal to book or execute a
+  hedge. Pre-trade tool traces expose compact previews for stance,
+  opportunity category, residual exposure effect, netting match quality, hedge
+  instrument, missing evidence, and policy stops.
+- Deterministic opportunity: keep assistant explanations tied to typed
+  recommendation fields and source snapshots. When Risk workspace integration
+  exposes deterministic hedge decisions, extend the typed service, UI contract,
+  and eval payload assertions together rather than relying on prompt-only hedge
+  rules.
+- Agent autonomy impact: Market Research, Pre-Trade Structuring, and Risk
+  Sentinel roles remain read, explain, and draft only for trader/risk
+  recommendations. They may explain opportunities, draft review notes, and
+  summarize hedge candidates, but they may not book trades, mutate positions,
+  execute hedges, approve reviews, or externally commit.
+- Tests or evidence: `make api-assistant-evals`.
+- Follow-up: watch reviewer reuse before promoting netting sets, hedge
+  recommendations, or risk scenarios into durable work objects.
+
+### 2026-05-29 - Pre-Trade Netting Candidates Use Deterministic Match Gates
+
+- Type: algorithm-added
+- Domain: pre-trade recommendation netting, long/short exposure offsets, and
+  trader/risk source evidence
+- Applies to:
+  `apps/api/app/domains/reports/services/pretrade_recommendations.py`,
+  `apps/api/app/schemas/pretrade.py`,
+  `apps/api/tests/test_pretrade_recommendation_triage.py`,
+  `apps/web/src/shared/models.ts`, and
+  `apps/web/src/workspaces/pretrade/PreTradeWorkspace.tsx`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-06.
+- Lesson: pre-trade recommendations now draft netting candidates from typed
+  desk-context evidence instead of only checking whether a draft reduces
+  absolute exposure. The deterministic candidate computes gross exposure,
+  offset quantity, and residual exposure, accepts opposing long/short drafts
+  with compatible commodity, book or allowed book group, unit, location,
+  delivery window, price index, and pricing type evidence, and emits explicit
+  rejection reasons when available evidence does not match.
+- Deterministic opportunity: keep netting as analysis-only recommendation
+  output until a human-owned durable netting-set object is approved. Future
+  legal netting, settlement netting, cross-commodity spreads, or flattening
+  trade generation must become separate governed services or action contracts.
+- Agent autonomy impact: agents may explain candidate match quality, mismatch
+  reasons, source refs, and residual exposure. They may not mutate positions,
+  transfer books, flatten trades, book offsets, execute hedges, or imply legal
+  or settlement netting authority.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_pretrade_recommendation_triage`.
+- Follow-up: watch reviewer reuse before promoting netting sets, hedge
+  recommendations, or risk scenarios into durable work objects.
+
+### 2026-05-29 - Pre-Trade Hedge Drafts Use A Deterministic Decision Table
+
+- Type: algorithm-added
+- Domain: pre-trade hedge recommendation, residual risk, option exposure,
+  netting, credit, settlement, and trader/risk evidence
+- Applies to:
+  `apps/api/app/domains/reports/services/pretrade_recommendations.py`,
+  `apps/api/app/schemas/pretrade.py`,
+  `apps/api/app/domains/assistant/services/tools.py`,
+  `apps/api/tests/test_pretrade_recommendation_triage.py`,
+  `apps/api/tests/test_assistant_evals.py`,
+  `apps/web/src/shared/models.ts`, and
+  `apps/web/src/workspaces/pretrade/PreTradeWorkspace.tsx`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-07.
+- Lesson: pre-trade hedge recommendations now use an explicit deterministic
+  decision table over residual delta, optionality, basis risk, tenor,
+  instrument support, liquidity availability, volatility freshness, curve
+  freshness, credit constraints, settlement constraints, hedge policy, and
+  hedge-accounting clarity. The output carries an instrument type, decision
+  key, decision factors, policy stops, source refs, and rejected alternatives.
+  Physical-offset recommendations consume typed netting candidates; optional
+  hedges require fresh option or volatility evidence; blocked or stale cases
+  stop at `WAIT_FOR_DATA` or `ESCALATE`.
+- Deterministic opportunity: keep hedge drafting in deterministic service logic
+  until human-owned policies approve deeper hedge accounting, margin, treasury,
+  or execution workflows. Do not move futures, swap, option, or physical-offset
+  selection back into prompt-only assistant instructions.
+- Agent autonomy impact: agents may explain the hedge draft, source evidence,
+  rejected alternatives, and stop conditions. They may not execute hedges, book
+  trades, designate hedge accounting, override credit or settlement stops, or
+  imply the draft is an approved hedge order.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_pretrade_recommendation_triage apps.api.tests.test_pretrade_api`,
+  targeted assistant tooling tests, `make api-assistant-evals`,
+  `npm --prefix apps/web run test -- preTradeApi.test.ts preTradeRecommendations.test.ts preTradeStructuringDraft.test.ts preTradeScenarioEnrichment.test.ts`,
+  `npm --prefix apps/web run build`, and `make web-lint`.
+- Follow-up: watch reviewer reuse before promoting netting sets, hedge
+  recommendations, or risk scenarios into durable work objects.
+
+### 2026-05-29 - Risk Workspace Stages Pre-Trade Reviews From Exposure Triage
+
+- Type: algorithm-added
+- Domain: Risk workspace exposure triage, pre-trade scenario staging,
+  recommendation runs, review handoff, and source freshness
+- Applies to:
+  `apps/web/src/workspaces/risk/RiskWorkspace.tsx`,
+  `apps/web/src/workspaces/risk/riskPreTradeTriage.ts`,
+  `apps/web/tests/riskPreTradeTriage.test.ts`,
+  `apps/web/src/shared/workspaceLayoutPresets.ts`, and
+  `apps/web/src/entities/app/workspaceRendererRegistry.tsx`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-08.
+- Lesson: the Risk workspace now derives review-only pre-trade triage
+  candidates from live linear positions, related active trades, and latest
+  price-index marks. The UI keeps source position, source trades, mark
+  freshness, draft side, draft volume, and manual review guardrails visible
+  before staging. Creating a candidate writes through the typed Pre-Trade
+  scenario, recommendation-run, and review item APIs, then enriches the review
+  from the deterministic recommendation run.
+- Deterministic opportunity: keep Risk-to-Pre-Trade routing as deterministic
+  candidate generation plus typed service writes. If reviewers repeatedly reuse
+  the same Risk triage candidates outside recommendation runs, promote the
+  durable object explicitly as a netting set, hedge recommendation, or risk
+  scenario rather than hiding that state in UI notes.
+- Agent autonomy impact: agents may explain Risk triage candidates and source
+  freshness, but the tile does not authorize trade booking, hedge execution,
+  credit overrides, settlement overrides, or hedge-accounting designation.
+- Tests or evidence:
+  `npm --prefix apps/web run test -- riskPreTradeTriage.test.ts workspaceLayoutPresets.test.ts`,
+  `npm --prefix apps/web run build`, `make web-lint`, and `git diff --check`.
+- Follow-up: watch reviewer reuse before promoting netting sets, hedge
+  recommendations, or risk scenarios into durable work objects.
 
 ### 2026-05-29 - Nomination Documents Update Delivery Schedule Details
 
@@ -191,9 +728,44 @@ proposal form until a human owner approves the domain rule.
   `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_document_record_creation_requests_service apps.api.tests.test_document_workflows_service`
   and
   `npm --prefix apps/web run test -- documentApi.test.ts libraryWorkspace.test.ts`.
-- Follow-up: connect resolved intake metrics to domain work queues and add
-  resolution support for additional canonical record types as their typed
-  services mature.
+- Follow-up: add resolution support and queue routing for additional canonical
+  record types as their typed services mature.
+
+### 2026-05-29 - Document Intake Routes To Owning Work Queues
+
+- Type: algorithm-added
+- Domain: document linkage, operations queues, settlement queues, and
+  missing-record creation intake
+- Applies to: open `document_record_creation_requests` for `TRADE`,
+  `DELIVERY`, and `TRADE_INVOICE`
+- Status: implemented
+- Source:
+  `apps/api/app/domains/operations/services/document_intake_work_items.py`,
+  `apps/api/app/domains/operations/routes/operations.py`,
+  `apps/api/app/domains/operations/services/operational_resource_registry.py`,
+  `apps/web/src/entities/app/api.ts`,
+  `apps/web/src/entities/app/useAppWorkspaceBootstrap.ts`,
+  `apps/web/src/workspaces/operations/OperationsWorkspace.tsx`, and
+  `apps/web/src/workspaces/settlement/SettlementWorkspace.tsx`
+- Lesson: missing-record intake is now projected into the desk that owns the
+  next typed action: trade and delivery requests route to the operations queue,
+  while invoice requests route to the settlement queue. This projection carries
+  queue, handoff type, routing label, priority, missing owner blockers, captured
+  fields, and next steps, but it remains a read model over the Library-owned
+  intake row. Operators must still create or identify the real business record
+  through the owning typed workflow and then resolve the intake by linking the
+  document.
+- Deterministic opportunity: as more canonical records get typed creation
+  services, add explicit target-to-queue mappings and tests before surfacing
+  them. Keep unmapped or ambiguous targets in Library review instead of
+  guessing an owner from freeform document text.
+- Agent autonomy impact: agents may triage or summarize routed document intake
+  by queue, but they should not treat the work-item projection as permission to
+  create trades, deliveries, invoices, or accounting entries.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_document_record_creation_requests_service apps.api.tests.test_document_workflows_service`,
+  `npm --prefix apps/web run test -- documentApi.test.ts libraryWorkspace.test.ts appBootstrapLoaders.test.ts`,
+  and `npm --prefix apps/web run build`.
 
 ### 2026-05-29 - Pre-Trade Recommendations Carry Typed Evidence And Freshness
 
@@ -231,8 +803,8 @@ proposal form until a human owner approves the domain rule.
   `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api apps.api.tests.test_assistant_tooling`
   and
   `npm --prefix apps/web run test -- preTradeApi.test.ts preTradeStructuringDraft.test.ts preTradeWorkspaceSupport.test.ts`.
-- Follow-up: TRMVP-04 should preserve the recommendation rationale on saved
-  scenarios and review handoffs now that deterministic triage exists.
+- Follow-up: watch reviewer reuse before promoting netting sets, hedge
+  recommendations, or risk scenarios into durable work objects.
 
 ### 2026-05-29 - Delivery Proof Documents Can Record Actualization
 
@@ -782,6 +1354,70 @@ proposal form until a human owner approves the domain rule.
 - Tests or evidence: focused document facet and ingestion tests.
 - Follow-up: include reviewed examples in replay exports if document-type tag
   behavior becomes part of broader document review analytics.
+
+### 2026-05-29 - Packet Structure Detection Uses Identity And Boundary Signals
+
+- Type: algorithm-added
+- Domain: document ingestion, logical document segmentation, packet structure,
+  and review provenance
+- Applies to: `build_logical_document_estimates`, structure profiles,
+  persisted logical-document memberships, and packet split activity events
+- Status: implemented
+- Source:
+  `apps/api/app/domains/documents/services/document_ingestion_review.py`,
+  `apps/api/app/domains/documents/services/document_logical_documents.py`,
+  and `apps/api/tests/test_document_ingestion_api.py`
+- Lesson: page-level classification alone is not enough to identify packet
+  boundaries. The estimator now also splits repeated same-kind documents when a
+  later page starts a new document with conflicting distinctive identity
+  evidence, and it shares adjacent boundary pages when a page contains section
+  title evidence for the neighboring logical document or attachment/supporting
+  document markers. Persist `split_confidence` and `split_evidence` with every
+  logical document so operators can review why the system split a packet and
+  future evals can replay accepted or rejected split evidence.
+- Deterministic opportunity: continue promoting reviewed packet corrections
+  into auditable structure signals before asking agents or processors to infer
+  downstream record changes.
+- Agent autonomy impact: agents may explain why a packet split was suggested,
+  but manual review and governed action paths still own corrections and any
+  downstream business mutations.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_logical_document_estimates_split_repeated_same_kind_by_identity apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_logical_document_estimates_share_boundary_pages_with_embedded_section_start apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_logical_document_split_patch_allows_shared_source_pages apps.api.tests.test_document_ingestion_api.DocumentIngestionApiTests.test_packet_upload_detects_shared_boundary_page_from_structure_signals`
+  and `npm --prefix apps/web run test -- libraryWorkspace.test.ts`.
+- Follow-up: add layout-aware region evidence once OCR/PDF bounding boxes are
+  preserved for sub-page splits.
+
+### 2026-05-29 - Logical Document Memberships Support Shared Packet Pages
+
+- Type: algorithm-added
+- Domain: document ingestion, logical document segmentation, packet-split
+  review, and audit provenance
+- Applies to: uploaded PDF packets, `DocumentLogicalDocument`,
+  `DocumentLogicalDocumentPage`, Library packet split review, page-to-logical
+  document serialization, and manual split activity events
+- Status: implemented
+- Source:
+  `apps/api/app/models/document_logical_document_page.py`,
+  `apps/api/app/domains/documents/services/document_logical_documents.py`,
+  `apps/api/app/domains/documents/services/document_ingestion_serialization.py`,
+  `apps/web/src/features/documents/DocumentPacketSplitEditor.tsx`,
+  and `apps/api/tests/test_document_ingestion_api.py`
+- Lesson: an uploaded PDF page can be evidence for more than one logical
+  document. Persist logical-document membership rows instead of assuming a
+  single contiguous page range is the durable split; keep reviewed manual
+  memberships from being overwritten by automatic page-kind synchronization.
+- Deterministic opportunity: structure extraction can promote separator,
+  attachment, shared-page, or sub-page span evidence into membership rows with
+  provenance, while downstream routing continues to operate on logical
+  documents rather than source files.
+- Agent autonomy impact: agents may propose packet boundaries or explain shared
+  evidence, but manual split edits remain governed review actions and agents
+  must preserve membership provenance before staging downstream record changes.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_document_ingestion_api`
+  and `npm --prefix apps/web run test -- documentApi.test.ts libraryWorkspace.test.ts`
+- Follow-up: add region drawing and logical-document-specific extraction or
+  action endpoints before increasing routing autonomy for sub-page splits.
 
 ### 2026-05-24 - Packet Splits Are Persisted Logical Documents
 
@@ -5502,6 +6138,44 @@ independently"`.
 - Follow-up: replace the metadata-only attachment prototype with real file
   storage and add mention-driven notifications once ownership and delivery
   rules are defined.
+
+### 2026-06-02 - Slack Messaging Should Mirror Through Durable Conversation Records
+
+- Type: lesson
+- Domain: Slack integration, messaging workspace persistence, and external
+  communication provenance
+- Applies to: `Messages` workspace Slack sync, Slack-backed conversation sends,
+  external channel mirrors, and future chat-provider connectors
+- Status: implemented
+- Source:
+  `apps/api/app/domains/integrations/services/slack_messaging.py`,
+  `apps/api/app/routes/messages.py`,
+  `apps/api/app/domains/messages/services/workspace.py`,
+  `apps/api/app/schemas/messaging.py`,
+  `apps/web/src/entities/messages/api.ts`, and
+  `apps/web/src/workspaces/messages/MessagingWorkspace.tsx`
+- Lesson: Slack should enter ECTRM through the durable messaging work-object
+  contract, not as a separate client-only feed. Slack conversation IDs and
+  message timestamps can produce stable local conversation/message IDs, making
+  history sync idempotent without adding a new schema just for the first
+  connector slice. Posting to Slack from ECTRM is an explicit external
+  communication and therefore requires a signed-in operator; assistant/local
+  messages may remain in-thread locally but should not silently post outward.
+- Deterministic opportunity: keep provider ID mapping, sync limits, author
+  normalization, and Slack-vs-local post routing in typed integration and
+  messaging services. If more providers arrive, reuse the same
+  `source_provider` distinction and durable message mirror pattern before
+  adding provider-specific UI state.
+- Agent autonomy impact: agents may summarize or draft around Slack-backed
+  conversations, but external sends should stay human-initiated and auditable.
+  Slack mirrors are collaboration context, not durable business truth or a
+  bypass around governed action requests.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_messaging_workspace_api`,
+  `npm test -- messagesApi.test.ts messagingWorkspace.test.ts`, and
+  `npm run build`
+- Follow-up: add event/webhook ingestion, provider-specific attachment storage,
+  and richer thread reply sync when the desk needs near-real-time Slack parity.
 
 ### 2026-05-18 - Price Index Sources Must Sync Into Market Marks
 

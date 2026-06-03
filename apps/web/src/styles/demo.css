@@ -359,6 +359,10 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .settlement-worklist-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .shipment-editor-panel {
     position: static;
   }
@@ -372,6 +376,154 @@
 .settlement-queue-section {
   display: grid;
   gap: 1rem;
+}
+
+.settlement-mode-tabs {
+  margin-bottom: 0;
+}
+
+.settlement-mode-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.settlement-mode-tab strong {
+  min-width: 1.75rem;
+  padding: 0.16rem 0.48rem;
+  border-radius: 999px;
+  background: rgba(18, 42, 56, 0.08);
+  color: #103045;
+  text-align: center;
+}
+
+.settlement-mode-tab.is-active strong {
+  background: rgba(18, 124, 108, 0.16);
+}
+
+.settlement-exception-queue {
+  display: grid;
+  gap: 1rem;
+}
+
+.settlement-worklist-shell {
+  display: grid;
+  grid-template-columns: minmax(18rem, 0.72fr) minmax(0, 1.28fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.settlement-worklist-panel,
+.settlement-worklist-list,
+.settlement-worklist-detail {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.settlement-worklist-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.settlement-worklist-head > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.settlement-worklist-head strong {
+  color: #103045;
+}
+
+.settlement-worklist-head span {
+  color: #6f7c8a;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.settlement-worklist-item {
+  display: grid;
+  width: 100%;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.78);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.settlement-worklist-item:hover,
+.settlement-worklist-item:focus-visible {
+  border-color: rgba(18, 124, 108, 0.32);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 10px 24px rgba(18, 42, 56, 0.08);
+  outline: none;
+}
+
+.settlement-worklist-item.is-selected {
+  border-color: rgba(18, 124, 108, 0.48);
+  background: rgba(236, 250, 246, 0.72);
+  box-shadow: inset 3px 0 0 rgba(18, 124, 108, 0.88);
+}
+
+.settlement-worklist-row-head,
+.settlement-worklist-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.settlement-worklist-row-head {
+  align-items: flex-start;
+}
+
+.settlement-worklist-footer {
+  align-items: center;
+  color: #6f7c8a;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.settlement-worklist-copy {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.settlement-worklist-copy strong {
+  color: #103045;
+  font-size: 0.95rem;
+}
+
+.settlement-worklist-copy span {
+  color: #52606d;
+  font-size: 0.86rem;
+}
+
+.settlement-worklist-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.settlement-worklist-action {
+  flex: 0 0 auto;
+  color: #0f685a;
+  font-weight: 800;
+}
+
+@media (max-width: 720px) {
+  .settlement-worklist-row-head,
+  .settlement-worklist-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 .operational-board-shell,
@@ -422,4 +574,3 @@
 .settlement-payment-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
-

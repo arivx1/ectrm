@@ -65,11 +65,13 @@ from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.schemas.assistant import (
+    AssistantMessageOut,
     AssistantPromptContextRequest,
     AssistantPromptRequest,
     AssistantPromptResponse,
     AssistantPromptSectionOut,
     AssistantToolCallOut,
+    AssistantUsageOut,
 )
 
 _TOOL_PREFETCH_LIMIT = 5
@@ -446,11 +448,20 @@ async def execute_assistant_execution(
     payload: AssistantPromptRequest,
     prepared: PreparedAssistantExecution,
 ) -> tuple[AssistantPromptResponse, AssistantConversation]:
-    response = await assistant_service.generate_response(
-        payload,
-        agent_definition=prepared.agent_definition,
-        prompt_context=prepared.prompt_context,
-    )
+    try:
+        response = await assistant_service.generate_response(
+            payload,
+            agent_definition=prepared.agent_definition,
+            prompt_context=prepared.prompt_context,
+        )
+    except AssistantServiceError as exc:
+        fallback_response = _build_provider_empty_response_fallback(
+            exc,
+            prepared=prepared,
+        )
+        if fallback_response is None:
+            raise
+        response = fallback_response
     if not isinstance(response, AssistantPromptResponse):
         response = AssistantPromptResponse.model_validate(response)
     if response.agent_role_key is None:
@@ -508,6 +519,77 @@ async def execute_assistant_execution(
     response.conversation_id = updated_conversation.id
     response.conversation_updated_at = updated_conversation.updated_at
     return response, updated_conversation
+
+
+def _build_provider_empty_response_fallback(
+    exc: AssistantServiceError,
+    *,
+    prepared: PreparedAssistantExecution,
+) -> AssistantPromptResponse | None:
+    if "returned an empty response" not in exc.detail.lower():
+        return None
+
+    fallback_message = _governed_action_fallback_message(prepared.action_runtime_result)
+    if fallback_message is None:
+        return None
+
+    fallback_warning = (
+        "The model provider returned no response text, so the assistant used the governed action planner's deterministic stop condition."
+        if prepared.action_runtime_result.warnings
+        else "The model provider returned no response text, so the assistant used the governed action planner's typed action plan."
+    )
+    return AssistantPromptResponse(
+        agent_id=prepared.prompt_context.agent_id,
+        agent_name=prepared.prompt_context.agent_name,
+        agent_role_key=prepared.prompt_context.agent_role_key,
+        agent_profile_kind=prepared.prompt_context.agent_profile_kind,
+        provider=prepared.provider_name,
+        model=prepared.model_name,
+        message=AssistantMessageOut(content=fallback_message),
+        usage=AssistantUsageOut(input_tokens=None, output_tokens=None),
+        warnings=_dedupe_strings(
+            [
+                *prepared.runtime_warnings,
+                *prepared.prompt_context.warnings,
+                fallback_warning,
+            ]
+        ),
+        tool_calls=[],
+    )
+
+
+def _governed_action_fallback_message(result: AssistantActionRuntimeResult) -> str | None:
+    action_warnings = [warning.strip() for warning in result.warnings if warning.strip()]
+    if action_warnings:
+        return (
+            "I could not stage a governed action from that prompt yet. "
+            + " ".join(action_warnings)
+            + " No trade or business record was created, amended, or executed from this chat. "
+            "Provide the missing structured fields or use the manual workspace path."
+        )
+
+    if result.proposals:
+        summaries = "; ".join(proposal.summary for proposal in result.proposals[:3])
+        return (
+            "I prepared governed action context for review: "
+            + summaries
+            + ". The model provider returned no response text, so this reply is based on the platform's typed action plan. "
+            "Review the action request status before treating anything as executed."
+        )
+
+    return None
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
 
 
 def record_failed_assistant_execution(

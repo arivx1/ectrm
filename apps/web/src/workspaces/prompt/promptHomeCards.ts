@@ -4,6 +4,7 @@ export const PROMPT_HOME_SYSTEM_TEMPLATE_VERSION = 1;
 export const PROMPT_HOME_CARD_KEYS = [
   "timeframe",
   "prices",
+  "news",
   "map",
   "documents",
   "communication",
@@ -15,6 +16,7 @@ export type PromptHomeCardKey = (typeof PROMPT_HOME_CARD_KEYS)[number];
 export type PromptHomeCardKind =
   | "desk_time"
   | "market_prices"
+  | "market_news"
   | "asset_map"
   | "document_upload"
   | "communication_center"
@@ -24,6 +26,9 @@ export type PromptHomeCardParameterKey =
   | "calendar_display"
   | "default_summary_targets"
   | "map_record_limit"
+  | "news_limit"
+  | "news_lookback_days"
+  | "news_query"
   | "price_mark_status"
   | "price_sort"
   | "starter_kit"
@@ -50,6 +55,7 @@ export type PromptHomeCardDataBinding =
   | "calendar_events"
   | "document_ingestion"
   | "latest_price_marks"
+  | "market_news_headlines"
   | "market_price_indices"
   | "message_threads"
   | "operator_attention_counts"
@@ -128,11 +134,29 @@ export const PROMPT_HOME_CARD_REGISTRY = [
     requiredEntitlements: [],
   },
   {
+    cardId: "news",
+    kind: "market_news",
+    label: "Market News",
+    defaultVisible: true,
+    defaultPlacement: { order: 2, columnSpan: 2, rowSpan: 1 },
+    allowedParameters: ["news_limit", "news_lookback_days", "news_query"],
+    allowedFilterFields: [
+      "commodity_code",
+      "location_code",
+      "price_index_code",
+      "provider",
+      "quote_type",
+      "region",
+    ],
+    dataBindings: ["market_news_headlines", "market_price_indices"],
+    requiredEntitlements: [],
+  },
+  {
     cardId: "map",
     kind: "asset_map",
     label: "Asset map",
     defaultVisible: true,
-    defaultPlacement: { order: 2, columnSpan: 2, rowSpan: 2 },
+    defaultPlacement: { order: 3, columnSpan: 2, rowSpan: 2 },
     allowedParameters: ["map_record_limit", "weather_overlays"],
     allowedFilterFields: ["commodity_code", "geography", "location_code", "region"],
     dataBindings: ["asset_map", "spatial_features", "weather_overlays"],
@@ -143,7 +167,7 @@ export const PROMPT_HOME_CARD_REGISTRY = [
     kind: "document_upload",
     label: "Upload documents",
     defaultVisible: true,
-    defaultPlacement: { order: 3, columnSpan: 1, rowSpan: 1 },
+    defaultPlacement: { order: 4, columnSpan: 1, rowSpan: 1 },
     allowedParameters: [],
     allowedFilterFields: ["document_kind", "review_status"],
     dataBindings: ["document_ingestion"],
@@ -154,7 +178,7 @@ export const PROMPT_HOME_CARD_REGISTRY = [
     kind: "communication_center",
     label: "Communication center",
     defaultVisible: true,
-    defaultPlacement: { order: 4, columnSpan: 1, rowSpan: 1 },
+    defaultPlacement: { order: 5, columnSpan: 1, rowSpan: 1 },
     allowedParameters: [],
     allowedFilterFields: ["message_category", "workflow_category"],
     dataBindings: ["message_threads", "operator_attention_counts"],
@@ -165,7 +189,7 @@ export const PROMPT_HOME_CARD_REGISTRY = [
     kind: "assistant_prompt",
     label: "Ask the desk assistant",
     defaultVisible: true,
-    defaultPlacement: { order: 5, columnSpan: 2, rowSpan: 1 },
+    defaultPlacement: { order: 6, columnSpan: 2, rowSpan: 1 },
     allowedParameters: ["default_summary_targets", "starter_kit"],
     allowedFilterFields: ["workflow_category"],
     dataBindings: ["assistant_conversation", "operator_attention_counts"],

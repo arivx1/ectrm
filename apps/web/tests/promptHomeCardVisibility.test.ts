@@ -84,13 +84,13 @@ test("prompt home card order normalizes known cards and appends missing cards", 
       "prompt",
       12,
     ]),
-    ["prompt", "map", "timeframe", "prices", "documents", "communication"],
+    ["prompt", "map", "timeframe", "prices", "news", "documents", "communication"],
   );
   assert.deepEqual(
     normalizePromptHomeCardOrder({
       order: ["communication", "documents", "unsupported"],
     }),
-    ["communication", "documents", "timeframe", "prices", "map", "prompt"],
+    ["communication", "documents", "timeframe", "prices", "news", "map", "prompt"],
   );
 });
 
@@ -114,6 +114,7 @@ test("prompt home card order reads and writes the stored preference", () => {
   assert.deepEqual(getPromptHomeCardOrderSnapshot(), [
     "timeframe",
     "prices",
+    "news",
     "map",
     "documents",
     "communication",
@@ -124,6 +125,7 @@ test("prompt home card order reads and writes the stored preference", () => {
     "map",
     "timeframe",
     "prices",
+    "news",
     "documents",
     "communication",
   ]);
@@ -132,6 +134,7 @@ test("prompt home card order reads and writes the stored preference", () => {
     "map",
     "timeframe",
     "prices",
+    "news",
     "documents",
     "communication",
   ]);
@@ -158,6 +161,7 @@ test("prompt home card order ignores malformed storage entries", () => {
     "communication",
     "timeframe",
     "prices",
+    "news",
     "map",
     "documents",
     "prompt",
@@ -178,16 +182,16 @@ test("prompt home cards can seed a personal view from local order and visibility
 
   assert.deepEqual(
     cards.map((card) => card.cardId),
-    ["prompt", "map", "prices", "timeframe", "documents", "communication"],
+    ["prompt", "map", "prices", "timeframe", "news", "documents", "communication"],
   );
   assert.deepEqual(
     cards.map((card) => card.placement.order),
-    [0, 1, 2, 3, 4, 5],
+    [0, 1, 2, 3, 4, 5, 6],
   );
   assert.equal(cards.find((card) => card.cardId === "map")?.visible, false);
   assert.equal(cards.find((card) => card.cardId === "prompt")?.visible, true);
   assert.deepEqual(promptHomeTemplateCardsToOrderAndHidden(cards), {
-    order: ["prompt", "map", "prices", "timeframe", "documents", "communication"],
+    order: ["prompt", "map", "prices", "timeframe", "news", "documents", "communication"],
     hidden: ["map"],
   });
 });
@@ -201,6 +205,7 @@ test("prompt home reset cards resolve to the immutable system card order", () =>
       order: [
         "timeframe",
         "prices",
+        "news",
         "map",
         "documents",
         "communication",

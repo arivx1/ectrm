@@ -794,6 +794,11 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/operations/document-record-creation-requests' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
     if (url.pathname === '/settlement/invoices' && method === 'GET') {
       writeJson(response, [])
       return

@@ -845,7 +845,11 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         approval_rules=("No trade creation, external communication, or commitment authority.",),
         stop_conditions=("Loaded market or weather data is stale, unavailable, or insufficiently sourced.",),
         success_metrics=("Humans promote useful generated opportunities into reviewable scenarios.",),
-        required_eval_coverage=("Sourced market briefing.", "No trade capture or external-commitment claims."),
+        required_eval_coverage=(
+            "Sourced market briefing.",
+            "Fresh pre-trade opportunity explanation.",
+            "No trade capture or external-commitment claims.",
+        ),
         base_prompt_guidance=("Cite loaded platform data and clearly mark missing external facts.",),
         recommended_orchestration_pattern="PARALLEL",
         recommended_parent_role_keys=("control-tower-agent",),
@@ -887,7 +891,11 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         approval_rules=("Trader owns review decisions and any trade capture.",),
         stop_conditions=("Credit, reference data, pricing, quantity, or counterparty assumptions are incomplete.",),
         success_metrics=("Generated structures reduce re-entry and ambiguity in trade capture handoffs.",),
-        required_eval_coverage=("Review-ready scenario draft.", "Denied direct trade booking."),
+        required_eval_coverage=(
+            "Review-ready scenario draft.",
+            "Hedge recommendation draft without execution.",
+            "Denied direct trade or hedge execution.",
+        ),
         base_prompt_guidance=("Separate proposed structure, assumptions, constraints, and required human review.",),
         recommended_parent_role_keys=("market-research-agent",),
         delegation_guidance=(
@@ -921,7 +929,12 @@ ROLE_ARCHETYPE_DEFINITIONS: tuple[AssistantAgentRoleArchetype, ...] = (
         approval_rules=("Risk or Credit Owner owns exception decisions and credit approvals.",),
         stop_conditions=("Exposure, price, credit, or position evidence is stale or contradictory.",),
         success_metrics=("Risk alerts are timely, grounded, and low-noise.",),
-        required_eval_coverage=("Risk exception explanation.", "No credit approval or trade mutation."),
+        required_eval_coverage=(
+            "Risk exception explanation.",
+            "Missing source fallback.",
+            "Netting explanation without mutation.",
+            "No credit approval or trade mutation.",
+        ),
         base_prompt_guidance=("Make stale data and confidence limits visible.",),
         recommended_parent_role_keys=("market-research-agent", "control-tower-agent"),
         delegation_guidance=(

@@ -1112,6 +1112,38 @@ export type DocumentRecordCreationRequestRecord = {
   version: number
 }
 
+export type DocumentRecordCreationWorkItemRecord = {
+  request_id: number
+  document_id: string
+  status: 'OPEN' | 'RESOLVED' | 'CANCELLED'
+  queue: 'operations' | 'settlement'
+  handoff_type: string
+  routing_label: string
+  next_action_label: string
+  priority: 'HIGH' | 'NORMAL' | 'BLOCKED' | string
+  document_kind: string | null
+  target_record_type: string
+  target_record_label: string
+  owner_record_type: string | null
+  owner_record_id: string | null
+  required_owner_record_types: string[]
+  matched_keys: string[]
+  missing_evidence: string[]
+  blocking_reasons: string[]
+  next_steps: string[]
+  captured_fields: Record<string, unknown>
+  title: string
+  description: string
+  request_comment: string | null
+  requested_at: string
+  requested_by: string
+  updated_at: string
+  updated_by: string
+  age_days: number
+  is_closed: boolean
+  version: number
+}
+
 export type DocumentWorkflowRecord = {
   workflow_id: string
   label: string
@@ -1228,6 +1260,50 @@ export type DocumentFacetAssignmentRecord = {
   version: number
 }
 
+export type DocumentLogicalDocumentPageRecord = {
+  membership_id: number
+  logical_document_id: string
+  document_id: string
+  page_id: number
+  page_number: number
+  sequence_number: number
+  span_type: string
+  region_payload: Record<string, unknown>
+  provenance: Record<string, unknown>
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type DocumentLogicalDocumentRecord = {
+  logical_document_id: string
+  document_id: string
+  logical_document_key: string
+  sequence_number: number
+  page_start: number
+  page_end: number
+  page_count: number
+  page_numbers: number[]
+  document_kind: string
+  document_subtype: string | null
+  classification_status: string
+  classification_confidence: number | null
+  review_status: string
+  review_notes: string | null
+  reviewed_at: string | null
+  reviewed_by: string | null
+  provenance: Record<string, unknown>
+  page_memberships: DocumentLogicalDocumentPageRecord[]
+  routing_assessment: DocumentRoutingAssessmentRecord | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
 export type DocumentActivityRecord = {
   activity_id: string
   event_type: string
@@ -1241,6 +1317,10 @@ export type DocumentActivityRecord = {
 export type DocumentIngestionPageRecord = {
   page_id: number
   page_number: number
+  logical_document_id?: string | null
+  logical_document_key?: string | null
+  logical_document_ids?: string[]
+  logical_document_keys?: string[]
   classification_status: string
   extraction_status: string
   document_kind: string
@@ -1298,6 +1378,7 @@ export type DocumentIngestionRecord = {
   record_links: DocumentRecordLinkRecord[]
   facet_values?: DocumentFacetAssignmentRecord[]
   activity: DocumentActivityRecord[]
+  logical_documents?: DocumentLogicalDocumentRecord[]
   pages: DocumentIngestionPageRecord[]
   understanding: DocumentIngestionUnderstandingRecord
 }
@@ -2456,6 +2537,11 @@ export type PreTradeTransformationEdgeType =
 export type PreTradeNettingCandidateMatchQuality = 'EXACT' | 'PARTIAL' | 'REJECTED'
 export type PreTradeHedgeInstrumentType = 'FUTURES' | 'OPTIONS' | 'SWAP' | 'PHYSICAL_OFFSET' | 'NO_HEDGE' | 'WAIT_FOR_DATA'
 export type PreTradeMissingEvidenceSeverity = 'BLOCKING' | 'WARNING'
+export type PreTradePromotionCandidateType = 'NETTING_SET' | 'HEDGE_RECOMMENDATION' | 'RISK_SCENARIO'
+export type PreTradePromotionCandidateStatus = 'WATCH' | 'CANDIDATE'
+export type PreTradeNettingSetStatus = 'REVIEW_DRAFT' | 'RETIRED'
+export type PreTradeHedgeRecommendationStatus = 'REVIEW_DRAFT' | 'RETIRED'
+export type PreTradeRiskScenarioStatus = 'REVIEW_DRAFT' | 'RETIRED'
 export type PreTradeGovernanceAuditCategory =
   | 'PENDING_REVIEW'
   | 'RISKY_RECOMMENDATION'
@@ -2463,6 +2549,7 @@ export type PreTradeGovernanceAuditCategory =
   | 'OVERRIDE'
   | 'BOOKED_WITH_OVERRIDE'
   | 'STALE_EVIDENCE'
+  | 'PROMOTION_CANDIDATE'
 export type PreTradeReviewDriftStatus = 'ALIGNED' | 'REAPPROVAL_REQUIRED' | 'NOT_APPROVED'
 export type PreTradeReviewDriftReasonCode =
   | 'MISSING_APPROVAL_SNAPSHOT'
@@ -2573,6 +2660,8 @@ export type PreTradeGovernanceSummaryRecord = {
   stale_evidence_run_count: number
   stale_evidence_source_count: number
   recommendation_run_count: number
+  promotion_candidate_count: number
+  top_promotion_candidate_type: PreTradePromotionCandidateType | null
 }
 
 export type PreTradeRecommendationSourceSnapshotRecord = {
@@ -2701,6 +2790,9 @@ export type PreTradeRecommendationNettingCandidateRecord = {
   candidate_id: string
   label: string
   match_quality: PreTradeNettingCandidateMatchQuality
+  gross_exposure?: number | null
+  offset_quantity?: number | null
+  residual_exposure?: number | null
   matched_quantity: number | null
   residual_quantity: number | null
   constraints: string[]
@@ -2710,9 +2802,11 @@ export type PreTradeRecommendationNettingCandidateRecord = {
 
 export type PreTradeRecommendationHedgeRecommendationRecord = {
   instrument_type: PreTradeHedgeInstrumentType
+  decision_key?: string | null
   rationale: string
   target_delta: number | null
   hedge_ratio: number | null
+  decision_factors?: string[]
   policy_stops: string[]
   source_refs: PreTradeRecommendationEvidenceRefRecord[]
 }
@@ -2820,6 +2914,25 @@ export type PreTradeGovernanceStaleEvidenceRunRecord = {
   impaired_snapshots: PreTradeRecommendationSourceSnapshotRecord[]
 }
 
+export type PreTradeGovernancePromotionCandidateRecord = {
+  candidate_type: PreTradePromotionCandidateType
+  label: string
+  status: PreTradePromotionCandidateStatus
+  score: number
+  review_count: number
+  approved_review_count: number
+  booked_review_count: number
+  override_count: number
+  run_count: number
+  latest_review_id: number | null
+  latest_run_id: number | null
+  evidence_summary: string
+  promotion_rationale: string
+  stop_reasons: string[]
+  sample_review_ids: number[]
+  sample_run_ids: number[]
+}
+
 export type PreTradeGovernanceItemsRecord = {
   generated_at: string
   pending_reviews: PreTradeReviewItemRecord[]
@@ -2828,6 +2941,121 @@ export type PreTradeGovernanceItemsRecord = {
   override_reviews: PreTradeReviewItemRecord[]
   booked_with_override_reviews: PreTradeReviewItemRecord[]
   stale_evidence_runs: PreTradeGovernanceStaleEvidenceRunRecord[]
+  promotion_candidates: PreTradeGovernancePromotionCandidateRecord[]
+}
+
+export type PreTradeNettingSetRecord = {
+  netting_set_id: number
+  netting_set_key: string
+  name: string
+  status: PreTradeNettingSetStatus
+  owner: string | null
+  review_note: string | null
+  source_promotion_candidate_type: PreTradePromotionCandidateType
+  source_promotion_status: PreTradePromotionCandidateStatus
+  source_promotion_score: number
+  source_review_count: number
+  source_approved_review_count: number
+  source_booked_review_count: number
+  source_override_count: number
+  source_run_count: number
+  source_latest_review_id: number | null
+  source_latest_run_id: number | null
+  source_sample_review_ids: number[]
+  source_sample_run_ids: number[]
+  source_evidence_summary: string
+  source_promotion_rationale: string
+  source_stop_reasons: string[]
+  draft: PreTradeScenarioDraft
+  netting_candidates: PreTradeRecommendationNettingCandidateRecord[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
+}
+
+export type PreTradeHedgeRecommendationRecord = {
+  hedge_recommendation_id: number
+  hedge_recommendation_key: string
+  name: string
+  status: PreTradeHedgeRecommendationStatus
+  owner: string | null
+  review_note: string | null
+  source_promotion_candidate_type: PreTradePromotionCandidateType
+  source_promotion_status: PreTradePromotionCandidateStatus
+  source_promotion_score: number
+  source_review_count: number
+  source_approved_review_count: number
+  source_booked_review_count: number
+  source_override_count: number
+  source_run_count: number
+  source_latest_review_id: number | null
+  source_latest_run_id: number | null
+  source_sample_review_ids: number[]
+  source_sample_run_ids: number[]
+  source_evidence_summary: string
+  source_promotion_rationale: string
+  source_stop_reasons: string[]
+  source_recommendation_stance: PreTradeRecommendationStance
+  source_recommendation_score: number
+  source_recommendation_headline: string
+  draft: PreTradeScenarioDraft
+  residual_exposure: PreTradeRecommendationResidualExposureRecord | null
+  hedge_recommendation: PreTradeRecommendationHedgeRecommendationRecord
+  rejected_alternatives: PreTradeRecommendationRejectedAlternativeRecord[]
+  missing_evidence: PreTradeRecommendationMissingEvidenceRecord[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
+}
+
+export type PreTradeRiskScenarioRecord = {
+  risk_scenario_id: number
+  risk_scenario_key: string
+  name: string
+  status: PreTradeRiskScenarioStatus
+  owner: string | null
+  review_note: string | null
+  source_promotion_candidate_type: PreTradePromotionCandidateType
+  source_promotion_status: PreTradePromotionCandidateStatus
+  source_promotion_score: number
+  source_review_count: number
+  source_approved_review_count: number
+  source_booked_review_count: number
+  source_override_count: number
+  source_run_count: number
+  source_latest_review_id: number | null
+  source_latest_run_id: number | null
+  source_sample_review_ids: number[]
+  source_sample_run_ids: number[]
+  source_evidence_summary: string
+  source_promotion_rationale: string
+  source_stop_reasons: string[]
+  source_review_name: string
+  source_review_status: PreTradeReviewStatus
+  source_review_thesis: string | null
+  source_review_notes: string | null
+  source_review_owner: string | null
+  source_recommendation_stance: PreTradeRecommendationStance | null
+  source_recommendation_score: number | null
+  source_recommendation_headline: string | null
+  draft: PreTradeScenarioDraft
+  enrichment: PreTradeScenarioEnrichmentRecord | null
+  residual_exposure: PreTradeRecommendationResidualExposureRecord | null
+  input_snapshots: PreTradeRecommendationSourceSnapshotRecord[]
+  missing_evidence: PreTradeRecommendationMissingEvidenceRecord[]
+  reviewer_focus: string[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
 }
 
 export type PreTradeGovernanceAuditRowRecord = {
@@ -2854,6 +3082,9 @@ export type PreTradeGovernanceAuditRowRecord = {
   source_provider: string | null
   source_dataset: string | null
   source_observed_at: string | null
+  promotion_candidate_type: PreTradePromotionCandidateType | null
+  promotion_status: PreTradePromotionCandidateStatus | null
+  promotion_score: number | null
   summary: string
 }
 

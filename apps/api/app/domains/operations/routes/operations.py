@@ -9,9 +9,15 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
+from apps.api.app.core.auth import is_operations_role
+from apps.api.app.core.auth import is_settlement_role
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
+from apps.api.app.core.http import require_actor_role
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.operations.services import build_database_overview
+from apps.api.app.domains.operations.services.document_intake_work_items import (
+    list_document_record_creation_work_items,
+)
 from apps.api.app.domains.operations.services.operational_resource_registry import (
     OPERATIONAL_RESOURCE_DESCRIPTORS,
 )
@@ -33,6 +39,7 @@ from apps.api.app.models.trade import Trade
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 from apps.api.app.schemas.operations import DependencyHealthOut
+from apps.api.app.schemas.operations import DocumentRecordCreationWorkItemOut
 from apps.api.app.schemas.operations import OperationalResourceDescriptorOut
 from apps.api.app.schemas.operations import OperationalResourceEmptyStateOut
 from apps.api.app.schemas.operations import OperationalResourcePrimaryActionOut
@@ -66,6 +73,10 @@ DEPENDENCY_DEFINITIONS = (
     },
 )
 WORK_ITEM_LIST_QUERY_SPEC = OperationalQuerySpec(load=list_trade_workflow_items, commit=True)
+
+
+def _can_view_document_intake(role: str | None) -> bool:
+    return is_operations_role(role) or is_settlement_role(role)
 
 
 def _coerce_utc(value: Optional[datetime]) -> Optional[datetime]:
@@ -353,6 +364,37 @@ def get_operational_resource_descriptors() -> list[OperationalResourceDescriptor
     ]
 
 
+@router.get("/document-record-creation-requests", response_model=list[DocumentRecordCreationWorkItemOut])
+def get_document_record_creation_work_items(
+    request: Request,
+    queue: str | None = Query(default=None),
+    target_record_type: str | None = Query(default=None),
+    include_closed: bool = Query(default=False),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> list[DocumentRecordCreationWorkItemOut]:
+    require_actor_role(
+        request,
+        predicate=_can_view_document_intake,
+        detail=(
+            "Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions "
+            "can view document intake work items."
+        ),
+    )
+    return execute_operational_query(
+        db,
+        lambda: list_document_record_creation_work_items(
+            db,
+            queue=queue,
+            target_record_type=target_record_type,
+            include_closed=include_closed,
+            limit=limit,
+            offset=offset,
+        ),
+    )
+
+
 @router.get("/work-items", response_model=list[TradeWorkflowItemOut])
 def get_work_items(
     queue: str | None = Query(default=None),
@@ -445,6 +487,7 @@ __all__ = [
     "router",
     "get_system_overview",
     "get_workspace_bootstrap_summary",
+    "get_document_record_creation_work_items",
     "get_work_items",
     "post_work_item",
     "patch_work_item",

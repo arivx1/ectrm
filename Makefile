@@ -1,4 +1,4 @@
-.PHONY: dev db-up db-down api-install api-dev api-test api-mcp-test api-assistant-evals api-document-classification-evals api-codex-smoke api-contract-refresh api-contract-check web-install web-build web-lint web-test web-smoke-install web-smoke-install-ci web-smoke-test verify verify-wave0 rebuild-trades rebuild-positions rebuild-all audit-trade-projections clean-trade-projections
+.PHONY: dev db-up db-down api-install api-dev api-test api-mcp-test api-assistant-evals api-document-classification-evals api-document-packet-split-evals api-codex-smoke api-contract-refresh api-contract-check web-install web-build web-lint web-test web-smoke-install web-smoke-install-ci web-smoke-test verify verify-wave0 rebuild-trades rebuild-positions rebuild-all audit-trade-projections clean-trade-projections
 
 VENV_PYTHON := ./.venv/bin/python
 WEB_DIR := apps/web
@@ -37,6 +37,12 @@ api-document-classification-evals:
 	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)
 	PYTHONPATH=. $(VENV_PYTHON) apps/api/scripts/run_document_classification_evals.py --check
 
+api-document-packet-split-evals:
+	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)
+	PYTHONPATH=. $(VENV_PYTHON) apps/api/scripts/run_document_packet_split_correction_replay.py \
+		--fixture apps/api/tests/fixtures/document_packet_split_correction_eval_corpus.json \
+		--check
+
 api-codex-smoke:
 	@test -x $(VENV_PYTHON) || (echo "Missing $(VENV_PYTHON). Run 'make api-install' first." && exit 1)
 	PYTHONPATH=. $(VENV_PYTHON) apps/api/scripts/run_codex_task_smoke.py
@@ -70,7 +76,7 @@ web-smoke-install-ci:
 web-smoke-test:
 	npm --prefix $(WEB_DIR) run test:smoke
 
-verify-wave0: api-contract-check api-test web-build web-lint web-test
+verify-wave0: api-contract-check api-document-packet-split-evals api-test web-build web-lint web-test
 
 verify: api-assistant-evals verify-wave0
 

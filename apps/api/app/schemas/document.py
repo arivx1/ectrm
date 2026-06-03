@@ -762,6 +762,8 @@ class DocumentIngestionPageOut(BaseModel):
     page_number: int
     logical_document_id: Optional[str] = None
     logical_document_key: Optional[str] = None
+    logical_document_ids: list[str] = Field(default_factory=list)
+    logical_document_keys: list[str] = Field(default_factory=list)
     classification_status: DocumentAnalysisStatus
     extraction_status: DocumentAnalysisStatus
     document_kind: DocumentKind | str
@@ -786,6 +788,23 @@ class DocumentIngestionPageOut(BaseModel):
     understanding: DocumentIngestionPageUnderstandingOut = Field(default_factory=DocumentIngestionPageUnderstandingOut)
 
 
+class DocumentLogicalDocumentPageOut(BaseModel):
+    membership_id: int
+    logical_document_id: str
+    document_id: str
+    page_id: int
+    page_number: int
+    sequence_number: int
+    span_type: str
+    region_payload: dict[str, object] = Field(default_factory=dict)
+    provenance: dict[str, object] = Field(default_factory=dict)
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
 class DocumentLogicalDocumentOut(BaseModel):
     logical_document_id: str
     document_id: str
@@ -804,6 +823,7 @@ class DocumentLogicalDocumentOut(BaseModel):
     reviewed_at: Optional[datetime] = None
     reviewed_by: Optional[str] = None
     provenance: dict[str, object] = Field(default_factory=dict)
+    page_memberships: list[DocumentLogicalDocumentPageOut] = Field(default_factory=list)
     routing_assessment: Optional[DocumentRoutingAssessmentOut] = None
     created_at: datetime
     created_by: str
@@ -967,6 +987,34 @@ class DocumentIngestionPageUpdate(BaseModel):
     @classmethod
     def normalize_review_notes(cls, value: Optional[str]) -> Optional[str]:
         return normalize_optional_text(value, field_name="review_notes")
+
+
+class DocumentLogicalDocumentSplitInput(BaseModel):
+    document_kind: str = Field(..., max_length=64)
+    document_subtype: Optional[str] = Field(default=None, max_length=128)
+    page_ids: list[int] = Field(..., min_length=1)
+    review_status: Optional[DocumentReviewStatus] = None
+    review_notes: Optional[str] = Field(default=None, max_length=4_000)
+
+    @field_validator("document_kind")
+    @classmethod
+    def normalize_document_kind(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="document_kind", uppercase=True)
+
+    @field_validator("document_subtype")
+    @classmethod
+    def normalize_document_subtype(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="document_subtype")
+
+    @field_validator("review_notes")
+    @classmethod
+    def normalize_review_notes(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value, field_name="review_notes")
+
+
+class DocumentLogicalDocumentsUpdate(BaseModel):
+    expected_document_version: Optional[int] = Field(default=None, ge=1)
+    logical_documents: list[DocumentLogicalDocumentSplitInput] = Field(..., min_length=1)
 
 
 class DocumentGmailInboxImportRequest(BaseModel):

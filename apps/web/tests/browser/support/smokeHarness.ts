@@ -12,6 +12,26 @@ import type {
   DeliveryTruckMovementRecord,
   DeliveryTruckMovementSummaryRecord,
   DeliveryTruckTrackingExceptionRecord,
+  PreTradeGovernanceAuditExportRecord,
+  PreTradeHedgeRecommendationRecord,
+  PreTradeGovernanceItemsRecord,
+  PreTradeGovernanceSummaryRecord,
+  PreTradeNettingSetRecord,
+  PreTradeRecommendationDraftAnalysisRecord,
+  PreTradeRecommendationEvidenceRefRecord,
+  PreTradeRecommendationResultRecord,
+  PreTradeRecommendationRunRecord,
+  PreTradeRecommendationSourceSnapshotRecord,
+  PreTradeReviewActivityRecord,
+  PreTradeReviewDriftRecord,
+  PreTradeReviewItemRecord,
+  PreTradeReviewRecommendationSummaryRecord,
+  PreTradeReviewStatus,
+  PreTradeRiskScenarioRecord,
+  PreTradeScenarioDraft,
+  PreTradeScenarioEnrichmentRecord,
+  PreTradeScenarioRecord,
+  TradeWorkflowItemRecord,
 } from '../../../src/shared/models'
 import { buildFallbackTradeMetadata } from '../../../src/shared/tradeMetadata'
 import {
@@ -238,6 +258,7 @@ type MockApiServer = {
   baseUrl: string
   expireSession: () => void
   mutationRequests: RecordedRequest[]
+  operationWorkItemRequests: TradeWorkflowItemRecord[]
   promptNavigationOutcomeRequests: RecordedRequest[]
   unexpectedRequests: RecordedRequest[]
   close: () => Promise<void>
@@ -252,6 +273,7 @@ export type SmokeHarness = {
   apiBaseUrl: string
   expireSession: () => void
   mutationRequests: RecordedRequest[]
+  operationWorkItemRequests: TradeWorkflowItemRecord[]
   promptNavigationOutcomeRequests: RecordedRequest[]
   unexpectedRequests: RecordedRequest[]
   close: () => Promise<void>
@@ -364,6 +386,461 @@ function buildCreatedTradeRow(args: {
     credit_approval_status: 'APPROVED',
     credit_hold_active: false,
     credit_hold_reason: null,
+  }
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function normalizePreTradeScenarioDraft(value: unknown): PreTradeScenarioDraft {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+
+  return {
+    book: normalizeOptionalText(source.book) ?? 'GULF_GAS',
+    portfolio: normalizeOptionalText(source.portfolio) ?? 'GULF_PROMPT',
+    counterparty: normalizeOptionalText(source.counterparty) ?? 'ALPHA_MKT',
+    commodity_class: normalizeOptionalText(source.commodity_class) ?? 'NATURAL_GAS',
+    commodity: normalizeOptionalText(source.commodity) ?? 'HENRY_HUB_GAS',
+    trade_side: normalizeOptionalText(source.trade_side) === 'SELL' ? 'SELL' : 'BUY',
+    pricing_type: normalizeOptionalText(source.pricing_type) ?? 'FIXED',
+    price_index_code: normalizeOptionalText(source.price_index_code),
+    target_price: normalizeOptionalNumber(source.target_price),
+    target_volume: normalizeOptionalNumber(source.target_volume),
+    trade_currency_code: normalizeOptionalText(source.trade_currency_code) ?? 'USD',
+    unit_of_measure: normalizeOptionalText(source.unit_of_measure) ?? 'MMBTU',
+    price_unit_code: normalizeOptionalText(source.price_unit_code) ?? 'USD/MMBTU',
+    location_code: normalizeOptionalText(source.location_code) ?? 'HENRY_HUB',
+    delivery_start: normalizeOptionalText(source.delivery_start),
+    delivery_end: normalizeOptionalText(source.delivery_end),
+  }
+}
+
+function buildPreTradeEvidenceRef(
+  snapshot: PreTradeRecommendationSourceSnapshotRecord,
+): PreTradeRecommendationEvidenceRefRecord {
+  return {
+    source_key: snapshot.source_key,
+    adapter_key: snapshot.adapter_key,
+    adapter_label: snapshot.adapter_label,
+    source_type: snapshot.source_type,
+    freshness: snapshot.freshness,
+    quality_status: snapshot.quality_status,
+    record_id: snapshot.provenance.record_id,
+    summary: snapshot.summary,
+  }
+}
+
+function buildSmokePreTradeInputSnapshots(
+  draft: PreTradeScenarioDraft,
+): PreTradeRecommendationSourceSnapshotRecord[] {
+  return [
+    {
+      source_key: 'desk-context',
+      adapter_key: 'desk-context',
+      adapter_label: 'Desk Context',
+      source_type: 'INTERNAL',
+      source_available: true,
+      captured_at: '2026-04-11T00:05:00Z',
+      freshness: 'FRESH',
+      quality_status: 'OK',
+      quality_score: 96,
+      summary: 'Desk context shows one existing long Henry Hub prompt position.',
+      provenance: {
+        provider: null,
+        dataset: 'positions',
+        record_id: draft.commodity,
+        observed_at: '2026-04-11T00:00:00Z',
+        ingested_at: '2026-04-11T00:05:00Z',
+        captured_by: 'smoke-harness',
+      },
+      payload: {
+        current_net_position: 25000,
+        related_active_trade_count: 1,
+      },
+    },
+    {
+      source_key: 'latest-mark',
+      adapter_key: 'latest-mark',
+      adapter_label: 'Latest Mark',
+      source_type: 'EXTERNAL',
+      source_available: true,
+      captured_at: '2026-04-11T00:05:00Z',
+      freshness: 'STALE',
+      quality_status: 'STALE',
+      quality_score: 62,
+      summary: 'Henry Hub IFERC mark is one day stale in the smoke fixture.',
+      provenance: {
+        provider: 'ICE',
+        dataset: 'price-index-observations',
+        record_id: 'HH_IFERC',
+        observed_at: '2026-04-10T20:00:00Z',
+        ingested_at: '2026-04-11T00:05:00Z',
+        captured_by: 'smoke-harness',
+      },
+      payload: {
+        latest_mark: 3.21,
+      },
+    },
+    {
+      source_key: 'weather-intelligence',
+      adapter_key: 'weather-intelligence',
+      adapter_label: 'Weather Intelligence',
+      source_type: 'EXTERNAL',
+      source_available: true,
+      captured_at: '2026-04-11T00:05:00Z',
+      freshness: 'FRESH',
+      quality_status: 'OK',
+      quality_score: 90,
+      summary: 'Weather risk is muted in the current smoke scenario.',
+      provenance: {
+        provider: 'NWS',
+        dataset: 'weather-intelligence',
+        record_id: draft.commodity_class,
+        observed_at: '2026-04-11T00:00:00Z',
+        ingested_at: '2026-04-11T00:05:00Z',
+        captured_by: 'smoke-harness',
+      },
+      payload: {
+        headline: 'Weather risk is muted in the current smoke scenario.',
+      },
+    },
+  ]
+}
+
+function sourceFreshnessSummary(snapshots: PreTradeRecommendationSourceSnapshotRecord[]): string {
+  const impaired = snapshots.filter((snapshot) => snapshot.quality_status !== 'OK' || snapshot.freshness !== 'FRESH')
+  if (impaired.length === 0) {
+    return `${snapshots.length} source snapshots are fresh.`
+  }
+  return `${impaired.length} of ${snapshots.length} source snapshots need review: ${impaired.map((snapshot) => snapshot.adapter_label ?? snapshot.source_key).join(', ')}.`
+}
+
+function buildSmokePreTradeRecommendation(
+  draft: PreTradeScenarioDraft,
+  snapshots: PreTradeRecommendationSourceSnapshotRecord[],
+): PreTradeRecommendationResultRecord {
+  const targetVolume = draft.target_volume ?? 12500
+  const proposedTradeDelta = draft.trade_side === 'SELL' ? -targetVolume : targetVolume
+  const currentNetPosition = 25000
+  const residualAfterTrade = currentNetPosition + proposedTradeDelta
+  const offsetsExposure = Math.abs(residualAfterTrade) < Math.abs(currentNetPosition)
+  const sourceRefs = snapshots.map(buildPreTradeEvidenceRef)
+
+  return {
+    stance: 'PROCEED_WITH_CARE',
+    headline: 'Proceed with smoke-offset review.',
+    summary: 'The draft reduces the seeded Henry Hub long while keeping stale mark evidence visible before capture.',
+    confidence: 'MEDIUM',
+    score: 78,
+    estimated_notional: draft.target_price && draft.target_volume ? draft.target_price * draft.target_volume : null,
+    projected_credit_utilization_pct: 22,
+    current_net_position: currentNetPosition,
+    related_active_trade_count: 1,
+    latest_mark: 3.21,
+    mark_gap_pct: draft.target_price ? Number((((draft.target_price - 3.21) / 3.21) * 100).toFixed(2)) : null,
+    explanation: {
+      stance_rationale:
+        'Proceed with care because the scenario offsets the existing prompt long, but the latest mark must be acknowledged before booking.',
+      source_quality_rationale: sourceFreshnessSummary(snapshots),
+      confidence_rationale: 'Confidence is medium because the source package has one stale external mark.',
+      primary_drivers: [
+        offsetsExposure
+          ? 'The proposed trade offsets existing prompt exposure.'
+          : 'The proposed trade deepens existing prompt exposure.',
+        'The latest mark is stale and remains visible before handoff.',
+      ],
+      reviewer_focus: [
+        'Confirm the stale Henry Hub IFERC mark still supports the target price.',
+        'Confirm final counterparty terms before Trade Capture.',
+      ],
+    },
+    checks: [
+      {
+        key: 'source-freshness',
+        label: 'Source Freshness',
+        status: 'watch',
+        detail: 'One source snapshot is stale and should be acknowledged by the reviewer.',
+        score_impact: -12,
+      },
+      {
+        key: 'residual-exposure',
+        label: 'Residual Exposure',
+        status: offsetsExposure ? 'good' : 'watch',
+        detail: offsetsExposure
+          ? 'The draft reduces the current long position.'
+          : 'The draft increases the current long position.',
+        score_impact: offsetsExposure ? 8 : -8,
+      },
+    ],
+    next_actions: ['Submit the scenario to the shared pre-trade review queue.'],
+    opportunity_summary: {
+      title: 'Henry Hub prompt offset',
+      category: offsetsExposure ? 'RISK_REDUCTION' : 'RISK_INCREASE',
+      detail: offsetsExposure
+        ? 'The draft reduces the seeded prompt long without flipping the book short.'
+        : 'The draft increases prompt exposure and needs desk review.',
+      driver_keys: ['residual-exposure', 'source-freshness'],
+      source_refs: sourceRefs,
+    },
+    arbitrage_candidate: null,
+    residual_exposure: {
+      current_net_position: currentNetPosition,
+      proposed_trade_delta: proposedTradeDelta,
+      residual_after_trade: residualAfterTrade,
+      direction_before: 'LONG',
+      direction_after: residualAfterTrade > 0 ? 'LONG' : residualAfterTrade < 0 ? 'SHORT' : 'FLAT',
+      exposure_effect: offsetsExposure ? 'OFFSETS' : 'DEEPENS',
+      detail: offsetsExposure
+        ? 'Residual exposure is lower after the proposed trade.'
+        : 'Residual exposure is higher after the proposed trade.',
+      source_refs: sourceRefs,
+    },
+    netting_candidates: [],
+    hedge_recommendation: {
+      instrument_type: 'PHYSICAL_OFFSET',
+      rationale: 'A physical offset is enough for this smoke scenario; no hedge execution is authorized.',
+      target_delta: proposedTradeDelta,
+      hedge_ratio: 1,
+      policy_stops: ['Human review and Trade Capture are still required before booking.'],
+      source_refs: sourceRefs,
+    },
+    rejected_alternatives: [
+      {
+        alternative: 'FUTURES',
+        reason: 'A financial hedge is unnecessary for this simple physical offset smoke fixture.',
+        source_refs: sourceRefs,
+      },
+    ],
+    missing_evidence: [
+      {
+        evidence_key: 'latest-mark',
+        label: 'Latest Mark',
+        severity: 'WARNING',
+        detail: 'Latest Henry Hub IFERC mark is stale in the smoke fixture.',
+        source_refs: [sourceRefs[1]],
+      },
+    ],
+  }
+}
+
+function buildSmokePreTradeDraftAnalysis(args: {
+  thesis: string | null
+  draft: PreTradeScenarioDraft
+  sourceScenarioId: number | null
+  sourceReviewId: number | null
+  inputSnapshots?: PreTradeRecommendationSourceSnapshotRecord[]
+}): PreTradeRecommendationDraftAnalysisRecord {
+  const inputSnapshots = args.inputSnapshots?.length ? args.inputSnapshots : buildSmokePreTradeInputSnapshots(args.draft)
+
+  return {
+    thesis: args.thesis,
+    draft: cloneJson(args.draft),
+    source_scenario_id: args.sourceScenarioId,
+    source_review_id: args.sourceReviewId,
+    input_snapshots: cloneJson(inputSnapshots),
+    recommendation: buildSmokePreTradeRecommendation(args.draft, inputSnapshots),
+    comparison: null,
+    evaluated_at: '2026-04-11T00:05:00Z',
+  }
+}
+
+function buildPreTradeScenarioEnrichmentFromRun(
+  run: PreTradeRecommendationRunRecord,
+): PreTradeScenarioEnrichmentRecord {
+  return {
+    opportunity_category: run.recommendation.opportunity_summary?.category ?? null,
+    hedge_intent: run.recommendation.hedge_recommendation?.instrument_type ?? null,
+    residual_exposure_summary: run.recommendation.residual_exposure?.detail ?? null,
+    source_freshness_summary: sourceFreshnessSummary(run.input_snapshots),
+    reviewer_focus: [
+      ...run.recommendation.explanation.reviewer_focus,
+      ...run.recommendation.missing_evidence.map((item) => item.detail),
+    ].slice(0, 5),
+    recommendation_run_id: run.run_id,
+    recommendation_run_key: run.run_key,
+    recommendation_stance: run.recommendation.stance,
+    recommendation_score: run.recommendation.score,
+    recommendation_headline: run.recommendation.headline,
+    captured_at: run.created_at,
+  }
+}
+
+function buildPreTradeReviewRecommendationSummary(
+  run: PreTradeRecommendationRunRecord | null,
+): PreTradeReviewRecommendationSummaryRecord | null {
+  if (!run) {
+    return null
+  }
+
+  return {
+    run_id: run.run_id,
+    run_key: run.run_key,
+    name: run.name,
+    stance: run.recommendation.stance,
+    headline: run.recommendation.headline,
+    confidence: run.recommendation.confidence,
+    score: run.recommendation.score,
+    explanation: cloneJson(run.recommendation.explanation),
+    source_scenario_id: run.source_scenario_id,
+    source_review_id: run.source_review_id,
+    input_snapshot_count: run.input_snapshots.length,
+    created_at: run.created_at,
+    created_by: run.created_by,
+  }
+}
+
+function impairedPreTradeSnapshots(
+  snapshots: PreTradeRecommendationSourceSnapshotRecord[],
+): PreTradeRecommendationSourceSnapshotRecord[] {
+  return snapshots.filter(
+    (snapshot) => !snapshot.source_available || snapshot.quality_status !== 'OK' || snapshot.freshness !== 'FRESH',
+  )
+}
+
+function buildPreTradeGovernanceSummary(
+  reviews: PreTradeReviewItemRecord[],
+  runs: PreTradeRecommendationRunRecord[],
+): PreTradeGovernanceSummaryRecord {
+  const riskyReviews = reviews.filter((review) =>
+    review.recommendation_summary?.stance === 'ESCALATE' || review.recommendation_summary?.stance === 'WAIT_FOR_DATA',
+  )
+
+  return {
+    generated_at: '2026-04-11T00:10:00Z',
+    risk_status: riskyReviews.length > 0 || runs.some((run) => impairedPreTradeSnapshots(run.input_snapshots).length > 0)
+      ? 'WATCH'
+      : 'CLEAR',
+    open_review_count: reviews.filter((review) => review.review_status === 'OPEN').length,
+    in_review_count: reviews.filter((review) => review.review_status === 'IN_REVIEW').length,
+    approved_review_count: reviews.filter((review) => review.review_status === 'APPROVED').length,
+    rejected_review_count: reviews.filter((review) => review.review_status === 'REJECTED').length,
+    pending_review_count: reviews.filter((review) => review.review_status === 'OPEN' || review.review_status === 'IN_REVIEW').length,
+    booked_review_count: reviews.filter((review) => review.linked_trade_id !== null).length,
+    risky_recommendation_count: riskyReviews.length,
+    unresolved_risky_recommendation_count: riskyReviews.filter((review) => review.review_status !== 'APPROVED').length,
+    override_count: reviews.filter((review) => review.recommendation_override_reason !== null).length,
+    booked_with_override_count: reviews.filter((review) => review.linked_trade_id !== null && review.recommendation_override_reason !== null).length,
+    stale_evidence_run_count: runs.filter((run) => impairedPreTradeSnapshots(run.input_snapshots).length > 0).length,
+    stale_evidence_source_count: runs.reduce((count, run) => count + impairedPreTradeSnapshots(run.input_snapshots).length, 0),
+    recommendation_run_count: runs.length,
+    promotion_candidate_count: 0,
+    top_promotion_candidate_type: null,
+  }
+}
+
+function buildPreTradeGovernanceItems(
+  reviews: PreTradeReviewItemRecord[],
+  runs: PreTradeRecommendationRunRecord[],
+): PreTradeGovernanceItemsRecord {
+  const riskyReviews = reviews.filter((review) =>
+    review.recommendation_summary?.stance === 'ESCALATE' || review.recommendation_summary?.stance === 'WAIT_FOR_DATA',
+  )
+
+  return {
+    generated_at: '2026-04-11T00:10:00Z',
+    pending_reviews: reviews.filter((review) => review.review_status === 'OPEN' || review.review_status === 'IN_REVIEW').map(cloneJson),
+    risky_recommendation_reviews: riskyReviews.map(cloneJson),
+    unresolved_risky_recommendation_reviews: riskyReviews.filter((review) => review.review_status !== 'APPROVED').map(cloneJson),
+    override_reviews: reviews.filter((review) => review.recommendation_override_reason !== null).map(cloneJson),
+    booked_with_override_reviews: reviews.filter((review) => review.linked_trade_id !== null && review.recommendation_override_reason !== null).map(cloneJson),
+    stale_evidence_runs: runs
+      .map((run) => ({
+        run: cloneJson(run),
+        impaired_snapshots: impairedPreTradeSnapshots(run.input_snapshots).map(cloneJson),
+      }))
+      .filter((item) => item.impaired_snapshots.length > 0),
+    promotion_candidates: [],
+  }
+}
+
+function buildPreTradeGovernanceExport(
+  reviews: PreTradeReviewItemRecord[],
+  runs: PreTradeRecommendationRunRecord[],
+): PreTradeGovernanceAuditExportRecord {
+  const summary = buildPreTradeGovernanceSummary(reviews, runs)
+  const items = buildPreTradeGovernanceItems(reviews, runs)
+
+  return {
+    generated_at: summary.generated_at,
+    exported_by: smokeSession.user.user_id,
+    format_version: 'smoke-v1',
+    summary,
+    items,
+    audit_rows: [],
+  }
+}
+
+function buildPreTradeReviewDrift(review: PreTradeReviewItemRecord): PreTradeReviewDriftRecord {
+  return {
+    review_id: review.review_id,
+    checked_at: '2026-04-11T00:12:00Z',
+    review_status: review.review_status,
+    alignment_status: review.review_status === 'APPROVED' ? 'ALIGNED' : 'NOT_APPROVED',
+    requires_reapproval: false,
+    approval_snapshot_generated_at: review.approval_governance_snapshot?.generated_at ?? null,
+    approval_snapshot_exported_by: review.approval_governance_snapshot?.exported_by ?? null,
+    approved_by: review.review_status === 'APPROVED' ? review.updated_by : null,
+    approved_at: review.review_status === 'APPROVED' ? review.updated_at : null,
+    approved_recommendation_run_id: review.recommendation_run_id,
+    approved_recommendation_stance: review.recommendation_summary?.stance ?? null,
+    approved_recommendation_score: review.recommendation_summary?.score ?? null,
+    current_recommendation_run_id: review.recommendation_run_id,
+    current_recommendation_stance: review.recommendation_summary?.stance ?? null,
+    current_recommendation_score: review.recommendation_summary?.score ?? null,
+    latest_recommendation_run_id: review.recommendation_run_id,
+    latest_recommendation_stance: review.recommendation_summary?.stance ?? null,
+    latest_recommendation_score: review.recommendation_summary?.score ?? null,
+    current_impaired_sources: [],
+    reasons: [],
+  }
+}
+
+function buildTradeWorkflowItemFromPayload(args: {
+  itemId: number
+  payload: Record<string, unknown>
+  tradeRows: SmokeTradeRow[]
+}): TradeWorkflowItemRecord {
+  const tradeId = normalizeOptionalText(args.payload.trade_id) ?? 'UNKNOWN'
+  const trade = args.tradeRows.find((row) => row.trade_id === tradeId) ?? null
+  const now = '2026-04-11T00:15:00Z'
+
+  return {
+    item_id: args.itemId,
+    trade_id: tradeId,
+    linked_trade_id: tradeId,
+    linked_trade_status: trade?.status ?? 'ACTIVE',
+    queue: 'operations',
+    workflow_type: 'CONFIRMATION',
+    status: normalizeOptionalText(args.payload.status) ?? 'PENDING',
+    owner: normalizeOptionalText(args.payload.owner),
+    due_at: normalizeOptionalText(args.payload.due_at),
+    notes: normalizeOptionalText(args.payload.notes),
+    created_at: now,
+    created_by: smokeSession.user.user_id,
+    updated_at: now,
+    updated_by: smokeSession.user.user_id,
+    version: 1,
+    is_closed: false,
+    is_overdue: false,
+    age_days: 0,
+    trade_nature: trade?.trade_nature ?? 'PHYSICAL',
+    book: trade?.book ?? 'GULF_GAS',
+    portfolio: trade?.portfolio ?? null,
+    counterparty: trade?.counterparty ?? null,
+    commodity_class: trade?.commodity_class ?? 'NATURAL_GAS',
+    commodity: trade?.commodity ?? 'HENRY_HUB_GAS',
+    trader_user: trade?.trader_user ?? null,
+    trade_date: trade?.trade_date ?? null,
+    delivery_start: trade?.delivery_start ?? null,
+    delivery_end: trade?.delivery_end ?? null,
+    action_states: [],
+    credit_approval_freshness: null,
+    active_credit_exception: null,
+    credit_decision_history: [],
+    credit_approval_status: trade?.credit_approval_status ?? 'APPROVED',
+    credit_hold_active: trade?.credit_hold_active ?? false,
+    credit_hold_reason: trade?.credit_hold_reason ?? null,
   }
 }
 
@@ -856,9 +1333,17 @@ async function startMockApiServer(
   options: StartSmokeHarnessOptions = {},
 ): Promise<MockApiServer> {
   const mutationRequests: RecordedRequest[] = []
+  const operationWorkItemRequests: TradeWorkflowItemRecord[] = []
   const promptNavigationOutcomeRequests: RecordedRequest[] = []
   const unexpectedRequests: RecordedRequest[] = []
   const tradeRows: SmokeTradeRow[] = trades.map((trade) => ({ ...trade }))
+  const tradeWorkflowItemRows: TradeWorkflowItemRecord[] = []
+  const preTradeScenarioRows: PreTradeScenarioRecord[] = []
+  const preTradeRecommendationRunRows: PreTradeRecommendationRunRecord[] = []
+  const preTradeReviewRows: PreTradeReviewItemRecord[] = []
+  const preTradeNettingSetRows: PreTradeNettingSetRecord[] = []
+  const preTradeHedgeRecommendationRows: PreTradeHedgeRecommendationRecord[] = []
+  const preTradeRiskScenarioRows: PreTradeRiskScenarioRecord[] = []
   const truckMovementSummaries: DeliveryTruckMovementSummaryRecord[] = smokeTruckMovementSummaries.map((movement) => ({
     ...movement,
     tracking_health: movement.tracking_health ? { ...movement.tracking_health } : movement.tracking_health,
@@ -958,6 +1443,12 @@ async function startMockApiServer(
         label: 'Market Prices',
         data_bindings: ['latest_price_marks', 'market_price_indices'],
       },
+      news: {
+        card_id: 'news',
+        kind: 'market_news',
+        label: 'Market News',
+        data_bindings: ['market_news_headlines', 'market_price_indices'],
+      },
       map: {
         card_id: 'map',
         kind: 'asset_map',
@@ -987,13 +1478,13 @@ async function startMockApiServer(
   }
 
   function buildSmokeHomeViewSystemCards(): SmokeHomeViewCardRow[] {
-    return ['timeframe', 'prices', 'map', 'documents', 'communication', 'prompt'].map(
+    return ['timeframe', 'prices', 'news', 'map', 'documents', 'communication', 'prompt'].map(
       (cardId, index) => ({
         ...smokeHomeViewCardDefaults(cardId),
         visible: true,
         placement: {
           order: index,
-          column_span: cardId === 'prices' || cardId === 'map' || cardId === 'prompt' ? 2 : 1,
+          column_span: cardId === 'prices' || cardId === 'news' || cardId === 'map' || cardId === 'prompt' ? 2 : 1,
           row_span: cardId === 'map' ? 2 : 1,
         },
         parameters: {},
@@ -1150,9 +1641,17 @@ async function startMockApiServer(
         data_bindings: ['latest_price_marks', 'market_price_indices'],
       },
       {
+        card_id: 'news',
+        visible: true,
+        placement: { order: 1, column_span: 2, row_span: 1 },
+        parameters: { news_limit: 5, news_lookback_days: 7 },
+        filters: { price_index_code: 'HH_IFERC', commodity_code: 'HENRY_HUB_GAS' },
+        data_bindings: ['market_news_headlines', 'market_price_indices'],
+      },
+      {
         card_id: 'map',
         visible: true,
-        placement: { order: 1, column_span: 2, row_span: 2 },
+        placement: { order: 2, column_span: 2, row_span: 2 },
         parameters: { map_record_limit: 250 },
         filters: { commodity_code: 'HENRY_HUB_GAS', geography: 'North America' },
         data_bindings: ['asset_map', 'spatial_features', 'weather_overlays'],
@@ -1160,7 +1659,7 @@ async function startMockApiServer(
       {
         card_id: 'prompt',
         visible: true,
-        placement: { order: 2, column_span: 2, row_span: 1 },
+        placement: { order: 3, column_span: 2, row_span: 1 },
         parameters: { starter_kit: 'market_watch' },
         filters: { workflow_category: 'market_monitoring' },
         data_bindings: ['assistant_conversation', 'operator_attention_counts'],
@@ -1199,7 +1698,7 @@ async function startMockApiServer(
           recipe_key: 'hub_basis_watch',
           name: 'HH NG Watch',
           scope: 'PERSONAL',
-          visible_cards: ['prices', 'map', 'prompt'],
+          visible_cards: ['prices', 'news', 'map', 'prompt'],
           global_filters: { commodity_code: 'HENRY_HUB_GAS' },
         },
         supporting_records: [
@@ -1933,6 +2432,7 @@ async function startMockApiServer(
       !(method === 'POST' && url.pathname === '/assistant/respond/stream') &&
       !(method === 'POST' && url.pathname === '/assistant/prompt-navigation-outcomes') &&
       !(method === 'POST' && /\/assistant\/runs\/\d+\/prompt-navigation-outcomes$/.test(url.pathname)) &&
+      !(method === 'POST' && url.pathname === '/pretrade/recommendations/draft-analysis') &&
       !(method === 'PUT' && url.pathname.startsWith('/layout-definitions/'))
     ) {
       mutationRequests.push(record)
@@ -4693,6 +5193,447 @@ async function startMockApiServer(
     }
 
     if (url.pathname === '/operations/work-items' && method === 'GET') {
+      writeJson(response, tradeWorkflowItemRows.map(cloneJson))
+      return
+    }
+
+    if (url.pathname === '/operations/work-items' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+      const workItem = buildTradeWorkflowItemFromPayload({
+        itemId: tradeWorkflowItemRows.length + 1,
+        payload: payload as Record<string, unknown>,
+        tradeRows,
+      })
+      tradeWorkflowItemRows.unshift(workItem)
+      operationWorkItemRequests.push(cloneJson(workItem))
+      writeJson(response, cloneJson(workItem), 201)
+      return
+    }
+
+    if (url.pathname === '/pretrade/scenarios' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, preTradeScenarioRows.map(cloneJson))
+      return
+    }
+
+    if (url.pathname === '/pretrade/scenarios' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+      const record = payload as {
+        name?: unknown
+        thesis?: unknown
+        draft?: unknown
+        enrichment?: PreTradeScenarioEnrichmentRecord | null
+      }
+      const now = '2026-04-11T00:09:00Z'
+      const scenario: PreTradeScenarioRecord = {
+        scenario_id: preTradeScenarioRows.length + 1,
+        name: normalizeOptionalText(record.name) ?? 'Smoke pre-trade scenario',
+        thesis: normalizeOptionalText(record.thesis),
+        draft: normalizePreTradeScenarioDraft(record.draft),
+        enrichment: record.enrichment ?? null,
+        created_at: now,
+        created_by: smokeSession.user.user_id,
+        updated_at: now,
+        updated_by: smokeSession.user.user_id,
+        version: 1,
+        can_edit: true,
+      }
+      preTradeScenarioRows.unshift(scenario)
+      writeJson(response, cloneJson(scenario), 201)
+      return
+    }
+
+    if (url.pathname === '/pretrade/reviews' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, preTradeReviewRows.map(cloneJson))
+      return
+    }
+
+    if (url.pathname === '/pretrade/reviews' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+      const record = payload as {
+        name?: unknown
+        thesis?: unknown
+        draft?: unknown
+        source_scenario_id?: unknown
+        recommendation_run_id?: unknown
+        enrichment?: PreTradeScenarioEnrichmentRecord | null
+        owner?: unknown
+        due_at?: unknown
+        review_notes?: unknown
+      }
+      const now = '2026-04-11T00:11:00Z'
+      const recommendationRunId = normalizeOptionalNumber(record.recommendation_run_id)
+      const recommendationRun = preTradeRecommendationRunRows.find((run) => run.run_id === recommendationRunId) ?? null
+      const review: PreTradeReviewItemRecord = {
+        review_id: preTradeReviewRows.length + 1,
+        name: normalizeOptionalText(record.name) ?? 'Smoke pre-trade review',
+        thesis: normalizeOptionalText(record.thesis),
+        draft: normalizePreTradeScenarioDraft(record.draft),
+        source_scenario_id: normalizeOptionalNumber(record.source_scenario_id),
+        recommendation_run_id: recommendationRunId,
+        enrichment: record.enrichment ?? (recommendationRun ? buildPreTradeScenarioEnrichmentFromRun(recommendationRun) : null),
+        recommendation_summary: buildPreTradeReviewRecommendationSummary(recommendationRun),
+        recommendation_override_reason: null,
+        recommendation_override_by: null,
+        recommendation_override_at: null,
+        review_status: 'OPEN',
+        owner: normalizeOptionalText(record.owner),
+        due_at: normalizeOptionalText(record.due_at),
+        review_notes: normalizeOptionalText(record.review_notes),
+        linked_trade_id: null,
+        linked_trade_status: null,
+        booked_at: null,
+        booked_by: null,
+        approval_governance_snapshot: null,
+        booking_governance_snapshot: null,
+        activity: [
+          {
+            activity_id: `ptr-activity-${preTradeReviewRows.length + 1}-submitted`,
+            action: 'SUBMITTED',
+            actor_id: smokeSession.user.user_id,
+            occurred_at: now,
+            comment: normalizeOptionalText(record.review_notes),
+            payload: {},
+          },
+        ],
+        created_at: now,
+        created_by: smokeSession.user.user_id,
+        updated_at: now,
+        updated_by: smokeSession.user.user_id,
+        version: 1,
+        can_edit: true,
+      }
+      preTradeReviewRows.unshift(review)
+      writeJson(response, cloneJson(review), 201)
+      return
+    }
+
+    const preTradeReviewDriftMatch = url.pathname.match(/^\/pretrade\/reviews\/(\d+)\/drift$/)
+    if (preTradeReviewDriftMatch && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const reviewId = Number(preTradeReviewDriftMatch[1])
+      const review = preTradeReviewRows.find((row) => row.review_id === reviewId)
+      if (!review) {
+        writeJson(response, { detail: 'Pre-trade review not found.' }, 404)
+        return
+      }
+
+      writeJson(response, buildPreTradeReviewDrift(review))
+      return
+    }
+
+    const preTradeReviewMatch = url.pathname.match(/^\/pretrade\/reviews\/(\d+)$/)
+    if (preTradeReviewMatch && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const reviewId = Number(preTradeReviewMatch[1])
+      const review = preTradeReviewRows.find((row) => row.review_id === reviewId)
+      if (!review) {
+        writeJson(response, { detail: 'Pre-trade review not found.' }, 404)
+        return
+      }
+
+      writeJson(response, cloneJson(review))
+      return
+    }
+
+    if (preTradeReviewMatch && method === 'PATCH') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const reviewId = Number(preTradeReviewMatch[1])
+      const reviewIndex = preTradeReviewRows.findIndex((row) => row.review_id === reviewId)
+      if (reviewIndex < 0) {
+        writeJson(response, { detail: 'Pre-trade review not found.' }, 404)
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+      const record = payload as {
+        owner?: unknown
+        review_status?: PreTradeReviewStatus
+        activity_comment?: unknown
+        recommendation_override_reason?: unknown
+      }
+      const current = preTradeReviewRows[reviewIndex]
+      const now = '2026-04-11T00:13:00Z'
+      const nextStatus = record.review_status ?? current.review_status
+      const nextActivityAction: PreTradeReviewActivityRecord['action'] =
+        nextStatus === 'APPROVED'
+          ? 'APPROVED'
+          : nextStatus === 'REJECTED'
+            ? 'REJECTED'
+            : nextStatus === 'IN_REVIEW'
+              ? 'CLAIMED'
+              : 'COMMENTED'
+      const comment = normalizeOptionalText(record.activity_comment)
+      const next: PreTradeReviewItemRecord = {
+        ...current,
+        owner: normalizeOptionalText(record.owner) ?? current.owner,
+        review_status: nextStatus,
+        recommendation_override_reason: normalizeOptionalText(record.recommendation_override_reason) ?? current.recommendation_override_reason,
+        recommendation_override_by:
+          normalizeOptionalText(record.recommendation_override_reason) || current.recommendation_override_reason
+            ? smokeSession.user.user_id
+            : current.recommendation_override_by,
+        recommendation_override_at:
+          normalizeOptionalText(record.recommendation_override_reason) || current.recommendation_override_reason
+            ? now
+            : current.recommendation_override_at,
+        approval_governance_snapshot:
+          nextStatus === 'APPROVED'
+            ? buildPreTradeGovernanceExport(preTradeReviewRows, preTradeRecommendationRunRows)
+            : current.approval_governance_snapshot,
+        activity: [
+          ...current.activity,
+          {
+            activity_id: `ptr-activity-${reviewId}-${current.activity.length + 1}`,
+            action: nextActivityAction,
+            actor_id: smokeSession.user.user_id,
+            occurred_at: now,
+            comment,
+            payload: {},
+          },
+        ],
+        updated_at: now,
+        updated_by: smokeSession.user.user_id,
+        version: current.version + 1,
+      }
+      preTradeReviewRows[reviewIndex] = next
+      writeJson(response, cloneJson(next))
+      return
+    }
+
+    const preTradeReviewActivityMatch = url.pathname.match(/^\/pretrade\/reviews\/(\d+)\/activity$/)
+    if (preTradeReviewActivityMatch && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const reviewId = Number(preTradeReviewActivityMatch[1])
+      const reviewIndex = preTradeReviewRows.findIndex((row) => row.review_id === reviewId)
+      if (reviewIndex < 0) {
+        writeJson(response, { detail: 'Pre-trade review not found.' }, 404)
+        return
+      }
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+      const current = preTradeReviewRows[reviewIndex]
+      const now = '2026-04-11T00:13:30Z'
+      const next: PreTradeReviewItemRecord = {
+        ...current,
+        activity: [
+          ...current.activity,
+          {
+            activity_id: `ptr-activity-${reviewId}-${current.activity.length + 1}`,
+            action: 'COMMENTED',
+            actor_id: smokeSession.user.user_id,
+            occurred_at: now,
+            comment: normalizeOptionalText((payload as { comment?: unknown }).comment),
+            payload: {},
+          },
+        ],
+        updated_at: now,
+        updated_by: smokeSession.user.user_id,
+        version: current.version + 1,
+      }
+      preTradeReviewRows[reviewIndex] = next
+      writeJson(response, cloneJson(next))
+      return
+    }
+
+    if (url.pathname === '/pretrade/governance/summary' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, buildPreTradeGovernanceSummary(preTradeReviewRows, preTradeRecommendationRunRows))
+      return
+    }
+
+    if (url.pathname === '/pretrade/governance/items' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, buildPreTradeGovernanceItems(preTradeReviewRows, preTradeRecommendationRunRows))
+      return
+    }
+
+    if (url.pathname === '/pretrade/governance/export' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, buildPreTradeGovernanceExport(preTradeReviewRows, preTradeRecommendationRunRows))
+      return
+    }
+
+    if (url.pathname === '/pretrade/netting-sets' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, preTradeNettingSetRows.map(cloneJson))
+      return
+    }
+
+    if (url.pathname === '/pretrade/hedge-recommendations' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, preTradeHedgeRecommendationRows.map(cloneJson))
+      return
+    }
+
+    if (url.pathname === '/pretrade/risk-scenarios' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, preTradeRiskScenarioRows.map(cloneJson))
+      return
+    }
+
+    if (url.pathname === '/pretrade/recommendations/runs' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const sourceScenarioId = url.searchParams.get('source_scenario_id')
+      const sourceReviewId = url.searchParams.get('source_review_id')
+      const limit = Number(url.searchParams.get('limit') ?? '20')
+      const filtered = preTradeRecommendationRunRows
+        .filter((run) => !sourceScenarioId || run.source_scenario_id === Number(sourceScenarioId))
+        .filter((run) => !sourceReviewId || run.source_review_id === Number(sourceReviewId))
+        .slice(0, Number.isFinite(limit) ? limit : 20)
+      writeJson(response, filtered.map(cloneJson))
+      return
+    }
+
+    if (url.pathname === '/pretrade/recommendations/runs' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+      const record = payload as {
+        name?: unknown
+        thesis?: unknown
+        draft?: unknown
+        source_scenario_id?: unknown
+        source_review_id?: unknown
+        input_snapshots?: PreTradeRecommendationSourceSnapshotRecord[]
+      }
+      const runId = preTradeRecommendationRunRows.length + 1
+      const draft = normalizePreTradeScenarioDraft(record.draft)
+      const analysis = buildSmokePreTradeDraftAnalysis({
+        thesis: normalizeOptionalText(record.thesis),
+        draft,
+        sourceScenarioId: normalizeOptionalNumber(record.source_scenario_id),
+        sourceReviewId: normalizeOptionalNumber(record.source_review_id),
+        inputSnapshots: Array.isArray(record.input_snapshots) ? record.input_snapshots : undefined,
+      })
+      const now = '2026-04-11T00:10:00Z'
+      const run: PreTradeRecommendationRunRecord = {
+        run_id: runId,
+        run_key: `PTR-SMOKE-${String(runId).padStart(3, '0')}`,
+        name: normalizeOptionalText(record.name) ?? 'Smoke pre-trade recommendation',
+        thesis: analysis.thesis,
+        draft: analysis.draft,
+        source_scenario_id: analysis.source_scenario_id,
+        source_review_id: analysis.source_review_id,
+        input_snapshots: analysis.input_snapshots,
+        recommendation: analysis.recommendation,
+        comparison: null,
+        created_at: now,
+        created_by: smokeSession.user.user_id,
+        updated_at: now,
+        updated_by: smokeSession.user.user_id,
+        version: 1,
+        can_edit: true,
+      }
+      preTradeRecommendationRunRows.unshift(run)
+      writeJson(response, cloneJson(run), 201)
+      return
+    }
+
+    const preTradeRecommendationRunMatch = url.pathname.match(/^\/pretrade\/recommendations\/runs\/(\d+)$/)
+    if (preTradeRecommendationRunMatch && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const runId = Number(preTradeRecommendationRunMatch[1])
+      const run = preTradeRecommendationRunRows.find((row) => row.run_id === runId)
+      if (!run) {
+        writeJson(response, { detail: 'Pre-trade recommendation run not found.' }, 404)
+        return
+      }
+      writeJson(response, cloneJson(run))
+      return
+    }
+
+    if (url.pathname === '/pretrade/recommendations/draft-analysis' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      const payload = await readJsonBody(request)
+      assert.ok(payload && typeof payload === 'object' && !Array.isArray(payload))
+      const record = payload as {
+        thesis?: unknown
+        draft?: unknown
+        source_scenario_id?: unknown
+        source_review_id?: unknown
+        input_snapshots?: PreTradeRecommendationSourceSnapshotRecord[]
+      }
+      const draft = normalizePreTradeScenarioDraft(record.draft)
+      writeJson(
+        response,
+        buildSmokePreTradeDraftAnalysis({
+          thesis: normalizeOptionalText(record.thesis),
+          draft,
+          sourceScenarioId: normalizeOptionalNumber(record.source_scenario_id),
+          sourceReviewId: normalizeOptionalNumber(record.source_review_id),
+          inputSnapshots: Array.isArray(record.input_snapshots) ? record.input_snapshots : undefined,
+        }),
+      )
+      return
+    }
+
+    if (url.pathname === '/operations/document-record-creation-requests' && method === 'GET') {
       writeJson(response, [])
       return
     }
@@ -5371,6 +6312,7 @@ async function startMockApiServer(
       sessionExpired = true
     },
     mutationRequests,
+    operationWorkItemRequests,
     promptNavigationOutcomeRequests,
     unexpectedRequests,
     close: () =>
@@ -5430,6 +6372,7 @@ export async function startSmokeHarness(
     apiBaseUrl: mockApi.baseUrl,
     expireSession: mockApi.expireSession,
     mutationRequests: mockApi.mutationRequests,
+    operationWorkItemRequests: mockApi.operationWorkItemRequests,
     promptNavigationOutcomeRequests: mockApi.promptNavigationOutcomeRequests,
     unexpectedRequests: mockApi.unexpectedRequests,
     close: async () => {

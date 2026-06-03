@@ -89,8 +89,9 @@ class HomeViewRecipeTests(unittest.TestCase):
         self.assertEqual(cards_by_id["map"].filters["location_code"], "HENRY_HUB")
         self.assertEqual(
             [card.card_id for card in normalized_cards if card.visible][:3],
-            ["prices", "map", "prompt"],
+            ["prices", "news", "map"],
         )
+        self.assertEqual(cards_by_id["news"].filters["price_index_code"], ["HH_NATGAS", "WAHA_NATGAS"])
         self.assertIn(
             "Included related active natural-gas price indices for basis context.",
             recipe.assumptions,
@@ -122,7 +123,7 @@ class HomeViewRecipeTests(unittest.TestCase):
         self.assertEqual(risk.persona_hint, "risk")
         self.assertEqual(
             [card.card_id for card in trader_cards if card.visible][:3],
-            ["prices", "map", "prompt"],
+            ["prices", "news", "map"],
         )
         self.assertEqual(
             [card.card_id for card in risk_cards if card.visible][:2],

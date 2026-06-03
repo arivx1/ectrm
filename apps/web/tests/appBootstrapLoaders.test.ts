@@ -44,6 +44,7 @@ import {
   loadCoreWorkspaceBootstrap,
   loadDeliveriesWorkspaceBootstrap,
   loadDeliveriesWindow,
+  loadDocumentRecordCreationWorkItemsWindow,
   loadEventsWorkspaceBootstrap,
   loadOptionExposuresWindow,
   loadPositionsWorkspaceBootstrap,
@@ -884,7 +885,15 @@ test('workspace loaders apply bounded bootstrap windows to large operational dat
       ['https://example.test/api/deliveries?limit=251', [{ delivery_id: 'DLV-1' }]],
       ['https://example.test/api/confirmations?limit=251', [{ confirmation_id: 1 }]],
       ['https://example.test/api/operations/work-items?queue=operations&limit=251', [{ item_id: 1 }]],
+      [
+        'https://example.test/api/operations/document-record-creation-requests?queue=operations&limit=251',
+        [{ request_id: 101 }],
+      ],
       ['https://example.test/api/operations/work-items?queue=settlement&limit=251', [{ item_id: 2 }]],
+      [
+        'https://example.test/api/operations/document-record-creation-requests?queue=settlement&limit=251',
+        [{ request_id: 201 }],
+      ],
       ['https://example.test/api/settlement/invoices?limit=251', [{ invoice_id: 11 }]],
       ['https://example.test/api/settlement/payments?limit=251', [{ payment_id: 21 }]],
     ])
@@ -911,12 +920,16 @@ test('workspace loaders apply bounded bootstrap windows to large operational dat
   assert.deepEqual(operations.confirmationsWindow, { loadedCount: 1, hasMore: false })
   assert.deepEqual(operations.workItems, [{ item_id: 1 }])
   assert.deepEqual(operations.workItemsWindow, { loadedCount: 1, hasMore: false })
+  assert.deepEqual(operations.operationsDocumentRecordCreationRequests, [{ request_id: 101 }])
+  assert.deepEqual(operations.operationsDocumentRecordCreationRequestsWindow, { loadedCount: 1, hasMore: false })
   assert.deepEqual(settlement.invoices, [{ invoice_id: 11 }])
   assert.deepEqual(settlement.invoicesWindow, { loadedCount: 1, hasMore: false })
   assert.deepEqual(settlement.payments, [{ payment_id: 21 }])
   assert.deepEqual(settlement.paymentsWindow, { loadedCount: 1, hasMore: false })
   assert.deepEqual(settlement.workItems, [{ item_id: 2 }])
   assert.deepEqual(settlement.workItemsWindow, { loadedCount: 1, hasMore: false })
+  assert.deepEqual(settlement.settlementDocumentRecordCreationRequests, [{ request_id: 201 }])
+  assert.deepEqual(settlement.settlementDocumentRecordCreationRequestsWindow, { loadedCount: 1, hasMore: false })
 })
 
 test('windowed trade loaders trim the extra row and use offset for follow-on pages', async () => {
@@ -949,7 +962,15 @@ test('large faux-book loaders stay bounded on the first page across every bootst
       ['https://example.test/api/deliveries?limit=251', makeStringRows('delivery_id', 'DLV', 251)],
       ['https://example.test/api/confirmations?limit=251', makeNumberRows('confirmation_id', 251)],
       ['https://example.test/api/operations/work-items?queue=operations&limit=251', makeNumberRows('item_id', 251)],
+      [
+        'https://example.test/api/operations/document-record-creation-requests?queue=operations&limit=251',
+        makeNumberRows('request_id', 251),
+      ],
       ['https://example.test/api/operations/work-items?queue=settlement&limit=251', makeNumberRows('item_id', 251, 1000)],
+      [
+        'https://example.test/api/operations/document-record-creation-requests?queue=settlement&limit=251',
+        makeNumberRows('request_id', 251, 1000),
+      ],
       ['https://example.test/api/settlement/invoices?limit=251', makeNumberRows('invoice_id', 251)],
       ['https://example.test/api/settlement/payments?limit=251', makeNumberRows('payment_id', 251)],
     ])
@@ -968,7 +989,9 @@ test('large faux-book loaders stay bounded on the first page across every bootst
     deliveries,
     confirmations,
     operationsWorkItems,
+    operationsDocumentRecordCreationRequests,
     settlementWorkItems,
+    settlementDocumentRecordCreationRequests,
     invoices,
     payments,
   ] = await Promise.all([
@@ -978,7 +1001,9 @@ test('large faux-book loaders stay bounded on the first page across every bootst
     loadDeliveriesWindow('https://example.test/api'),
     loadTradeConfirmationsWindow('https://example.test/api'),
     loadTradeWorkflowItemsWindow('https://example.test/api', 'operations'),
+    loadDocumentRecordCreationWorkItemsWindow('https://example.test/api', 'operations'),
     loadTradeWorkflowItemsWindow('https://example.test/api', 'settlement'),
+    loadDocumentRecordCreationWorkItemsWindow('https://example.test/api', 'settlement'),
     loadTradeInvoicesWindow('https://example.test/api'),
     loadTradePaymentsWindow('https://example.test/api'),
   ])
@@ -1007,9 +1032,17 @@ test('large faux-book loaders stay bounded on the first page across every bootst
   assert.equal(operationsWorkItems.rows.at(-1)?.item_id, 250)
   assert.deepEqual(operationsWorkItems.window, { loadedCount: 250, hasMore: true })
 
+  assert.equal(operationsDocumentRecordCreationRequests.rows.length, 250)
+  assert.equal(operationsDocumentRecordCreationRequests.rows.at(-1)?.request_id, 250)
+  assert.deepEqual(operationsDocumentRecordCreationRequests.window, { loadedCount: 250, hasMore: true })
+
   assert.equal(settlementWorkItems.rows.length, 250)
   assert.equal(settlementWorkItems.rows.at(-1)?.item_id, 1249)
   assert.deepEqual(settlementWorkItems.window, { loadedCount: 250, hasMore: true })
+
+  assert.equal(settlementDocumentRecordCreationRequests.rows.length, 250)
+  assert.equal(settlementDocumentRecordCreationRequests.rows.at(-1)?.request_id, 1249)
+  assert.deepEqual(settlementDocumentRecordCreationRequests.window, { loadedCount: 250, hasMore: true })
 
   assert.equal(invoices.rows.length, 250)
   assert.equal(invoices.rows.at(-1)?.invoice_id, 250)

@@ -35,6 +35,24 @@ from apps.api.app.domains.reports.services.pretrade_governance import (
     build_pretrade_governance_items,
     build_pretrade_governance_summary,
 )
+from apps.api.app.domains.reports.services.pretrade_hedge_recommendations import (
+    PreTradeHedgeRecommendationPromotionError,
+    promote_governance_hedge_recommendation_draft,
+    to_pretrade_hedge_recommendation_out,
+    visible_pretrade_hedge_recommendation_records,
+)
+from apps.api.app.domains.reports.services.pretrade_netting_sets import (
+    PreTradeNettingSetPromotionError,
+    promote_governance_netting_set_draft,
+    to_pretrade_netting_set_out,
+    visible_pretrade_netting_set_records,
+)
+from apps.api.app.domains.reports.services.pretrade_risk_scenarios import (
+    PreTradeRiskScenarioPromotionError,
+    promote_governance_risk_scenario_draft,
+    to_pretrade_risk_scenario_out,
+    visible_pretrade_risk_scenario_records,
+)
 from apps.api.app.domains.reports.services.pretrade_review_drift import (
     build_pretrade_review_drift,
 )
@@ -61,8 +79,12 @@ from apps.api.app.schemas.pretrade import (
     PreTradeGovernanceAuditCategory,
     PreTradeGovernanceAuditExportOut,
     PreTradeGovernanceAuditRowOut,
+    PreTradeHedgeRecommendationOut,
+    PreTradeHedgeRecommendationPromoteCreate,
     PreTradeGovernanceItemsOut,
     PreTradeGovernanceSummaryOut,
+    PreTradeNettingSetOut,
+    PreTradeNettingSetPromoteCreate,
     PreTradeRecommendationDraftAnalysisCreate,
     PreTradeRecommendationDraftAnalysisOut,
     PreTradeGovernanceStaleEvidenceRunOut,
@@ -76,6 +98,8 @@ from apps.api.app.schemas.pretrade import (
     PreTradeReviewItemCreate,
     PreTradeReviewItemOut,
     PreTradeReviewItemUpdate,
+    PreTradeRiskScenarioOut,
+    PreTradeRiskScenarioPromoteCreate,
     PreTradeScenarioCreate,
     PreTradeScenarioDraft,
     PreTradeScenarioEnrichmentOut,
@@ -614,6 +638,104 @@ def export_pretrade_governance_audit(
         db,
         actor_id=actor_id,
     )
+
+
+@router.get("/netting-sets", response_model=list[PreTradeNettingSetOut])
+def get_pretrade_netting_sets(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[PreTradeNettingSetOut]:
+    actor_id = require_authenticated_actor(request)
+    return [
+        to_pretrade_netting_set_out(record, actor_id=actor_id)
+        for record in visible_pretrade_netting_set_records(db)
+    ]
+
+
+@router.post("/netting-sets/from-promotion", response_model=PreTradeNettingSetOut, status_code=status.HTTP_201_CREATED)
+def promote_pretrade_netting_set_from_governance(
+    payload: PreTradeNettingSetPromoteCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradeNettingSetOut:
+    actor_id = require_authenticated_actor(request)
+    try:
+        record = promote_governance_netting_set_draft(
+            db,
+            actor_id=actor_id,
+            payload=payload,
+        )
+    except PreTradeNettingSetPromotionError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return to_pretrade_netting_set_out(record, actor_id=actor_id)
+
+
+@router.get("/hedge-recommendations", response_model=list[PreTradeHedgeRecommendationOut])
+def get_pretrade_hedge_recommendations(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[PreTradeHedgeRecommendationOut]:
+    actor_id = require_authenticated_actor(request)
+    return [
+        to_pretrade_hedge_recommendation_out(record, actor_id=actor_id)
+        for record in visible_pretrade_hedge_recommendation_records(db)
+    ]
+
+
+@router.post(
+    "/hedge-recommendations/from-promotion",
+    response_model=PreTradeHedgeRecommendationOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def promote_pretrade_hedge_recommendation_from_governance(
+    payload: PreTradeHedgeRecommendationPromoteCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradeHedgeRecommendationOut:
+    actor_id = require_authenticated_actor(request)
+    try:
+        record = promote_governance_hedge_recommendation_draft(
+            db,
+            actor_id=actor_id,
+            payload=payload,
+        )
+    except PreTradeHedgeRecommendationPromotionError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return to_pretrade_hedge_recommendation_out(record, actor_id=actor_id)
+
+
+@router.get("/risk-scenarios", response_model=list[PreTradeRiskScenarioOut])
+def get_pretrade_risk_scenarios(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[PreTradeRiskScenarioOut]:
+    actor_id = require_authenticated_actor(request)
+    return [
+        to_pretrade_risk_scenario_out(record, actor_id=actor_id)
+        for record in visible_pretrade_risk_scenario_records(db)
+    ]
+
+
+@router.post(
+    "/risk-scenarios/from-promotion",
+    response_model=PreTradeRiskScenarioOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def promote_pretrade_risk_scenario_from_governance(
+    payload: PreTradeRiskScenarioPromoteCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradeRiskScenarioOut:
+    actor_id = require_authenticated_actor(request)
+    try:
+        record = promote_governance_risk_scenario_draft(
+            db,
+            actor_id=actor_id,
+            payload=payload,
+        )
+    except PreTradeRiskScenarioPromotionError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return to_pretrade_risk_scenario_out(record, actor_id=actor_id)
 
 
 @router.get("/recommendations/runs", response_model=list[PreTradeRecommendationRunOut])

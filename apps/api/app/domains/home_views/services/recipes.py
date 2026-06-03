@@ -610,12 +610,12 @@ def _market_cards_for_persona(
             "No dedicated shipment Home card exists yet; operations emphasis uses map, prompt, timeframe, and communications cards.",
         )
     elif persona == "settlement":
-        ordered_visible = ("prices", "documents", "communication", "prompt")
+        ordered_visible = ("prices", "news", "documents", "communication", "prompt")
         missing_evidence = (
             "No dedicated settlement exception Home card exists yet; settlement emphasis uses price, document, and communications cards.",
         )
     else:
-        ordered_visible = ("prices", "map", "prompt")
+        ordered_visible = ("prices", "news", "map", "prompt")
 
     full_order = [*ordered_visible, *[card_id for card_id in _HOME_CARD_DEFAULT_ORDER if card_id not in ordered_visible]]
     cards: list[HomeViewCardDefinition] = []
@@ -636,6 +636,7 @@ def _market_cards_for_persona(
 _HOME_CARD_DEFAULT_ORDER: tuple[str, ...] = (
     "timeframe",
     "prices",
+    "news",
     "map",
     "documents",
     "communication",
@@ -669,6 +670,15 @@ def _home_view_card(
             parameters={"map_record_limit": 250},
             filters=dict(map_filters),
             data_bindings=["asset_map", "weather_overlays"],
+        )
+    if card_id == "news":
+        return HomeViewCardDefinition(
+            card_id="news",
+            visible=visible,
+            placement=HomeViewCardPlacement(order=order, column_span=2, row_span=1),
+            parameters={"news_limit": 5, "news_lookback_days": 7},
+            filters=dict(price_filters),
+            data_bindings=["market_news_headlines", "market_price_indices"],
         )
     if card_id == "prompt":
         starter_kit = "market_watch"

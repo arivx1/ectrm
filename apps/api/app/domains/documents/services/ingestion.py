@@ -60,6 +60,7 @@ from .document_ingestion_review import normalize_table_blocks
 from .document_ingestion_review import validate_document_review_status_transition
 from .document_ingestion_review import validate_page_review_state
 from .document_logical_documents import sync_document_logical_documents
+from .document_logical_documents import update_document_logical_document_splits
 from .document_ingestion_serialization import get_document_page_preview_path
 from .document_ingestion_serialization import get_document_source_file_details as _get_document_source_file_details
 from .document_ingestion_serialization import load_document_and_pages
@@ -1000,6 +1001,50 @@ def update_document_ingestion_page(
                 "reviewed_by": page.reviewed_by,
             },
         )
+    db.flush()
+    return serialize_documents(
+        db,
+        [document],
+        preloaded_pages=pages,
+        preloaded_logical_documents=logical_documents,
+    )[0]
+
+
+def update_document_logical_documents(
+    db: Session,
+    *,
+    document_id: str,
+    actor_id: str,
+    changes: dict[str, Any],
+) -> DocumentIngestionOut:
+    document, pages = load_document_and_pages(db, document_id=document_id)
+    now = datetime.now(timezone.utc)
+    logical_documents_payload = [
+        dict(item)
+        for item in changes.get("logical_documents", [])
+        if isinstance(item, dict)
+    ]
+    logical_documents = update_document_logical_document_splits(
+        db,
+        document=document,
+        pages=pages,
+        actor_id=actor_id,
+        logical_documents=logical_documents_payload,
+        expected_document_version=changes.get("expected_document_version"),
+        occurred_at=now,
+    )
+    if document.review_status == "VERIFIED":
+        document.review_status = "IN_REVIEW"
+        document.reviewed_at = None
+        document.reviewed_by = None
+    document.analysis_summary = build_document_summary(
+        pages,
+        review_status=document.review_status,
+        logical_documents=list(logical_documents),
+    )
+    document.updated_at = now
+    document.updated_by = actor_id
+    document.version += 1
     db.flush()
     return serialize_documents(
         db,

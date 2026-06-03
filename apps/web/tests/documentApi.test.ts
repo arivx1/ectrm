@@ -32,6 +32,7 @@ import {
   stageDocumentRecordCreationRequest,
   stageSelectedDocumentRecordCandidateApprovalRequest,
   stageDocumentActionApprovalRequest,
+  updateDocumentLogicalDocuments,
   uploadPdfDocument,
 } from '../src/entities/documents/api.ts'
 import type { StoredAuthSession } from '../src/shared/mutation.ts'
@@ -101,6 +102,48 @@ test('uploadPdfDocument posts the AI confidence threshold with the upload form',
   assert.equal(url, 'http://api.test/documents/uploads')
   assert.equal((formData as FormData).get('ai_confidence_threshold'), '0.82')
   assert.equal((formData as FormData).get('processor_provider'), 'openai')
+  const headers = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(headers.get('Authorization'), 'Bearer document-token')
+})
+
+test('updateDocumentLogicalDocuments patches packet split membership with authorization', async () => {
+  patchJsonMock.mockResolvedValueOnce({ document_id: 'DOC-SPLIT-1' })
+
+  const payload = await updateDocumentLogicalDocuments(
+    'http://api.test',
+    documentSession,
+    'DOC-SPLIT-1',
+    {
+      expected_document_version: 3,
+      logical_documents: [
+        {
+          document_kind: 'BILL_OF_LADING',
+          page_ids: [1, 2],
+        },
+        {
+          document_kind: 'INVOICE',
+          page_ids: [2, 3],
+        },
+      ],
+    },
+  )
+
+  assert.equal(payload.document_id, 'DOC-SPLIT-1')
+  const [url, body, init] = patchJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/documents/DOC-SPLIT-1/logical-documents')
+  assert.deepEqual(body, {
+    expected_document_version: 3,
+    logical_documents: [
+      {
+        document_kind: 'BILL_OF_LADING',
+        page_ids: [1, 2],
+      },
+      {
+        document_kind: 'INVOICE',
+        page_ids: [2, 3],
+      },
+    ],
+  })
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer document-token')
 })

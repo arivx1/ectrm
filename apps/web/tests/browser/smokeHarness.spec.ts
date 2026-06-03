@@ -205,6 +205,7 @@ test("dashboard smoke boots against the seeded browser harness", async ({
       page.getByRole("button", { name: "Open Exposure" }).first(),
     ).toBeVisible();
 
+    await page.getByRole("button", { name: "Customize view" }).click();
     await page.getByLabel("Monitor preset").selectOption({ label: "Market Overview" });
     await expect(
       page.getByText(
@@ -609,6 +610,34 @@ test("settlement candidate drilldowns hand off into focused invoice and payment 
     });
 
     await dismissStartHereOverlay(page);
+
+    const settlementQueue = page.locator("#settlement-queue");
+    await expect(settlementQueue).toBeVisible();
+    await expect(
+      settlementQueue.getByRole("tab", { name: /Ready to invoice\s*1/ }),
+    ).toBeVisible();
+    await expect(
+      settlementQueue.getByRole("tab", { name: /Payment due\s*0/ }),
+    ).toBeVisible();
+    await expect(
+      settlementQueue.getByRole("tab", { name: /Exceptions\s*0/ }),
+    ).toBeVisible();
+    await expect(
+      settlementQueue.getByRole("tab", { name: /All\s*1/ }),
+    ).toBeVisible();
+    await expect(settlementQueue).toContainText("Invoice-ready trades");
+    const readyInvoiceRow = settlementQueue
+      .locator(".settlement-worklist-item")
+      .filter({ hasText: "T-AMEND-100" });
+    await expect(readyInvoiceRow).toBeVisible();
+    await expect(readyInvoiceRow).toContainText("Issue invoice");
+    await expect(readyInvoiceRow).toHaveAttribute("aria-pressed", "true");
+    await expect(settlementQueue).toContainText("Invoice Ledger");
+    await expect(settlementQueue).not.toContainText("Payment Ledger");
+    await expect(settlementQueue).not.toContainText("Move");
+    await settlementQueue.getByRole("tab", { name: /Payment due\s*0/ }).click();
+    await expect(settlementQueue).toContainText("No payment due rows");
+    await settlementQueue.getByRole("tab", { name: /Ready to invoice\s*1/ }).click();
 
     const invoiceTile = page
       .locator(".tile-section-card")
@@ -1553,7 +1582,7 @@ test("prompt home accepts an assistant handoff into the old operations workspace
     await expect(page).not.toHaveURL(/handoff=assistant/);
     await expect(page.getByText("Assistant run #8801")).toBeHidden();
 
-    await page.goto(`${harness.origin}/?view=admin`, {
+    await page.goto(`${harness.origin}/?view=admin#assistant-outcome-metrics`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -1607,7 +1636,7 @@ test("prompt home dismisses an assistant handoff and records the dismissed route
       0,
     );
 
-    await page.goto(`${harness.origin}/?view=admin`, {
+    await page.goto(`${harness.origin}/?view=admin#assistant-outcome-metrics`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -1783,7 +1812,7 @@ test("assistant feedback smoke persists response feedback through chat reload an
       ),
     ).toHaveValue(feedbackNote);
 
-    await page.goto(`${harness.origin}/?view=admin`, {
+    await page.goto(`${harness.origin}/?view=admin#assistant-outcome-metrics`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -1823,7 +1852,7 @@ test("admin smoke shows the role-derived pilot lineup and sync action", async ({
 
   try {
     await seedSignedInSession(page, harness);
-    await page.goto(`${harness.origin}/?view=admin`, {
+    await page.goto(`${harness.origin}/?view=admin#assistant-agent-builder`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -1847,13 +1876,6 @@ test("admin smoke shows the role-derived pilot lineup and sync action", async ({
         .filter({ hasText: "Ops Governor" }),
     ).toBeVisible();
     await expect(agentControl.getByText("Evals PASS")).toBeVisible();
-    const constructionReview = agentControl.locator(
-      ".assistant-admin-construction-review:not(.assistant-admin-draft-construction-review)",
-    );
-    await expect(constructionReview).toContainText("Saved Construction Preview");
-    await expect(constructionReview).toContainText("Context provenance");
-    await expect(constructionReview).toContainText("Managed agent overlay");
-    await expect(constructionReview).toContainText("Fallback");
     await expect(
       roleCatalog.getByRole("button", { name: /Pre-Trade Structuring Agent/ }),
     ).toBeVisible();
@@ -1867,6 +1889,18 @@ test("admin smoke shows the role-derived pilot lineup and sync action", async ({
         "Pilot lineup synchronized: 0 created, 1 updated across 1 seeded defaults.",
       ),
     ).toBeVisible();
+    await agentControl.getByRole("tab", { name: /Editor & Evals/ }).click();
+    const evalCatalog = agentControl.locator(".assistant-agent-eval-catalog");
+    await expect(evalCatalog).toHaveCount(1);
+    await expect(evalCatalog).toContainText("Behavior Regression Cases");
+    await expect(agentControl.getByText("Saved Behavior Cases")).toHaveCount(0);
+    const constructionReview = agentControl.locator(
+      ".assistant-admin-construction-review:not(.assistant-admin-draft-construction-review)",
+    );
+    await expect(constructionReview).toContainText("Saved Construction Preview");
+    await expect(constructionReview).toContainText("Context provenance");
+    await expect(constructionReview).toContainText("Managed agent overlay");
+    await expect(constructionReview).toContainText("Fallback");
 
     expect(
       harness.unexpectedRequests,
@@ -1937,7 +1971,7 @@ test("assistant smoke submits a governed agent change request and admin marks it
     await expect(submittedRequestCard).toContainText("Narrow access");
     await expect(submittedRequestCard).toContainText("REQUESTED");
 
-    await page.goto(`${harness.origin}/?view=admin`, {
+    await page.goto(`${harness.origin}/?view=admin#assistant-agent-profile-requests`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -1958,11 +1992,11 @@ test("assistant smoke submits a governed agent change request and admin marks it
     await expect(
       reviewCard.getByText("Approved narrower authority for the smoke request."),
     ).toBeVisible();
+    await expect(reviewCard.getByRole("button", { name: "Mark Applied" })).toBeDisabled();
     await reviewCard.getByRole("button", { name: "Load Review Draft" }).click();
     await expect(
       page.getByText("Loaded request #9001 into the review draft for Ops Governor."),
     ).toBeVisible();
-    await expect(reviewCard.getByRole("button", { name: "Mark Applied" })).toBeDisabled();
     const draftConstructionReview = page.locator(
       ".assistant-admin-draft-construction-review",
     );
@@ -2182,7 +2216,7 @@ test("prompt home fails closed for invalid workspace handoff payloads", async ({
     await expect(page).not.toHaveURL(/view=operations/);
     await expect(page).not.toHaveURL(/view=trades/);
 
-    await page.goto(`${harness.origin}/?view=admin`, {
+    await page.goto(`${harness.origin}/?view=admin#assistant-outcome-metrics`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -2452,6 +2486,225 @@ test("signed-in smoke captures a trade and selects the created ticket", async ({
   }
 });
 
+test("pre-trade smoke carries approved recommendation context into trade capture", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness();
+  const scenarioName = "Smoke Henry Hub offset";
+  const createdTradeId = "TRD-10001";
+
+  try {
+    await seedSignedInSession(page, harness);
+    await page.goto(`${harness.origin}/?view=pretrade`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await dismissStartHereOverlay(page);
+
+    const scenarioTile = page.locator("#pretrade-brief");
+    await expect(scenarioTile).toBeVisible();
+    await scenarioTile
+      .locator("label.field")
+      .filter({ hasText: /^Scenario Name/ })
+      .locator("input")
+      .fill(scenarioName);
+    await scenarioTile
+      .locator("label.field")
+      .filter({ hasText: /^Thesis/ })
+      .locator("textarea")
+      .fill("Use the smoke recommendation to reduce the Henry Hub prompt long.");
+    await scenarioTile
+      .locator("label.field")
+      .filter({ hasText: /^Counterparty/ })
+      .locator("select")
+      .selectOption("ALPHA_MKT");
+    await scenarioTile
+      .locator("label.field")
+      .filter({ hasText: /^Side/ })
+      .locator("select")
+      .selectOption("SELL");
+    await scenarioTile
+      .locator("label.field")
+      .filter({ hasText: /^Indicative Price/ })
+      .locator("input")
+      .fill("3.18");
+    await scenarioTile
+      .locator("label.field")
+      .filter({ hasText: /^Target Volume/ })
+      .locator("input")
+      .fill("12500");
+    await scenarioTile
+      .locator("label.field")
+      .filter({ hasText: /^Price Unit/ })
+      .locator("select")
+      .selectOption("USD/MMBTU");
+    await scenarioTile
+      .locator("label.field")
+      .filter({ hasText: /^Delivery Start/ })
+      .locator("input")
+      .fill("2026-05-01");
+    await scenarioTile
+      .locator("label.field")
+      .filter({ hasText: /^Delivery End/ })
+      .locator("input")
+      .fill("2026-05-31");
+
+    const readinessPanel = page.locator(
+      "#pretrade-recommendation .pretrade-readiness-panel",
+    );
+    await expect(readinessPanel).toContainText(
+      "Proceed with smoke-offset review.",
+    );
+    await expect(readinessPanel).toContainText("Source Freshness");
+    await expect(readinessPanel).toContainText(
+      "Latest Henry Hub IFERC mark is stale",
+    );
+    await expect(
+      readinessPanel.getByRole("button", { name: "Submit For Review" }),
+    ).toBeVisible();
+    await readinessPanel
+      .getByRole("button", { name: "Submit For Review" })
+      .click();
+
+    const reviewCards = page.locator(
+      "#pretrade-reviews .workspace-tile-body > .stack > .pretrade-card-list > article.pretrade-record-card",
+    );
+    const reviewCard = reviewCards.filter({ hasText: scenarioName });
+    await expect(reviewCard).toBeVisible();
+    await expect(reviewCard).toContainText("OPEN");
+    await expect(reviewCard).toContainText("Proceed with smoke-offset review.");
+    await reviewCard
+      .getByPlaceholder("Add a reviewer note. Approval requires a comment.")
+      .fill("Approved for smoke handoff into Trade Capture.");
+    await expect(reviewCard.getByRole("button", { name: "Approve" })).toBeEnabled();
+    await reviewCard.getByRole("button", { name: "Approve" }).click();
+    await expect(reviewCard).toContainText("APPROVED");
+    await expect(
+      reviewCard.getByRole("button", { name: "Open Ticket" }),
+    ).toBeVisible();
+    await reviewCard.getByRole("button", { name: "Open Ticket" }).click();
+
+    await expect(page).toHaveURL(/view=trades/);
+    const createForm = page.locator("form.trade-form.trade-form-feature");
+    await expect(createForm).toBeVisible();
+    await expect(createForm).toContainText("Approved pre-trade review attached");
+    await expect(createForm).toContainText(`Review #1 ${scenarioName}`);
+    await expect(createForm).toContainText("Recommendation #1 is attached with score 78");
+    await expect(createForm).toContainText("Opportunity: RISK REDUCTION");
+    await expect(createForm).toContainText(
+      "Sources: 1 of 3 source snapshots need review",
+    );
+    await expect(createForm).toContainText("Still Aligned");
+    await expect(
+      createForm.getByPlaceholder("Search by book name or code"),
+    ).toHaveValue(/GULF_GAS/);
+    await expect(
+      createForm.getByPlaceholder("Search by name or code"),
+    ).toHaveValue(/ALPHA_MKT/);
+    await expect(
+      createForm.getByPlaceholder("Search by commodity name or code"),
+    ).toHaveValue(/HENRY_HUB_GAS/);
+    await expect(
+      createForm
+        .locator("label.field")
+        .filter({ hasText: /^Volume$/ })
+        .locator("input"),
+    ).toHaveValue("12500");
+
+    await expect(
+      createForm.getByRole("button", { name: "Create Trade" }),
+    ).toBeEnabled();
+    await createForm.getByRole("button", { name: "Create Trade" }).click();
+
+    await expect(page).toHaveURL(
+      new RegExp(`view=trades(?:&|$).*trade=${createdTradeId}`),
+    );
+    await expect(
+      page.getByRole("button", {
+        name: new RegExp(`Trade: ${createdTradeId} HENRY_HUB_GAS`),
+      }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(harness.operationWorkItemRequests).toHaveLength(1);
+    expect(harness.operationWorkItemRequests[0].trade_id).toBe(createdTradeId);
+    expect(harness.operationWorkItemRequests[0].notes ?? "").toContain(
+      "Pre-trade governance context attached from approved shared review.",
+    );
+    expect(harness.operationWorkItemRequests[0].notes ?? "").toContain(
+      `Review: #1 ${scenarioName}`,
+    );
+    expect(harness.operationWorkItemRequests[0].notes ?? "").toContain(
+      "Source freshness: 1 of 3 source snapshots need review",
+    );
+
+    expect(
+      harness.unexpectedRequests,
+      `Unhandled mock API requests:\n${formatRecordedRequests(harness.unexpectedRequests)}`,
+    ).toHaveLength(0);
+    expect(harness.mutationRequests).toEqual([
+      {
+        method: "POST",
+        path: "/pretrade/recommendations/runs",
+        search: "",
+      },
+      {
+        method: "POST",
+        path: "/pretrade/reviews",
+        search: "",
+      },
+      {
+        method: "PATCH",
+        path: "/pretrade/reviews/1",
+        search: "",
+      },
+      {
+        method: "POST",
+        path: "/events",
+        search: "",
+      },
+      {
+        method: "POST",
+        path: "/operations/work-items",
+        search: "",
+      },
+    ]);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("pre-trade smoke keeps the primary review action visible on narrow screens", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness();
+
+  try {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await seedSignedInSession(page, harness);
+    await page.goto(`${harness.origin}/?view=pretrade`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await dismissStartHereOverlay(page);
+
+    const readinessPanel = page.locator(
+      "#pretrade-recommendation .pretrade-readiness-panel",
+    );
+    await expect(readinessPanel).toContainText("Review Readiness");
+    await expect(readinessPanel).toContainText("Source Freshness");
+    const submitAction = readinessPanel.getByRole("button", {
+      name: "Submit For Review",
+    });
+    await expect(submitAction).toBeVisible();
+    const actionBox = await submitAction.boundingBox();
+    expect(actionBox).not.toBeNull();
+    expect(actionBox?.width ?? 0).toBeGreaterThan(120);
+
+    assertNoHarnessRequestFailures(harness);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("admin smoke rejects a pending assistant approval from the governance inbox", async ({
   page,
 }) => {
@@ -2460,7 +2713,7 @@ test("admin smoke rejects a pending assistant approval from the governance inbox
 
   try {
     await seedSignedInSession(page, harness);
-    await page.goto(`${harness.origin}/?view=admin`, {
+    await page.goto(`${harness.origin}/?view=admin#assistant-approval-inbox`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -2543,7 +2796,7 @@ test("admin smoke approves and executes a pending assistant approval from the go
 
   try {
     await seedSignedInSession(page, harness);
-    await page.goto(`${harness.origin}/?view=admin`, {
+    await page.goto(`${harness.origin}/?view=admin#assistant-approval-inbox`, {
       waitUntil: "domcontentloaded",
     });
 

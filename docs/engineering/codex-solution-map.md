@@ -94,10 +94,11 @@ domain-first packages. New business logic should normally live under
 | Trade lifecycle | `domains/trading`, `routes/events.py`, `routes/trades.py` | Trade commands, lifecycle validation, event append semantics, trade projection application, stale-state checks. |
 | Reference data | `domains/reference_data`, `routes/reference_data.py`, `routes/reference_data_routes` | Master data validity, active/inactive eligibility, standards, dependency-safe changes, seed/import helpers. |
 | Risk | `domains/risk`, `routes/positions.py`, `routes/option_exposures.py` | Exposure views, option exposure logic, risk-oriented projections and exceptions. |
-| Operations | `domains/operations` | Confirmations, deliveries, shipments, workflow items, actualization, operational resources, tracking. |
+| Operations | `domains/operations` | Confirmations, deliveries, shipments, workflow items, actualization, operational resources, document-intake work projections, tracking. |
 | Settlement and accruals | `domains/settlement`, `domains/accruals`, settlement-adjacent operations services | Invoice/payment state, settlement posture, accrual lots and entries, settlement exceptions. |
 | Documents | `domains/documents`, `routes/documents.py` | Ingestion, classification, extraction review, deterministic facets, linkage, document action planning, and missing-record creation intake/resolution. |
-| Reports | `domains/reports` | Aggregation, report definitions, presets, exports, prompt-resolved read-only report lenses, and summaries over governed domain outputs. |
+| Messages and collaboration | `routes/messages.py`, `domains/messages/services/workspace.py`, `domains/integrations/services/slack_messaging.py` | Durable conversation/message objects, Slack sync and mirror posting, in-thread assistant provenance, and authenticated external messaging. Not a hidden business-write path. |
+| Reports | `domains/reports` | Aggregation, report definitions, presets, exports, prompt-resolved read-only report lenses, pre-trade recommendation/governance services, review-only netting-set, hedge-recommendation, and risk-scenario drafts, and summaries over governed domain outputs. |
 | Home view instances | `domains/home_views`, `routes/home_view_definitions.py`, assistant read tools in `domains/assistant/services/tools.py`, recipe registry in `domains/home_views/services/recipes.py` | System Home template metadata, personal and shared Home definitions, card registry and card configuration value validation, deterministic Home view recipes, shared lifecycle/admin inventory, assistant-readable Home catalog/visible-instance inspection, governed personal `create_home_view_instance` staging/execution, scope/audit fields, and reset behavior. Not live business data truth. |
 | Assistant and AI gateway | `domains/assistant`, `routes/assistant.py` | Prompt assembly, live tools, managed agents, run traces, evals, action planning, action governance. |
 | Job scheduling | `domains/job_scheduling`, `models/job_schedule.py`, `apps/web/src/workspaces/admin/JobSchedulingPanel.tsx` | Admin-owned schedule definitions, time/event trigger materialization, queued job run intents, deterministic/agentic/hybrid execution plans, scheduler authority checks, and the Admin Console schedule/run surface. Not a business-write bypass. |
@@ -227,18 +228,20 @@ contract for staged or executable mutations.
 
 ```text
 /documents upload or reprocess
-  -> uploaded-file storage, page records, and logical-document page ranges
+  -> uploaded-file storage, page records, and logical-document memberships
   -> deterministic classification/facet scoring
   -> threshold-gated AI processor for low-confidence pages using system config
      or the Library session override
-  -> packet split provenance and logical-document review serialization
+  -> packet split provenance, shared-page spans, and logical-document review serialization
   -> routing/linkage/action planning at the logical-document boundary
   -> optional governed action request or missing-record creation intake
+  -> operations or settlement work-queue projection until explicit resolution
 ```
 
 Document AI output can help extract or normalize, but deterministic scoring,
-packet boundaries, review state, linkage, creation-intake state, intake
-resolution, and business-record mutations must remain explicit and testable.
+packet boundaries, review state, linkage, creation-intake state, queue routing,
+intake resolution, and business-record mutations must remain explicit and
+testable.
 
 ### Codex Task Flow
 
@@ -291,6 +294,7 @@ Current risks to keep in view:
 | Trade lifecycle write | `domains/trading/services/trade_commands.py`, `event_writes.py`, `trade_event_application.py` | Trade command/projection tests, `make api-contract-check` if metadata changes. |
 | Trade metadata contract | `domains/trading/services/trade_metadata.py`, `apps/api/contracts` | `make api-contract-check`; refresh only with `make api-contract-refresh` when intentional. |
 | Reference data | `domains/reference_data`, `routes/reference_data_routes`, `features/reference-data` | `apps/api/tests/test_reference_data.py`, focused web tests if UI changes. |
+| Pre-trade trader/risk decision support | `routes/pretrade.py`, `schemas/pretrade.py`, `domains/reports/services/pretrade_recommendations.py`, `pretrade_governance.py`, `pretrade_netting_sets.py`, `pretrade_hedge_recommendations.py`, `pretrade_risk_scenarios.py`, Pre-Trade workspace | `apps.api.tests.test_pretrade_api`, `apps.api.tests.test_pretrade_recommendation_triage`, focused Pre-Trade web tests, build/lint, and assistant evals when agent behavior changes. |
 | Web workspace behavior | `workspaceRendererRegistry.tsx`, `useAppWorkspaceBootstrap.ts`, owning workspace | `make web-test`, `make web-lint`, browser smoke for high-visibility flows. |
 | Home view instances | `domains/home_views`, `routes/home_view_definitions.py`, Prompt Home workspace, assistant read tools, Home recipe registry | `apps.api.tests.test_home_view_definitions_api`; `apps.api.tests.test_home_view_recipes` for recipe changes; `apps.api.tests.test_assistant_tooling` when assistant Home tools change; focused assistant action/API tests plus `make api-assistant-evals` when prompt-created Home views, recipe stop conditions, outcome metrics, or `create_home_view_instance` changes; focused web tests when Prompt Home rendering changes; browser smoke for prompt-created saved-instance approval/open paths. |
 | Assistant prompt context | `domains/assistant/services/prompt_context.py`, managed-agent services | `make api-assistant-evals`, focused assistant API tests. |
@@ -298,7 +302,7 @@ Current risks to keep in view:
 | Managed agent config/governance | `agent_admin.py`, `policies.py`, `eval_gates.py`, admin UI | Assistant evals and focused admin API/web tests. |
 | Document classification or facets | `domains/documents/services/document_classification_scoring.py`, `document_facets.py`, fixtures | `make api-document-classification-evals`, focused document tests. |
 | Document action planning | `document_action_planning.py`, approval/execution/governance services | Document action tests and assistant/action eval coverage when relevant. |
-| Missing document record intake | `document_record_creation_requests.py`, `document_workflows.py`, `routes/documents.py`, Library workspace | Focused document record-creation tests plus Library API/support tests. |
+| Missing document record intake | `document_record_creation_requests.py`, `domains/operations/services/document_intake_work_items.py`, `document_workflows.py`, `routes/documents.py`, `domains/operations/routes/operations.py`, Library/Operations/Settlement workspaces | Focused document record-creation tests plus Library/API/workspace bootstrap tests. |
 | Operations/delivery workflow | `domains/operations`, shipment/delivery workspaces | Focused operations/delivery API tests and web tests. |
 | Settlement or accrual state | `domains/settlement`, `domains/accruals`, settlement workspace | Settlement/accrual API tests; ensure immutable correction patterns. |
 | Reports | `domains/reports`, reports workspace | Report API tests and focused web tests; verify rules come from governed services or typed read-only resolvers where applicable. |

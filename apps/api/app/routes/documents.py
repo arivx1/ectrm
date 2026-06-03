@@ -53,6 +53,7 @@ from apps.api.app.domains.documents.services.ingestion import resolve_document_a
 from apps.api.app.domains.documents.services.ingestion import run_document_processing_job
 from apps.api.app.domains.documents.services.ingestion import update_document_ingestion
 from apps.api.app.domains.documents.services.ingestion import update_document_ingestion_page
+from apps.api.app.domains.documents.services.ingestion import update_document_logical_documents
 from apps.api.app.schemas.document import DocumentIngestionOut
 from apps.api.app.schemas.document import DocumentGmailInboxBrowseResultOut
 from apps.api.app.schemas.document import DocumentGmailInboxMessageDetailOut
@@ -67,6 +68,7 @@ from apps.api.app.schemas.document import DocumentRecordCreationRequestOut
 from apps.api.app.schemas.document import DocumentRecordCreationRequestResolve
 from apps.api.app.schemas.document import DocumentRecordCandidateSelectionRequest
 from apps.api.app.schemas.document import DocumentIngestionPageUpdate
+from apps.api.app.schemas.document import DocumentLogicalDocumentsUpdate
 from apps.api.app.schemas.document import DocumentIngestionProcessRequest
 from apps.api.app.schemas.document import DocumentProcessorSelection
 from apps.api.app.schemas.document import DocumentProcessorRuntimeSettingsOut
@@ -276,6 +278,32 @@ def patch_document_page(
     return execute_http_action(
         db,
         update_page,
+        commit=True,
+        handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
+
+
+@router.patch("/{document_id}/logical-documents", response_model=DocumentIngestionOut)
+def patch_document_logical_documents(
+    document_id: str,
+    payload: DocumentLogicalDocumentsUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DocumentIngestionOut:
+    actor_id = require_authenticated_actor(request)
+    changes = payload.model_dump(exclude_unset=True)
+
+    def update_logical_documents() -> DocumentIngestionOut:
+        return update_document_logical_documents(
+            db,
+            document_id=document_id,
+            actor_id=actor_id,
+            changes=changes,
+        )
+
+    return execute_http_action(
+        db,
+        update_logical_documents,
         commit=True,
         handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
     )

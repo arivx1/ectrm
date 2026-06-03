@@ -30,6 +30,13 @@ from apps.api.app.config import settings
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.documents.services.document_classification_scoring import score_document_page_classification
 from apps.api.app.domains.documents.services.document_ingestion_review import build_document_summary
+from apps.api.app.domains.documents.services.document_ingestion_review import build_logical_document_estimates
+from apps.api.app.domains.documents.services.document_packet_split_corrections import (
+    build_packet_split_correction_replay_case,
+)
+from apps.api.app.domains.documents.services.document_packet_split_corrections import (
+    normalize_packet_split_documents_for_replay,
+)
 from apps.api.app.domains.documents.services.document_facets import suggest_document_facets_from_text
 from apps.api.app.domains.documents.services.document_processor import _build_openai_text_format
 from apps.api.app.domains.documents.services.document_processor import _generate_openai_document_analysis
@@ -47,6 +54,7 @@ from apps.api.app.models.document_facet_value import DocumentFacetValue
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.document_logical_document import DocumentLogicalDocument
+from apps.api.app.models.document_logical_document_page import DocumentLogicalDocumentPage
 from apps.api.app.models.document_record_link import DocumentRecordLink
 from apps.api.app.models.event import Event
 from apps.api.app.models.gmail_inbox_import_receipt import GmailInboxImportReceipt
@@ -859,6 +867,105 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(summary["routing_strategy"], "MANUAL_REVIEW")
         self.assertIn("multiple logical document kinds", " ".join(summary["routing_assessment"]["reasons"]))
 
+    def test_logical_document_estimates_split_repeated_same_kind_by_identity(self) -> None:
+        pages = [
+            self._summary_page(page_number=1, document_kind="INVOICE"),
+            self._summary_page(page_number=2, document_kind="INVOICE"),
+            self._summary_page(page_number=3, document_kind="INVOICE"),
+            self._summary_page(page_number=4, document_kind="INVOICE"),
+        ]
+        pages[0].raw_text = "\n".join(
+            [
+                "Invoice",
+                "Invoice Number: INV-REPEAT-001",
+                "Invoice Date: 2026-04-14",
+                "Due Date: 2026-04-20",
+                "Counterparty: Shell Trading",
+                "Total Amount: USD 125000",
+            ]
+        )
+        pages[1].raw_text = "Invoice continued\nLine items continued for INV-REPEAT-001."
+        pages[2].raw_text = "\n".join(
+            [
+                "Invoice",
+                "Invoice Number: INV-REPEAT-002",
+                "Invoice Date: 2026-04-15",
+                "Due Date: 2026-04-21",
+                "Counterparty: Shell Trading",
+                "Total Amount: USD 98000",
+            ]
+        )
+        pages[3].raw_text = "Invoice continued\nLine items continued for INV-REPEAT-002."
+
+        summary = build_document_summary(pages, review_status="UNREVIEWED")
+
+        logical_documents = summary["structure_profile"]["logical_documents"]
+        self.assertEqual(summary["document_classification_scope"], "LOGICAL_DOCUMENT")
+        self.assertEqual(summary["dominant_document_kind"], "INVOICE")
+        self.assertEqual(summary["structure_profile"]["logical_document_count_estimate"], 2)
+        self.assertEqual(logical_documents[0]["page_numbers"], [1, 2])
+        self.assertEqual(logical_documents[1]["page_numbers"], [3, 4])
+        self.assertEqual(logical_documents[1]["provenance"]["source"], "system_packet_structure")
+        self.assertEqual(logical_documents[1]["provenance"]["split_strategy"], "packet_structure_signal_run")
+        self.assertEqual(logical_documents[1]["provenance"]["split_confidence"], 0.86)
+        self.assertEqual(logical_documents[1]["provenance"]["split_evidence"][0]["type"], "distinct_identity")
+        self.assertIn("distinct identity evidence", logical_documents[1]["provenance"]["split_evidence"][0]["summary"])
+
+    def test_logical_document_estimates_share_boundary_pages_with_embedded_section_start(self) -> None:
+        pages = [
+            self._summary_page(page_number=1, document_kind="BILL_OF_LADING"),
+            self._summary_page(page_number=2, document_kind="BILL_OF_LADING"),
+            self._summary_page(page_number=3, document_kind="INVOICE"),
+        ]
+        pages[0].raw_text = "\n".join(
+            [
+                "Bill of Lading",
+                "Bill of Lading Number: BOL-SHARED-001",
+                "Carrier: Acme Logistics",
+                "Load Date: 2026-04-14",
+                "Origin: HOUSTON",
+                "Destination: NEW ORLEANS",
+            ]
+        )
+        pages[1].raw_text = "\n".join(
+            [
+                "Bill of Lading",
+                "Bill of Lading Number: BOL-SHARED-001",
+                "Carrier: Acme Logistics",
+                "Load Date: 2026-04-14",
+                "Origin: HOUSTON",
+                "Destination: NEW ORLEANS",
+                "",
+                "Invoice",
+                "Invoice Number: INV-SHARED-002",
+                "Invoice Date: 2026-04-15",
+                "Due Date: 2026-04-21",
+                "Counterparty: Shell Trading",
+                "Total Amount: USD 98000",
+            ]
+        )
+        pages[2].raw_text = "\n".join(
+            [
+                "Invoice",
+                "Invoice Number: INV-SHARED-002",
+                "Invoice Date: 2026-04-15",
+                "Due Date: 2026-04-21",
+                "Counterparty: Shell Trading",
+                "Total Amount: USD 98000",
+            ]
+        )
+
+        summary = build_document_summary(pages, review_status="UNREVIEWED")
+
+        logical_documents = summary["structure_profile"]["logical_documents"]
+        self.assertEqual(summary["structure_profile"]["shared_page_numbers"], [2])
+        self.assertEqual(logical_documents[0]["page_numbers"], [1, 2])
+        self.assertEqual(logical_documents[1]["page_numbers"], [2, 3])
+        self.assertEqual(logical_documents[0]["provenance"]["shared_page_numbers"], [2])
+        self.assertEqual(logical_documents[1]["provenance"]["shared_page_numbers"], [2])
+        self.assertEqual(logical_documents[0]["provenance"]["split_confidence"], 0.82)
+        self.assertEqual(logical_documents[0]["provenance"]["split_evidence"][0]["type"], "section_title_boundary")
+
     def test_packet_upload_persists_logical_documents_with_page_range_provenance(self) -> None:
         admin_token = self._bootstrap_admin()
         invoice_text = "\n".join(
@@ -927,6 +1034,245 @@ class DocumentIngestionApiTests(unittest.TestCase):
             self.assertEqual(rows[0].provenance["split_strategy"], "contiguous_page_classification_run")
             self.assertEqual(rows[0].provenance["source_page_numbers"], [1])
             self.assertEqual(rows[1].provenance["source_page_numbers"], [2])
+            memberships = (
+                session.query(DocumentLogicalDocumentPage)
+                .filter(DocumentLogicalDocumentPage.document_id == document["document_id"])
+                .order_by(
+                    DocumentLogicalDocumentPage.logical_document_id,
+                    DocumentLogicalDocumentPage.sequence_number,
+                )
+                .all()
+            )
+            self.assertEqual(len(memberships), 2)
+            self.assertEqual([membership.page_number for membership in memberships], [1, 2])
+
+    def test_logical_document_split_patch_allows_shared_source_pages(self) -> None:
+        admin_token = self._bootstrap_admin()
+        uploaded = self._upload_document(admin_token, filename="shared-page-packet.pdf", page_count=3)
+        document = self._wait_for_document(admin_token, uploaded["document_id"])
+        page_by_number = {page["page_number"]: page for page in document["pages"]}
+
+        response = self.client.patch(
+            f"/documents/{document['document_id']}/logical-documents",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "expected_document_version": document["version"],
+                "logical_documents": [
+                    {
+                        "document_kind": "BILL_OF_LADING",
+                        "page_ids": [
+                            page_by_number[1]["page_id"],
+                            page_by_number[2]["page_id"],
+                        ],
+                    },
+                    {
+                        "document_kind": "INVOICE",
+                        "page_ids": [
+                            page_by_number[2]["page_id"],
+                            page_by_number[3]["page_id"],
+                        ],
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        updated = response.json()
+        self.assertEqual(len(updated["logical_documents"]), 2)
+        self.assertEqual(updated["logical_documents"][0]["document_kind"], "BILL_OF_LADING")
+        self.assertEqual(updated["logical_documents"][0]["page_numbers"], [1, 2])
+        self.assertEqual(updated["logical_documents"][1]["document_kind"], "INVOICE")
+        self.assertEqual(updated["logical_documents"][1]["page_numbers"], [2, 3])
+        self.assertEqual(updated["logical_documents"][0]["provenance"]["source"], "human_packet_split")
+        self.assertEqual(updated["logical_documents"][0]["provenance"]["split_confidence"], 1.0)
+        self.assertEqual(
+            updated["logical_documents"][0]["provenance"]["split_evidence"][0]["type"],
+            "operator_reviewed_membership",
+        )
+        self.assertEqual(updated["logical_documents"][0]["provenance"]["shared_page_numbers"], [2])
+        shared_page = next(page for page in updated["pages"] if page["page_number"] == 2)
+        self.assertEqual(shared_page["logical_document_keys"], ["LD-001", "LD-002"])
+
+        correction_events = [
+            entry for entry in updated["activity"] if entry["event_type"] == "DocumentPacketSplitCorrectionCaptured"
+        ]
+        self.assertEqual(len(correction_events), 1)
+        self.assertEqual(correction_events[0]["label"], "Packet Split Correction")
+        correction_payload = correction_events[0]["payload"]
+        self.assertEqual(correction_payload["system_logical_document_count"], 1)
+        self.assertEqual(correction_payload["accepted_logical_document_count"], 2)
+        self.assertEqual(correction_payload["accepted_shared_page_numbers"], [2])
+        self.assertIn("logical_document_count", correction_payload["changed_fields"])
+        self.assertIn("page_membership", correction_payload["changed_fields"])
+        accepted_documents = correction_payload["accepted_logical_documents"]
+        self.assertEqual(accepted_documents[0]["document_kind"], "BILL_OF_LADING")
+        self.assertEqual(accepted_documents[0]["page_numbers"], [1, 2])
+        self.assertEqual(
+            accepted_documents[0]["page_ids"],
+            [page_by_number[1]["page_id"], page_by_number[2]["page_id"]],
+        )
+        self.assertEqual(accepted_documents[0]["split_evidence"][0]["type"], "operator_reviewed_membership")
+
+        with self.SessionLocal() as session:
+            memberships = (
+                session.query(DocumentLogicalDocumentPage)
+                .filter(DocumentLogicalDocumentPage.document_id == document["document_id"])
+                .order_by(
+                    DocumentLogicalDocumentPage.logical_document_id,
+                    DocumentLogicalDocumentPage.sequence_number,
+                )
+                .all()
+            )
+            self.assertEqual(len(memberships), 4)
+            self.assertEqual(
+                [(membership.logical_document_id.rsplit(":", 1)[-1], membership.page_number) for membership in memberships],
+                [("LD-001", 1), ("LD-001", 2), ("LD-002", 2), ("LD-002", 3)],
+            )
+            document_row = (
+                session.query(DocumentIngestion)
+                .filter(DocumentIngestion.document_id == document["document_id"])
+                .one()
+            )
+            page_rows = (
+                session.query(DocumentIngestionPage)
+                .filter(DocumentIngestionPage.document_id == document["document_id"])
+                .order_by(DocumentIngestionPage.page_number)
+                .all()
+            )
+            replay_case = build_packet_split_correction_replay_case(
+                document=document_row,
+                pages=page_rows,
+                correction_payload=correction_payload,
+            )
+            detector_output = normalize_packet_split_documents_for_replay(
+                build_logical_document_estimates(page_rows, document_id=document["document_id"])
+            )
+            self.assertEqual(replay_case["system_logical_documents"], detector_output)
+            self.assertEqual(replay_case["expected_logical_documents"], accepted_documents)
+            self.assertEqual(replay_case["expected_shared_page_numbers"], [2])
+            self.assertEqual(replay_case["pages"][0]["page_number"], 1)
+            self.assertIn("raw_text_sha256", replay_case["pages"][0])
+
+        repeat_response = self.client.patch(
+            f"/documents/{document['document_id']}/logical-documents",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={
+                "expected_document_version": updated["version"],
+                "logical_documents": [
+                    {
+                        "document_kind": "BILL_OF_LADING",
+                        "page_ids": [
+                            page_by_number[1]["page_id"],
+                            page_by_number[2]["page_id"],
+                        ],
+                    },
+                    {
+                        "document_kind": "INVOICE",
+                        "page_ids": [
+                            page_by_number[2]["page_id"],
+                            page_by_number[3]["page_id"],
+                        ],
+                    },
+                ],
+            },
+        )
+        self.assertEqual(repeat_response.status_code, 200)
+        repeated = repeat_response.json()
+        repeated_correction_events = [
+            entry for entry in repeated["activity"] if entry["event_type"] == "DocumentPacketSplitCorrectionCaptured"
+        ]
+        self.assertEqual(len(repeated_correction_events), 1)
+
+    def test_packet_upload_detects_shared_boundary_page_from_structure_signals(self) -> None:
+        admin_token = self._bootstrap_admin()
+        texts = [
+            (
+                "\n".join(
+                    [
+                        "Bill of Lading",
+                        "Bill of Lading Number: BOL-AUTO-001",
+                        "Carrier: Acme Logistics",
+                        "Load Date: 2026-04-14",
+                        "Origin: HOUSTON",
+                        "Destination: NEW ORLEANS",
+                    ]
+                ),
+                [],
+            ),
+            (
+                "\n".join(
+                    [
+                        "Bill of Lading",
+                        "Bill of Lading Number: BOL-AUTO-001",
+                        "Carrier: Acme Logistics",
+                        "Load Date: 2026-04-14",
+                        "Origin: HOUSTON",
+                        "Destination: NEW ORLEANS",
+                        "",
+                        "Invoice",
+                        "Invoice Number: INV-AUTO-002",
+                        "Invoice Date: 2026-04-15",
+                        "Due Date: 2026-04-21",
+                        "Counterparty: Shell Trading",
+                        "Total Amount: USD 98000",
+                    ]
+                ),
+                [],
+            ),
+            (
+                "\n".join(
+                    [
+                        "Invoice",
+                        "Invoice Number: INV-AUTO-002",
+                        "Invoice Date: 2026-04-15",
+                        "Due Date: 2026-04-21",
+                        "Counterparty: Shell Trading",
+                        "Total Amount: USD 98000",
+                    ]
+                ),
+                [],
+            ),
+        ]
+
+        with patch(
+            "apps.api.app.domains.documents.services.ingestion._extract_page_text",
+            side_effect=texts,
+        ):
+            response = self.client.post(
+                "/documents/uploads",
+                headers={"Authorization": f"Bearer {admin_token}"},
+                files={"file": ("auto-shared-boundary.pdf", self._build_pdf_bytes(page_count=3), "application/pdf")},
+                data={"processor_provider": "builtin"},
+            )
+            self.assertEqual(response.status_code, 201)
+            document = self._wait_for_document(admin_token, response.json()["document_id"])
+
+        self.assertEqual(document["analysis_summary"]["structure_profile"]["shared_page_numbers"], [2])
+        self.assertEqual(document["logical_documents"][0]["page_numbers"], [1, 2])
+        self.assertEqual(document["logical_documents"][1]["page_numbers"], [2, 3])
+        self.assertEqual(document["logical_documents"][1]["provenance"]["source"], "system_packet_structure")
+        self.assertEqual(document["logical_documents"][1]["provenance"]["split_confidence"], 0.82)
+        self.assertEqual(
+            document["logical_documents"][1]["provenance"]["split_evidence"][0]["type"],
+            "section_title_boundary",
+        )
+        shared_page = next(page for page in document["pages"] if page["page_number"] == 2)
+        self.assertEqual(shared_page["logical_document_keys"], ["LD-001", "LD-002"])
+
+        with self.SessionLocal() as session:
+            memberships = (
+                session.query(DocumentLogicalDocumentPage)
+                .filter(DocumentLogicalDocumentPage.document_id == document["document_id"])
+                .order_by(
+                    DocumentLogicalDocumentPage.logical_document_id,
+                    DocumentLogicalDocumentPage.sequence_number,
+                )
+                .all()
+            )
+            self.assertEqual(
+                [(membership.logical_document_id.rsplit(":", 1)[-1], membership.page_number) for membership in memberships],
+                [("LD-001", 1), ("LD-001", 2), ("LD-002", 2), ("LD-002", 3)],
+            )
 
     def test_packet_split_activity_records_auditable_page_ranges(self) -> None:
         admin_token = self._bootstrap_admin()

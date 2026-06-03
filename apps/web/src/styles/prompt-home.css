@@ -6,6 +6,7 @@
 .prompt-home-timeframe-panel-head,
 .prompt-home-card-filter-head,
 .prompt-home-prices-card-head,
+.prompt-home-news-card-head,
 .prompt-home-map-card-head,
 .prompt-home-communication-card-head,
 .prompt-home-document-upload-card-head,
@@ -279,9 +280,9 @@
 
 .prompt-home-heading h3 {
   margin: 0.35rem 0 0.55rem;
-  font-size: clamp(1.9rem, 3vw, 2.7rem);
+  font-size: 2.25rem;
   line-height: 1.02;
-  letter-spacing: -0.05em;
+  letter-spacing: 0;
 }
 
 .prompt-home-heading p {
@@ -426,7 +427,33 @@
     rgba(255, 255, 255, 0.04);
 }
 
+.prompt-home-news-card {
+  display: grid;
+  gap: 0.6rem;
+  width: 100%;
+  margin: 0 auto;
+  min-width: 0;
+  padding: 0.72rem 0.85rem;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.16);
+  border-radius: 0.95rem;
+  background:
+    linear-gradient(180deg, rgb(var(--theme-highlight-rgb, 78 167 255) / 0.08), transparent),
+    rgba(255, 255, 255, 0.04);
+}
+
 .prompt-home-prices-card-toggle {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: right;
+  cursor: pointer;
+}
+
+.prompt-home-news-card-toggle {
   display: flex;
   justify-content: flex-end;
   width: 100%;
@@ -443,7 +470,20 @@
   outline-offset: 3px;
 }
 
+.prompt-home-news-card-toggle:focus-visible {
+  outline: 2px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.38);
+  outline-offset: 3px;
+}
+
 .prompt-home-prices-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.7rem 1rem;
+  align-items: center;
+  width: 100%;
+}
+
+.prompt-home-news-card-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.7rem 1rem;
@@ -457,14 +497,27 @@
   min-width: 0;
 }
 
+.prompt-home-news-card-copy {
+  display: grid;
+  gap: 0.14rem;
+  min-width: 0;
+}
+
 .prompt-home-prices-card-copy strong {
   font-size: 1rem;
   line-height: 1.12;
 }
 
+.prompt-home-news-card-copy strong {
+  font-size: 1rem;
+  line-height: 1.12;
+}
+
 .prompt-home-prices-card-copy p,
+.prompt-home-news-card-copy p,
 .prompt-home-price-fields dt,
-.prompt-home-prices-card-footer span {
+.prompt-home-prices-card-footer span,
+.prompt-home-news-card-footer span {
   margin: 0;
   color: var(--color-copy-muted, #66717c);
   line-height: 1.5;
@@ -479,7 +532,22 @@
   min-width: 0;
 }
 
+.prompt-home-news-card-toggle-side {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: end;
+  justify-self: end;
+  align-content: center;
+  min-width: 0;
+}
+
 .prompt-home-prices-card-toggle-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.prompt-home-news-card-toggle-meta {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -490,7 +558,17 @@
   line-height: 1.4;
 }
 
+.prompt-home-news-card-toggle-meta small {
+  color: var(--color-copy-muted, #66717c);
+  line-height: 1.4;
+}
+
 .prompt-home-prices-card-body {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.prompt-home-news-card-body {
   display: grid;
   gap: 0.75rem;
 }
@@ -499,7 +577,18 @@
   display: none;
 }
 
+.prompt-home-news-card-body[hidden] {
+  display: none;
+}
+
 .prompt-home-prices-filter-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.6rem;
+  align-items: end;
+}
+
+.prompt-home-news-filter-bar {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   gap: 0.6rem;
@@ -788,7 +877,22 @@
   gap: 0.75rem;
 }
 
+.prompt-home-news-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
 .prompt-home-prices-card-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.prompt-home-news-card-footer-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
@@ -2801,11 +2905,13 @@
   }
 
   .prompt-home-prices-card-head,
+  .prompt-home-news-card-head,
   .prompt-home-map-card-head {
     grid-template-columns: 1fr;
   }
 
-  .prompt-home-prices-filter-bar {
+  .prompt-home-prices-filter-bar,
+  .prompt-home-news-filter-bar {
     grid-template-columns: 1fr;
   }
 
@@ -2818,11 +2924,13 @@
   }
 
   .prompt-home-prices-card-toggle-side,
+  .prompt-home-news-card-toggle-side,
   .prompt-home-map-card-toggle-side {
     justify-items: start;
   }
 
   .prompt-home-prices-card-toggle,
+  .prompt-home-news-card-toggle,
   .prompt-home-map-card-toggle {
     justify-content: flex-start;
     text-align: left;

@@ -6,6 +6,7 @@ import {
   loadCoreWorkspaceBootstrap,
   loadDeliveriesWindow,
   loadDeliveriesWorkspaceBootstrap,
+  loadDocumentRecordCreationWorkItemsWindow,
   loadEventsWorkspaceBootstrap,
   loadOptionExposuresWindow,
   loadOperationsWorkspaceBootstrap,
@@ -82,6 +83,7 @@ import type {
   OptionExposureRow,
   PositionRow,
   DeliveryRecord,
+  DocumentRecordCreationWorkItemRecord,
   PortfolioRecord,
   PriceIndexRecord,
   PriceSourceReviewRecord,
@@ -120,7 +122,9 @@ function createEmptyCollectionWindows(): WorkspaceCollectionWindows {
     deliveries: { loadedCount: 0, hasMore: false },
     confirmations: { loadedCount: 0, hasMore: false },
     operationsWorkItems: { loadedCount: 0, hasMore: false },
+    operationsDocumentRecordCreationRequests: { loadedCount: 0, hasMore: false },
     settlementWorkItems: { loadedCount: 0, hasMore: false },
+    settlementDocumentRecordCreationRequests: { loadedCount: 0, hasMore: false },
     invoices: { loadedCount: 0, hasMore: false },
     payments: { loadedCount: 0, hasMore: false },
   }
@@ -133,7 +137,9 @@ const EMPTY_COLLECTION_LOADING: WorkspaceCollectionLoadingFlags = {
   deliveries: false,
   confirmations: false,
   operationsWorkItems: false,
+  operationsDocumentRecordCreationRequests: false,
   settlementWorkItems: false,
+  settlementDocumentRecordCreationRequests: false,
   invoices: false,
   payments: false,
 }
@@ -145,7 +151,9 @@ const EMPTY_COLLECTION_ERRORS: WorkspaceCollectionErrors = {
   deliveries: '',
   confirmations: '',
   operationsWorkItems: '',
+  operationsDocumentRecordCreationRequests: '',
   settlementWorkItems: '',
+  settlementDocumentRecordCreationRequests: '',
   invoices: '',
   payments: '',
 }
@@ -177,7 +185,13 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([])
   const [tradeConfirmations, setTradeConfirmations] = useState<TradeConfirmationRecord[]>([])
   const [operationsTradeWorkflowItems, setOperationsTradeWorkflowItems] = useState<TradeWorkflowItemRecord[]>([])
+  const [operationsDocumentRecordCreationRequests, setOperationsDocumentRecordCreationRequests] = useState<
+    DocumentRecordCreationWorkItemRecord[]
+  >([])
   const [settlementTradeWorkflowItems, setSettlementTradeWorkflowItems] = useState<TradeWorkflowItemRecord[]>([])
+  const [settlementDocumentRecordCreationRequests, setSettlementDocumentRecordCreationRequests] = useState<
+    DocumentRecordCreationWorkItemRecord[]
+  >([])
   const [tradeWorkflowItems, setTradeWorkflowItems] = useState<TradeWorkflowItemRecord[]>([])
   const [tradeInvoices, setTradeInvoices] = useState<TradeInvoiceRecord[]>([])
   const [tradePayments, setTradePayments] = useState<TradePaymentRecord[]>([])
@@ -237,8 +251,14 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const operationsTradeWorkflowItemsRef = useRef(operationsTradeWorkflowItems)
   operationsTradeWorkflowItemsRef.current = operationsTradeWorkflowItems
 
+  const operationsDocumentRecordCreationRequestsRef = useRef(operationsDocumentRecordCreationRequests)
+  operationsDocumentRecordCreationRequestsRef.current = operationsDocumentRecordCreationRequests
+
   const settlementTradeWorkflowItemsRef = useRef(settlementTradeWorkflowItems)
   settlementTradeWorkflowItemsRef.current = settlementTradeWorkflowItems
+
+  const settlementDocumentRecordCreationRequestsRef = useRef(settlementDocumentRecordCreationRequests)
+  settlementDocumentRecordCreationRequestsRef.current = settlementDocumentRecordCreationRequests
 
   const tradeWorkflowItemsRef = useRef(tradeWorkflowItems)
   tradeWorkflowItemsRef.current = tradeWorkflowItems
@@ -319,6 +339,10 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setDeliveries([])
     setTradeConfirmations([])
     syncTradeWorkflowItems([], [])
+    operationsDocumentRecordCreationRequestsRef.current = []
+    setOperationsDocumentRecordCreationRequests([])
+    settlementDocumentRecordCreationRequestsRef.current = []
+    setSettlementDocumentRecordCreationRequests([])
     setTradeInvoices([])
     setTradePayments([])
     setBooks([])
@@ -503,6 +527,10 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
           hasMore: payload.workItemsWindow.hasMore,
         })
         setCollectionError('operationsWorkItems', '')
+        operationsDocumentRecordCreationRequestsRef.current = payload.operationsDocumentRecordCreationRequests
+        setOperationsDocumentRecordCreationRequests(payload.operationsDocumentRecordCreationRequests)
+        setCollectionWindow('operationsDocumentRecordCreationRequests', payload.operationsDocumentRecordCreationRequestsWindow)
+        setCollectionError('operationsDocumentRecordCreationRequests', '')
         markGroupLoaded('operations', true)
       },
       settlement: async () => {
@@ -519,6 +547,10 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
           hasMore: payload.workItemsWindow.hasMore,
         })
         setCollectionError('settlementWorkItems', '')
+        settlementDocumentRecordCreationRequestsRef.current = payload.settlementDocumentRecordCreationRequests
+        setSettlementDocumentRecordCreationRequests(payload.settlementDocumentRecordCreationRequests)
+        setCollectionWindow('settlementDocumentRecordCreationRequests', payload.settlementDocumentRecordCreationRequestsWindow)
+        setCollectionError('settlementDocumentRecordCreationRequests', '')
         markGroupLoaded('settlement', true)
       },
       reports: async () => {
@@ -662,6 +694,20 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         setCollectionError('operationsWorkItems', '')
         markGroupLoaded('operations', true)
       },
+      operationsDocumentRecordCreationRequests: async () => {
+        const payload = await loadDocumentRecordCreationWorkItemsWindow(
+          appConfig.apiBase,
+          'operations',
+          { readHeaders },
+          0,
+          refreshWindowSize('operationsDocumentRecordCreationRequests'),
+        )
+        operationsDocumentRecordCreationRequestsRef.current = payload.rows
+        setOperationsDocumentRecordCreationRequests(payload.rows)
+        setCollectionWindow('operationsDocumentRecordCreationRequests', payload.window)
+        setCollectionError('operationsDocumentRecordCreationRequests', '')
+        markGroupLoaded('operations', true)
+      },
       settlementWorkItems: async () => {
         const payload = await loadTradeWorkflowItemsWindow(
           appConfig.apiBase,
@@ -673,6 +719,20 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         syncTradeWorkflowItems(operationsTradeWorkflowItemsRef.current, payload.rows)
         setCollectionWindow('settlementWorkItems', payload.window)
         setCollectionError('settlementWorkItems', '')
+        markGroupLoaded('settlement', true)
+      },
+      settlementDocumentRecordCreationRequests: async () => {
+        const payload = await loadDocumentRecordCreationWorkItemsWindow(
+          appConfig.apiBase,
+          'settlement',
+          { readHeaders },
+          0,
+          refreshWindowSize('settlementDocumentRecordCreationRequests'),
+        )
+        settlementDocumentRecordCreationRequestsRef.current = payload.rows
+        setSettlementDocumentRecordCreationRequests(payload.rows)
+        setCollectionWindow('settlementDocumentRecordCreationRequests', payload.window)
+        setCollectionError('settlementDocumentRecordCreationRequests', '')
         markGroupLoaded('settlement', true)
       },
       invoices: async () => {
@@ -806,6 +866,22 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
           hasMore: payload.window.hasMore,
         })
       },
+      operationsDocumentRecordCreationRequests: async () => {
+        const currentRows = operationsDocumentRecordCreationRequestsRef.current
+        const payload = await loadDocumentRecordCreationWorkItemsWindow(
+          appConfig.apiBase,
+          'operations',
+          { readHeaders },
+          currentRows.length,
+        )
+        const nextRows = mergeCollectionRows(currentRows, payload.rows, (item) => item.request_id)
+        operationsDocumentRecordCreationRequestsRef.current = nextRows
+        setOperationsDocumentRecordCreationRequests(nextRows)
+        setCollectionWindow('operationsDocumentRecordCreationRequests', {
+          loadedCount: nextRows.length,
+          hasMore: payload.window.hasMore,
+        })
+      },
       settlementWorkItems: async () => {
         const currentRows = settlementTradeWorkflowItemsRef.current
         const payload = await loadTradeWorkflowItemsWindow(
@@ -818,6 +894,22 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         syncTradeWorkflowItems(operationsTradeWorkflowItemsRef.current, nextQueueRows)
         setCollectionWindow('settlementWorkItems', {
           loadedCount: nextQueueRows.length,
+          hasMore: payload.window.hasMore,
+        })
+      },
+      settlementDocumentRecordCreationRequests: async () => {
+        const currentRows = settlementDocumentRecordCreationRequestsRef.current
+        const payload = await loadDocumentRecordCreationWorkItemsWindow(
+          appConfig.apiBase,
+          'settlement',
+          { readHeaders },
+          currentRows.length,
+        )
+        const nextRows = mergeCollectionRows(currentRows, payload.rows, (item) => item.request_id)
+        settlementDocumentRecordCreationRequestsRef.current = nextRows
+        setSettlementDocumentRecordCreationRequests(nextRows)
+        setCollectionWindow('settlementDocumentRecordCreationRequests', {
+          loadedCount: nextRows.length,
           hasMore: payload.window.hasMore,
         })
       },
@@ -1117,6 +1209,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     railRoutes,
     refreshMutationData,
     operationalResourceDescriptors,
+    operationsDocumentRecordCreationRequests,
     spatialFeatures,
     spatialFeatureStandards,
     tradeMetadata,
@@ -1128,6 +1221,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     tradeConfirmations,
     tradePayments,
     tradeWorkflowItems,
+    settlementDocumentRecordCreationRequests,
     trades,
     tradingSources,
     units,

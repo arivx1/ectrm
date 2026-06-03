@@ -58,6 +58,19 @@ export type UpdateDocumentPageInput = {
   review_notes?: string | null
 }
 
+export type UpdateDocumentLogicalDocumentInput = {
+  document_kind: string
+  document_subtype?: string | null
+  page_ids: number[]
+  review_status?: string | null
+  review_notes?: string | null
+}
+
+export type UpdateDocumentLogicalDocumentsInput = {
+  expected_document_version?: number | null
+  logical_documents: UpdateDocumentLogicalDocumentInput[]
+}
+
 export type ImportGmailInboxDocumentsInput = {
   query?: string | null
   max_messages?: number | null
@@ -227,6 +240,21 @@ export async function updateDocumentPage(
 ): Promise<DocumentIngestionRecord> {
   return patchJson<DocumentIngestionRecord>(
     `${apiBase}/documents/${documentId}/pages/${pageId}`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function updateDocumentLogicalDocuments(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  payload: UpdateDocumentLogicalDocumentsInput,
+): Promise<DocumentIngestionRecord> {
+  return patchJson<DocumentIngestionRecord>(
+    `${apiBase}/documents/${documentId}/logical-documents`,
     payload as Record<string, unknown>,
     {
       headers: documentHeaders(session),

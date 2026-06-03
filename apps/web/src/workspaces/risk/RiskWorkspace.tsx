@@ -1,6 +1,12 @@
 import { useMemo, useState } from 'react'
 
+import {
+  createPreTradeRecommendationRun,
+  createPreTradeReviewItem,
+  createPreTradeScenario,
+} from '../../entities/pretrade/api'
 import { useLatestPriceIndexMarks } from '../../entities/market-data/useLatestPriceIndexMarks'
+import { appConfig } from '../../shared/config'
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import { formatCurrencyAmount } from '../../shared/format'
 import type { AppRouteHandoff } from '../../shared/appRouteHandoff'
@@ -20,6 +26,12 @@ import {
 import type { OptionExposureRow, Trade } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import type { OptionLifecycleEventType } from '../../shared/trading'
+import { buildPreTradeScenarioEnrichmentFromRun } from '../pretrade/preTradeScenarioEnrichment'
+import {
+  buildRiskPreTradeReviewNotes,
+  buildRiskPreTradeTriageCandidates,
+  type RiskPreTradeTriageCandidate,
+} from './riskPreTradeTriage'
 
 type PositionRow = {
   commodity: string
@@ -43,6 +55,7 @@ type RiskWorkspaceProps = {
   formatDate: (value: string | null | undefined) => string
   formatDateOnly: (value: string | null | undefined) => string
   onOpenTrade: (tradeId: string) => void
+  onOpenPreTrade: () => void
   onOptionLifecycleEvent: (tradeId: string, eventType: OptionLifecycleEventType) => Promise<void>
   optionLifecycleSubmittingEvent: OptionLifecycleEventType | null
   optionLifecycleSubmittingTradeId: string | null
@@ -301,11 +314,15 @@ export function RiskWorkspace({
   formatDate,
   formatDateOnly,
   onOpenTrade,
+  onOpenPreTrade,
   onOptionLifecycleEvent,
   optionLifecycleSubmittingEvent,
   optionLifecycleSubmittingTradeId,
 }: RiskWorkspaceProps) {
   const [screenFilter, setScreenFilter] = useState('')
+  const [riskTriageActionPending, setRiskTriageActionPending] = useState<string | null>(null)
+  const [riskTriageActionMessage, setRiskTriageActionMessage] = useState('')
+  const [riskTriageActionError, setRiskTriageActionError] = useState('')
   const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
   const directlyMatchedTrades = useMemo(
     () => trades.filter((trade) => matchesRiskTradeFilter(trade, effectiveScreenFilter)),
@@ -361,15 +378,15 @@ export function RiskWorkspace({
   )
   const linearActiveTrades = visibleActiveTrades.filter((trade) => trade.instrument_type !== 'OPTION')
   const activeOptionTrades = visibleActiveTrades.filter((trade) => trade.instrument_type === 'OPTION')
+  const visiblePriceIndexCodes = useMemo(
+    () => visibleTrades.map((trade) => trade.price_index_code),
+    [visibleTrades],
+  )
   const {
     latestMarksByCode,
     loading: latestMarksLoading,
     error: latestMarksError,
-  } = useLatestPriceIndexMarks(
-    visibleTrades
-      .filter((trade) => trade.instrument_type === 'OPTION' || trade.originating_option_trade_id !== null)
-      .map((trade) => trade.price_index_code),
-  )
+  } = useLatestPriceIndexMarks(visiblePriceIndexCodes)
   const grossExposure = visiblePositionRows.reduce((total, position) => total + Math.abs(position.net_volume), 0)
   const pricedTradeCount = visibleActiveTrades.filter((trade) => trade.pricing_status === 'PRICED').length
   const pricingCoverage =
@@ -386,6 +403,15 @@ export function RiskWorkspace({
   const pricingAttentionTrades = [...visibleActiveTrades]
     .filter((trade) => trade.pricing_status !== 'PRICED')
     .sort((left, right) => right.updated_at.localeCompare(left.updated_at))
+  const riskTriageCandidates = useMemo(
+    () =>
+      buildRiskPreTradeTriageCandidates({
+        positions: visiblePositionRows,
+        activeTrades: visibleActiveTrades,
+        latestMarksByCode,
+      }),
+    [latestMarksByCode, visibleActiveTrades, visiblePositionRows],
+  )
   const largestExposureClass = visiblePositionsByClass.reduce<{ commodityClass: string; netVolume: number } | null>(
     (largest, row) =>
       largest === null || Math.abs(row.netVolume) > Math.abs(largest.netVolume) ? row : largest,
@@ -462,6 +488,49 @@ export function RiskWorkspace({
     (sum, valuation) => sum + (valuation.packageMarkToMarket ?? 0),
     0,
   )
+
+  async function handleCreateRiskTriageReview(candidate: RiskPreTradeTriageCandidate) {
+    const accessToken = authSession?.accessToken
+    if (!accessToken) {
+      setRiskTriageActionError('Sign in to stage this risk triage candidate in the shared pre-trade review queue.')
+      setRiskTriageActionMessage('')
+      return
+    }
+
+    setRiskTriageActionPending(candidate.candidateId)
+    setRiskTriageActionError('')
+    setRiskTriageActionMessage('')
+    try {
+      const scenario = await createPreTradeScenario(appConfig.apiBase, accessToken, {
+        name: candidate.scenarioName,
+        thesis: candidate.thesis,
+        draft: candidate.draft,
+      })
+      const recommendationRun = await createPreTradeRecommendationRun(appConfig.apiBase, accessToken, {
+        name: `${candidate.scenarioName.slice(0, 92)} recommendation`,
+        thesis: candidate.thesis,
+        draft: candidate.draft,
+        source_scenario_id: scenario.scenario_id,
+      })
+      const review = await createPreTradeReviewItem(appConfig.apiBase, accessToken, {
+        name: candidate.scenarioName,
+        thesis: candidate.thesis,
+        draft: candidate.draft,
+        source_scenario_id: scenario.scenario_id,
+        recommendation_run_id: recommendationRun.run_id,
+        enrichment: buildPreTradeScenarioEnrichmentFromRun(recommendationRun),
+        review_notes: buildRiskPreTradeReviewNotes(candidate, recommendationRun),
+      })
+      setRiskTriageActionMessage(
+        `Created review #${review.review_id} from ${candidate.sourcePosition.commodity} risk triage with recommendation ${recommendationRun.run_key.slice(0, 8)}.`,
+      )
+    } catch (error) {
+      setRiskTriageActionError(error instanceof Error ? error.message : 'Could not stage the risk triage candidate for pre-trade review.')
+    } finally {
+      setRiskTriageActionPending(null)
+    }
+  }
+
   const riskSummaryCards: TileSectionGridItem[] = [
     {
       id: 'gross-linear-exposure',
@@ -786,6 +855,116 @@ export function RiskWorkspace({
             <div className="empty-state">
               <strong>No pricing exceptions</strong>
               <p>The active trade set is fully marked as priced right now.</p>
+            </div>
+          ),
+        },
+        {
+          id: 'risk-pretrade-triage',
+          eyebrow: 'Pre-Trade',
+          title: riskTriageCandidates.length > 0 ? 'Pre-Trade Risk Triage' : 'No pre-trade triage candidates',
+          description: 'Turn live exposure rows into review-only pre-trade scenarios with deterministic recommendation evidence before any capture decision.',
+          span: 'full',
+          availableSpans: ['full', 'wide'],
+          content: riskTriageCandidates.length > 0 ? (
+            <div className="detail-list">
+              {latestMarksError ? (
+                <p className="field-error">Live marks unavailable: {latestMarksError}</p>
+              ) : latestMarksLoading ? (
+                <p className="form-note">Refreshing latest price index marks before staging risk triage.</p>
+              ) : null}
+              {riskTriageActionError ? <p className="form-note">{riskTriageActionError}</p> : null}
+              {riskTriageActionMessage ? (
+                <div className="surface pretrade-next-actions">
+                  <span className="eyebrow">Review Created</span>
+                  <p>{riskTriageActionMessage}</p>
+                  <button type="button" className="button button-secondary" onClick={onOpenPreTrade}>
+                    Open Pre-Trade
+                  </button>
+                </div>
+              ) : null}
+              <div className="position-list">
+                {riskTriageCandidates.slice(0, 6).map((candidate) => (
+                  <article key={candidate.candidateId} className="position-card shipment-card">
+                    <div className="shipment-card-head">
+                      <div className="shipment-card-copy">
+                        <strong>{candidate.title}</strong>
+                        <span>
+                          {formatCommodityClass(candidate.sourcePosition.commodityClass)} • {candidate.draft.book} • anchor {candidate.anchorTradeId}
+                        </span>
+                      </div>
+                      <span className={`status-pill status-pill-${candidate.tone}`}>
+                        {candidate.markStatus.replaceAll('_', ' ')}
+                      </span>
+                    </div>
+                    <div className="shipment-card-meta">
+                      <span className="entity-chip entity-chip-soft">
+                        Position {formatNumber(candidate.sourcePosition.netVolume, 0)}
+                      </span>
+                      <span className="entity-chip entity-chip-soft">
+                        Draft {candidate.draft.trade_side} {formatNumber(candidate.draft.target_volume, 0)}
+                      </span>
+                      <span className="entity-chip entity-chip-soft">
+                        {candidate.draft.pricing_type}
+                      </span>
+                      {candidate.draft.price_index_code ? (
+                        <span className="entity-chip entity-chip-soft">{candidate.draft.price_index_code}</span>
+                      ) : null}
+                    </div>
+                    <div className="shipment-card-copy">
+                      <p>{candidate.thesis}</p>
+                    </div>
+                    <div className="dashboard-report-grid">
+                      <article className="dashboard-report-card">
+                        <span>Source Position</span>
+                        <strong>{formatNumber(candidate.sourcePosition.netVolume, 0)}</strong>
+                        <p>Updated {formatDate(candidate.sourcePosition.updatedAt)}.</p>
+                      </article>
+                      <article className="dashboard-report-card">
+                        <span>Latest Mark</span>
+                        <strong>{candidate.markStatus.replaceAll('_', ' ')}</strong>
+                        <p>{candidate.markStatusLabel}.</p>
+                      </article>
+                      <article className="dashboard-report-card">
+                        <span>Source Trades</span>
+                        <strong>{formatNumber(candidate.sourceTradeCount, 0)}</strong>
+                        <p>{candidate.sourceTradeIds.join(', ')}</p>
+                      </article>
+                    </div>
+                    <ul className="pretrade-bullet-list">
+                      {candidate.readinessReasons.map((reason) => (
+                        <li key={reason}>{reason}</li>
+                      ))}
+                    </ul>
+                    <div className="shipment-card-actions">
+                      <span>Review-only scenario staging; no booking or hedge execution.</span>
+                      <div className="workflow-item-button-row">
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => void handleCreateRiskTriageReview(candidate)}
+                          disabled={!authSession || riskTriageActionPending !== null}
+                        >
+                          {riskTriageActionPending === candidate.candidateId ? 'Creating Review...' : 'Create Review Scenario'}
+                        </button>
+                        <button type="button" className="button button-ghost" onClick={() => onOpenTrade(candidate.anchorTradeId)}>
+                          Open Source Trade
+                        </button>
+                        <button type="button" className="button button-ghost" onClick={onOpenPreTrade}>
+                          Open Pre-Trade
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              {!authSession ? (
+                <p className="form-note">Sign in to stage a candidate as a shared pre-trade review item.</p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="empty-state">
+              <strong>No pre-trade triage candidates</strong>
+              <p>Open linear exposure with matching active trade evidence will appear here for review-only scenario staging.</p>
             </div>
           ),
         },

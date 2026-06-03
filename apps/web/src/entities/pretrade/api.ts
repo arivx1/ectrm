@@ -1,7 +1,9 @@
 import { fetchJson, patchJson, postJson, requestOk } from '../../shared/api'
 import type {
   PreTradeGovernanceAuditExportRecord,
+  PreTradeHedgeRecommendationRecord,
   PreTradeGovernanceItemsRecord,
+  PreTradeNettingSetRecord,
   PreTradeRecommendationDraftAnalysisRecord,
   PreTradeGovernanceSummaryRecord,
   PreTradeRecommendationSourceAdapterRecord,
@@ -10,6 +12,7 @@ import type {
   PreTradeReviewDriftRecord,
   PreTradeReviewItemRecord,
   PreTradeReviewStatus,
+  PreTradeRiskScenarioRecord,
   PreTradeScenarioDraft,
   PreTradeScenarioEnrichmentRecord,
   PreTradeScenarioRecord,
@@ -78,6 +81,21 @@ export type AnalyzePreTradeRecommendationDraftPayload = {
   source_scenario_id?: number | null
   source_review_id?: number | null
   input_snapshots?: PreTradeRecommendationSourceSnapshotRecord[]
+}
+
+export type PromotePreTradeNettingSetPayload = {
+  owner?: string | null
+  review_note?: string | null
+}
+
+export type PromotePreTradeHedgeRecommendationPayload = {
+  owner?: string | null
+  review_note?: string | null
+}
+
+export type PromotePreTradeRiskScenarioPayload = {
+  owner?: string | null
+  review_note?: string | null
 }
 
 export async function loadPreTradeScenarios(
@@ -159,6 +177,66 @@ export async function loadPreTradeGovernanceAuditExport(
   return fetchJson<PreTradeGovernanceAuditExportRecord>(`${apiBase}/pretrade/governance/export`, {
     headers: authorizationHeaders(accessToken),
     cache: 'no-store',
+  })
+}
+
+export async function loadPreTradeNettingSets(
+  apiBase: string,
+  accessToken: string,
+): Promise<PreTradeNettingSetRecord[]> {
+  return fetchJson<PreTradeNettingSetRecord[]>(`${apiBase}/pretrade/netting-sets`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function promotePreTradeNettingSetFromGovernance(
+  apiBase: string,
+  accessToken: string,
+  payload: PromotePreTradeNettingSetPayload = {},
+): Promise<PreTradeNettingSetRecord> {
+  return postJson<PreTradeNettingSetRecord>(`${apiBase}/pretrade/netting-sets/from-promotion`, payload, {
+    headers: authorizationHeaders(accessToken),
+  })
+}
+
+export async function loadPreTradeHedgeRecommendations(
+  apiBase: string,
+  accessToken: string,
+): Promise<PreTradeHedgeRecommendationRecord[]> {
+  return fetchJson<PreTradeHedgeRecommendationRecord[]>(`${apiBase}/pretrade/hedge-recommendations`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function promotePreTradeHedgeRecommendationFromGovernance(
+  apiBase: string,
+  accessToken: string,
+  payload: PromotePreTradeHedgeRecommendationPayload = {},
+): Promise<PreTradeHedgeRecommendationRecord> {
+  return postJson<PreTradeHedgeRecommendationRecord>(`${apiBase}/pretrade/hedge-recommendations/from-promotion`, payload, {
+    headers: authorizationHeaders(accessToken),
+  })
+}
+
+export async function loadPreTradeRiskScenarios(
+  apiBase: string,
+  accessToken: string,
+): Promise<PreTradeRiskScenarioRecord[]> {
+  return fetchJson<PreTradeRiskScenarioRecord[]>(`${apiBase}/pretrade/risk-scenarios`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function promotePreTradeRiskScenarioFromGovernance(
+  apiBase: string,
+  accessToken: string,
+  payload: PromotePreTradeRiskScenarioPayload = {},
+): Promise<PreTradeRiskScenarioRecord> {
+  return postJson<PreTradeRiskScenarioRecord>(`${apiBase}/pretrade/risk-scenarios/from-promotion`, payload, {
+    headers: authorizationHeaders(accessToken),
   })
 }
 

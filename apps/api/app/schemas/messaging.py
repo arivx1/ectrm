@@ -11,7 +11,9 @@ MessagingWorkspaceConversationSection = Literal["Starred", "Channels", "Follow-u
 MessagingWorkspaceConversationKind = Literal["channel", "dm"]
 MessagingWorkspaceMemberTone = Literal["desk", "human", "ops", "system"]
 MessagingWorkspacePostSource = Literal["human", "assistant"]
+MessagingWorkspaceSourceProvider = Literal["ectrm", "slack"]
 MessagingWorkspaceTimelineItemKind = Literal["system", "message"]
+MessagingSlackAuthStatus = Literal["none", "partial", "configured"]
 
 
 class MessagingWorkspaceMemberOut(BaseModel):
@@ -83,6 +85,7 @@ class MessagingWorkspaceConversationOut(BaseModel):
     metrics: list[MessagingWorkspaceMetricOut] = Field(default_factory=list)
     members: list[MessagingWorkspaceMemberOut] = Field(default_factory=list)
     timeline: list[MessagingWorkspaceTimelineItemOut] = Field(default_factory=list)
+    source_provider: MessagingWorkspaceSourceProvider = "ectrm"
 
 
 class MessagingWorkspaceMessageOut(BaseModel):
@@ -186,3 +189,25 @@ class MessagingWorkspacePostUpdate(BaseModel):
         ):
             raise ValueError("At least one messaging post change is required.")
         return self
+
+
+class MessagingSlackRuntimeSettingsOut(BaseModel):
+    enabled: bool
+    configured: bool
+    provider: Literal["slack_web_api"] = "slack_web_api"
+    auth_status: MessagingSlackAuthStatus
+    configured_channel_count: int
+    channel_limit: int
+    history_limit: int
+
+
+class MessagingSlackSyncResultOut(BaseModel):
+    provider: Literal["slack_web_api"] = "slack_web_api"
+    synced_channel_count: int
+    created_conversation_count: int
+    updated_conversation_count: int
+    scanned_message_count: int
+    imported_message_count: int
+    updated_message_count: int
+    skipped_message_count: int
+    warnings: list[str] = Field(default_factory=list)

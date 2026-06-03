@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
+from dataclasses import field
 from datetime import datetime
 from typing import Any
 
+from apps.api.app.domains.documents.services.document_ingestion_analysis import CLASSIFICATION_RULES
+from apps.api.app.domains.documents.services.document_ingestion_analysis import extract_document_header_fields
 from apps.api.app.domains.documents.services.schema_registry import get_document_kind_schema
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.schemas.document import DocumentExtractedFieldOut
@@ -13,7 +17,67 @@ from apps.api.app.schemas.document import DocumentTableBlockOut
 from .document_routing import build_document_routing_assessment
 from .document_ingestion_common import clean_optional_text
 from .document_ingestion_common import humanize_key
+from .document_ingestion_common import normalize_for_matching
 from .document_ingestion_common import normalize_key
+
+
+_SYSTEM_PAGE_CLASSIFICATION_SOURCE = "system_page_classification"
+_SYSTEM_PACKET_STRUCTURE_SOURCE = "system_packet_structure"
+_CONTIGUOUS_SPLIT_STRATEGY = "contiguous_page_classification_run"
+_STRUCTURE_SPLIT_STRATEGY = "packet_structure_signal_run"
+_ATTACHMENT_BOUNDARY_MARKERS = (
+    "attached documents",
+    "attachments",
+    "backup documentation",
+    "backup documents",
+    "enclosures",
+    "exhibits",
+    "miscellaneous documents",
+    "supporting documents",
+    "supporting documentation",
+)
+_COMMON_REFERENCE_KEYS = {
+    "account",
+    "applicant",
+    "beneficiary",
+    "buyer",
+    "carrier",
+    "commodity",
+    "consignee",
+    "counterparty",
+    "customer_reference",
+    "delivery_id",
+    "external_trade_id",
+    "product",
+    "seller",
+    "shipper",
+    "source_series_id",
+    "trade_id",
+}
+_SPLIT_CONFIDENCE_CONTIGUOUS = 0.68
+_SPLIT_CONFIDENCE_DISTINCT_IDENTITY = 0.86
+_SPLIT_CONFIDENCE_SECTION_BOUNDARY = 0.82
+_SPLIT_CONFIDENCE_ADJACENT_IDENTITY = 0.78
+_SPLIT_CONFIDENCE_ATTACHMENT_MARKER = 0.7
+
+
+@dataclass(frozen=True)
+class _PageStructureSignal:
+    page: DocumentIngestionPage
+    group_key: tuple[str, str | None]
+    section_title_kinds: set[str]
+    identity_values_by_kind: dict[str, dict[str, str]]
+    attachment_markers: list[str]
+
+
+@dataclass
+class _LogicalDocumentGroup:
+    group_key: tuple[str, str | None]
+    signals: list[_PageStructureSignal]
+    reasons: list[str] = field(default_factory=list)
+    evidence: list[dict[str, object]] = field(default_factory=list)
+    confidence: float = _SPLIT_CONFIDENCE_CONTIGUOUS
+    enhanced: bool = False
 
 
 def build_document_summary(
@@ -249,6 +313,16 @@ def build_structure_profile(
     logical_document_payloads = [
         _coerce_logical_document_payload(document) for document in raw_logical_documents
     ]
+    page_membership_counts: Counter[int] = Counter()
+    for document in logical_document_payloads:
+        for page_number in document.get("page_numbers", []):
+            if isinstance(page_number, int):
+                page_membership_counts[page_number] += 1
+    shared_page_numbers = [
+        page_number
+        for page_number, count in sorted(page_membership_counts.items())
+        if count > 1
+    ]
     extractable_table_count = sum(1 for table in table_profiles if table.get("extract_as_dataset"))
     has_required_deep_schema = any(
         _schema_requires_deep_extraction(str(document.get("document_kind") or "UNKNOWN"))
@@ -260,6 +334,8 @@ def build_structure_profile(
         "logical_document_count": len(logical_document_payloads),
         "logical_document_count_estimate": len(logical_document_payloads),
         "logical_documents": logical_document_payloads,
+        "shared_page_numbers": shared_page_numbers,
+        "shared_page_count": len(shared_page_numbers),
         "has_key_value_fields": any(page.header_fields for page in pages),
         "has_tables": bool(table_profiles),
         "table_count": len(table_profiles),
@@ -285,11 +361,14 @@ def build_extraction_plan(
         schema = get_document_kind_schema(document_kind)
         page_start = _coerce_int(document.get("page_start"))
         page_end = _coerce_int(document.get("page_end"))
-        document_pages = [
-            pages_by_number[page_number]
-            for page_number in range(page_start or 0, (page_end or 0) + 1)
-            if page_number in pages_by_number
+        page_numbers = [
+            page_number
+            for page_number in document.get("page_numbers", [])
+            if isinstance(page_number, int)
         ]
+        if not page_numbers and page_start is not None and page_end is not None:
+            page_numbers = list(range(page_start, page_end + 1))
+        document_pages = [pages_by_number[page_number] for page_number in page_numbers if page_number in pages_by_number]
         method = _recommended_extraction_method(document_pages, artifact_profile=artifact_profile)
         if schema is None or document_kind in {"UNKNOWN", "OTHER"} or not schema.extraction_schema_code:
             plan.append(
@@ -334,34 +413,76 @@ def build_logical_document_estimates(
     if not ordered_pages:
         return []
 
-    groups: list[list[DocumentIngestionPage]] = []
-    current_group: list[DocumentIngestionPage] = [ordered_pages[0]]
-    current_key = _logical_document_group_key(ordered_pages[0])
-    for page in ordered_pages[1:]:
-        page_key = _logical_document_group_key(page)
-        if page_key == current_key:
-            current_group.append(page)
-            continue
-        groups.append(current_group)
-        current_group = [page]
-        current_key = page_key
-    groups.append(current_group)
+    signals = [_build_page_structure_signal(page) for page in ordered_pages]
+    groups = _build_logical_document_groups(signals)
+    _apply_shared_boundary_pages(groups)
+    shared_page_numbers = _shared_page_numbers_for_groups(groups)
 
     logical_documents: list[dict[str, object]] = []
     for index, group in enumerate(groups, start=1):
-        page_start = group[0].page_number
-        page_end = group[-1].page_number
-        document_kind = group[0].document_kind or "UNKNOWN"
-        document_subtype = clean_optional_text(group[0].document_subtype)
+        group_signals = _sorted_unique_signals(group.signals)
+        group_pages = [signal.page for signal in group_signals]
+        page_start = group_pages[0].page_number
+        page_end = group_pages[-1].page_number
+        document_kind = group.group_key[0] or "UNKNOWN"
+        document_subtype = group.group_key[1]
         confidences = [
             page.classification_confidence
-            for page in group
+            for page in group_pages
             if isinstance(page.classification_confidence, (int, float))
         ]
-        table_count = sum(len(page.table_blocks or []) for page in group)
+        table_count = sum(len(page.table_blocks or []) for page in group_pages)
         logical_document_key = f"LD-{index:03d}"
-        page_numbers = [page.page_number for page in group]
-        page_ids = [page.page_id for page in group if page.page_id is not None]
+        page_numbers = [page.page_number for page in group_pages]
+        page_ids = [page.page_id for page in group_pages if page.page_id is not None]
+        segment_shared_pages = [
+            page_number for page_number in page_numbers if page_number in shared_page_numbers
+        ]
+        enhanced = group.enhanced or bool(segment_shared_pages)
+        split_source = _SYSTEM_PACKET_STRUCTURE_SOURCE if enhanced else _SYSTEM_PAGE_CLASSIFICATION_SOURCE
+        split_strategy = _STRUCTURE_SPLIT_STRATEGY if enhanced else _CONTIGUOUS_SPLIT_STRATEGY
+        split_reason = (
+            " ".join(group.reasons)
+            if group.reasons
+            else "Contiguous pages with matching document kind and subtype are grouped as one logical document."
+        )
+        split_evidence = group.evidence or [
+            {
+                "type": "contiguous_page_classification",
+                "confidence": _SPLIT_CONFIDENCE_CONTIGUOUS,
+                "summary": (
+                    "Grouped contiguous pages with matching document kind and subtype."
+                ),
+                "page_numbers": page_numbers,
+                "document_kind": document_kind,
+            }
+        ]
+        provenance: dict[str, object] = {
+            "source": split_source,
+            "split_strategy": split_strategy,
+            "split_reason": split_reason,
+            "split_confidence": round(max(group.confidence, _SPLIT_CONFIDENCE_CONTIGUOUS), 2),
+            "split_evidence": split_evidence,
+            "source_file_id": document_id,
+            "source_page_numbers": page_numbers,
+            "source_page_ids": page_ids,
+            "page_range": {
+                "start": page_start,
+                "end": page_end,
+            },
+            "classification_sources": [
+                _page_classification_source_snapshot(page)
+                for page in group_pages
+            ],
+            "review_sources": [
+                _page_review_source_snapshot(page)
+                for page in group_pages
+            ],
+        }
+        if segment_shared_pages:
+            provenance["shared_page_numbers"] = segment_shared_pages
+        if group.reasons:
+            provenance["structure_signals"] = list(group.reasons)
         logical_documents.append(
             {
                 "logical_document_id": (
@@ -376,43 +497,353 @@ def build_logical_document_estimates(
                 "page_start": page_start,
                 "page_end": page_end,
                 "page_numbers": page_numbers,
-                "page_count": len(group),
-                "classification_status": _merged_analysis_status(page.classification_status for page in group),
+                "page_count": len(group_pages),
+                "classification_status": _merged_analysis_status(page.classification_status for page in group_pages),
                 "classification_confidence": round(sum(confidences) / len(confidences), 4) if confidences else None,
-                "review_status": _logical_document_review_status(group),
-                "reviewed_at": _logical_document_reviewed_at(group),
-                "reviewed_by": _logical_document_reviewed_by(group),
+                "review_status": _logical_document_review_status(group_pages),
+                "reviewed_at": _logical_document_reviewed_at(group_pages),
+                "reviewed_by": _logical_document_reviewed_by(group_pages),
                 "table_count": table_count,
                 "deep_extraction_required": bool(table_count or _schema_requires_deep_extraction(document_kind)),
-                "provenance": {
-                    "source": "system_page_classification",
-                    "split_strategy": "contiguous_page_classification_run",
-                    "split_reason": (
-                        "Contiguous pages with matching document kind and subtype are grouped as one logical document."
-                    ),
-                    "source_file_id": document_id,
-                    "source_page_numbers": page_numbers,
-                    "source_page_ids": page_ids,
-                    "page_range": {
-                        "start": page_start,
-                        "end": page_end,
-                    },
-                    "classification_sources": [
-                        _page_classification_source_snapshot(page)
-                        for page in group
-                    ],
-                    "review_sources": [
-                        _page_review_source_snapshot(page)
-                        for page in group
-                    ],
-                },
+                "provenance": provenance,
             }
         )
     return logical_documents
 
 
+def _build_logical_document_groups(
+    signals: list[_PageStructureSignal],
+) -> list[_LogicalDocumentGroup]:
+    groups: list[_LogicalDocumentGroup] = []
+    current_group = _LogicalDocumentGroup(group_key=signals[0].group_key, signals=[signals[0]])
+
+    for signal in signals[1:]:
+        if signal.group_key != current_group.group_key:
+            groups.append(current_group)
+            current_group = _LogicalDocumentGroup(group_key=signal.group_key, signals=[signal])
+            continue
+        if _starts_new_same_kind_document(signal, current_group):
+            groups.append(current_group)
+            evidence = _distinct_identity_evidence(signal)
+            current_group = _LogicalDocumentGroup(
+                group_key=signal.group_key,
+                signals=[signal],
+                reasons=[str(evidence["summary"])],
+                evidence=[evidence],
+                confidence=_SPLIT_CONFIDENCE_DISTINCT_IDENTITY,
+                enhanced=True,
+            )
+            continue
+        current_group.signals.append(signal)
+    groups.append(current_group)
+    return groups
+
+
+def _apply_shared_boundary_pages(groups: list[_LogicalDocumentGroup]) -> None:
+    for index in range(len(groups) - 1):
+        left = groups[index]
+        right = groups[index + 1]
+        left_last = _sorted_unique_signals(left.signals)[-1]
+        right_first = _sorted_unique_signals(right.signals)[0]
+        left_kind = left.group_key[0]
+        right_kind = right.group_key[0]
+        if left.group_key == right.group_key:
+            continue
+
+        left_boundary_evidence = _adjacent_boundary_evidence(left_last, right_kind)
+        if left_boundary_evidence is not None:
+            right.signals.append(left_last)
+            left.enhanced = True
+            right.enhanced = True
+            _append_group_evidence(left, left_boundary_evidence)
+            _append_group_evidence(right, left_boundary_evidence)
+
+        right_boundary_evidence = _adjacent_boundary_evidence(right_first, left_kind)
+        if right_boundary_evidence is not None:
+            left.signals.append(right_first)
+            left.enhanced = True
+            right.enhanced = True
+            _append_group_evidence(left, right_boundary_evidence)
+            _append_group_evidence(right, right_boundary_evidence)
+
+
 def _logical_document_group_key(page: DocumentIngestionPage) -> tuple[str, str | None]:
     return page.document_kind or "UNKNOWN", clean_optional_text(page.document_subtype)
+
+
+def _build_page_structure_signal(page: DocumentIngestionPage) -> _PageStructureSignal:
+    raw_text = page.raw_text or ""
+    normalized_text = normalize_for_matching(raw_text)
+    text_source = page_text_source(page)
+    section_title_kinds = _section_title_kinds(raw_text)
+    identity_values_by_kind: dict[str, dict[str, str]] = {}
+    for document_kind, _keywords in CLASSIFICATION_RULES:
+        if document_kind in {"OTHER", "UNKNOWN"}:
+            continue
+        if document_kind == page.document_kind:
+            fields = list(page.header_fields or [])
+            if not fields:
+                fields = extract_document_header_fields(document_kind, raw_text, text_source=text_source)
+        elif document_kind in section_title_kinds or _kind_keywords_present(document_kind, normalized_text):
+            fields = extract_document_header_fields(document_kind, raw_text, text_source=text_source)
+        else:
+            fields = []
+        identity_values = _distinctive_identity_values(document_kind, fields)
+        if identity_values:
+            identity_values_by_kind[document_kind] = identity_values
+
+    return _PageStructureSignal(
+        page=page,
+        group_key=_logical_document_group_key(page),
+        section_title_kinds=section_title_kinds,
+        identity_values_by_kind=identity_values_by_kind,
+        attachment_markers=[
+            marker
+            for marker in _ATTACHMENT_BOUNDARY_MARKERS
+            if marker in normalized_text
+        ],
+    )
+
+
+def _starts_new_same_kind_document(
+    signal: _PageStructureSignal,
+    current_group: _LogicalDocumentGroup,
+) -> bool:
+    document_kind = signal.group_key[0]
+    if document_kind in {"OTHER", "UNKNOWN"}:
+        return False
+
+    signal_identity = signal.identity_values_by_kind.get(document_kind, {})
+    if not signal_identity:
+        return False
+
+    current_identity = _merged_identity_values(current_group.signals, document_kind)
+    if not current_identity:
+        return False
+
+    if not _has_document_start_evidence(signal, document_kind):
+        return False
+
+    return _identity_values_conflict(current_identity, signal_identity)
+
+
+def _adjacent_boundary_evidence(
+    signal: _PageStructureSignal,
+    document_kind: str,
+) -> dict[str, object] | None:
+    page_number = signal.page.page_number
+    if document_kind in {"OTHER", "UNKNOWN"}:
+        if not signal.attachment_markers:
+            return None
+        return {
+            "type": "attachment_boundary_marker",
+            "confidence": _SPLIT_CONFIDENCE_ATTACHMENT_MARKER,
+            "summary": (
+                f"Page {page_number} contains attachment or supporting-document markers near the packet boundary."
+            ),
+            "page_number": page_number,
+            "document_kind": document_kind,
+            "markers": signal.attachment_markers,
+        }
+    if document_kind in signal.section_title_kinds:
+        return {
+            "type": "section_title_boundary",
+            "confidence": _SPLIT_CONFIDENCE_SECTION_BOUNDARY,
+            "summary": (
+                f"Page {page_number} also contains a {document_kind} section title at the packet boundary."
+            ),
+            "page_number": page_number,
+            "document_kind": document_kind,
+        }
+    identity_values = signal.identity_values_by_kind.get(document_kind, {})
+    if identity_values and _has_document_start_evidence(signal, document_kind):
+        return {
+            "type": "adjacent_identity_boundary",
+            "confidence": _SPLIT_CONFIDENCE_ADJACENT_IDENTITY,
+            "summary": (
+                f"Page {page_number} contains {document_kind} identity evidence at the packet boundary."
+            ),
+            "page_number": page_number,
+            "document_kind": document_kind,
+            "identity_keys": sorted(identity_values),
+        }
+    return None
+
+
+def _distinct_identity_evidence(signal: _PageStructureSignal) -> dict[str, object]:
+    document_kind = signal.group_key[0]
+    identity_values = signal.identity_values_by_kind.get(document_kind, {})
+    return {
+        "type": "distinct_identity",
+        "confidence": _SPLIT_CONFIDENCE_DISTINCT_IDENTITY,
+        "summary": (
+            f"Page {signal.page.page_number} starts a new {document_kind} from distinct identity evidence."
+        ),
+        "page_number": signal.page.page_number,
+        "document_kind": document_kind,
+        "identity_keys": sorted(identity_values),
+    }
+
+
+def _append_group_evidence(
+    group: _LogicalDocumentGroup,
+    evidence: dict[str, object],
+) -> None:
+    summary = clean_optional_text(evidence.get("summary"))
+    if summary and summary not in group.reasons:
+        group.reasons.append(summary)
+    if evidence not in group.evidence:
+        group.evidence.append(evidence)
+    confidence = evidence.get("confidence")
+    if isinstance(confidence, (int, float)):
+        group.confidence = max(group.confidence, float(confidence))
+
+
+def _has_document_start_evidence(signal: _PageStructureSignal, document_kind: str) -> bool:
+    if document_kind in signal.section_title_kinds:
+        return True
+    raw_text = signal.page.raw_text or ""
+    normalized_lines = [
+        normalize_for_matching(line)
+        for line in raw_text.splitlines()[:12]
+        if line.strip()
+    ]
+    return any("page 1 of" in line or line in {"page 1", "p 1"} for line in normalized_lines)
+
+
+def _merged_identity_values(
+    signals: list[_PageStructureSignal],
+    document_kind: str,
+) -> dict[str, str]:
+    merged: dict[str, str] = {}
+    for signal in signals:
+        for key, value in signal.identity_values_by_kind.get(document_kind, {}).items():
+            merged.setdefault(key, value)
+    return merged
+
+
+def _identity_values_conflict(
+    current_identity: dict[str, str],
+    next_identity: dict[str, str],
+) -> bool:
+    for key, next_value in next_identity.items():
+        current_value = current_identity.get(key)
+        if current_value is not None and current_value != next_value:
+            return True
+    return False
+
+
+def _section_title_kinds(raw_text: str | None) -> set[str]:
+    if not raw_text:
+        return set()
+    title_lines = [
+        normalize_for_matching(line)
+        for line in raw_text.splitlines()
+        if _line_can_be_section_title(line)
+    ]
+    if not title_lines:
+        return set()
+
+    hits: set[str] = set()
+    for document_kind, keywords in CLASSIFICATION_RULES:
+        if document_kind in {"OTHER", "UNKNOWN"}:
+            continue
+        for line in title_lines:
+            if any(_keyword_matches_title_line(keyword, line) for keyword in keywords):
+                hits.add(document_kind)
+                break
+    return hits
+
+
+def _line_can_be_section_title(line: str) -> bool:
+    stripped = line.strip(" \t#.-")
+    if not stripped:
+        return False
+    if ":" in stripped and not stripped.endswith(":"):
+        return False
+    if len(stripped) > 90:
+        return False
+    words = [word for word in normalize_for_matching(stripped).split() if word]
+    return 1 <= len(words) <= 8
+
+
+def _keyword_matches_title_line(keyword: str, normalized_line: str) -> bool:
+    if not keyword or not normalized_line:
+        return False
+    if normalized_line == keyword:
+        return True
+    if normalized_line.startswith(f"{keyword} "):
+        return True
+    if normalized_line.endswith(f" {keyword}"):
+        return True
+    return f" {keyword} " in f" {normalized_line} " and len(normalized_line) <= len(keyword) + 28
+
+
+def _kind_keywords_present(document_kind: str, normalized_text: str) -> bool:
+    if not normalized_text:
+        return False
+    for candidate_kind, keywords in CLASSIFICATION_RULES:
+        if candidate_kind != document_kind:
+            continue
+        return any(keyword in normalized_text for keyword in keywords)
+    return False
+
+
+def _distinctive_identity_values(
+    document_kind: str,
+    fields: list[dict[str, object]],
+) -> dict[str, str]:
+    distinctive_keys = _distinctive_identity_keys(document_kind)
+    values: dict[str, str] = {}
+    for field in fields:
+        field_key = clean_optional_text(field.get("field_key"), lowercase=True)
+        if field_key not in distinctive_keys:
+            continue
+        value = clean_optional_text(field.get("value"))
+        if value is None:
+            continue
+        values[field_key] = value.upper()
+    return values
+
+
+def _distinctive_identity_keys(document_kind: str) -> set[str]:
+    schema = get_document_kind_schema(document_kind)
+    if schema is None:
+        return set()
+    candidate_keys = {
+        field.field_key
+        for field in schema.header_fields
+        if field.value_type == "identifier"
+    } | set(schema.matching_keys)
+    distinctive_keys: set[str] = set()
+    for key in candidate_keys:
+        normalized_key = normalize_key(key)
+        if normalized_key in _COMMON_REFERENCE_KEYS:
+            continue
+        if normalized_key.endswith("_number") or normalized_key.endswith("_reference"):
+            distinctive_keys.add(normalized_key)
+            continue
+        if normalized_key in {"sample_id", "lot_number", "voyage_number"}:
+            distinctive_keys.add(normalized_key)
+    return distinctive_keys
+
+
+def _sorted_unique_signals(signals: list[_PageStructureSignal]) -> list[_PageStructureSignal]:
+    by_page_number: dict[int, _PageStructureSignal] = {}
+    for signal in signals:
+        by_page_number[signal.page.page_number] = signal
+    return [
+        by_page_number[page_number]
+        for page_number in sorted(by_page_number)
+    ]
+
+
+def _shared_page_numbers_for_groups(groups: list[_LogicalDocumentGroup]) -> set[int]:
+    counts: Counter[int] = Counter()
+    for group in groups:
+        for signal in _sorted_unique_signals(group.signals):
+            counts[signal.page.page_number] += 1
+    return {page_number for page_number, count in counts.items() if count > 1}
 
 
 def _coerce_logical_document_payload(document: object) -> dict[str, object]:

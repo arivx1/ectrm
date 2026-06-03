@@ -20,7 +20,13 @@ import {
   createPreTradeRecommendationRun,
   createPreTradeReviewItem,
   createPreTradeScenario,
+  loadPreTradeHedgeRecommendations,
+  loadPreTradeNettingSets,
   loadPreTradeReviewDrift,
+  loadPreTradeRiskScenarios,
+  promotePreTradeHedgeRecommendationFromGovernance,
+  promotePreTradeNettingSetFromGovernance,
+  promotePreTradeRiskScenarioFromGovernance,
 } from '../src/entities/pretrade/api.ts'
 
 const draft = {
@@ -307,4 +313,214 @@ test('loadPreTradeReviewDrift fetches the review drift contract', async () => {
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer token-123')
   assert.equal((init as RequestInit | undefined)?.cache, 'no-store')
+})
+
+test('netting-set promotion endpoints use the governance contract', async () => {
+  fetchJsonMock.mockResolvedValueOnce([])
+  postJsonMock.mockResolvedValueOnce({
+    netting_set_id: 7,
+    netting_set_key: 'netting-draft-7',
+    name: 'GAS_PHYS HENRY_HUB Exact netting review draft',
+    status: 'REVIEW_DRAFT',
+    owner: 'risk.owner',
+    review_note: 'Owner review requested.',
+    source_promotion_candidate_type: 'NETTING_SET',
+    source_promotion_status: 'WATCH',
+    source_promotion_score: 43,
+    source_review_count: 1,
+    source_approved_review_count: 1,
+    source_booked_review_count: 0,
+    source_override_count: 0,
+    source_run_count: 1,
+    source_latest_review_id: 22,
+    source_latest_run_id: 44,
+    source_sample_review_ids: [22],
+    source_sample_run_ids: [44],
+    source_evidence_summary: '1 review, 1 approved, 0 booked, 0 overrides, 1 recommendation run.',
+    source_promotion_rationale: 'Reviewer activity reused netting set evidence.',
+    source_stop_reasons: ['No booked trade has reused this pattern yet.'],
+    draft,
+    netting_candidates: [],
+    created_at: '2026-04-24T18:00:00Z',
+    created_by: 'trader_two',
+    updated_at: '2026-04-24T18:00:00Z',
+    updated_by: 'trader_two',
+    version: 1,
+    can_edit: true,
+  })
+
+  await loadPreTradeNettingSets('http://api.test', 'token-123')
+  await promotePreTradeNettingSetFromGovernance('http://api.test', 'token-123', {
+    owner: 'risk.owner',
+    review_note: 'Owner review requested.',
+  })
+
+  const [getUrl, getInit] = fetchJsonMock.mock.calls[0]
+  assert.equal(getUrl, 'http://api.test/pretrade/netting-sets')
+  assert.equal(new Headers((getInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer token-123')
+  assert.equal((getInit as RequestInit | undefined)?.cache, 'no-store')
+
+  const [postUrl, body, postInit] = postJsonMock.mock.calls[0]
+  assert.equal(postUrl, 'http://api.test/pretrade/netting-sets/from-promotion')
+  assert.deepEqual(body, {
+    owner: 'risk.owner',
+    review_note: 'Owner review requested.',
+  })
+  assert.equal(new Headers((postInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer token-123')
+})
+
+test('hedge-recommendation promotion endpoints use the governance contract', async () => {
+  fetchJsonMock.mockResolvedValueOnce([])
+  postJsonMock.mockResolvedValueOnce({
+    hedge_recommendation_id: 9,
+    hedge_recommendation_key: 'hedge-draft-9',
+    name: 'GAS_PHYS HENRY_HUB Swap hedge review draft',
+    status: 'REVIEW_DRAFT',
+    owner: 'risk.owner',
+    review_note: 'Owner review requested.',
+    source_promotion_candidate_type: 'HEDGE_RECOMMENDATION',
+    source_promotion_status: 'WATCH',
+    source_promotion_score: 72,
+    source_review_count: 1,
+    source_approved_review_count: 1,
+    source_booked_review_count: 1,
+    source_override_count: 1,
+    source_run_count: 1,
+    source_latest_review_id: 22,
+    source_latest_run_id: 44,
+    source_sample_review_ids: [22],
+    source_sample_run_ids: [44],
+    source_evidence_summary: '1 review, 1 approved, 1 booked, 1 override, 1 recommendation run.',
+    source_promotion_rationale: 'Reviewer activity reused hedge recommendation evidence.',
+    source_stop_reasons: ['Promotion evidence includes override decisions.'],
+    source_recommendation_stance: 'ESCALATE',
+    source_recommendation_score: 70,
+    source_recommendation_headline: 'Escalate before capture.',
+    draft,
+    residual_exposure: null,
+    hedge_recommendation: {
+      instrument_type: 'SWAP',
+      decision_key: 'linear_basis_or_floating_swap',
+      rationale: 'Review an index-linked swap.',
+      target_delta: -26000,
+      hedge_ratio: 1,
+      decision_factors: ['residual_delta=26000'],
+      policy_stops: [],
+      source_refs: [],
+    },
+    rejected_alternatives: [],
+    missing_evidence: [],
+    created_at: '2026-04-24T18:00:00Z',
+    created_by: 'trader_two',
+    updated_at: '2026-04-24T18:00:00Z',
+    updated_by: 'trader_two',
+    version: 1,
+    can_edit: true,
+  })
+
+  await loadPreTradeHedgeRecommendations('http://api.test', 'token-123')
+  await promotePreTradeHedgeRecommendationFromGovernance('http://api.test', 'token-123', {
+    owner: 'risk.owner',
+    review_note: 'Owner review requested.',
+  })
+
+  const [getUrl, getInit] = fetchJsonMock.mock.calls[0]
+  assert.equal(getUrl, 'http://api.test/pretrade/hedge-recommendations')
+  assert.equal(new Headers((getInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer token-123')
+  assert.equal((getInit as RequestInit | undefined)?.cache, 'no-store')
+
+  const [postUrl, body, postInit] = postJsonMock.mock.calls[0]
+  assert.equal(postUrl, 'http://api.test/pretrade/hedge-recommendations/from-promotion')
+  assert.deepEqual(body, {
+    owner: 'risk.owner',
+    review_note: 'Owner review requested.',
+  })
+  assert.equal(new Headers((postInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer token-123')
+})
+
+test('risk-scenario promotion endpoints use the governance contract', async () => {
+  fetchJsonMock.mockResolvedValueOnce([])
+  postJsonMock.mockResolvedValueOnce({
+    risk_scenario_id: 11,
+    risk_scenario_key: 'risk-draft-11',
+    name: 'GAS_PHYS HENRY_HUB risk scenario review draft',
+    status: 'REVIEW_DRAFT',
+    owner: 'risk.owner',
+    review_note: 'Owner review requested.',
+    source_promotion_candidate_type: 'RISK_SCENARIO',
+    source_promotion_status: 'WATCH',
+    source_promotion_score: 58,
+    source_review_count: 1,
+    source_approved_review_count: 1,
+    source_booked_review_count: 0,
+    source_override_count: 0,
+    source_run_count: 1,
+    source_latest_review_id: 22,
+    source_latest_run_id: 44,
+    source_sample_review_ids: [22],
+    source_sample_run_ids: [44],
+    source_evidence_summary: '1 review, 1 approved, 0 booked, 0 overrides, 1 recommendation run.',
+    source_promotion_rationale: 'Reviewer activity reused Risk triage evidence.',
+    source_stop_reasons: ['No booked trade has reused this pattern yet.'],
+    source_review_name: 'Risk triage offset review',
+    source_review_status: 'APPROVED',
+    source_review_thesis: 'Offset prompt-month exposure.',
+    source_review_notes: 'Review residual exposure before capture.',
+    source_review_owner: 'risk.owner',
+    source_recommendation_stance: 'PROCEED',
+    source_recommendation_score: 82,
+    source_recommendation_headline: 'Proceed with standard controls.',
+    draft,
+    enrichment: {
+      opportunity_category: 'EXPOSURE_OFFSET',
+      hedge_intent: 'NO_HEDGE',
+      residual_exposure_summary: 'Offsets current exposure.',
+      source_freshness_summary: 'Live sources are fresh.',
+      reviewer_focus: ['Confirm residual exposure after proposed trade.'],
+      recommendation_run_id: 44,
+      recommendation_run_key: 'run-44',
+      recommendation_stance: 'PROCEED',
+      recommendation_score: 82,
+      recommendation_headline: 'Proceed with standard controls.',
+      captured_at: '2026-04-24T18:00:00Z',
+    },
+    residual_exposure: {
+      current_net_position: 25000,
+      proposed_trade_delta: -25000,
+      residual_after_trade: 0,
+      direction_before: 'LONG',
+      direction_after: 'FLAT',
+      exposure_effect: 'OFFSETS',
+      detail: 'The draft offsets current exposure.',
+      source_refs: [],
+    },
+    input_snapshots: [],
+    missing_evidence: [],
+    reviewer_focus: ['Confirm residual exposure after proposed trade.'],
+    created_at: '2026-04-24T18:00:00Z',
+    created_by: 'trader_two',
+    updated_at: '2026-04-24T18:00:00Z',
+    updated_by: 'trader_two',
+    version: 1,
+    can_edit: true,
+  })
+
+  await loadPreTradeRiskScenarios('http://api.test', 'token-123')
+  await promotePreTradeRiskScenarioFromGovernance('http://api.test', 'token-123', {
+    owner: 'risk.owner',
+    review_note: 'Owner review requested.',
+  })
+
+  const [getUrl, getInit] = fetchJsonMock.mock.calls[0]
+  assert.equal(getUrl, 'http://api.test/pretrade/risk-scenarios')
+  assert.equal(new Headers((getInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer token-123')
+  assert.equal((getInit as RequestInit | undefined)?.cache, 'no-store')
+
+  const [postUrl, body, postInit] = postJsonMock.mock.calls[0]
+  assert.equal(postUrl, 'http://api.test/pretrade/risk-scenarios/from-promotion')
+  assert.deepEqual(body, {
+    owner: 'risk.owner',
+    review_note: 'Owner review requested.',
+  })
+  assert.equal(new Headers((postInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer token-123')
 })

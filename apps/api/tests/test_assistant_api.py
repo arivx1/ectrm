@@ -2602,6 +2602,60 @@ class AssistantApiTests(unittest.TestCase):
             stored_review_context.pop("delegated_ability_override_reason", None)
             self.assertEqual(record.payload["review_context"], stored_review_context)
 
+    def test_assistant_prompt_uses_governed_stop_condition_when_provider_returns_empty_text(self) -> None:
+        token = self._create_session_token()
+        self._create_agent(
+            agent_id="trade-demo-agent",
+            name="Trade Demo Agent",
+            status="ACTIVE",
+            allowed_workspaces=["assistant"],
+            capabilities=["ACTION", "EXPLAIN"],
+            allowed_action_types=["create_trade"],
+            provider="openai",
+            model="gpt-5-mini",
+        )
+
+        async def _empty_openai_response(*, url, headers, payload, provider_label):
+            del url, headers, payload, provider_label
+            return {"output": [], "usage": {"input_tokens": 18, "output_tokens": 0}}
+
+        with patch(
+            "apps.api.app.domains.assistant.services.chat._post_json",
+            side_effect=_empty_openai_response,
+        ):
+            response = self.client.post(
+                "/assistant/respond",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "agent_id": "trade-demo-agent",
+                    "workspace": "assistant",
+                    "use_live_tools": False,
+                    "messages": [
+                        {"role": "user", "content": "This is for a demo, so do a crude trade."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["action_requests"], [])
+        self.assertIn("could not stage a governed action", payload["message"]["content"])
+        self.assertIn("trade_id", payload["message"]["content"])
+        self.assertIn("book", payload["message"]["content"])
+        self.assertIn("No trade or business record was created", payload["message"]["content"])
+        self.assertTrue(
+            any("deterministic stop condition" in warning for warning in payload["warnings"]),
+            msg=payload["warnings"],
+        )
+
+        with self.SessionLocal() as session:
+            run_record = session.query(AssistantRun).one()
+            self.assertEqual(run_record.status, "COMPLETED")
+            self.assertIsNone(run_record.error_detail)
+            self.assertIn("could not stage a governed action", run_record.assistant_message)
+            self.assertEqual(session.query(AssistantActionRequest).count(), 0)
+            self.assertEqual(session.query(Trade).count(), 0)
+
     def test_execute_capable_agent_autonomously_executes_cancel_trade_action(self) -> None:
         token = self._create_session_token()
         self._create_trade_with_event(trade_id="T-1010")

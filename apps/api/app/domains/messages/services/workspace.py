@@ -1030,6 +1030,7 @@ def to_messaging_workspace_conversation_out(
         metrics=build_conversation_metrics(record.conversation_id, workspace_counts),
         members=members,
         timeline=timeline,
+        source_provider="slack" if record.conversation_id.startswith("slack-") else "ectrm",
     )
 
 
@@ -1073,6 +1074,8 @@ def build_thread_metadata(
 
 
 def build_unread_count(conversation_id: str) -> int:
+    if conversation_id.startswith("slack-"):
+        return 0
     for definition in DEFAULT_MESSAGING_WORKSPACE_CONVERSATIONS:
         if definition.conversation_id == conversation_id:
             return definition.unread_count
@@ -1083,6 +1086,11 @@ def build_conversation_highlights(
     conversation_id: str,
     counts: MessagingWorkspaceCounts,
 ) -> list[str]:
+    if conversation_id.startswith("slack-"):
+        return [
+            "Synced from Slack into the durable ECTRM messaging center.",
+            "Messages sent from this lane post to Slack and keep a local mirror.",
+        ]
     if conversation_id == "ectrm-assistant":
         return [
             "Action draft AR-204 is staged for review.",
@@ -1115,6 +1123,11 @@ def build_conversation_metrics(
     conversation_id: str,
     counts: MessagingWorkspaceCounts,
 ) -> list[MessagingWorkspaceMetricOut]:
+    if conversation_id.startswith("slack-"):
+        return [
+            MessagingWorkspaceMetricOut(label="Source", value="Slack"),
+            MessagingWorkspaceMetricOut(label="Local mirror", value="Active"),
+        ]
     if conversation_id == "ectrm-assistant":
         return [
             MessagingWorkspaceMetricOut(label="Governed drafts", value="1 new"),

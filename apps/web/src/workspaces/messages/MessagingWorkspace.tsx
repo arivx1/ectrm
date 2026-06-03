@@ -15,9 +15,13 @@ import {
   type AssistantStreamEvent,
 } from '../../entities/assistant/api'
 import {
+  createMessagingSlackPost,
   createMessagingWorkspacePost,
+  loadMessagingSlackSettings,
   loadMessagingWorkspaceState,
+  syncMessagingSlackWorkspace,
   updateMessagingWorkspacePost,
+  type MessagingSlackRuntimeSettings,
   type MessagingWorkspaceState,
 } from '../../entities/messages/api'
 import {
@@ -233,6 +237,10 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
   const [assistantReplyChannelId, setAssistantReplyChannelId] = useState<string | null>(null)
   const [workspaceLoadError, setWorkspaceLoadError] = useState<string>('')
   const [workspaceLoading, setWorkspaceLoading] = useState<boolean>(!initialWorkspaceState)
+  const [slackSettings, setSlackSettings] = useState<MessagingSlackRuntimeSettings | null>(null)
+  const [slackSettingsError, setSlackSettingsError] = useState<string>('')
+  const [slackSyncing, setSlackSyncing] = useState<boolean>(false)
+  const [slackSyncStatus, setSlackSyncStatus] = useState<string>('')
   const feedRef = useRef<HTMLDivElement | null>(null)
   const composerFormRef = useRef<HTMLFormElement | null>(null)
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -271,7 +279,11 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
   const selectedThreadDraft = selectedThreadRoot
     ? threadDraftsByRootId[selectedThreadRoot.id] ?? ''
     : ''
-  const sendDisabled = !selectedChannel || selectedChannelDraft.trim().length === 0
+  const selectedChannelIsSlack = selectedChannel?.sourceProvider === 'slack'
+  const sendDisabled =
+    !selectedChannel ||
+    selectedChannelDraft.trim().length === 0 ||
+    Boolean(selectedChannelIsSlack && !authSession?.accessToken)
   const assistantReplyPending = selectedChannel
     ? assistantReplyChannelId === selectedChannel.id
     : false
@@ -341,6 +353,34 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
       active = false
     }
   }, [authSession?.accessToken])
+
+  useEffect(() => {
+    let active = true
+
+    void loadMessagingSlackSettings(appConfig.apiBase)
+      .then((settings) => {
+        if (!active) {
+          return
+        }
+        setSlackSettings(settings)
+        setSlackSettingsError('')
+      })
+      .catch((error) => {
+        if (!active) {
+          return
+        }
+        setSlackSettings(null)
+        setSlackSettingsError(
+          error instanceof Error
+            ? error.message
+            : 'Could not load Slack messaging connector settings.',
+        )
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
 
   function handleDraftChange(event: ChangeEvent<HTMLTextAreaElement>) {
     if (!selectedChannel) {
@@ -556,6 +596,37 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
     onSelectConversation(conversationId)
   }
 
+  async function handleSyncSlack() {
+    if (!authSession?.accessToken) {
+      setSlackSyncStatus('Sign in before syncing Slack into Messages.')
+      return
+    }
+    if (!slackSettings?.configured) {
+      setSlackSyncStatus('Slack messaging is not configured on the API.')
+      return
+    }
+
+    setSlackSyncing(true)
+    setSlackSyncStatus('')
+    try {
+      const result = await syncMessagingSlackWorkspace(appConfig.apiBase, {
+        accessToken: authSession.accessToken,
+      })
+      const state = await loadMessagingWorkspaceState(appConfig.apiBase, {
+        accessToken: authSession.accessToken,
+      })
+      setChannels(buildMessagingWorkspaceChannelsFromRecords(state.conversations))
+      setWorkspaceLoadError('')
+      setSlackSyncStatus(
+        `Synced ${result.synced_channel_count.toLocaleString()} Slack conversation${result.synced_channel_count === 1 ? '' : 's'} with ${result.imported_message_count.toLocaleString()} new message${result.imported_message_count === 1 ? '' : 's'}.`,
+      )
+    } catch (error) {
+      setSlackSyncStatus(error instanceof Error ? error.message : 'Could not sync Slack messages.')
+    } finally {
+      setSlackSyncing(false)
+    }
+  }
+
   function handleThreadSelect(rootMessageId: string | null) {
     if (!selectedChannel) {
       return
@@ -626,7 +697,9 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
     },
   ): Promise<MessagingWorkspacePost> {
     const trimmedBody = body.trim()
-    const persistedPost = await createMessagingWorkspacePost(
+    const persistPost =
+      channel.sourceProvider === 'slack' ? createMessagingSlackPost : createMessagingWorkspacePost
+    const persistedPost = await persistPost(
       appConfig.apiBase,
       {
         conversation_id: channel.id,
@@ -1423,6 +1496,7 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
                     <strong>{selectedChannel.label}</strong>
                     <span>{selectedChannel.kind === 'dm' ? 'Direct message' : 'Channel'}</span>
                     <span>{selectedChannel.connectedWorkspace}</span>
+                    <span>{selectedChannel.sourceProvider === 'slack' ? 'Slack mirror' : 'ECTRM lane'}</span>
                   </div>
                   <p>{selectedChannel.description}</p>
                   <small>{selectedChannel.topic}</small>
@@ -1430,6 +1504,19 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
                 <div className="messaging-desk-channel-header-meta">
                   <span>{selectedChannel.members.length.toLocaleString()} members</span>
                   <span>{selectedChannel.unreadCount.toLocaleString()} unread</span>
+                  <button
+                    type="button"
+                    className="button button-secondary messaging-desk-sync-button"
+                    onClick={() => void handleSyncSlack()}
+                    disabled={slackSyncing || !authSession?.accessToken || slackSettings?.configured !== true}
+                    title={
+                      slackSettings?.configured
+                        ? 'Sync configured Slack conversations into Messages'
+                        : 'Configure Slack on the API before syncing'
+                    }
+                  >
+                    {slackSyncing ? 'Syncing...' : 'Sync Slack'}
+                  </button>
                 </div>
               </header>
 
@@ -1562,7 +1649,11 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
                 />
                 <div className="messaging-desk-composer-foot">
                   <small>
-                    {authSession
+                    {selectedChannel.sourceProvider === 'slack'
+                      ? authSession
+                        ? `Posting to Slack as ${authSession.user.display_name}. ${selectedChannel.composerHint}`
+                        : `Sign in to post to Slack. ${selectedChannel.composerHint}`
+                      : authSession
                       ? `Replying as ${authSession.user.display_name}. ${selectedChannel.composerHint}`
                       : `Prototype composer while signed out. ${selectedChannel.composerHint}`}
                   </small>
@@ -1580,12 +1671,18 @@ export function MessagingWorkspace(props: MessagingWorkspaceProps) {
                       className="button button-primary"
                       disabled={sendDisabled || assistantReplyPending}
                     >
-                      {assistantReplyPending ? 'Agent drafting...' : 'Send message'}
+                      {assistantReplyPending
+                        ? 'Agent drafting...'
+                        : selectedChannel.sourceProvider === 'slack'
+                          ? 'Send to Slack'
+                          : 'Send message'}
                     </button>
                   </div>
                 </div>
                 <p className="messaging-desk-composer-status">
                   {selectedChannelStatus ||
+                    slackSyncStatus ||
+                    slackSettingsError ||
                     workspaceLoadError ||
                     'Messages posted here stay in the visible thread instead of routing away.'}
                 </p>

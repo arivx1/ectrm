@@ -23,6 +23,7 @@ import {
   stageSelectedDocumentRecordCandidateApprovalRequest,
 } from '../../entities/documents/api'
 import { DocumentFacetEditor } from '../../features/documents/DocumentFacetEditor'
+import { DocumentPacketSplitEditor } from '../../features/documents/DocumentPacketSplitEditor'
 import {
   activeDocumentFacetValues,
   documentFacetDisplayValues,
@@ -570,6 +571,7 @@ export function LibraryWorkspace({
   onActiveDocumentChange,
   onOpenOperationsWorkspace,
 }: LibraryWorkspaceProps) {
+  const controller = useDocumentIngestionController({ authSession })
   const {
     documents,
     processorSettings,
@@ -618,7 +620,7 @@ export function LibraryWorkspace({
     toggleDocumentExpanded,
     saveErrors,
     savingTarget,
-  } = useDocumentIngestionController({ authSession })
+  } = controller
   const [viewMode, setViewMode] = useState<DocumentLibraryViewMode>('list')
   const [sortMode, setSortMode] = useState<DocumentLibrarySortMode>('updated')
   const [searchQuery, setSearchQuery] = useState('')
@@ -1603,6 +1605,12 @@ export function LibraryWorkspace({
                     </div>
                   ) : null}
                 </section>
+
+                <DocumentPacketSplitEditor
+                  key={`${documentPage.document_id}:${documentPage.version}:packet-split`}
+                  controller={controller}
+                  document={documentPage}
+                />
 
                 <section className="library-document-page-section library-document-pages-section">
                   <div className="library-section-head">

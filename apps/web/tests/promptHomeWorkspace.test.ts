@@ -31,7 +31,10 @@ import {
   selectPromptHomeDisplayPriceIndices,
   sortPromptHomeDisplayPriceIndices,
 } from "../src/workspaces/prompt/promptHomePrices";
-import { PromptHomeWorkspace } from "../src/workspaces/prompt/PromptHomeWorkspace";
+import {
+  PromptHomeWorkspace,
+  shouldSubmitPromptHomeComposerKey,
+} from "../src/workspaces/prompt/PromptHomeWorkspace";
 
 const defaultCounts = {
   activeTrades: 12,
@@ -108,6 +111,26 @@ function buildPromptHomeVesselDelivery(
   } as DeliveryRecord;
 }
 
+test("prompt home composer submits on unmodified Enter only", () => {
+  assert.equal(shouldSubmitPromptHomeComposerKey({ key: "Enter" }), true);
+  assert.equal(
+    shouldSubmitPromptHomeComposerKey({ key: "Enter", ctrlKey: true }),
+    false,
+  );
+  assert.equal(
+    shouldSubmitPromptHomeComposerKey({ key: "Enter", shiftKey: true }),
+    false,
+  );
+  assert.equal(
+    shouldSubmitPromptHomeComposerKey({
+      key: "Enter",
+      nativeEvent: { isComposing: true },
+    }),
+    false,
+  );
+  assert.equal(shouldSubmitPromptHomeComposerKey({ key: "A" }), false);
+});
+
 test("prompt home renders guided prompts without legacy home actions", () => {
   const markup = renderToStaticMarkup(
     createElement(PromptHomeWorkspace, {
@@ -120,6 +143,7 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   );
   const deskTimeIndex = markup.indexOf("Desk Time");
   const pricesIndex = markup.indexOf("Market Prices");
+  const newsIndex = markup.indexOf("Market News");
   const mapIndex = markup.indexOf("Open Map Workspace");
   const documentUploadIndex = markup.indexOf("Upload documents");
   const communicationIndex = markup.indexOf("Communication center");
@@ -130,14 +154,10 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.doesNotMatch(markup, /Show live context/);
   assert.doesNotMatch(markup, />Assistant Console</);
   assert.doesNotMatch(markup, /Contextual starting points/);
-  assert.doesNotMatch(markup, /Clear operations blockers/);
   assert.doesNotMatch(markup, /Recent prompt threads/);
   assert.doesNotMatch(markup, /Old Console/);
   assert.doesNotMatch(markup, /Go direct/);
   assert.doesNotMatch(markup, /Open Live Desk/);
-  assert.doesNotMatch(markup, /Open Trade Capture/);
-  assert.doesNotMatch(markup, /Open Work Queue/);
-  assert.doesNotMatch(markup, /Open Settlement/);
   assert.doesNotMatch(markup, /Using openai when you send\./);
   assert.doesNotMatch(markup, /Use your microphone to dictate the prompt\./);
   assert.doesNotMatch(markup, /What needs my attention right now\?/);
@@ -169,11 +189,25 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.doesNotMatch(markup, /Governed Review/);
   assert.doesNotMatch(markup, /Review queue/);
   assert.doesNotMatch(markup, /Sign in to review PDFs/);
+  assert.doesNotMatch(markup, /Desk brief and next work/);
+  assert.doesNotMatch(
+    markup,
+    /A compact readout of open desk work, market context, and safe handoffs/,
+  );
+  assert.doesNotMatch(markup, /Ask What Matters/);
+  assert.doesNotMatch(markup, /Desk snapshot/);
+  assert.doesNotMatch(markup, /Clear operations blockers/);
+  assert.doesNotMatch(markup, />Open Work Queue<\/button>/);
+  assert.doesNotMatch(markup, />Open Settlement<\/button>/);
+  assert.doesNotMatch(markup, />Open Trade Capture<\/button>/);
+  assert.doesNotMatch(markup, /Fast Starts/);
+  assert.doesNotMatch(markup, /Book Trade/);
   assert.ok(cardFilterIndex >= 0);
   assert.ok(deskTimeIndex >= 0);
   assert.ok(deskTimeIndex > cardFilterIndex);
   assert.ok(pricesIndex > deskTimeIndex);
-  assert.ok(mapIndex > pricesIndex);
+  assert.ok(newsIndex > pricesIndex);
+  assert.ok(mapIndex > newsIndex);
   assert.ok(documentUploadIndex > mapIndex);
   assert.ok(communicationIndex > documentUploadIndex);
   assert.ok(promptCardIndex > documentUploadIndex);
@@ -184,7 +218,7 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.match(markup, /<strong id="prompt-home-card-filter-heading">Home cards<\/strong>/);
   assert.match(markup, /<span>View<\/span>/);
   assert.match(markup, /Local Home/);
-  assert.match(markup, /6 visible · 0 hidden/);
+  assert.match(markup, /7 visible · 0 hidden/);
   assert.match(
     markup,
     /aria-expanded="false" aria-controls="prompt-home-card-filter-panel"/,
@@ -213,6 +247,7 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     markup,
     /id="prompt-home-prices-panel" class="prompt-home-prices-card-body"/,
   );
+  assert.match(markup, /class="market-news-panel market-news-panel-table"/);
   assert.doesNotMatch(markup, /No latest price marks/);
   assert.match(markup, /aria-label="Sort prices by Product"/);
   assert.match(markup, /aria-label="Sort prices by Change"/);
@@ -232,6 +267,12 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.match(markup, /Market price marks/);
   assert.match(markup, /0 latest marks · 1 active index/);
   assert.match(markup, /Code, market, commodity/);
+  assert.match(markup, /Market Location/);
+  assert.match(markup, /All terms/);
+  assert.match(markup, /Supply Effect/);
+  assert.match(markup, /All supply effects/);
+  assert.match(markup, /Demand Effect/);
+  assert.match(markup, /All demand effects/);
   assert.match(markup, /All providers/);
   assert.match(markup, /All commodities/);
   assert.match(markup, /All indices/);
@@ -427,7 +468,6 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   );
   assert.match(markup, /Open Messages Workspace/);
   assert.doesNotMatch(markup, /Open Assistant Console/);
-  assert.doesNotMatch(markup, /Open Work Queue/);
   assert.doesNotMatch(markup, /Open Operations/);
   assert.doesNotMatch(markup, /Sign In to Review Communication/);
   assert.match(

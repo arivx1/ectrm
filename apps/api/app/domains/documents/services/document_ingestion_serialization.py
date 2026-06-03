@@ -12,11 +12,13 @@ from apps.api.app.config import settings
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.document_logical_document import DocumentLogicalDocument
+from apps.api.app.models.document_logical_document_page import DocumentLogicalDocumentPage
 from apps.api.app.schemas.document import DocumentActionPlanOut
 from apps.api.app.schemas.document import DocumentExtractedFieldOut
 from apps.api.app.schemas.document import DocumentIngestionOut
 from apps.api.app.schemas.document import DocumentLinkageAssessmentOut
 from apps.api.app.schemas.document import DocumentIngestionPageOut
+from apps.api.app.schemas.document import DocumentLogicalDocumentPageOut
 from apps.api.app.schemas.document import DocumentLogicalDocumentOut
 from apps.api.app.schemas.document import DocumentRecordLinkOut
 from apps.api.app.schemas.document import DocumentProcessorDocumentTraceOut
@@ -44,6 +46,7 @@ from .document_ingestion_storage import document_page_preview_absolute_path
 from .document_ingestion_storage import document_page_preview_exists
 from .document_ingestion_storage import stored_pdf_absolute_path
 from .document_logical_documents import load_document_logical_documents_by_document_id
+from .document_logical_documents import load_document_logical_document_memberships_by_document_id
 from .document_understanding import build_document_page_understanding
 from .document_understanding import build_document_understanding
 
@@ -150,6 +153,7 @@ def serialize_documents(
     *,
     preloaded_pages: Optional[list[DocumentIngestionPage]] = None,
     preloaded_logical_documents: Optional[list[DocumentLogicalDocument]] = None,
+    preloaded_logical_document_memberships: Optional[list[DocumentLogicalDocumentPage]] = None,
 ) -> list[DocumentIngestionOut]:
     document_ids = [document.document_id for document in documents]
     pages = preloaded_pages
@@ -176,6 +180,15 @@ def serialize_documents(
         logical_documents_by_document: dict[str, list[DocumentLogicalDocument]] = defaultdict(list)
         for logical_document in preloaded_logical_documents:
             logical_documents_by_document[logical_document.document_id].append(logical_document)
+    if preloaded_logical_document_memberships is None:
+        logical_document_memberships_by_document = load_document_logical_document_memberships_by_document_id(
+            db,
+            document_ids=document_ids,
+        )
+    else:
+        logical_document_memberships_by_document: dict[str, list[DocumentLogicalDocumentPage]] = defaultdict(list)
+        for membership in preloaded_logical_document_memberships:
+            logical_document_memberships_by_document[membership.document_id].append(membership)
     record_links_by_document = load_document_record_links_by_document_id(db, document_ids=document_ids)
     facet_values_by_document = load_document_facet_values_by_document_id(db, document_ids=document_ids)
     activity_events_by_document = load_document_activity_events_by_document_id(db, document_ids=document_ids)
@@ -184,6 +197,7 @@ def serialize_documents(
     for document in documents:
         document_pages = pages_by_document.get(document.document_id, [])
         persisted_logical_documents = logical_documents_by_document.get(document.document_id, [])
+        persisted_logical_document_memberships = logical_document_memberships_by_document.get(document.document_id, [])
         document_record_links = record_links_by_document.get(document.document_id, [])
         document_facet_values = facet_values_by_document.get(document.document_id, [])
         document_activity_events = activity_events_by_document.get(document.document_id, [])
@@ -259,9 +273,10 @@ def serialize_documents(
         serialized_logical_documents = _serialize_logical_documents(
             document_id=document.document_id,
             logical_documents=persisted_logical_documents,
+            memberships=persisted_logical_document_memberships,
             pages=document_pages,
         )
-        logical_document_by_page_number = _logical_document_by_page_number(serialized_logical_documents)
+        logical_documents_by_page_number = _logical_documents_by_page_number(serialized_logical_documents)
         for page_index, page in enumerate(document_pages):
             preview_available = document_page_preview_exists(
                 document_id=page.document_id,
@@ -272,7 +287,8 @@ def serialize_documents(
                 preview_available=preview_available,
             )
             page_understandings.append(page_understanding)
-            page_logical_document = logical_document_by_page_number.get(page.page_number)
+            page_logical_documents = logical_documents_by_page_number.get(page.page_number, [])
+            page_logical_document = page_logical_documents[0] if page_logical_documents else None
             serialized_pages.append(
                 DocumentIngestionPageOut(
                     page_id=page.page_id or 0,
@@ -283,6 +299,14 @@ def serialize_documents(
                     logical_document_key=(
                         page_logical_document.logical_document_key if page_logical_document is not None else None
                     ),
+                    logical_document_ids=[
+                        logical_document.logical_document_id
+                        for logical_document in page_logical_documents
+                    ],
+                    logical_document_keys=[
+                        logical_document.logical_document_key
+                        for logical_document in page_logical_documents
+                    ],
                     classification_status=page.classification_status,
                     extraction_status=page.extraction_status,
                     document_kind=page.document_kind,
@@ -371,20 +395,35 @@ def _serialize_logical_documents(
     *,
     document_id: str,
     logical_documents: list[DocumentLogicalDocument],
+    memberships: list[DocumentLogicalDocumentPage],
     pages: list[DocumentIngestionPage],
 ) -> list[DocumentLogicalDocumentOut]:
     if logical_documents:
-        return [
-            _logical_document_row_to_out(
-                row,
-                pages=[
+        memberships_by_logical_document: dict[str, list[DocumentLogicalDocumentPage]] = defaultdict(list)
+        for membership in memberships:
+            memberships_by_logical_document[membership.logical_document_id].append(membership)
+        page_by_id = {page.page_id: page for page in pages if page.page_id is not None}
+        serialized_rows: list[DocumentLogicalDocumentOut] = []
+        for row in sorted(logical_documents, key=lambda item: item.sequence_number):
+            row_memberships = sorted(
+                memberships_by_logical_document.get(row.logical_document_id, []),
+                key=lambda item: (item.sequence_number, item.page_number),
+            )
+            row_pages = [
+                page_by_id[membership.page_id]
+                for membership in row_memberships
+                if membership.page_id in page_by_id
+            ]
+            if not row_pages:
+                row_pages = [
                     page
                     for page in pages
                     if row.page_start <= page.page_number <= row.page_end
-                ],
+                ]
+            serialized_rows.append(
+                _logical_document_row_to_out(row, pages=row_pages, memberships=row_memberships)
             )
-            for row in sorted(logical_documents, key=lambda item: item.sequence_number)
-        ]
+        return serialized_rows
 
     now = datetime.now(timezone.utc)
     estimates = build_logical_document_estimates(pages, document_id=document_id)
@@ -407,6 +446,7 @@ def _serialize_logical_documents(
             reviewed_at=estimate.get("reviewed_at") if isinstance(estimate.get("reviewed_at"), datetime) else None,
             reviewed_by=clean_optional_text(estimate.get("reviewed_by")),
             provenance=dict(estimate.get("provenance") or {}),
+            page_memberships=[],
             routing_assessment=build_document_routing_assessment(
                 pages=[
                     page
@@ -429,9 +469,12 @@ def _logical_document_row_to_out(
     row: DocumentLogicalDocument,
     *,
     pages: list[DocumentIngestionPage],
+    memberships: list[DocumentLogicalDocumentPage],
 ) -> DocumentLogicalDocumentOut:
     provenance = dict(row.provenance or {})
-    page_numbers = provenance.get("source_page_numbers")
+    ordered_memberships = sorted(memberships, key=lambda item: (item.sequence_number, item.page_number))
+    membership_page_numbers = [membership.page_number for membership in ordered_memberships]
+    page_numbers = membership_page_numbers or provenance.get("source_page_numbers")
     if not isinstance(page_numbers, list):
         page_numbers = list(range(row.page_start, row.page_end + 1))
     return DocumentLogicalDocumentOut(
@@ -452,6 +495,10 @@ def _logical_document_row_to_out(
         reviewed_at=row.reviewed_at,
         reviewed_by=row.reviewed_by,
         provenance=provenance,
+        page_memberships=[
+            _logical_document_membership_to_out(membership)
+            for membership in ordered_memberships
+        ],
         routing_assessment=build_document_routing_assessment(pages, review_status=row.review_status),
         created_at=row.created_at,
         created_by=row.created_by,
@@ -461,14 +508,39 @@ def _logical_document_row_to_out(
     )
 
 
-def _logical_document_by_page_number(
+def _logical_documents_by_page_number(
     logical_documents: list[DocumentLogicalDocumentOut],
-) -> dict[int, DocumentLogicalDocumentOut]:
-    mapping: dict[int, DocumentLogicalDocumentOut] = {}
+) -> dict[int, list[DocumentLogicalDocumentOut]]:
+    mapping: dict[int, list[DocumentLogicalDocumentOut]] = {}
     for logical_document in logical_documents:
-        for page_number in range(logical_document.page_start, logical_document.page_end + 1):
-            mapping[page_number] = logical_document
+        if logical_document.page_numbers:
+            page_numbers = logical_document.page_numbers
+        else:
+            page_numbers = list(range(logical_document.page_start, logical_document.page_end + 1))
+        for page_number in page_numbers:
+            mapping.setdefault(page_number, []).append(logical_document)
     return mapping
+
+
+def _logical_document_membership_to_out(
+    membership: DocumentLogicalDocumentPage,
+) -> DocumentLogicalDocumentPageOut:
+    return DocumentLogicalDocumentPageOut(
+        membership_id=membership.membership_id,
+        logical_document_id=membership.logical_document_id,
+        document_id=membership.document_id,
+        page_id=membership.page_id,
+        page_number=membership.page_number,
+        sequence_number=membership.sequence_number,
+        span_type=membership.span_type,
+        region_payload=dict(membership.region_payload or {}),
+        provenance=dict(membership.provenance or {}),
+        created_at=membership.created_at,
+        created_by=membership.created_by,
+        updated_at=membership.updated_at,
+        updated_by=membership.updated_by,
+        version=membership.version,
+    )
 
 
 def _coerce_float(value: object) -> float | None:
