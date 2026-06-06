@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type MouseEventHandler } from 'react'
 
-import { listAssistantAgents, loadAssistantRuntimeSettings } from '../../entities/assistant/api'
+import { loadAssistantTokenUsage } from '../../entities/assistant/api'
 import { appConfig } from '../../shared/config'
 import { summarizePromptHomeAvailableTokens } from './promptHomeAvailableTokens'
 
@@ -9,72 +9,95 @@ type PromptHomeAvailableTokenBadgeState = {
   detail: string
 }
 
-const LOADING_STATE: PromptHomeAvailableTokenBadgeState = {
-  value: 'Loading...',
-  detail: 'Checking published assistant budgets.',
+type PromptHomeAvailableTokenBadgeProps = {
+  href?: string
+  onClick?: MouseEventHandler<HTMLAnchorElement>
 }
 
-export function PromptHomeAvailableTokenBadge() {
+const LOADING_STATE: PromptHomeAvailableTokenBadgeState = {
+  value: 'Loading...',
+  detail: 'Checking assistant token usage.',
+}
+
+const TOKEN_USAGE_REFRESH_INTERVAL_MS = 15_000
+const DEFAULT_TOKEN_TRACKER_HREF = '/?view=token-analysis#assistant-token-tracker'
+
+export function PromptHomeAvailableTokenBadge({
+  href = DEFAULT_TOKEN_TRACKER_HREF,
+  onClick,
+}: PromptHomeAvailableTokenBadgeProps = {}) {
   const [summary, setSummary] = useState<PromptHomeAvailableTokenBadgeState>(LOADING_STATE)
 
   useEffect(() => {
     let cancelled = false
+    let requestInFlight = false
 
-    async function loadAssistantBudgetsForHome() {
-      const [runtimeSettingsResult, assistantAgentsResult] = await Promise.allSettled([
-        loadAssistantRuntimeSettings(appConfig.apiBase),
-        listAssistantAgents(appConfig.apiBase),
-      ])
-      if (cancelled) {
+    async function loadAssistantTokenUsageForHome() {
+      if (requestInFlight) {
         return
       }
 
-      const defaultDailyTokenAllocation =
-        runtimeSettingsResult.status === 'fulfilled'
-          ? runtimeSettingsResult.value.default_daily_token_allocation
-          : undefined
-
-      if (assistantAgentsResult.status === 'fulfilled') {
+      requestInFlight = true
+      try {
+        const usage = await loadAssistantTokenUsage(appConfig.apiBase)
+        if (cancelled) {
+          return
+        }
         setSummary(
           summarizePromptHomeAvailableTokens({
-            agents: assistantAgentsResult.value,
-            defaultDailyTokenAllocation,
+            usage,
           }),
         )
         return
+      } catch (error) {
+        if (cancelled) {
+          return
+        }
+        setSummary({
+          value: 'Unavailable',
+          detail:
+            error instanceof Error
+              ? error.message
+              : 'Could not load assistant token usage.',
+        })
+      } finally {
+        requestInFlight = false
       }
-
-      if (typeof defaultDailyTokenAllocation === 'number') {
-        setSummary(
-          summarizePromptHomeAvailableTokens({
-            agents: [],
-            defaultDailyTokenAllocation,
-          }),
-        )
-        return
-      }
-
-      setSummary({
-        value: 'Unavailable',
-        detail:
-          assistantAgentsResult.reason instanceof Error
-            ? assistantAgentsResult.reason.message
-            : 'Could not load published assistant budgets.',
-      })
     }
 
-    void loadAssistantBudgetsForHome()
+    void loadAssistantTokenUsageForHome()
+    const refreshTimer = window.setInterval(() => {
+      void loadAssistantTokenUsageForHome()
+    }, TOKEN_USAGE_REFRESH_INTERVAL_MS)
+
+    function refreshWhenVisible() {
+      if (document.visibilityState === 'visible') {
+        void loadAssistantTokenUsageForHome()
+      }
+    }
+
+    window.addEventListener('focus', refreshWhenVisible)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
 
     return () => {
       cancelled = true
+      window.clearInterval(refreshTimer)
+      window.removeEventListener('focus', refreshWhenVisible)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
   }, [])
 
   return (
-    <div className="workspace-topbar-token" aria-live="polite">
-      <span className="workspace-topbar-token-label">Available Token Count</span>
+    <a
+      className="workspace-topbar-token workspace-topbar-token-link"
+      href={href}
+      onClick={onClick}
+      aria-live="polite"
+      aria-label={`Open token tracker. Tokens today: ${summary.value}. ${summary.detail}`}
+    >
+      <span className="workspace-topbar-token-label">Tokens Today</span>
       <strong>{summary.value}</strong>
-      <small>{summary.detail}</small>
-    </div>
+      {summary.detail ? <small>{summary.detail}</small> : null}
+    </a>
   )
 }

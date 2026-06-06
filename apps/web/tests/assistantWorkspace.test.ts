@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, test } from 'vitest'
 
 import { AssistantWorkspace } from '../src/workspaces/assistant/AssistantWorkspace'
+import { TokenAnalysisWorkspace } from '../src/workspaces/assistant/TokenAnalysisWorkspace'
 import { buildAssistantAgentAccessSummary } from '../src/workspaces/assistant/assistantWorkspaceAccessSummary'
 import type { AssistantAgent, AssistantRuntimeSettings } from '../src/shared/models'
 
@@ -26,6 +27,15 @@ test('assistant workspace renders the grounded prompt console on the server', ()
 
   assert.match(markup, /Grounded Prompt Console/)
   assert.match(markup, />Voice Unavailable</)
+  assert.doesNotMatch(markup, /Token Tracker/)
+})
+
+test('token analysis workspace renders token usage without the assistant console chrome', () => {
+  const markup = renderToStaticMarkup(createElement(TokenAnalysisWorkspace))
+
+  assert.match(markup, /Token Tracker/)
+  assert.match(markup, /Usage by period/)
+  assert.doesNotMatch(markup, /Grounded Prompt Console/)
 })
 
 describe('buildAssistantAgentAccessSummary', () => {

@@ -205,6 +205,7 @@ AssistantControlTowerTrustSignalType = Literal[
     "STALE_WORK_PACKAGE",
 ]
 AssistantControlTowerTrustSignalSeverity = Literal["info", "warning", "danger"]
+AssistantTokenUsagePeriod = Literal["day", "week", "month"]
 ALL_ASSISTANT_ACTION_TYPES: tuple[str, ...] = get_args(AssistantActionType)
 
 AGENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
@@ -369,6 +370,37 @@ class AssistantRuntimeSettingsOut(BaseModel):
     available_tools: list[AssistantToolDefinitionOut]
     available_action_types: list[AssistantActionDefinitionOut]
     available_personas: list[AssistantPersonaDefinitionOut]
+
+
+class AssistantTokenUsageSummaryOut(BaseModel):
+    used_tokens: int
+    input_tokens: int
+    output_tokens: int
+    recorded_run_count: int
+    managed_agent_tokens: int
+    unassigned_tokens: int
+    window_started_at: datetime
+    reset_at: datetime
+
+
+class AssistantTokenUsageBucketOut(BaseModel):
+    period: AssistantTokenUsagePeriod
+    bucket_started_at: datetime
+    bucket_ended_at: datetime
+    used_tokens: int
+    input_tokens: int
+    output_tokens: int
+    recorded_run_count: int
+    managed_agent_tokens: int
+    unassigned_tokens: int
+
+
+class AssistantTokenUsageTrackerOut(BaseModel):
+    generated_at: datetime
+    timezone: str = "UTC"
+    daily: list[AssistantTokenUsageBucketOut]
+    weekly: list[AssistantTokenUsageBucketOut]
+    monthly: list[AssistantTokenUsageBucketOut]
 
 
 class AssistantMessageIn(BaseModel):

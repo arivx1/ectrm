@@ -1632,9 +1632,10 @@ test("prompt home topbar token badge renders a loading state before budgets reso
     createElement(PromptHomeAvailableTokenBadge),
   );
 
-  assert.match(markup, /Available Token Count/);
+  assert.match(markup, /Tokens Today/);
   assert.match(markup, /Loading\.\.\./);
-  assert.match(markup, /Checking published assistant budgets\./);
+  assert.match(markup, /Checking assistant token usage\./);
+  assert.match(markup, /href="\/\?view=token-analysis#assistant-token-tracker"/);
 });
 
 test("prompt home shows prompt thread messages in chronological order", () => {
@@ -1699,164 +1700,56 @@ test("prompt home stops auto-loading weather after the first load error", () => 
   );
 });
 
-test("prompt home token summary reports a single assistant budget", () => {
+test("prompt home token summary reports inclusive assistant provider usage", () => {
   const summary = summarizePromptHomeAvailableTokens({
-    agents: [
-      {
-        agent_id: "ops-governor",
-        name: "Ops Governor",
-        description: "Governed assistant",
-        status: "ACTIVE",
-        scope: "TEAM",
-        provider: "openai",
-        model: "gpt-5.4",
-        role_key: "trade-ops-copilot",
-        profile_kind: "ROLE_DERIVED",
-        allowed_workspaces: ["assistant", "trades"],
-        capabilities: ["READ"],
-        allowed_tools: [],
-        allowed_action_types: [],
-        token_budget: {
-          status: "GREEN",
-          allocated_tokens: 50000,
-          used_tokens: 4200,
-          remaining_tokens: 45800,
-          percent_used: 8.4,
-          warning_threshold_percent: 80,
-          allocation_source: "AGENT",
-          window_started_at: "2026-05-05T00:00:00Z",
-          reset_at: "2026-05-06T00:00:00Z",
-        },
-        effective_policy: {
-          allowed_tools: [],
-          blocked_tools: [],
-          allowed_actions: [],
-          blocked_actions: [],
-          policy_notes: [],
-        },
-        eval_gate: {
-          status: "PASS",
-          role_key: "trade-ops-copilot",
-          required_cases: [],
-          covered_cases: [],
-          missing_cases: [],
-          custom_case_count: 0,
-          notes: [],
-        },
-      },
-    ],
+    usage: {
+      used_tokens: 4200,
+      input_tokens: 3500,
+      output_tokens: 700,
+      recorded_run_count: 1,
+      managed_agent_tokens: 0,
+      unassigned_tokens: 4200,
+      window_started_at: "2026-05-05T00:00:00Z",
+      reset_at: "2026-05-06T00:00:00Z",
+    },
   });
 
-  assert.equal(summary.value, "45,800");
-  assert.equal(summary.detail, "Ops Governor remaining today.");
+  assert.equal(summary.value, "4,200");
+  assert.equal(summary.detail, "3,500 input / 700 output across 1 run.");
 });
 
-test("prompt home token summary combines multiple assistant budgets", () => {
+test("prompt home token summary includes managed-agent and unassigned assistant usage", () => {
   const summary = summarizePromptHomeAvailableTokens({
-    agents: [
-      {
-        agent_id: "ops-governor",
-        name: "Ops Governor",
-        description: "Governed assistant",
-        status: "ACTIVE",
-        scope: "TEAM",
-        provider: "openai",
-        model: "gpt-5.4",
-        role_key: "trade-ops-copilot",
-        profile_kind: "ROLE_DERIVED",
-        allowed_workspaces: ["assistant"],
-        capabilities: ["READ"],
-        allowed_tools: [],
-        allowed_action_types: [],
-        token_budget: {
-          status: "GREEN",
-          allocated_tokens: 50000,
-          used_tokens: 4200,
-          remaining_tokens: 45800,
-          percent_used: 8.4,
-          warning_threshold_percent: 80,
-          allocation_source: "AGENT",
-          window_started_at: "2026-05-05T00:00:00Z",
-          reset_at: "2026-05-06T00:00:00Z",
-        },
-        effective_policy: {
-          allowed_tools: [],
-          blocked_tools: [],
-          allowed_actions: [],
-          blocked_actions: [],
-          policy_notes: [],
-        },
-        eval_gate: {
-          status: "PASS",
-          role_key: "trade-ops-copilot",
-          required_cases: [],
-          covered_cases: [],
-          missing_cases: [],
-          custom_case_count: 0,
-          notes: [],
-        },
-      },
-      {
-        agent_id: "risk-analyst",
-        name: "Risk Analyst",
-        description: "Risk assistant",
-        status: "ACTIVE",
-        scope: "TEAM",
-        provider: "openai",
-        model: "gpt-5.4",
-        role_key: "risk-analyst",
-        profile_kind: "ROLE_DERIVED",
-        allowed_workspaces: ["assistant", "risk"],
-        capabilities: ["READ"],
-        allowed_tools: [],
-        allowed_action_types: [],
-        token_budget: {
-          status: "AMBER",
-          allocated_tokens: 25000,
-          used_tokens: 7000,
-          remaining_tokens: 18000,
-          percent_used: 28,
-          warning_threshold_percent: 80,
-          allocation_source: "AGENT",
-          window_started_at: "2026-05-05T00:00:00Z",
-          reset_at: "2026-05-06T00:00:00Z",
-        },
-        effective_policy: {
-          allowed_tools: [],
-          blocked_tools: [],
-          allowed_actions: [],
-          blocked_actions: [],
-          policy_notes: [],
-        },
-        eval_gate: {
-          status: "PASS",
-          role_key: "risk-analyst",
-          required_cases: [],
-          covered_cases: [],
-          missing_cases: [],
-          custom_case_count: 0,
-          notes: [],
-        },
-      },
-    ],
+    usage: {
+      used_tokens: 11200,
+      input_tokens: 9000,
+      output_tokens: 2200,
+      recorded_run_count: 4,
+      managed_agent_tokens: 7000,
+      unassigned_tokens: 4200,
+      window_started_at: "2026-05-05T00:00:00Z",
+      reset_at: "2026-05-06T00:00:00Z",
+    },
   });
 
-  assert.equal(summary.value, "63,800");
-  assert.equal(
-    summary.detail,
-    "Combined across 2 published assistant budgets.",
-  );
+  assert.equal(summary.value, "11,200");
+  assert.equal(summary.detail, "9,000 input / 2,200 output across 4 runs.");
 });
 
-test("prompt home token summary falls back to the default daily allocation", () => {
+test("prompt home token summary reports zero usage without recorded provider tokens", () => {
   const summary = summarizePromptHomeAvailableTokens({
-    agents: [],
-    defaultDailyTokenAllocation: 100000,
+    usage: {
+      used_tokens: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      recorded_run_count: 0,
+      managed_agent_tokens: 0,
+      unassigned_tokens: 0,
+      window_started_at: "2026-05-05T00:00:00Z",
+      reset_at: "2026-05-06T00:00:00Z",
+    },
   });
 
-  assert.equal(summary.value, "100,000");
-  assert.equal(
-    summary.detail,
-    "Default daily assistant allocation available on Home.",
-  );
+  assert.equal(summary.value, "0");
+  assert.equal(summary.detail, "");
 });

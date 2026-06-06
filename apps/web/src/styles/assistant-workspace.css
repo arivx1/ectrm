@@ -192,6 +192,176 @@
   background: rgba(126, 154, 184, 0.42);
 }
 
+.workspace-topbar-token-link {
+  color: inherit;
+  text-decoration: none;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.workspace-topbar-token-link:hover,
+.workspace-topbar-token-link:focus-visible {
+  border-color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.42);
+  background-color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.1);
+  box-shadow: 0 0 0 3px rgb(var(--theme-highlight-rgb, 78 167 255) / 0.12);
+}
+
+.assistant-token-tracker {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  scroll-margin-top: calc(var(--workspace-topbar-height, 5rem) + 1rem);
+}
+
+.assistant-token-tracker-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.assistant-token-tracker-kpi {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+  padding: 0.7rem 0;
+  border-top: 1px solid rgba(126, 154, 184, 0.16);
+  border-bottom: 1px solid rgba(126, 154, 184, 0.16);
+}
+
+.assistant-token-tracker-kpi span,
+.assistant-token-tracker-controls small {
+  color: var(--terminal-dim);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.assistant-token-tracker-kpi strong {
+  color: var(--terminal-text);
+  font-size: 1.32rem;
+  line-height: 1.1;
+}
+
+.assistant-token-tracker-kpi small {
+  color: var(--terminal-text-soft);
+}
+
+.assistant-token-tracker-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.assistant-token-tracker-controls button {
+  display: grid;
+  gap: 0.18rem;
+  min-height: 3.2rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid rgba(126, 154, 184, 0.18);
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--terminal-text-soft);
+  text-align: left;
+}
+
+.assistant-token-tracker-controls button:hover,
+.assistant-token-tracker-controls button:focus-visible,
+.assistant-token-tracker-controls button.is-selected {
+  border-color: rgba(61, 214, 160, 0.28);
+  background: rgba(61, 214, 160, 0.1);
+  color: var(--terminal-text);
+}
+
+.assistant-token-tracker-controls span {
+  font-weight: 800;
+}
+
+.assistant-token-tracker-error {
+  margin: 0;
+  color: var(--terminal-amber);
+  font-size: 0.86rem;
+}
+
+.assistant-token-tracker-bars {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.assistant-token-tracker-bar-row {
+  display: grid;
+  grid-template-columns: minmax(5.8rem, 7.5rem) minmax(0, 1fr) minmax(4rem, max-content);
+  gap: 0.65rem;
+  align-items: center;
+  color: var(--terminal-text-soft);
+  font-size: 0.82rem;
+}
+
+.assistant-token-tracker-bar-row > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-token-tracker-bar-row strong {
+  color: var(--terminal-text);
+  text-align: right;
+}
+
+.assistant-token-tracker-bar {
+  height: 0.54rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(126, 154, 184, 0.14);
+}
+
+.assistant-token-tracker-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--terminal-accent-strong), rgba(78, 167, 255, 0.88));
+}
+
+.assistant-token-tracker-table-wrap {
+  overflow-x: auto;
+}
+
+.assistant-token-tracker-table {
+  width: 100%;
+  min-width: 42rem;
+  border-collapse: collapse;
+  color: var(--terminal-text-soft);
+  font-size: 0.82rem;
+}
+
+.assistant-token-tracker-table th,
+.assistant-token-tracker-table td {
+  padding: 0.55rem 0.6rem;
+  border-top: 1px solid rgba(126, 154, 184, 0.12);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.assistant-token-tracker-table th:first-child,
+.assistant-token-tracker-table td:first-child {
+  text-align: left;
+}
+
+.assistant-token-tracker-table thead th {
+  color: var(--terminal-dim);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.assistant-token-tracker-table tbody th {
+  color: var(--terminal-text);
+  font-weight: 700;
+}
+
 .assistant-provider-card:disabled {
   opacity: 0.72;
   cursor: not-allowed;

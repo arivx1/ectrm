@@ -158,6 +158,8 @@ from apps.api.app.domains.assistant.services.registry import (
     list_public_agent_records,
     summarize_agent_token_budget,
     summarize_agent_token_budgets,
+    summarize_assistant_token_usage,
+    summarize_assistant_token_usage_tracker,
     to_admin_agent_out,
     to_public_agent_out,
 )
@@ -219,6 +221,8 @@ from apps.api.app.schemas.assistant import (
     AssistantRunOut,
     AssistantRunSummaryOut,
     AssistantRuntimeSettingsOut,
+    AssistantTokenUsageSummaryOut,
+    AssistantTokenUsageTrackerOut,
     AssistantVoiceSpeechRequest,
     AssistantVoiceTranscriptionOut,
     AssistantWorkspace,
@@ -262,6 +266,16 @@ def get_assistant_service(db: Session, *, actor_id: str | None = None) -> Assist
 @router.get("/settings", response_model=AssistantRuntimeSettingsOut)
 def get_assistant_settings() -> AssistantRuntimeSettingsOut:
     return build_assistant_runtime_settings()
+
+
+@router.get("/token-usage", response_model=AssistantTokenUsageSummaryOut)
+def get_assistant_token_usage(db: Session = Depends(get_db)) -> AssistantTokenUsageSummaryOut:
+    return summarize_assistant_token_usage(db)
+
+
+@router.get("/token-usage/tracker", response_model=AssistantTokenUsageTrackerOut)
+def get_assistant_token_usage_tracker(db: Session = Depends(get_db)) -> AssistantTokenUsageTrackerOut:
+    return summarize_assistant_token_usage_tracker(db)
 
 
 @router.get("/personas", response_model=list[AssistantPersonaDefinitionOut])

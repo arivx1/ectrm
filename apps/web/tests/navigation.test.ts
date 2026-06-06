@@ -115,6 +115,7 @@ describe('mobile navigation helpers', () => {
     expect(primaryNavigationSectionForView('library').key).toBe('intelligence')
     expect(primaryNavigationSectionForView('map').key).toBe('intelligence')
     expect(primaryNavigationSectionForView('assistant').key).toBe('intelligence')
+    expect(primaryNavigationSectionForView('token-analysis').key).toBe('administration')
     expect(primaryNavigationSectionForView('settings').key).toBe('administration')
   })
 

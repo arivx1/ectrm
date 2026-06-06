@@ -130,7 +130,8 @@ Frontend layering:
 - `workspaces`: top-level product areas such as Home, Live Desk, Pre-Trade,
   Trade Capture, Activity Feed, Exposure, Net Positions, Deliveries,
   Scheduling, Work Queue, Settlement, Messages, Reports, Library, Map,
-  Reference Data, Admin Console, Settings, and Assistant Console.
+  Reference Data, Admin Console, Settings, Token Tracker, and Assistant
+  Console.
 - `entities`: API adapters, shared business-object types, and reusable
   presentation helpers.
 - `features`: workflow-specific UI logic that composes entities, widgets, and

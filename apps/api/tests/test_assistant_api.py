@@ -4263,6 +4263,70 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(budget["warning_threshold_percent"], 80.0)
         self.assertIn("window_started_at", budget)
 
+    def test_assistant_token_usage_counts_managed_and_default_runs(self) -> None:
+        self._create_assistant_run(agent_id="budget-runner", input_tokens=12, output_tokens=8)
+        self._create_assistant_run(agent_id=None, input_tokens=7, output_tokens=3)
+
+        response = self.client.get("/assistant/token-usage")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["used_tokens"], 30)
+        self.assertEqual(payload["input_tokens"], 19)
+        self.assertEqual(payload["output_tokens"], 11)
+        self.assertEqual(payload["recorded_run_count"], 2)
+        self.assertEqual(payload["managed_agent_tokens"], 20)
+        self.assertEqual(payload["unassigned_tokens"], 10)
+        self.assertIn("window_started_at", payload)
+        self.assertIn("reset_at", payload)
+
+    def test_assistant_token_usage_tracker_groups_runs_by_day_week_month(self) -> None:
+        now = datetime.now(timezone.utc)
+        self._create_assistant_run(
+            agent_id="tracker-managed",
+            input_tokens=10,
+            output_tokens=5,
+            created_at=now,
+        )
+        self._create_assistant_run(
+            agent_id=None,
+            input_tokens=7,
+            output_tokens=3,
+            created_at=now - timedelta(days=1),
+        )
+        self._create_assistant_run(
+            agent_id="tracker-managed",
+            input_tokens=6,
+            output_tokens=3,
+            created_at=now - timedelta(days=8),
+        )
+        self._create_assistant_run(
+            agent_id=None,
+            input_tokens=4,
+            output_tokens=3,
+            created_at=now - timedelta(days=35),
+        )
+
+        response = self.client.get("/assistant/token-usage/tracker")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["timezone"], "UTC")
+        self.assertEqual(len(payload["daily"]), 14)
+        self.assertEqual(len(payload["weekly"]), 8)
+        self.assertEqual(len(payload["monthly"]), 12)
+        self.assertEqual({bucket["period"] for bucket in payload["daily"]}, {"day"})
+        self.assertEqual({bucket["period"] for bucket in payload["weekly"]}, {"week"})
+        self.assertEqual({bucket["period"] for bucket in payload["monthly"]}, {"month"})
+        self.assertEqual(sum(bucket["used_tokens"] for bucket in payload["daily"]), 34)
+        self.assertEqual(sum(bucket["used_tokens"] for bucket in payload["weekly"]), 41)
+        self.assertEqual(sum(bucket["used_tokens"] for bucket in payload["monthly"]), 41)
+        self.assertEqual(payload["daily"][-1]["managed_agent_tokens"], 15)
+        self.assertEqual(payload["daily"][-1]["recorded_run_count"], 1)
+        self.assertEqual(payload["daily"][-2]["unassigned_tokens"], 10)
+        self.assertEqual(sum(bucket["managed_agent_tokens"] for bucket in payload["monthly"]), 24)
+        self.assertEqual(sum(bucket["unassigned_tokens"] for bucket in payload["monthly"]), 17)
+
     def test_assistant_agent_listing_marks_near_depleted_token_budget_amber(self) -> None:
         self._create_agent(
             agent_id="budget-watch",
@@ -9163,11 +9227,12 @@ class AssistantApiTests(unittest.TestCase):
     def _create_assistant_run(
         self,
         *,
-        agent_id: str,
+        agent_id: str | None,
         input_tokens: int,
         output_tokens: int,
+        created_at: datetime | None = None,
     ) -> None:
-        now = datetime.now(timezone.utc)
+        now = created_at or datetime.now(timezone.utc)
         with self.SessionLocal() as session:
             session.add(
                 AssistantRun(

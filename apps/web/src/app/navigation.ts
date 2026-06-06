@@ -144,11 +144,17 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
     kicker: 'Control',
     heroTitle: 'Access, settings, and privileged controls',
     heroBody:
-      'Keep sign-in, runtime settings, sync health, and privileged controls together without burying them under trading screens.',
+      'Keep sign-in, runtime settings, sync health, AI usage, and privileged controls together without burying them under trading screens.',
     landingBody:
-      'Use this section when the task is configuring the console, signing in, checking runtime health, or running privileged maintenance.',
-    viewKeys: ['admin', 'settings'],
+      'Use this section when the task is configuring the console, signing in, checking runtime health, reviewing token usage, or running privileged maintenance.',
+    viewKeys: ['token-analysis', 'admin', 'settings'],
     startPaths: [
+      {
+        title: 'Review token usage',
+        detail: 'Open the token tracker when you want AI provider usage by day, week, or month without opening the Assistant Console.',
+        viewKey: 'token-analysis',
+        actionLabel: 'Open Token Tracker',
+      },
       {
         title: 'Sign in or configure access',
         detail: 'Open settings when you need to connect the app, manage session details, or adjust runtime behavior.',

@@ -53,6 +53,8 @@ import {
   getAdminAssistantOutcomeMetrics,
   getAdminAssistantRunAuditTrace,
   getAssistantConversation,
+  loadAssistantTokenUsage,
+  loadAssistantTokenUsageTracker,
   listAdminAssistantAgentWorkPackages,
   listAdminAssistantAgentEvals,
   listAdminAssistantAgentEvalRuns,
@@ -120,6 +122,45 @@ test('getAssistantConversation owns the encoded detail URL and auth headers', as
   assert.equal(url, 'http://api.test/assistant/conversations/42')
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer detail-token')
+})
+
+test('loadAssistantTokenUsage owns the inclusive token usage endpoint', async () => {
+  const expected = {
+    used_tokens: 220,
+    input_tokens: 180,
+    output_tokens: 40,
+    recorded_run_count: 3,
+    managed_agent_tokens: 120,
+    unassigned_tokens: 100,
+    window_started_at: '2026-06-06T00:00:00Z',
+    reset_at: '2026-06-07T00:00:00Z',
+  }
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await loadAssistantTokenUsage('http://api.test')
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/assistant/token-usage')
+  assert.equal(init, undefined)
+})
+
+test('loadAssistantTokenUsageTracker owns the period breakdown endpoint', async () => {
+  const expected = {
+    generated_at: '2026-06-06T12:00:00Z',
+    timezone: 'UTC',
+    daily: [],
+    weekly: [],
+    monthly: [],
+  }
+  fetchJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await loadAssistantTokenUsageTracker('http://api.test')
+
+  assert.equal(payload, expected)
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/assistant/token-usage/tracker')
+  assert.equal(init, undefined)
 })
 
 test('listAssistantActionRequests centralizes query-string assembly for pending approvals', async () => {

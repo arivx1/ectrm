@@ -3609,6 +3609,39 @@ export type AssistantRuntimeSettings = {
   available_personas?: AssistantPersonaDefinition[]
 }
 
+export type AssistantTokenUsageSummary = {
+  used_tokens: number
+  input_tokens: number
+  output_tokens: number
+  recorded_run_count: number
+  managed_agent_tokens: number
+  unassigned_tokens: number
+  window_started_at: string
+  reset_at: string
+}
+
+export type AssistantTokenUsagePeriod = 'day' | 'week' | 'month'
+
+export type AssistantTokenUsageBucket = {
+  period: AssistantTokenUsagePeriod
+  bucket_started_at: string
+  bucket_ended_at: string
+  used_tokens: number
+  input_tokens: number
+  output_tokens: number
+  recorded_run_count: number
+  managed_agent_tokens: number
+  unassigned_tokens: number
+}
+
+export type AssistantTokenUsageTracker = {
+  generated_at: string
+  timezone: string
+  daily: AssistantTokenUsageBucket[]
+  weekly: AssistantTokenUsageBucket[]
+  monthly: AssistantTokenUsageBucket[]
+}
+
 export type AssistantVoiceTranscriptionSettings = {
   enabled: boolean
   provider: AssistantProvider
@@ -4760,6 +4793,7 @@ export type ViewKey =
   | 'reference'
   | 'admin'
   | 'settings'
+  | 'token-analysis'
   | 'assistant'
 export type InspectorTab = 'overview' | 'events' | 'amend' | 'risk'
 export type ReferenceTab =

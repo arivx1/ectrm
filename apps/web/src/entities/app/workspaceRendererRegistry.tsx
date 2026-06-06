@@ -150,6 +150,11 @@ const AssistantWorkspace = lazy(() =>
     default: module.AssistantWorkspace,
   })),
 )
+const TokenAnalysisWorkspace = lazy(() =>
+  import('../../workspaces/assistant/TokenAnalysisWorkspace').then((module) => ({
+    default: module.TokenAnalysisWorkspace,
+  })),
+)
 
 export type AppDataGroup =
   | 'core'
@@ -954,6 +959,16 @@ const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = 
     dataGroups: [],
     blockingGroups: [],
   },
+  'token-analysis': {
+    key: 'token-analysis',
+    label: 'Token Tracker',
+    kicker: 'Usage',
+    heroTitle: 'AI token usage',
+    heroBody:
+      'Review assistant provider usage by day, week, and month without entering the full Assistant Console.',
+    dataGroups: [],
+    blockingGroups: [],
+  },
   assistant: {
     key: 'assistant',
     label: 'Assistant Console',
@@ -1703,6 +1718,9 @@ export const WORKSPACE_RENDERERS: Record<
         onRefreshData={context.workspaceData.loadData}
       />
     ),
+  },
+  'token-analysis': {
+    render: () => <TokenAnalysisWorkspace />,
   },
 }
 

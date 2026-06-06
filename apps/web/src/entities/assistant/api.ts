@@ -51,6 +51,8 @@ import type {
   AssistantRunAuditTrace,
   AssistantRunSummary,
   AssistantRuntimeSettings,
+  AssistantTokenUsageSummary,
+  AssistantTokenUsageTracker,
   AssistantVoiceTranscription,
   ViewKey,
 } from '../../shared/models'
@@ -420,6 +422,14 @@ function assistantActionDecisionPayload(payload: AssistantActionDecisionInput): 
 
 export async function loadAssistantRuntimeSettings(apiBase: string): Promise<AssistantRuntimeSettings> {
   return fetchJson<AssistantRuntimeSettings>(`${apiBase}/assistant/settings`)
+}
+
+export async function loadAssistantTokenUsage(apiBase: string): Promise<AssistantTokenUsageSummary> {
+  return fetchJson<AssistantTokenUsageSummary>(`${apiBase}/assistant/token-usage`)
+}
+
+export async function loadAssistantTokenUsageTracker(apiBase: string): Promise<AssistantTokenUsageTracker> {
+  return fetchJson<AssistantTokenUsageTracker>(`${apiBase}/assistant/token-usage/tracker`)
 }
 
 export async function listAssistantAgents(apiBase: string): Promise<AssistantAgent[]> {

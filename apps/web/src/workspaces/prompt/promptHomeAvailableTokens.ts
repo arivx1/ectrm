@@ -1,5 +1,5 @@
 import { formatTokenCount } from '../../entities/assistant/budget'
-import type { AssistantAgent } from '../../shared/models'
+import type { AssistantTokenUsageSummary } from '../../shared/models'
 
 type PromptHomeAvailableTokenSummary = {
   value: string
@@ -8,37 +8,18 @@ type PromptHomeAvailableTokenSummary = {
 
 export function summarizePromptHomeAvailableTokens(
   args: {
-    agents: AssistantAgent[]
-    defaultDailyTokenAllocation?: number
+    usage: AssistantTokenUsageSummary
   },
 ): PromptHomeAvailableTokenSummary {
-  const assistantScopedAgents = args.agents.filter((agent) => agent.allowed_workspaces.includes('assistant'))
-  if (assistantScopedAgents.length === 0) {
-    if (typeof args.defaultDailyTokenAllocation === 'number') {
-      return {
-        value: formatTokenCount(args.defaultDailyTokenAllocation),
-        detail: 'Default daily assistant allocation available on Home.',
-      }
-    }
-
+  if (args.usage.used_tokens <= 0) {
     return {
-      value: 'Not tracked',
-      detail: 'No published assistant budget is currently available on Home.',
-    }
-  }
-
-  if (assistantScopedAgents.length === 1) {
-    const [agent] = assistantScopedAgents
-    return {
-      value: formatTokenCount(agent.token_budget?.remaining_tokens ?? 0),
-      detail: `${agent.name} remaining today.`,
+      value: formatTokenCount(0),
+      detail: '',
     }
   }
 
   return {
-    value: formatTokenCount(
-      assistantScopedAgents.reduce((total, agent) => total + (agent.token_budget?.remaining_tokens ?? 0), 0),
-    ),
-    detail: `Combined across ${assistantScopedAgents.length} published assistant budgets.`,
+    value: formatTokenCount(args.usage.used_tokens),
+    detail: `${formatTokenCount(args.usage.input_tokens)} input / ${formatTokenCount(args.usage.output_tokens)} output across ${formatTokenCount(args.usage.recorded_run_count)} run${args.usage.recorded_run_count === 1 ? '' : 's'}.`,
   }
 }
