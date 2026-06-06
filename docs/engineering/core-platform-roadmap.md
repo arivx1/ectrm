@@ -17,6 +17,7 @@ position, and settlement spine can safely support.
 - [Governed Core Trade Command Model](./core-platform-trade-command-model.md)
 - [ADR 0002: V2 Application Architecture And Canonical Domain Boundaries](../adr/0002-v2-application-architecture.md)
 - [Business Use Case Roadmap](./business-use-case-roadmap.md)
+- [Premium E/CTRM Gap Bridge Work Packages](./premium-ectrm-gap-bridge-work-packages.md)
 - [Future-Ready Engineering Work Packages](./future-ready-engineering-work-packages.md)
 - [AI Workflow](./ai-workflow.md)
 - [Agent Autonomy Rubric](./agent-autonomy-rubric.md)
@@ -42,6 +43,10 @@ Success for this roadmap is not "more surfaces." Success is one product family
 with a trustworthy spine:
 
 `capture -> approval -> lifecycle -> position impact -> settlement preview -> audit/explanation`
+
+The premium E/CTRM gap bridge uses this same slice as the path from prototype
+surface area toward premium-grade capability. It should sharpen this roadmap,
+not widen it into a multi-commodity feature chase.
 
 ## Planning Posture
 

@@ -94,6 +94,32 @@ class TradeCommandsServiceTests(unittest.TestCase):
         )
         session.commit()
 
+    def _seed_trade_event(
+        self,
+        session,
+        *,
+        event_id: str,
+        trade_id: str,
+        event_type: str = "TradeCreated",
+    ) -> None:
+        now = datetime(2026, 4, 27, 14, 56, tzinfo=timezone.utc)
+        session.add(
+            Event(
+                event_id=event_id,
+                aggregate_type="trade",
+                aggregate_id=trade_id,
+                event_type=event_type,
+                occurred_at=now,
+                recorded_at=now,
+                actor_id="ops-trader",
+                correlation_id="corr-seed-event",
+                causation_id=None,
+                schema_version=1,
+                payload={"trade_id": trade_id},
+            )
+        )
+        session.commit()
+
     def test_build_trade_write_command_maps_trade_created_to_book_trade(self) -> None:
         payload = EventCreate(
             aggregate_type="trade",
@@ -140,6 +166,36 @@ class TradeCommandsServiceTests(unittest.TestCase):
                 actor_id="ops-trader",
                 correlation_id="corr-trade-2",
             )
+
+    def test_build_trade_write_command_accepts_correct_trade_for_trade_amended(self) -> None:
+        payload = EventCreate(
+            aggregate_type="trade",
+            aggregate_id="T-CORRECT-1",
+            event_type="TradeAmended",
+            occurred_at=datetime(2026, 4, 27, 15, 8, tzinfo=timezone.utc),
+            actor_id="ops-trader",
+            command_type="CorrectTrade",
+            command_id="cmd-correct-1",
+            expected_last_event_id="evt-last-correct-1",
+            payload={
+                "price": 3.35,
+                "correction_reason": "Fix broker ticket typo",
+                "corrects_event_id": "evt-created-correct-1",
+            },
+            schema_version=4,
+        )
+
+        command = build_trade_write_command_from_event(
+            payload,
+            actor_id="ops-trader",
+            correlation_id="corr-trade-correct-1",
+        )
+
+        assert command is not None
+        self.assertEqual(command.command_type, "CorrectTrade")
+        self.assertEqual(command.trade_id, "T-CORRECT-1")
+        self.assertEqual(command.command_id, "cmd-correct-1")
+        self.assertEqual(command.expected_last_event_id, "evt-last-correct-1")
 
     def test_append_trade_write_command_records_command_provenance(self) -> None:
         occurred_at = datetime(2026, 4, 27, 15, 10, tzinfo=timezone.utc)
@@ -193,6 +249,136 @@ class TradeCommandsServiceTests(unittest.TestCase):
         self.assertEqual(provenance.details["command_type"], "AmendTradeTerms")
         self.assertEqual(provenance.details["expected_last_event_id"], "evt-last-1")
         self.assertEqual(provenance.details["event_type"], "TradeAmended")
+
+    def test_append_correct_trade_records_correction_provenance(self) -> None:
+        occurred_at = datetime(2026, 4, 27, 15, 11, tzinfo=timezone.utc)
+        identity = set_request_identity(
+            actor_id="ops-trader",
+            role="TRADER",
+            session_id="session-correct-command",
+            correlation_id="corr-trade-correct-2",
+            request_method="POST",
+            request_path="/events",
+        )
+
+        try:
+            with self.SessionLocal() as session:
+                self._seed_trade(
+                    session,
+                    trade_id="T-CORRECT-2",
+                    last_event_id="evt-last-correct-2",
+                )
+                self._seed_trade_event(
+                    session,
+                    event_id="evt-created-correct-2",
+                    trade_id="T-CORRECT-2",
+                )
+                with patch(
+                    "apps.api.app.domains.trading.services.trade_event_application.apply_trade_event"
+                ) as apply_trade_event_mock:
+                    event = append_trade_write_command(
+                        session,
+                        TradeWriteCommand(
+                            command_id="cmd-correct-2",
+                            command_type="CorrectTrade",
+                            trade_id="T-CORRECT-2",
+                            payload={
+                                "price": 3.45,
+                                "correction_reason": " Correct broker ticket typo ",
+                                "corrects_event_id": "evt-created-correct-2",
+                            },
+                            occurred_at=occurred_at,
+                            recorded_at=occurred_at,
+                            actor_id="ops-trader",
+                            correlation_id="corr-trade-correct-2",
+                            source_surface="web.trades.correct",
+                            expected_last_event_id="evt-last-correct-2",
+                        ),
+                        commit=True,
+                        refresh=True,
+                    )
+
+                apply_trade_event_mock.assert_called_once()
+                provenance = (
+                    session.query(MutationProvenanceRecord)
+                    .order_by(MutationProvenanceRecord.id.desc())
+                    .one()
+                )
+        finally:
+            reset_request_identity(identity)
+
+        self.assertEqual(event.event_type, "TradeAmended")
+        self.assertEqual(event.payload["correction_reason"], "Correct broker ticket typo")
+        self.assertEqual(event.payload["corrects_event_id"], "evt-created-correct-2")
+        self.assertEqual(provenance.operation_key, "trade_command.CorrectTrade")
+        self.assertEqual(provenance.source_surface, "web.trades.correct")
+        self.assertEqual(provenance.details["command_id"], "cmd-correct-2")
+        self.assertEqual(provenance.details["command_type"], "CorrectTrade")
+        self.assertEqual(provenance.details["expected_last_event_id"], "evt-last-correct-2")
+        self.assertEqual(provenance.details["corrects_event_id"], "evt-created-correct-2")
+        self.assertEqual(provenance.details["correction_reason"], "Correct broker ticket typo")
+
+    def test_append_correct_trade_requires_expected_last_event_id(self) -> None:
+        with self.SessionLocal() as session:
+            self._seed_trade(session, trade_id="T-CORRECT-NO-EXPECTED", last_event_id="evt-last-3")
+
+            with patch(
+                "apps.api.app.domains.trading.services.trade_commands.append_domain_event"
+            ) as append_domain_event_mock:
+                with self.assertRaises(HTTPException) as context:
+                    append_trade_write_command(
+                        session,
+                        TradeWriteCommand(
+                            command_id="cmd-correct-no-expected",
+                            command_type="CorrectTrade",
+                            trade_id="T-CORRECT-NO-EXPECTED",
+                            payload={
+                                "price": 3.45,
+                                "correction_reason": "Fix broker ticket typo",
+                                "corrects_event_id": "evt-created-correct-no-expected",
+                            },
+                            occurred_at=datetime(2026, 4, 27, 15, 11, tzinfo=timezone.utc),
+                            actor_id="ops-trader",
+                        ),
+                    )
+
+            append_domain_event_mock.assert_not_called()
+
+        self.assertEqual(context.exception.status_code, 422)
+        self.assertEqual(context.exception.detail, "CorrectTrade requires expected_last_event_id")
+
+    def test_append_correct_trade_requires_known_prior_trade_event(self) -> None:
+        with self.SessionLocal() as session:
+            self._seed_trade(session, trade_id="T-CORRECT-MISSING", last_event_id="evt-last-4")
+
+            with patch(
+                "apps.api.app.domains.trading.services.trade_commands.append_domain_event"
+            ) as append_domain_event_mock:
+                with self.assertRaises(HTTPException) as context:
+                    append_trade_write_command(
+                        session,
+                        TradeWriteCommand(
+                            command_id="cmd-correct-missing",
+                            command_type="CorrectTrade",
+                            trade_id="T-CORRECT-MISSING",
+                            payload={
+                                "price": 3.45,
+                                "correction_reason": "Fix broker ticket typo",
+                                "corrects_event_id": "evt-missing-correct",
+                            },
+                            occurred_at=datetime(2026, 4, 27, 15, 11, tzinfo=timezone.utc),
+                            actor_id="ops-trader",
+                            expected_last_event_id="evt-last-4",
+                        ),
+                    )
+
+            append_domain_event_mock.assert_not_called()
+
+        self.assertEqual(context.exception.status_code, 404)
+        self.assertEqual(
+            context.exception.detail,
+            "Trade event evt-missing-correct was not found for trade T-CORRECT-MISSING",
+        )
 
     def test_append_trade_write_command_rejects_stale_expected_last_event_id(self) -> None:
         occurred_at = datetime(2026, 4, 27, 15, 12, tzinfo=timezone.utc)

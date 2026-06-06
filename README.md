@@ -209,6 +209,7 @@ dependencies.
 - [Governed core platform roadmap](docs/engineering/core-platform-roadmap.md)
 - [Governed core platform slice lock](docs/engineering/core-platform-slice-lock.md)
 - [Governed core platform boundary reset](docs/engineering/core-platform-boundary-reset.md)
+- [Premium E/CTRM gap bridge work packages](docs/engineering/premium-ectrm-gap-bridge-work-packages.md)
 - [Governed core trade command model](docs/engineering/core-platform-trade-command-model.md)
 - [Governed core platform work packages](docs/engineering/core-platform-work-packages.md)
 - [Trader/Risk MVP work packages](docs/engineering/trader-risk-mvp-work-packages.md)

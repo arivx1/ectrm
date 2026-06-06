@@ -24,6 +24,7 @@ These packages assume:
 - [Platform Blueprint](./platform-blueprint.md)
 - [ADR 0002: V2 Application Architecture And Canonical Domain Boundaries](../adr/0002-v2-application-architecture.md)
 - [Business Use Case Roadmap](./business-use-case-roadmap.md)
+- [Premium E/CTRM Gap Bridge Work Packages](./premium-ectrm-gap-bridge-work-packages.md)
 - [Future-Ready Engineering Work Packages](./future-ready-engineering-work-packages.md)
 - [AI Workflow](./ai-workflow.md)
 - [Agent Action Request Contract](./agent-action-request-contract.md)
@@ -41,6 +42,9 @@ These packages assume:
   prototype systems and should become the pattern for other automation seams
 - current product breadth is wider than the maturity of the core trade,
   reference-data, policy, and settlement model
+- the premium E/CTRM bridge should be used as the market-facing maturity lens
+  for sequencing trade, valuation, operations, settlement, integrations,
+  controls, reporting, and governed AI inside the locked gas slice
 
 ## Delivery Order
 

@@ -6455,3 +6455,69 @@ independently"`.
   focused upload/reprocess fallback tests,
   `npm --prefix apps/web test -- libraryWorkspace.test.ts`, and
   `make api-document-classification-evals`
+
+### 2026-06-06 - Premium Gap Bridging Stays Slice-Locked
+
+- Type: lesson
+- Domain: governed core, premium E/CTRM maturity, roadmap sequencing, and agent
+  planning
+- Applies to: premium capability comparisons, work-package planning, trade
+  lifecycle, valuation, operations, settlement, integrations, controls,
+  reporting, and governed AI
+- Status: planned
+- Source:
+  [Premium E/CTRM Gap Bridge Work Packages](./premium-ectrm-gap-bridge-work-packages.md),
+  [Governed Core Platform Slice Lock](./core-platform-slice-lock.md), and
+  [Governed Core Platform Roadmap](./core-platform-roadmap.md)
+- Lesson: premium E/CTRM parity should be translated into deterministic
+  maturity inside the locked fixed-price physical gas slice before expanding
+  product breadth. The useful benchmark is not "more workspaces"; it is whether
+  the slice has governed trade commands, official economics, valuation truth,
+  physical scheduling/actualization, settlement/accounting traceability,
+  integration contracts, enterprise controls, audit reporting, and AI tool
+  parity over the same governed records.
+- Deterministic opportunity: use the premium bridge scorecard as a planning
+  gate. Owner is platform/product architecture. Inputs are the locked slice,
+  premium capability category, current repo seam, target maturity level, and
+  verification lane. Outputs are prioritized work packages with owner domain,
+  stop conditions, tests, and authority boundaries. Stop conditions are
+  requests that widen to unsupported product families, move business truth into
+  prompts/reports/frontend helpers, or grant AI/external side effects before
+  typed services and policy checks exist.
+- Agent autonomy impact: agents may research, compare, draft, and stage
+  package plans, but they should not treat premium-market capability lists as
+  permission to widen product scope or autonomy. Keep AI subordinate to the
+  same deterministic services and action-request contracts used by humans.
+- Tests or evidence:
+  docs-only link/reference check with `rg` and whitespace validation with
+  `git diff --check`
+
+### 2026-06-06 - CorrectTrade Is A Governed Correction Command, Not A Generic Amend
+
+- Type: algorithm-added
+- Domain: trade lifecycle write-path governance, correction audit, and command
+  provenance
+- Applies to: `CorrectTrade`, `/events` compatibility writes carrying
+  `command_type=CorrectTrade`, future correction routes, and assistant-staged
+  trade correction actions
+- Status: implemented
+- Source:
+  `apps/api/app/domains/trading/services/trade_commands.py`,
+  `apps/api/tests/test_trade_commands_service.py`, and
+  [Governed Core Trade Command Model](./core-platform-trade-command-model.md)
+- Lesson: `CorrectTrade` now has a distinct command identity even while it
+  temporarily emits `TradeAmended` for projection compatibility. The command
+  requires `expected_last_event_id`, `correction_reason`, and a
+  same-trade `corrects_event_id` before appending an event, and records
+  correction metadata in both the event payload and command provenance.
+- Deterministic opportunity: keep correction lineage in the command layer until
+  a dedicated `TradeCorrected` event and projection path are approved. Do not
+  model corrections as ordinary amendments in assistant prompts, UI helpers, or
+  route adapters, because the stale basis and corrected-event pointer are part
+  of the business truth.
+- Agent autonomy impact: assistants may draft or stage a correction with a
+  rationale and target event, but execution must pass through the same typed
+  command service and must fail closed if the stale basis or corrected event is
+  missing.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_trade_commands_service`

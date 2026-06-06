@@ -24,18 +24,23 @@ from apps.api.app.models.event import Event
 from apps.api.app.models.trade import Trade
 from apps.api.app.schemas.event import EventCreate
 
-TradeCommandType = Literal["BookTrade", "AmendTradeTerms", "CancelTrade"]
+TradeCommandType = Literal["BookTrade", "AmendTradeTerms", "CancelTrade", "CorrectTrade"]
 ALLOWED_GOVERNED_TRADE_WRITE_ROLES = frozenset({"TRADER", "DESK_LEAD", "OPS_ADMIN", "ADMIN"})
 
 TRADE_COMMAND_EVENT_TYPES: dict[TradeCommandType, str] = {
     "BookTrade": "TradeCreated",
     "AmendTradeTerms": "TradeAmended",
     "CancelTrade": "TradeCancelled",
+    "CorrectTrade": "TradeAmended",
 }
 
 TRADE_EVENT_COMMAND_TYPES: dict[str, TradeCommandType] = {
-    event_type: command_type for command_type, event_type in TRADE_COMMAND_EVENT_TYPES.items()
+    "TradeCreated": "BookTrade",
+    "TradeAmended": "AmendTradeTerms",
+    "TradeCancelled": "CancelTrade",
 }
+
+CORRECTABLE_TRADE_EVENT_TYPES = frozenset(TRADE_EVENT_COMMAND_TYPES.keys())
 
 
 class TradeCommandValidationError(ValueError):
@@ -72,7 +77,9 @@ def build_trade_write_command_from_event(
     if command_type is None:
         return None
 
-    if payload.command_type and payload.command_type != command_type:
+    if payload.command_type == "CorrectTrade" and payload.event_type == "TradeAmended":
+        command_type = "CorrectTrade"
+    elif payload.command_type and payload.command_type != command_type:
         raise TradeCommandValidationError(
             f"Trade event {payload.event_type} does not match command_type {payload.command_type}."
         )
@@ -116,15 +123,7 @@ def append_trade_write_command(
             schema_version=command.schema_version,
             operation_key=f"trade_command.{command.command_type}",
             source_surface=command.source_surface,
-            provenance_details={
-                "command_id": command.command_id,
-                "command_type": command.command_type,
-                **(
-                    {"expected_last_event_id": command.expected_last_event_id}
-                    if command.expected_last_event_id
-                    else {}
-                ),
-            },
+            provenance_details=_trade_command_provenance_details(command, event_payload),
         ),
         commit=commit,
         refresh=refresh,
@@ -144,6 +143,11 @@ def _precheck_trade_write(db: Session, command: TradeWriteCommand) -> Mapping[st
         _enforce_trade_write_stale_state(trade, command)
         _precheck_cancel_trade(trade=trade)
         return dict(command.payload or {})
+    if command.command_type == "CorrectTrade":
+        _require_expected_last_event_id(command)
+        trade = _load_existing_trade(db, command.trade_id)
+        _enforce_trade_write_stale_state(trade, command)
+        return _precheck_correct_trade(db, command, trade=trade)
     return dict(command.payload or {})
 
 
@@ -182,6 +186,15 @@ def _enforce_trade_write_stale_state(trade: Trade, command: TradeWriteCommand) -
         )
 
 
+def _require_expected_last_event_id(command: TradeWriteCommand) -> None:
+    if command.expected_last_event_id:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=f"{command.command_type} requires expected_last_event_id",
+    )
+
+
 def _precheck_book_trade(db: Session, command: TradeWriteCommand) -> Mapping[str, Any]:
     existing = db.execute(select(Trade).where(Trade.trade_id == command.trade_id)).scalars().first()
     if existing is not None:
@@ -198,6 +211,86 @@ def _precheck_book_trade(db: Session, command: TradeWriteCommand) -> Mapping[str
     payload["unit_of_measure"] = validated.unit_of_measure
     payload["price_unit_code"] = validated.price_unit_code
     return payload
+
+
+def _precheck_correct_trade(
+    db: Session,
+    command: TradeWriteCommand,
+    *,
+    trade: Trade,
+) -> Mapping[str, Any]:
+    payload = dict(command.payload or {})
+    correction_reason = _require_correction_text(
+        payload.get("correction_reason"),
+        field_name="correction_reason",
+        command_type=command.command_type,
+    )
+    corrects_event_id = _require_correction_text(
+        payload.get("corrects_event_id"),
+        field_name="corrects_event_id",
+        command_type=command.command_type,
+    )
+    corrected_event = _load_corrected_trade_event(db, command, corrects_event_id)
+    if corrected_event.event_type not in CORRECTABLE_TRADE_EVENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="corrects_event_id must reference a known prior trade event",
+        )
+
+    payload["correction_reason"] = correction_reason
+    payload["corrects_event_id"] = corrects_event_id
+    validated = validate_amend_trade_write(
+        db,
+        trade=trade,
+        payload_data=payload,
+    )
+    payload["unit_of_measure"] = validated.unit_of_measure
+    payload["price_unit_code"] = validated.price_unit_code
+    return payload
+
+
+def _require_correction_text(
+    value: object,
+    *,
+    field_name: str,
+    command_type: TradeCommandType,
+) -> str:
+    if value is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field_name} is required for {command_type}",
+        )
+    normalized = str(value).strip()
+    if not normalized:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field_name} is required for {command_type}",
+        )
+    return normalized
+
+
+def _load_corrected_trade_event(
+    db: Session,
+    command: TradeWriteCommand,
+    corrects_event_id: str,
+) -> Event:
+    event = (
+        db.execute(
+            select(Event).where(
+                Event.event_id == corrects_event_id,
+                Event.aggregate_type == "trade",
+                Event.aggregate_id == command.trade_id,
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if event is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Trade event {corrects_event_id} was not found for trade {command.trade_id}",
+        )
+    return event
 
 
 def _precheck_amend_trade(
@@ -219,3 +312,23 @@ def _precheck_amend_trade(
 
 def _precheck_cancel_trade(*, trade: Trade) -> None:
     validate_cancel_trade_write(trade)
+
+
+def _trade_command_provenance_details(
+    command: TradeWriteCommand,
+    event_payload: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    details: dict[str, Any] = {
+        "command_id": command.command_id,
+        "command_type": command.command_type,
+    }
+    if command.expected_last_event_id:
+        details["expected_last_event_id"] = command.expected_last_event_id
+    if command.command_type == "CorrectTrade":
+        corrects_event_id = event_payload.get("corrects_event_id")
+        correction_reason = event_payload.get("correction_reason")
+        if corrects_event_id:
+            details["corrects_event_id"] = corrects_event_id
+        if correction_reason:
+            details["correction_reason"] = correction_reason
+    return details

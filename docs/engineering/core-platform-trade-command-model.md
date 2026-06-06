@@ -269,7 +269,8 @@ Initial command payload for the slice:
 
 - `trade_id`
 - `expected_last_event_id`
-- `corrected_fields`
+- affected trade fields, using the same field names as amend during the
+  `/events` compatibility phase
 - `correction_reason`
 - `corrects_event_id`
 
@@ -287,10 +288,10 @@ Initial validation ownership:
 
 Compatibility note:
 
-- the current repo does not yet have a dedicated `TradeCorrected` event type
-  wired into projection application. Until that lands, `CorrectTrade` should be
-  treated as a planned command shape whose first implementation may temporarily
-  map into `TradeAmended` plus correction metadata. The long-term target is a
+- the current repo accepts `CorrectTrade` in the command service and maps it
+  into `TradeAmended` plus correction metadata during the `/events`
+  compatibility phase. The repo does not yet have a dedicated `TradeCorrected`
+  event type wired into projection application. The long-term target is a
   distinct correction event and clearer reversal lineage.
 
 ## Route And Service Strategy

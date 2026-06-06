@@ -360,6 +360,7 @@ For general architecture:
 For commodity product direction, vertical workflow packs, and report-pack
 scoping:
 
+- [Premium E/CTRM Gap Bridge Work Packages](./premium-ectrm-gap-bridge-work-packages.md)
 - [Opinionated Commodity Workflow Roadmap](./opinionated-commodity-workflow-roadmap.md)
 - [Business Use Case Roadmap](./business-use-case-roadmap.md)
 - [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md)
@@ -370,6 +371,7 @@ For trade lifecycle and the governed core:
 - [Governed Core Trade Command Model](./core-platform-trade-command-model.md)
 - [Governed Core Platform Slice Lock](./core-platform-slice-lock.md)
 - [Governed Core Platform Work Packages](./core-platform-work-packages.md)
+- [Premium E/CTRM Gap Bridge Work Packages](./premium-ectrm-gap-bridge-work-packages.md)
 
 For assistant, agents, automation, and actions:
 
