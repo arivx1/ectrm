@@ -7,6 +7,7 @@ import {
   saveGoogleCalendarAccessToken,
   saveGoogleCalendarEventCache,
   saveGoogleCalendarScopeGranted,
+  saveGoogleCalendarSelectedCalendars,
   saveGoogleCalendarSelection,
 } from '../src/entities/calendar/googleCalendarSession.ts'
 
@@ -112,6 +113,12 @@ test('google calendar session snapshot keeps a stable reference when storage is 
     accessTokenExpiresAt: 1_800_000_000_000,
     selectedCalendarId: 'desk-calendar',
     selectedCalendarSummary: 'Desk Calendar',
+    selectedCalendars: [
+      {
+        id: 'desk-calendar',
+        summary: 'Desk Calendar',
+      },
+    ],
     scopeGranted: true,
     cachedEvents: [
       {
@@ -200,6 +207,47 @@ test('google calendar session stores durable calendar access in local storage', 
   assert.equal(window.localStorage.getItem('ectrm.google-calendar.cached-at'), null)
 })
 
+test('google calendar session persists multiple selected calendars for Home', () => {
+  saveGoogleCalendarSelectedCalendars([
+    {
+      id: 'desk-calendar',
+      summary: 'Desk Calendar',
+    },
+    {
+      id: 'ops-calendar',
+      summary: 'Operations',
+    },
+  ])
+
+  const snapshot = getGoogleCalendarSessionSnapshot()
+
+  assert.equal(snapshot.selectedCalendarId, 'desk-calendar')
+  assert.equal(snapshot.selectedCalendarSummary, 'Desk Calendar + 1 calendar')
+  assert.deepEqual(snapshot.selectedCalendars, [
+    {
+      id: 'desk-calendar',
+      summary: 'Desk Calendar',
+    },
+    {
+      id: 'ops-calendar',
+      summary: 'Operations',
+    },
+  ])
+  assert.equal(
+    window.localStorage.getItem('ectrm.google-calendar.selected-calendars'),
+    JSON.stringify([
+      {
+        id: 'desk-calendar',
+        summary: 'Desk Calendar',
+      },
+      {
+        id: 'ops-calendar',
+        summary: 'Operations',
+      },
+    ]),
+  )
+})
+
 test('google calendar session snapshot still reads legacy session storage entries', () => {
   window.sessionStorage.setItem(
     'ectrm.google-calendar.selected-calendar-summary',
@@ -248,4 +296,5 @@ test('google calendar session snapshot still reads legacy session storage entrie
   assert.equal(snapshot.cachedAt, '2026-05-08T22:00:00.000Z')
   assert.equal(snapshot.cachedEvents.length, 1)
   assert.equal(snapshot.cachedEvents[0]?.id, 'evt-legacy')
+  assert.deepEqual(snapshot.selectedCalendars, [])
 })

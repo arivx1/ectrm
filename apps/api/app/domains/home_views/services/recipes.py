@@ -635,6 +635,8 @@ def _market_cards_for_persona(
 
 _HOME_CARD_DEFAULT_ORDER: tuple[str, ...] = (
     "timeframe",
+    "exchanges",
+    "calendar",
     "prices",
     "news",
     "map",
@@ -715,13 +717,31 @@ def _home_view_card(
             filters={"workflow_category": "market_monitoring"} if visible else {},
             data_bindings=["message_threads", "operator_attention_counts"],
         )
+    if card_id == "exchanges":
+        return HomeViewCardDefinition(
+            card_id="exchanges",
+            visible=visible,
+            placement=HomeViewCardPlacement(order=order, column_span=1, row_span=1),
+            parameters={},
+            filters={},
+            data_bindings=[],
+        )
+    if card_id == "calendar":
+        return HomeViewCardDefinition(
+            card_id="calendar",
+            visible=visible,
+            placement=HomeViewCardPlacement(order=order, column_span=1, row_span=1),
+            parameters={"calendar_display": "agenda"},
+            filters={},
+            data_bindings=["calendar_events", "user_events"],
+        )
     return HomeViewCardDefinition(
         card_id="timeframe",
         visible=visible,
         placement=HomeViewCardPlacement(order=order, column_span=1, row_span=1),
         parameters={},
         filters={},
-        data_bindings=["calendar_events", "user_events"],
+        data_bindings=[],
     )
 
 

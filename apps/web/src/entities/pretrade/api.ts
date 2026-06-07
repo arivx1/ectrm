@@ -3,7 +3,9 @@ import type {
   PreTradeGovernanceAuditExportRecord,
   PreTradeHedgeRecommendationRecord,
   PreTradeGovernanceItemsRecord,
+  PreTradeMarketOpportunityRecord,
   PreTradeNettingSetRecord,
+  PreTradePromotionOutcomeSummaryRecord,
   PreTradeRecommendationDraftAnalysisRecord,
   PreTradeGovernanceSummaryRecord,
   PreTradeRecommendationSourceAdapterRecord,
@@ -98,6 +100,11 @@ export type PromotePreTradeRiskScenarioPayload = {
   review_note?: string | null
 }
 
+export type PromotePreTradeMarketOpportunityPayload = {
+  owner?: string | null
+  review_note?: string | null
+}
+
 export async function loadPreTradeScenarios(
   apiBase: string,
   accessToken: string,
@@ -180,6 +187,16 @@ export async function loadPreTradeGovernanceAuditExport(
   })
 }
 
+export async function loadPreTradePromotionOutcomes(
+  apiBase: string,
+  accessToken: string,
+): Promise<PreTradePromotionOutcomeSummaryRecord> {
+  return fetchJson<PreTradePromotionOutcomeSummaryRecord>(`${apiBase}/pretrade/promotion-outcomes`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
 export async function loadPreTradeNettingSets(
   apiBase: string,
   accessToken: string,
@@ -236,6 +253,26 @@ export async function promotePreTradeRiskScenarioFromGovernance(
   payload: PromotePreTradeRiskScenarioPayload = {},
 ): Promise<PreTradeRiskScenarioRecord> {
   return postJson<PreTradeRiskScenarioRecord>(`${apiBase}/pretrade/risk-scenarios/from-promotion`, payload, {
+    headers: authorizationHeaders(accessToken),
+  })
+}
+
+export async function loadPreTradeMarketOpportunities(
+  apiBase: string,
+  accessToken: string,
+): Promise<PreTradeMarketOpportunityRecord[]> {
+  return fetchJson<PreTradeMarketOpportunityRecord[]>(`${apiBase}/pretrade/market-opportunities`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function promotePreTradeMarketOpportunityFromGovernance(
+  apiBase: string,
+  accessToken: string,
+  payload: PromotePreTradeMarketOpportunityPayload = {},
+): Promise<PreTradeMarketOpportunityRecord> {
+  return postJson<PreTradeMarketOpportunityRecord>(`${apiBase}/pretrade/market-opportunities/from-promotion`, payload, {
     headers: authorizationHeaders(accessToken),
   })
 }

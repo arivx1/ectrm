@@ -160,7 +160,8 @@ test('settings workspace renders expanded card bodies when persisted open', () =
     markup,
     /id="settings-trade-ticket-defaults-card-panel" class="settings-disclosure-body" hidden=""/,
   )
-  assert.match(markup, /Hide card/)
+  assert.match(markup, /aria-label="Collapse Trade Ticket Defaults"/)
+  assert.doesNotMatch(markup, />Hide\s+card</)
   assert.match(markup, /New Ticket Starting Values/)
   assert.match(markup, /Rule Stack/)
 })
@@ -210,7 +211,7 @@ test('settings workspace renders the custom event entry form when that card is e
   assert.match(markup, /Add Event/)
 })
 
-test('settings workspace exposes guided and market terminal shell modes in the appearance card', () => {
+test('settings workspace exposes guided and dense shell modes in the appearance card', () => {
   usePersistentCollapsibleCardStateMock.mockImplementation((cardKey: string) => ({
     expanded: cardKey === 'settings.appearance-card',
     hasPersistedValue: cardKey === 'settings.appearance-card',
@@ -225,7 +226,7 @@ test('settings workspace exposes guided and market terminal shell modes in the a
   )
   assert.match(markup, /Workspace mode/)
   assert.match(markup, /Guided workspace/)
-  assert.match(markup, /Market terminal/)
+  assert.match(markup, /Dense workspace/)
   assert.match(markup, /Landing and density mode/)
   assert.match(markup, /Theme and palette/)
   assert.match(markup, />Reset Appearance</)

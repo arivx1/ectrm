@@ -5,6 +5,7 @@ import {
   getPrimaryTerminalWorkspaceSetRoute,
   listTerminalWorkspaceSets,
 } from '../../shared/terminalWorkspaceSets'
+import { buildPriceIndexBiReportHandoff } from '../../workspaces/reports/reportRouteHandoffs'
 import type {
   CounterpartyRecord,
   PriceIndexRecord,
@@ -120,7 +121,7 @@ type TerminalFunctionShortcut = {
 }
 
 const FEATURED_WORKSPACE_VIEW_KEYS: ViewKey[] = [
-  'dashboard',
+  'prompt',
   'trades',
   'risk',
   'operations',
@@ -447,9 +448,9 @@ function buildMarketInstrumentHandoff(args: {
     focusType: 'market_instrument',
     focusId: `${args.kind}:${args.id}`,
     focusLabel: args.label,
-    label: `Open ${args.label} brief`,
+    label: `Open ${args.label} context`,
     rationale:
-      'The terminal command opened a read-only instrument brief so you can review market context beside related trades, exposure, and workflow activity.',
+      'The terminal command opened a read-only market context route so you can review related trades, exposure, and workflow activity.',
     filter: args.id,
   })
 }
@@ -478,12 +479,12 @@ function buildStaticFunctionShortcuts(): TerminalFunctionShortcut[] {
   return [
     {
       id: 'mon',
-      title: 'MON - Live Desk Monitor',
-      detail: 'Open Live Desk for market monitor, watchlist, headline, price, and exposure context.',
-      aliases: ['mon', 'monitor', 'mkt', 'mkts', 'live', 'live desk', 'market monitor'],
+      title: 'HOME - Apps',
+      detail: 'Open Home Apps for saved views, market cards, maps, documents, messages, and assistant prompts.',
+      aliases: ['home', 'apps', 'home apps', 'mon', 'monitor', 'mkt', 'mkts', 'brief', 'operating brief', 'market pulse'],
       action: {
         kind: 'view',
-        view: 'dashboard',
+        view: 'prompt',
         handoff: null,
       },
     },
@@ -578,20 +579,23 @@ function buildStaticFunctionShortcuts(): TerminalFunctionShortcut[] {
 }
 
 function buildWorkspaceEntries(): TerminalCommandEntry[] {
-  return APP_VIEWS.map((view, index) => ({
-    id: `workspace:${view.key}`,
-    scope: 'workspace',
-    title: view.label,
-    detail: `${view.kicker} workspace`,
-    action: {
-      kind: 'view',
-      view: view.key,
-      handoff: null,
-    },
-    searchValues: [view.label, view.kicker, view.key],
-    rankValues: [view.label, view.key],
-    order: index,
-  }))
+  return APP_VIEWS.filter((view) => view.key !== 'dashboard').map((view, index) => {
+    const homeAliases = view.key === 'prompt' ? ['home', 'home apps'] : []
+    return {
+      id: `workspace:${view.key}`,
+      scope: 'workspace',
+      title: view.label,
+      detail: `${view.kicker} workspace`,
+      action: {
+        kind: 'view',
+        view: view.key,
+        handoff: null,
+      },
+      searchValues: [view.label, view.kicker, view.key, ...homeAliases],
+      rankValues: [view.label, view.key, ...homeAliases],
+      order: index,
+    }
+  })
 }
 
 function buildTradeEntries(trades: readonly Trade[]): TerminalCommandEntry[] {
@@ -774,14 +778,16 @@ function buildTerminalFunctionEntries(args: Omit<TerminalCommandSearchArgs, 'que
     id: `function:des:price-index:${priceIndex.code}`,
     scope: 'function',
     title: `DES - ${priceIndex.code}`,
-    detail: `Open ${priceIndex.name} as a Live Desk instrument brief.`,
+    detail: `Open ${priceIndex.name} in the reusable price report.`,
     action: {
       kind: 'view',
-      view: 'dashboard',
-      handoff: buildMarketInstrumentHandoff({
-        kind: 'price_index',
-        id: priceIndex.code,
-        label: priceIndex.name,
+      view: 'reports',
+      handoff: buildPriceIndexBiReportHandoff({
+        priceIndexCode: priceIndex.code,
+        priceIndexName: priceIndex.name,
+        product: priceIndex.commodity_code,
+        location: priceIndex.location_code,
+        source: priceIndex.provider,
       }),
     },
     searchValues: [
@@ -817,10 +823,10 @@ function buildTerminalFunctionEntries(args: Omit<TerminalCommandSearchArgs, 'que
     id: `function:des:commodity-class:${commodityClass}`,
     scope: 'function',
     title: `DES - ${commodityClass}`,
-    detail: `Open ${commodityClass} as a Live Desk commodity-class instrument brief.`,
+    detail: `Open ${commodityClass} in Exposure for commodity-class context.`,
     action: {
       kind: 'view',
-      view: 'dashboard',
+      view: 'risk',
       handoff: buildMarketInstrumentHandoff({
         kind: 'commodity_class',
         id: commodityClass,

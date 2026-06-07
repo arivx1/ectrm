@@ -17,6 +17,7 @@ import type {
   PreTradeGovernanceItemsRecord,
   PreTradeGovernanceSummaryRecord,
   PreTradeNettingSetRecord,
+  PreTradePromotionOutcomeSummaryRecord,
   PreTradeRecommendationDraftAnalysisRecord,
   PreTradeRecommendationEvidenceRefRecord,
   PreTradeRecommendationResultRecord,
@@ -27,6 +28,7 @@ import type {
   PreTradeReviewItemRecord,
   PreTradeReviewRecommendationSummaryRecord,
   PreTradeReviewStatus,
+  PreTradeMarketOpportunityRecord,
   PreTradeRiskScenarioRecord,
   PreTradeScenarioDraft,
   PreTradeScenarioEnrichmentRecord,
@@ -150,6 +152,10 @@ type SmokeHomeViewCardRow = {
     order: number
     column_span: number
     row_span: number
+    collapsed_column_span: number
+    collapsed_row_span: number
+    expanded_column_span: number
+    expanded_row_span: number
   }
   parameters: Record<string, unknown>
   filters: Record<string, unknown>
@@ -771,6 +777,68 @@ function buildPreTradeGovernanceExport(
   }
 }
 
+function buildPreTradePromotionOutcomeSummary(): PreTradePromotionOutcomeSummaryRecord {
+  return {
+    generated_at: '2026-04-11T00:10:00Z',
+    total_draft_count: 0,
+    metrics: [
+      { outcome: 'CREATED', count: 0 },
+      { outcome: 'REUSED', count: 0 },
+      { outcome: 'RETIRED', count: 0 },
+      { outcome: 'REJECTED', count: 0 },
+      { outcome: 'MERGED_INTO_BOOKED_TRADE', count: 0 },
+      { outcome: 'BLOCKED_BY_MISSING_EVIDENCE', count: 0 },
+    ],
+    by_draft_type: [
+      {
+        draft_type: 'NETTING_SET',
+        label: 'Netting Set',
+        total_count: 0,
+        created_count: 0,
+        reused_count: 0,
+        retired_count: 0,
+        rejected_count: 0,
+        merged_into_booked_trade_count: 0,
+        blocked_by_missing_evidence_count: 0,
+      },
+      {
+        draft_type: 'HEDGE_RECOMMENDATION',
+        label: 'Hedge Recommendation',
+        total_count: 0,
+        created_count: 0,
+        reused_count: 0,
+        retired_count: 0,
+        rejected_count: 0,
+        merged_into_booked_trade_count: 0,
+        blocked_by_missing_evidence_count: 0,
+      },
+      {
+        draft_type: 'RISK_SCENARIO',
+        label: 'Risk Scenario',
+        total_count: 0,
+        created_count: 0,
+        reused_count: 0,
+        retired_count: 0,
+        rejected_count: 0,
+        merged_into_booked_trade_count: 0,
+        blocked_by_missing_evidence_count: 0,
+      },
+      {
+        draft_type: 'MARKET_OPPORTUNITY',
+        label: 'Market Opportunity',
+        total_count: 0,
+        created_count: 0,
+        reused_count: 0,
+        retired_count: 0,
+        rejected_count: 0,
+        merged_into_booked_trade_count: 0,
+        blocked_by_missing_evidence_count: 0,
+      },
+    ],
+    drafts: [],
+  }
+}
+
 function buildPreTradeReviewDrift(review: PreTradeReviewItemRecord): PreTradeReviewDriftRecord {
   return {
     review_id: review.review_id,
@@ -1344,6 +1412,7 @@ async function startMockApiServer(
   const preTradeNettingSetRows: PreTradeNettingSetRecord[] = []
   const preTradeHedgeRecommendationRows: PreTradeHedgeRecommendationRecord[] = []
   const preTradeRiskScenarioRows: PreTradeRiskScenarioRecord[] = []
+  const preTradeMarketOpportunityRows: PreTradeMarketOpportunityRecord[] = []
   const truckMovementSummaries: DeliveryTruckMovementSummaryRecord[] = smokeTruckMovementSummaries.map((movement) => ({
     ...movement,
     tracking_health: movement.tracking_health ? { ...movement.tracking_health } : movement.tracking_health,
@@ -1433,9 +1502,21 @@ async function startMockApiServer(
     const defaults: Record<string, Omit<SmokeHomeViewCardRow, 'visible' | 'placement' | 'parameters' | 'filters'>> = {
       timeframe: {
         card_id: 'timeframe',
-        kind: 'time_context',
+        kind: 'desk_time',
         label: 'Desk Time',
-        data_bindings: ['desk_clock', 'upcoming_calendar_events'],
+        data_bindings: [],
+      },
+      exchanges: {
+        card_id: 'exchanges',
+        kind: 'exchange_sessions',
+        label: 'Exchanges',
+        data_bindings: [],
+      },
+      calendar: {
+        card_id: 'calendar',
+        kind: 'calendar',
+        label: 'Calendar',
+        data_bindings: ['calendar_events', 'user_events'],
       },
       prices: {
         card_id: 'prices',
@@ -1457,20 +1538,20 @@ async function startMockApiServer(
       },
       documents: {
         card_id: 'documents',
-        kind: 'documents',
+        kind: 'document_upload',
         label: 'Upload documents',
         data_bindings: ['document_ingestion'],
       },
       communication: {
         card_id: 'communication',
-        kind: 'communication',
+        kind: 'communication_center',
         label: 'Communication center',
-        data_bindings: ['message_threads', 'counterparty_contacts'],
+        data_bindings: ['message_threads', 'operator_attention_counts'],
       },
       prompt: {
         card_id: 'prompt',
         kind: 'assistant_prompt',
-        label: 'Ask the desk assistant',
+        label: 'Desk Assistant',
         data_bindings: ['assistant_conversation', 'operator_attention_counts'],
       },
     }
@@ -1478,14 +1559,28 @@ async function startMockApiServer(
   }
 
   function buildSmokeHomeViewSystemCards(): SmokeHomeViewCardRow[] {
-    return ['timeframe', 'prices', 'news', 'map', 'documents', 'communication', 'prompt'].map(
+    return [
+      'timeframe',
+      'exchanges',
+      'calendar',
+      'prices',
+      'news',
+      'map',
+      'documents',
+      'communication',
+      'prompt',
+    ].map(
       (cardId, index) => ({
         ...smokeHomeViewCardDefaults(cardId),
         visible: true,
         placement: {
           order: index,
-          column_span: cardId === 'prices' || cardId === 'news' || cardId === 'map' || cardId === 'prompt' ? 2 : 1,
-          row_span: cardId === 'map' ? 2 : 1,
+          column_span: 2,
+          row_span: 4,
+          collapsed_column_span: 2,
+          collapsed_row_span: 1,
+          expanded_column_span: 2,
+          expanded_row_span: 4,
         },
         parameters: {},
         filters: {},
@@ -1517,8 +1612,40 @@ async function startMockApiServer(
         visible: typeof record.visible === 'boolean' ? record.visible : true,
         placement: {
           order: normalized.length,
-          column_span: Number(placementRecord.column_span ?? placementRecord.columnSpan ?? 1),
-          row_span: Number(placementRecord.row_span ?? placementRecord.rowSpan ?? 1),
+          column_span: Number(
+            placementRecord.expanded_column_span ??
+              placementRecord.expandedColumnSpan ??
+              placementRecord.column_span ??
+              placementRecord.columnSpan ??
+              2,
+          ),
+          row_span: Number(
+            placementRecord.expanded_row_span ??
+              placementRecord.expandedRowSpan ??
+              placementRecord.row_span ??
+              placementRecord.rowSpan ??
+              4,
+          ),
+          collapsed_column_span: Number(
+            placementRecord.collapsed_column_span ??
+              placementRecord.collapsedColumnSpan ??
+              2,
+          ),
+          collapsed_row_span: Number(
+            placementRecord.collapsed_row_span ??
+              placementRecord.collapsedRowSpan ??
+              1,
+          ),
+          expanded_column_span: Number(
+            placementRecord.expanded_column_span ??
+              placementRecord.expandedColumnSpan ??
+              2,
+          ),
+          expanded_row_span: Number(
+            placementRecord.expanded_row_span ??
+              placementRecord.expandedRowSpan ??
+              4,
+          ),
         },
         parameters:
           record.parameters && typeof record.parameters === 'object' && !Array.isArray(record.parameters)
@@ -2432,6 +2559,8 @@ async function startMockApiServer(
       !(method === 'POST' && url.pathname === '/assistant/respond/stream') &&
       !(method === 'POST' && url.pathname === '/assistant/prompt-navigation-outcomes') &&
       !(method === 'POST' && /\/assistant\/runs\/\d+\/prompt-navigation-outcomes$/.test(url.pathname)) &&
+      !(method === 'POST' && url.pathname === '/integrations/attio/client-enrichment') &&
+      !(method === 'POST' && url.pathname === '/market-data/news/headlines/tagging') &&
       !(method === 'POST' && url.pathname === '/pretrade/recommendations/draft-analysis') &&
       !(method === 'PUT' && url.pathname.startsWith('/layout-definitions/'))
     ) {
@@ -2630,6 +2759,95 @@ async function startMockApiServer(
 
     if (url.pathname === '/assistant/settings' && method === 'GET') {
       writeJson(response, assistantRuntimeSettings)
+      return
+    }
+
+    if (url.pathname === '/integrations/attio/client-enrichment' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const body = await readJsonBody(request)
+      const clientName =
+        body && typeof body === 'object' && typeof (body as { client_name?: unknown }).client_name === 'string'
+          ? (body as { client_name: string }).client_name
+          : ''
+      if (clientName.trim().toLowerCase() !== 'hartree') {
+        writeJson(response, {
+          provider: 'attio_rest_api',
+          configured: true,
+          client_name: clientName,
+          matched: false,
+          match_basis: 'none',
+          company: null,
+          contacts: [],
+          deals: [],
+          required_scopes: ['object_configuration:read', 'record_permission:read'],
+          warnings: ['No Attio company match found for this client.'],
+        })
+        return
+      }
+      writeJson(response, {
+        provider: 'attio_rest_api',
+        configured: true,
+        client_name: 'Hartree',
+        matched: true,
+        match_basis: 'search',
+        company: {
+          object_slug: 'companies',
+          record_id: 'company-hartree',
+          label: 'Hartree Partners',
+          web_url: 'https://app.attio.com/company-hartree',
+          domains: ['hartreepartners.com'],
+          description: 'Global energy and commodities firm.',
+          status: 'Customer',
+        },
+        contacts: [
+          {
+            record_id: 'person-hartree-1',
+            name: 'Alex Hartree',
+            title: 'Commercial lead',
+            email: 'alex.hartree@example.com',
+            phone: null,
+            web_url: 'https://app.attio.com/person-hartree-1',
+          },
+        ],
+        deals: [
+          {
+            record_id: 'deal-hartree-1',
+            name: 'Hartree Partners (Expansion)',
+            stage: 'Won',
+            value: null,
+            close_date: '2025-05-20',
+            web_url: 'https://app.attio.com/deal-hartree-1',
+          },
+        ],
+        required_scopes: ['object_configuration:read', 'record_permission:read'],
+        warnings: [],
+      })
+      return
+    }
+
+    if (url.pathname === '/assistant/token-usage' && method === 'GET') {
+      const activeAgentBudget = currentAssistantAgent('ops-governor')?.token_budget
+      writeJson(response, {
+        used_tokens: activeAgentBudget?.used_tokens ?? 0,
+        input_tokens: 120,
+        output_tokens: 60,
+        recorded_run_count: activeAgentBudget && activeAgentBudget.used_tokens > 0 ? 1 : 0,
+        managed_agent_tokens: activeAgentBudget?.used_tokens ?? 0,
+        unassigned_tokens: 0,
+        window_started_at: activeAgentBudget?.window_started_at ?? assistantRunRecordedAt,
+        reset_at: activeAgentBudget?.reset_at ?? assistantRunRecordedAt,
+      })
+      return
+    }
+
+    if (url.pathname === '/messages/workspace' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, { conversations: [] })
       return
     }
 
@@ -5498,6 +5716,15 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/pretrade/promotion-outcomes' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, buildPreTradePromotionOutcomeSummary())
+      return
+    }
+
     if (url.pathname === '/pretrade/netting-sets' && method === 'GET') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
@@ -5522,6 +5749,15 @@ async function startMockApiServer(
       }
 
       writeJson(response, preTradeRiskScenarioRows.map(cloneJson))
+      return
+    }
+
+    if (url.pathname === '/pretrade/market-opportunities' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+
+      writeJson(response, preTradeMarketOpportunityRows.map(cloneJson))
       return
     }
 
@@ -5934,6 +6170,49 @@ async function startMockApiServer(
             link: 'https://news.example.test/henry-hub-smoke',
           },
         ],
+      })
+      return
+    }
+
+    if (url.pathname === '/market-data/news/headlines/tagging' && method === 'POST') {
+      const payload = await readJsonBody(request)
+      const record =
+        payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>)
+          : {}
+      const items = Array.isArray(record.items) ? record.items : []
+
+      writeJson(response, {
+        generated_at: '2026-04-11T00:00:00Z',
+        provider: 'smoke',
+        model: null,
+        items: items
+          .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object' && !Array.isArray(item))
+          .map((item) => ({
+            id: typeof item.id === 'string' ? item.id : 'smoke-news-item',
+            supply: {
+              direction: 'neutral',
+              horizon: 'near_term',
+              confidence: 0.5,
+              rationale: 'Smoke harness neutral news tag.',
+              source: 'ai',
+            },
+            demand: {
+              direction: 'neutral',
+              horizon: 'near_term',
+              confidence: 0.5,
+              rationale: 'Smoke harness neutral news tag.',
+              source: 'ai',
+            },
+            market_location: {
+              label: 'Henry Hub',
+              scope: 'region',
+              confidence: 0.5,
+              rationale: 'Smoke harness market location.',
+              source: 'ai',
+            },
+          })),
+        warnings: [],
       })
       return
     }

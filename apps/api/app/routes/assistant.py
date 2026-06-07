@@ -979,7 +979,7 @@ async def build_admin_assistant_agent(
     db: Session = Depends(get_db),
 ) -> AssistantAgentBuildSuggestionOut:
     try:
-        return await get_assistant_service(db).build_agent_draft_with_openai(payload)
+        return await get_assistant_service(db).build_agent_draft(payload)
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

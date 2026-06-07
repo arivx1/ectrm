@@ -45,6 +45,7 @@ RECOMMENDATION_OVERRIDE_STANCES = {"ESCALATE", "WAIT_FOR_DATA"}
 IMPAIRED_SOURCE_QUALITY_STATUSES = {"STALE", "DEGRADED", "MISSING"}
 PROMOTABLE_HEDGE_INSTRUMENTS = {"FUTURES", "OPTIONS", "SWAP", "PHYSICAL_OFFSET"}
 PROMOTABLE_NETTING_MATCH_QUALITIES = {"EXACT", "PARTIAL"}
+PROMOTABLE_MARKET_OPPORTUNITY_CATEGORIES = {"MARK_GAP", "ARBITRAGE"}
 RISK_TRIAGE_PROMOTION_MARKERS = (
     "risk workspace triage",
     "risk triage",
@@ -55,11 +56,13 @@ PROMOTION_CANDIDATE_LABELS: dict[PreTradePromotionCandidateType, str] = {
     "NETTING_SET": "Netting Set",
     "HEDGE_RECOMMENDATION": "Hedge Recommendation",
     "RISK_SCENARIO": "Risk Scenario",
+    "MARKET_OPPORTUNITY": "Market Opportunity",
 }
 PROMOTION_CANDIDATE_ORDER: tuple[PreTradePromotionCandidateType, ...] = (
     "NETTING_SET",
     "HEDGE_RECOMMENDATION",
     "RISK_SCENARIO",
+    "MARKET_OPPORTUNITY",
 )
 
 
@@ -74,6 +77,7 @@ class _PromotionCandidateEvidence:
     evidence_notes: list[str] = field(default_factory=list)
     has_exact_netting_match: bool = False
     has_policy_stops: bool = False
+    has_blocking_missing_evidence: bool = False
 
 
 def _visible_reviews_stmt():
@@ -179,6 +183,27 @@ def _hedge_promotion_note(run: PreTradeRecommendationRunOut) -> tuple[str | None
     )
 
 
+def _market_opportunity_promotion_note(run: PreTradeRecommendationRunOut) -> tuple[str | None, bool]:
+    opportunity = run.recommendation.opportunity_summary
+    if opportunity is None or opportunity.category not in PROMOTABLE_MARKET_OPPORTUNITY_CATEGORIES:
+        return None, False
+
+    has_blocking_missing_evidence = any(
+        missing.severity == "BLOCKING"
+        for missing in run.recommendation.missing_evidence
+    )
+    arbitrage_candidate = run.recommendation.arbitrage_candidate
+    if opportunity.category == "ARBITRAGE" and arbitrage_candidate is not None:
+        has_blocking_missing_evidence = has_blocking_missing_evidence or bool(
+            arbitrage_candidate.missing_evidence
+            or arbitrage_candidate.stop_reasons
+            or arbitrage_candidate.status != "SUPPORTED"
+        )
+
+    category = opportunity.category.replace("_", " ").lower()
+    return f"{category} opportunity evidence: {opportunity.title}.", has_blocking_missing_evidence
+
+
 def _review_mentions_risk_triage(record: ReportPreset) -> bool:
     payload = review_record_payload(record)
     text_parts: list[str] = [record.name]
@@ -209,6 +234,7 @@ def _add_promotion_evidence(
     note: str | None = None,
     has_exact_netting_match: bool = False,
     has_policy_stops: bool = False,
+    has_blocking_missing_evidence: bool = False,
 ) -> None:
     if review_status(review_record) == "REJECTED":
         return
@@ -230,6 +256,10 @@ def _add_promotion_evidence(
         _promotion_note_once(evidence, note)
     evidence.has_exact_netting_match = evidence.has_exact_netting_match or has_exact_netting_match
     evidence.has_policy_stops = evidence.has_policy_stops or has_policy_stops
+    evidence.has_blocking_missing_evidence = (
+        evidence.has_blocking_missing_evidence
+        or has_blocking_missing_evidence
+    )
 
 
 def _latest_promotion_review_id(evidence: _PromotionCandidateEvidence) -> int | None:
@@ -281,6 +311,8 @@ def _promotion_stop_reasons(evidence: _PromotionCandidateEvidence) -> list[str]:
         stop_reasons.append("Only partial netting evidence is visible; define matching tolerances before creating a durable netting set.")
     if evidence.candidate_type == "HEDGE_RECOMMENDATION" and evidence.has_policy_stops:
         stop_reasons.append("At least one hedge recommendation still carries policy stops.")
+    if evidence.candidate_type == "MARKET_OPPORTUNITY" and evidence.has_blocking_missing_evidence:
+        stop_reasons.append("Market opportunity evidence still carries blocking missing evidence.")
     if not evidence.runs and evidence.candidate_type != "RISK_SCENARIO":
         stop_reasons.append("No linked recommendation run evidence is attached to the reviews yet.")
     return stop_reasons
@@ -399,6 +431,17 @@ def _build_promotion_candidates(
                     run=run,
                     note=hedge_note,
                     has_policy_stops=has_policy_stops,
+                )
+
+            market_note, has_blocking_missing_evidence = _market_opportunity_promotion_note(run)
+            if market_note is not None:
+                _add_promotion_evidence(
+                    evidence_by_type,
+                    candidate_type="MARKET_OPPORTUNITY",
+                    review_record=review_record,
+                    run=run,
+                    note=market_note,
+                    has_blocking_missing_evidence=has_blocking_missing_evidence,
                 )
 
         if _review_mentions_risk_triage(review_record):

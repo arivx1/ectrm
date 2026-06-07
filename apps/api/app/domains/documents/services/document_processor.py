@@ -332,6 +332,7 @@ def run_document_processor_analysis(
                 provider=config,
                 model=config.model,
                 filename=filename,
+                payload=payload,
                 pages=pages,
             )
         else:
@@ -520,9 +521,10 @@ def _generate_anthropic_document_analysis(
     provider: DocumentProcessorProviderConfig,
     model: str,
     filename: str,
+    payload: bytes,
     pages: list[DocumentIngestionPage],
 ) -> _ProcessorResponse:
-    prompt = _build_text_document_prompt(filename=filename, page_count=len(pages), pages=pages)
+    prompt = _build_anthropic_document_prompt(filename=filename, page_count=len(pages), pages=pages)
     response_payload = _post_json(
         url=f"{provider.base_url.rstrip('/')}/v1/messages",
         headers={
@@ -537,7 +539,10 @@ def _generate_anthropic_document_analysis(
             "messages": [
                 {
                     "role": "user",
-                    "content": [{"type": "text", "text": prompt}],
+                    "content": [
+                        _build_anthropic_pdf_document_block(payload),
+                        {"type": "text", "text": prompt},
+                    ],
                 }
             ],
         },
@@ -734,6 +739,32 @@ def _build_text_document_prompt(
     )
 
 
+def _build_anthropic_document_prompt(
+    *,
+    filename: str,
+    page_count: int,
+    pages: list[DocumentIngestionPage],
+) -> str:
+    page_payload = [
+        {
+            "page_number": page.page_number,
+            "text_source": str((page.classification_payload or {}).get("text_source") or "none"),
+            "raw_text": page.raw_text or "",
+            "heuristic_document_kind": page.document_kind,
+        }
+        for page in pages
+    ]
+    return (
+        f"Filename: {filename}\n"
+        f"Page count: {page_count}\n\n"
+        f"{_document_schema_instructions()}\n\n"
+        "Read the attached PDF directly. Use the extracted text below only as fallback context when the PDF is "
+        "visually ambiguous or text extraction is sparse.\n\n"
+        f"Fallback extracted text by page:\n{json.dumps(page_payload, ensure_ascii=True)}\n\n"
+        f"{_document_response_contract()}"
+    )
+
+
 def _document_schema_instructions() -> str:
     registry = build_document_schema_registry()
     lines: list[str] = [
@@ -879,6 +910,17 @@ def _build_openai_document_response_schema() -> dict[str, Any]:
 def _build_pdf_data_url(payload: bytes) -> str:
     encoded = base64.b64encode(payload).decode("ascii")
     return f"data:application/pdf;base64,{encoded}"
+
+
+def _build_anthropic_pdf_document_block(payload: bytes) -> dict[str, Any]:
+    return {
+        "type": "document",
+        "source": {
+            "type": "base64",
+            "media_type": "application/pdf",
+            "data": base64.b64encode(payload).decode("ascii"),
+        },
+    }
 
 
 def _build_openai_input_file(

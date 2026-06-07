@@ -178,6 +178,7 @@ class AssistantApiTests(unittest.TestCase):
             "OPENAI_BASE_URL": settings.OPENAI_BASE_URL,
             "ANTHROPIC_API_KEY": settings.ANTHROPIC_API_KEY,
             "ANTHROPIC_MODEL": settings.ANTHROPIC_MODEL,
+            "ANTHROPIC_AGENT_BUILDER_MODEL": settings.ANTHROPIC_AGENT_BUILDER_MODEL,
             "ANTHROPIC_BASE_URL": settings.ANTHROPIC_BASE_URL,
             "GOOGLE_API_KEY": settings.GOOGLE_API_KEY,
             "GOOGLE_MODEL": settings.GOOGLE_MODEL,
@@ -240,6 +241,7 @@ class AssistantApiTests(unittest.TestCase):
         settings.OPENAI_BASE_URL = "https://api.openai.com/v1"
         settings.ANTHROPIC_API_KEY = ""
         settings.ANTHROPIC_MODEL = "claude-sonnet-4-5"
+        settings.ANTHROPIC_AGENT_BUILDER_MODEL = ""
         settings.ANTHROPIC_BASE_URL = "https://api.anthropic.com"
         settings.GOOGLE_API_KEY = "google-test-key"
         settings.GOOGLE_MODEL = "gemini-2.5-flash"
@@ -2154,6 +2156,80 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn('"action_type_options"', request_payload["input"])
         self.assertIn('"allowed_action_types":["cancel_trade"]', request_payload["input"])
 
+    def test_admin_agent_builder_uses_anthropic_when_configured(self) -> None:
+        token = self._create_session_token()
+        captured_request: dict[str, object] = {}
+        settings.ANTHROPIC_API_KEY = "anthropic-test-key"
+        settings.ANTHROPIC_AGENT_BUILDER_MODEL = "claude-opus-4-0"
+
+        async def _fake_post_json(*, url, headers, payload, provider_label):
+            captured_request["url"] = url
+            captured_request["headers"] = headers
+            captured_request["payload"] = payload
+            captured_request["provider_label"] = provider_label
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {
+                                "agent_id": "ops-claude-briefing",
+                                "name": "Ops Claude Briefing",
+                                "description": "Summarizes operational blockers for supervisors.",
+                                "scope": "TEAM",
+                                "allowed_workspaces": ["assistant", "operations"],
+                                "capabilities": ["READ", "EXPLAIN"],
+                                "skills": ["trade_operations_coordination"],
+                                "allowed_tools": ["list_workflow_items"],
+                                "allowed_action_types": [],
+                                "system_prompt": "Summarize blockers with cited workflow evidence.",
+                            }
+                        ),
+                    }
+                ],
+                "usage": {"input_tokens": 90, "output_tokens": 40},
+            }
+
+        with patch(
+            "apps.api.app.domains.assistant.services.chat._post_json",
+            side_effect=_fake_post_json,
+        ):
+            response = self.client.post(
+                "/admin/assistant/agents/build",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "brief": "Build an operations briefing agent that uses Claude.",
+                    "current_draft": {
+                        "status": "DRAFT",
+                        "provider": "anthropic",
+                        "model": "claude-sonnet-4-5",
+                        "allowed_workspaces": ["assistant"],
+                        "capabilities": ["EXPLAIN"],
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["provider"], "anthropic")
+        self.assertEqual(payload["model"], "claude-sonnet-4-5")
+        self.assertEqual(payload["builder_provider"], "anthropic")
+        self.assertEqual(payload["builder_model"], "claude-opus-4-0")
+        self.assertEqual(payload["allowed_tools"], ["list_workflow_items"])
+        self.assertEqual(payload["allowed_action_types"], [])
+        self.assertEqual(payload["warnings"], [])
+
+        request_payload = captured_request["payload"]
+        assert isinstance(request_payload, dict)
+        self.assertEqual(captured_request["provider_label"], "Anthropic Agent Builder")
+        self.assertEqual(captured_request["url"], "https://api.anthropic.com/v1/messages")
+        self.assertEqual(captured_request["headers"]["x-api-key"], "anthropic-test-key")
+        self.assertEqual(request_payload["model"], "claude-opus-4-0")
+        self.assertIn("pinned to the Anthropic provider", request_payload["system"])
+        sent_text = request_payload["messages"][0]["content"][0]["text"]
+        self.assertIn('"provider":"anthropic"', sent_text)
+        self.assertIn('"response_schema"', sent_text)
+
     def test_admin_self_update_draft_generates_reviewable_agent_revision_from_learning_signals(self) -> None:
         token = self._create_session_token()
         captured_request: dict[str, object] = {}
@@ -2340,6 +2416,86 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(revisions_payload[0]["revision_id"], payload["revision_id"])
         self.assertFalse(revisions_payload[0]["is_published"])
         self.assertEqual(revisions_payload[0]["payload"]["allowed_action_types"], [])
+
+    def test_admin_self_update_draft_uses_anthropic_for_anthropic_agent(self) -> None:
+        token = self._create_session_token()
+        captured_request: dict[str, object] = {}
+        settings.ANTHROPIC_API_KEY = "anthropic-test-key"
+        self._create_agent(
+            agent_id="claude-agent",
+            name="Claude Agent",
+            status="ACTIVE",
+            allowed_workspaces=["assistant", "operations"],
+            capabilities=["READ", "EXPLAIN"],
+            allowed_tools=["list_workflow_items"],
+            allowed_action_types=[],
+            provider="anthropic",
+            model="claude-sonnet-4-5",
+            role_key="trade-ops-copilot",
+            profile_kind="ROLE_DERIVED",
+            specialization_summary="Workflow triage specialist.",
+            human_owner_role="Operations Lead",
+            authority_ceiling="STAGE",
+            activation_notes="Prompt reviewed for workflow triage.",
+        )
+
+        async def _fake_post_json(*, url, headers, payload, provider_label):
+            captured_request["url"] = url
+            captured_request["headers"] = headers
+            captured_request["payload"] = payload
+            captured_request["provider_label"] = provider_label
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {
+                                "description": "Explains workflow blockers with stronger owner evidence.",
+                                "allowed_workspaces": ["assistant", "operations"],
+                                "capabilities": ["READ", "EXPLAIN"],
+                                "skills": [],
+                                "allowed_tools": ["list_workflow_items"],
+                                "allowed_action_types": [],
+                                "system_prompt": "Name the workflow owner and cite evidence before recommending next steps.",
+                                "change_summary": [
+                                    "Strengthened owner-evidence requirements in the system prompt.",
+                                ],
+                            }
+                        ),
+                    }
+                ],
+                "usage": {"input_tokens": 80, "output_tokens": 40},
+            }
+
+        with patch(
+            "apps.api.app.domains.assistant.services.chat._post_json",
+            side_effect=_fake_post_json,
+        ):
+            response = self.client.post(
+                "/admin/assistant/agents/claude-agent/self-update-draft",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"brief": "Make owner-evidence expectations clearer."},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["agent_id"], "claude-agent")
+        self.assertEqual(payload["provider"], "anthropic")
+        self.assertEqual(payload["model"], "claude-sonnet-4-5")
+        self.assertEqual(payload["builder_provider"], "anthropic")
+        self.assertEqual(payload["builder_model"], "claude-sonnet-4-5")
+        self.assertEqual(payload["allowed_tools"], ["list_workflow_items"])
+        self.assertIsInstance(payload["revision_id"], int)
+
+        request_payload = captured_request["payload"]
+        assert isinstance(request_payload, dict)
+        self.assertEqual(captured_request["provider_label"], "Anthropic Agent Self Update")
+        self.assertEqual(captured_request["url"], "https://api.anthropic.com/v1/messages")
+        self.assertEqual(captured_request["headers"]["x-api-key"], "anthropic-test-key")
+        self.assertEqual(request_payload["model"], "claude-sonnet-4-5")
+        sent_text = request_payload["messages"][0]["content"][0]["text"]
+        self.assertIn('"current_agent"', sent_text)
+        self.assertIn('"provider":"anthropic"', sent_text)
 
     def test_admin_publish_agent_revision_applies_stored_self_update_draft_to_live_agent(self) -> None:
         token = self._create_session_token()

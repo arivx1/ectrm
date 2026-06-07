@@ -33,8 +33,10 @@ The target experience is:
 - `apps/web/src/workspaces/prompt/PromptHomeWorkspace.tsx` is already the
   prompt-first Home surface.
 - `apps/web/src/workspaces/prompt/promptHomeCardVisibility.ts` already supports
-  browser-local card order and card visibility for the current Home cards.
-- Prompt Home already has a DnD card shell, card visibility controls, price,
+  browser-local card order and card visibility for the current Home apps. The
+  frontend and API still use `card` as the internal registry/configuration
+  contract while the operator-facing Home UI labels them as apps.
+- Prompt Home already has a DnD card shell, app enablement controls, price,
   map, document, communication, time, and prompt cards.
 - saved settlement report presets already use a typed backend service through
   `apps/api/app/domains/reports/services/settlement_presets.py`.
@@ -60,15 +62,17 @@ Users can reset to it, but they cannot edit it directly.
 ### Home View Instance
 
 A named, persisted Home configuration derived from a system template or another
-visible instance. It stores card placement, visibility, filters, sort rules,
-card parameters, and selected data bindings. It does not store live business
-data snapshots.
+visible instance. It stores card instance ids, card placement, visibility,
+filters, sort rules, card parameters, and selected data bindings. It does not
+store live business data snapshots.
 
 ### Home Card Registry
 
 A typed registry of supported Home card kinds, stable card ids, allowed
 parameters, allowed filter fields, supported data bindings, default dimensions,
-and required data entitlements.
+and required data entitlements. A Home view may contain more than one instance
+of the same registered card id, but each rendered/saved card instance must have
+a unique `instance_id`.
 
 ### Assistant-Created View Draft
 
@@ -87,10 +91,10 @@ reference data, and deterministic recipe rules.
    The latest prices, shipments, workflow items, and positions should still
    come from their existing typed APIs and projections.
 
-3. Use stable card ids and typed parameters.
-   Layouts should reference approved card ids, semantic data bindings, and
-   validated filter keys, not React component names, arbitrary SQL, or
-   freeform model JSON.
+3. Use stable card ids, unique instance ids, and typed parameters.
+   Layouts should reference approved card ids, unique card instance ids,
+   semantic data bindings, and validated filter keys, not React component
+   names, arbitrary SQL, or freeform model JSON.
 
 4. Let persona guide composition, not authority.
    A trader persona may bias `HH NG` toward prices, basis, exposure, and
@@ -187,6 +191,7 @@ default template contract that can be validated and reset.
 
 - define a Home card registry with:
   - stable `card_id`
+  - unique persisted `instance_id` per rendered card instance
   - card kind or renderer key
   - display label
   - default visibility
@@ -204,7 +209,8 @@ default template contract that can be validated and reset.
   - communication center
   - ask the desk assistant
 - choose a contract versioning strategy for cards and templates
-- add normalization logic for unknown, retired, or newly added card ids
+- add normalization logic for unknown, retired, or newly added card ids and for
+  duplicate/missing card instance ids
 
 ### Out Of Scope
 

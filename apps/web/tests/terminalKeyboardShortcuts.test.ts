@@ -10,7 +10,7 @@ import {
 describe('terminal keyboard shortcuts', () => {
   test('maps Alt-number shortcuts to primary terminal workspaces', () => {
     expect(TERMINAL_WORKSPACE_SHORTCUTS.map((shortcut) => shortcut.view)).toEqual([
-      'dashboard',
+      'prompt',
       'trades',
       'risk',
       'operations',

@@ -181,6 +181,7 @@ export function shouldPresentStartHereOverlay({
     hasStartHereOnboarding &&
     !(hasStartHereReturnIntent || hasRouteHandoff || usesTerminalMode) &&
     currentView !== 'prompt' &&
+    currentView !== 'dashboard' &&
     currentView !== 'settings' &&
     currentView !== 'messages' &&
     authInterruptionReason !== 'session_expired' &&

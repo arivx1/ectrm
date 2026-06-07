@@ -23,6 +23,43 @@ export type AssistantAgentSeedResult = {
   agent_ids: string[]
 }
 
+export type IntegrationAuthStatus = 'none' | 'partial' | 'configured'
+
+export type AnthropicRuntimeSettings = {
+  enabled: boolean
+  configured: boolean
+  provider: 'anthropic_admin_api'
+  auth_status: IntegrationAuthStatus
+  base_url: string
+  api_version: string
+  tracked_api_key_id: string | null
+  missing_configuration: string[]
+}
+
+export type AnthropicApiKeyActor = {
+  id: string
+  type: string
+}
+
+export type AnthropicApiKeyRecord = {
+  id: string
+  created_at: string
+  created_by: AnthropicApiKeyActor
+  expires_at: string | null
+  name: string
+  partial_key_hint: string
+  status: 'active' | 'inactive' | 'archived' | 'expired'
+  type: 'api_key'
+  workspace_id: string | null
+}
+
+export type AnthropicApiKeyLookup = {
+  provider: 'anthropic_admin_api'
+  status: 'connected'
+  api_key: AnthropicApiKeyRecord
+  warnings: string[]
+}
+
 export type CodexTaskStatus = 'QUEUED' | 'DISPATCHED' | 'RUNNING' | 'COMPLETED' | 'STOPPED' | 'FAILED' | 'CANCELLED'
 export type CodexTaskRunMode = 'SINGLE_TASK' | 'LONG_RUNNING'
 
@@ -355,6 +392,7 @@ export const externalDataSyncRouteByProvider = {
   EIA: 'eia',
   EIA_FUNDAMENTALS: 'eia-fundamentals',
   FRED: 'fred',
+  ALPHA_VANTAGE: 'alpha-vantage',
   BLS_PPI: 'bls-ppi',
   WORLD_BANK: 'world-bank',
   USDA_NASS: 'usda-nass',
@@ -377,6 +415,30 @@ function adminMutationHeaders(): Headers {
 
 function authorizationHeaders(accessToken: string): Headers {
   return new Headers({ Authorization: `Bearer ${accessToken}` })
+}
+
+function adminIntegrationHeaders(accessToken?: string): Headers {
+  return accessToken ? authorizationHeaders(accessToken) : adminMutationHeaders()
+}
+
+export async function loadAnthropicIntegrationSettings(
+  apiBase: string,
+  accessToken?: string,
+): Promise<AnthropicRuntimeSettings> {
+  return fetchJson<AnthropicRuntimeSettings>(`${apiBase}/admin/integrations/anthropic/settings`, {
+    headers: adminIntegrationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function getAnthropicIntegrationApiKey(
+  apiBase: string,
+  accessToken?: string,
+): Promise<AnthropicApiKeyLookup> {
+  return fetchJson<AnthropicApiKeyLookup>(`${apiBase}/admin/integrations/anthropic/api-key`, {
+    headers: adminIntegrationHeaders(accessToken),
+    cache: 'no-store',
+  })
 }
 
 export async function runExternalDataSync(

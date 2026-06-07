@@ -120,6 +120,10 @@
   place-items: center;
 }
 
+.auth-gate-wordmark .brand-mark-row {
+  --brand-mark-row-item-inline-size: 6.5rem;
+}
+
 .auth-gate-wordmark .brand-mark {
   padding: 0.72rem 1.22rem;
   font-family:

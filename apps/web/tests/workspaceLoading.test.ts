@@ -58,7 +58,7 @@ test('buildRequestedGroups includes previously loaded groups during a forced ref
     groupLoading: { ...EMPTY_GROUP_FLAGS },
   })
 
-  assert.deepEqual(requestedGroups, ['core', 'trades', 'events', 'positions', 'reference', 'reports'])
+  assert.deepEqual(requestedGroups, ['core', 'trades', 'events', 'reference', 'reports'])
 })
 
 test('deriveRetryableWorkspaceGroups only retries current-view groups that failed before loading', () => {
@@ -351,7 +351,7 @@ test('shouldPresentStartHereOverlay stays hidden until a session is authenticate
 
   assert.equal(
     shouldPresentStartHereOverlay({
-      currentView: 'dashboard',
+      currentView: 'operations',
       hasAuthSession: true,
       hasStartHereOnboarding: true,
       hasStartHereReturnIntent: false,
@@ -360,6 +360,21 @@ test('shouldPresentStartHereOverlay stays hidden until a session is authenticate
       usesTerminalMode: false,
     }),
     true,
+  )
+})
+
+test('shouldPresentStartHereOverlay stays hidden on Home so the landing brief remains visible', () => {
+  assert.equal(
+    shouldPresentStartHereOverlay({
+      currentView: 'dashboard',
+      hasAuthSession: true,
+      hasStartHereOnboarding: true,
+      hasStartHereReturnIntent: false,
+      authInterruptionReason: null,
+      hasAuthInterruptionResume: false,
+      usesTerminalMode: false,
+    }),
+    false,
   )
 })
 

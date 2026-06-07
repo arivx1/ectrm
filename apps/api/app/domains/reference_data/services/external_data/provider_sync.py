@@ -10,6 +10,7 @@ from apps.api.app.db.engine import SessionLocal
 from apps.api.app.models.external_data_run import ExternalDataRun
 
 from . import (
+    sync_alpha_vantage_prices,
     sync_bls_ppi_series,
     sync_caiso_series,
     sync_cftc_series,
@@ -83,6 +84,11 @@ def sync_external_data_provider(
         return sync_fred_series(
             db,
             lookback_days=settings.FRED_SYNC_DEFAULT_LOOKBACK_DAYS,
+            requested_by=requested_by,
+        )
+    if normalized_provider == "ALPHA_VANTAGE":
+        return sync_alpha_vantage_prices(
+            db,
             requested_by=requested_by,
         )
     if normalized_provider == "BLS_PPI":

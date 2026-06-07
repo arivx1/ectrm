@@ -53,13 +53,22 @@ Use Guide when you need product context without leaving the application.
 - jump between concepts, workflows, and access notes quickly
 - move straight from a help section into the workspace you need next
 
-### Dashboard
+### Home
 
-Use Dashboard when you want a quick operational picture.
+Use Home when you want the signed-in operating brief.
 
-- highlights current system health
-- surfaces recent trade activity and event flow
-- summarizes exposure without forcing users into raw tables first
+- summarizes what needs attention in plain language
+- promotes one recommended next move and the object most worth inspecting
+- shows a compact operating timeline, watched market marks, and recent event
+  flow without forcing users into a full dashboard first
+
+### Apps
+
+Use Apps when you want the configurable Home apps surface.
+
+- switch between saved personal or shared Home view instances
+- arrange market, map, document, communication, and assistant cards
+- ask the desk assistant or jump into promoted workflow routes
 
 ### Trades
 
@@ -128,7 +137,7 @@ Current admin-facing capabilities include:
 - trading source register access
 - schema and explainability-oriented summaries
 
-This workspace is intentionally more technical than Dashboard or Trades, but it
+This workspace is intentionally more technical than Home or Trades, but it
 still presents the system in product language rather than database language.
 
 ### Settings

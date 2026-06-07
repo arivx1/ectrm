@@ -8,11 +8,19 @@ import {
   resolvePreferredHomeView,
   resolveColorMode,
   saveAppearanceSettingsSnapshot,
+  type AppearanceColorModeScope,
 } from '../../shared/appearance'
 
-export function useAppAppearance() {
-  const [appearanceSettings, setAppearanceSettings] = useState(() => getAppearanceSettingsSnapshot())
+export function useAppAppearance(colorModeScope: AppearanceColorModeScope = 'strata') {
+  const [appearanceSettingsRevision, setAppearanceSettingsRevision] = useState(0)
   const [systemPrefersDark, setSystemPrefersDark] = useState(() => detectSystemPrefersDark())
+  const appearanceSettings = useMemo(
+    () => {
+      void appearanceSettingsRevision
+      return getAppearanceSettingsSnapshot(colorModeScope)
+    },
+    [appearanceSettingsRevision, colorModeScope],
+  )
 
   const resolvedColorMode = useMemo(
     () => resolveColorMode(appearanceSettings.colorMode, systemPrefersDark),
@@ -49,14 +57,14 @@ export function useAppAppearance() {
   }, [appearanceSettings, systemPrefersDark])
 
   function handleAppearanceSettingsChange(nextSettings: Parameters<typeof saveAppearanceSettingsSnapshot>[0]) {
-    const savedSettings = saveAppearanceSettingsSnapshot(nextSettings)
-    setAppearanceSettings(savedSettings)
+    const savedSettings = saveAppearanceSettingsSnapshot(nextSettings, colorModeScope)
+    setAppearanceSettingsRevision((currentRevision) => currentRevision + 1)
     return savedSettings
   }
 
   function handleAppearanceSettingsReset() {
     const defaultSettings = clearAppearanceSettingsSnapshot()
-    setAppearanceSettings(defaultSettings)
+    setAppearanceSettingsRevision((currentRevision) => currentRevision + 1)
     return defaultSettings
   }
 

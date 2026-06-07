@@ -25,9 +25,11 @@ vi.mock('../src/shared/mutation.ts', () => ({
 import {
   createJobSchedule,
   enqueueEventJobRuns,
+  getAnthropicIntegrationApiKey,
   importCounterpartyCreditSnapshots,
   isExternalDataSyncProvider,
   listJobSchedules,
+  loadAnthropicIntegrationSettings,
   loadTradeProjectionMonitoring,
   materializeDueJobRuns,
   previewCounterpartyCreditImport,
@@ -59,6 +61,49 @@ beforeEach(() => {
     accessToken: 'admin-token',
     role: 'ADMIN',
   })
+})
+
+test('anthropic integration helpers use typed admin routes with explicit auth headers', async () => {
+  const settings = {
+    enabled: true,
+    configured: true,
+    provider: 'anthropic_admin_api',
+    auth_status: 'configured',
+    base_url: 'https://api.anthropic.com',
+    api_version: '2023-06-01',
+    tracked_api_key_id: 'apikey_123',
+    missing_configuration: [],
+  }
+  const lookup = {
+    provider: 'anthropic_admin_api',
+    status: 'connected',
+    api_key: {
+      id: 'apikey_123',
+      created_at: '2024-10-30T23:58:27.427722Z',
+      created_by: { id: 'user_123', type: 'user' },
+      expires_at: null,
+      name: 'Developer Key',
+      partial_key_hint: 'sk-ant-api03-R2D...igAA',
+      status: 'active',
+      type: 'api_key',
+      workspace_id: 'wrkspc_123',
+    },
+    warnings: [],
+  }
+  fetchJsonMock.mockResolvedValueOnce(settings)
+  fetchJsonMock.mockResolvedValueOnce(lookup)
+
+  const settingsPayload = await loadAnthropicIntegrationSettings('http://api.test', 'admin-session-token')
+  const lookupPayload = await getAnthropicIntegrationApiKey('http://api.test', 'admin-session-token')
+
+  assert.equal(settingsPayload, settings)
+  assert.equal(lookupPayload, lookup)
+  assert.equal(fetchJsonMock.mock.calls[0][0], 'http://api.test/admin/integrations/anthropic/settings')
+  assert.equal(fetchJsonMock.mock.calls[1][0], 'http://api.test/admin/integrations/anthropic/api-key')
+  const settingsHeaders = new Headers((fetchJsonMock.mock.calls[0][1] as RequestInit).headers)
+  const lookupHeaders = new Headers((fetchJsonMock.mock.calls[1][1] as RequestInit).headers)
+  assert.equal(settingsHeaders.get('Authorization'), 'Bearer admin-session-token')
+  assert.equal(lookupHeaders.get('Authorization'), 'Bearer admin-session-token')
 })
 
 test('job scheduling admin helpers shape schedule and run requests', async () => {
@@ -208,6 +253,7 @@ test('runExternalDataSync can use an explicit actor and headers outside admin wo
 test('isExternalDataSyncProvider narrows configured provider routes', () => {
   assert.equal(isExternalDataSyncProvider('EIA'), true)
   assert.equal(isExternalDataSyncProvider('ERCOT'), true)
+  assert.equal(isExternalDataSyncProvider('ALPHA_VANTAGE'), true)
   assert.equal(isExternalDataSyncProvider('OPIS'), false)
 })
 

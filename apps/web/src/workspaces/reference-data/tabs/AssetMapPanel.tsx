@@ -562,6 +562,9 @@ function AssetMapFiltersCard({
       <button
         type="button"
         className="asset-map-filters-card-toggle"
+        aria-label={
+          expandedState.expanded ? "Collapse Map Filters" : "Expand Map Filters"
+        }
         aria-expanded={expandedState.expanded}
         aria-controls={panelId}
         onClick={() => expandedState.setExpanded((current) => !current)}
@@ -571,7 +574,6 @@ function AssetMapFiltersCard({
           <p>{summary}</p>
         </div>
         <div className="asset-map-filters-card-toggle-meta">
-          <small>{expandedState.expanded ? "Hide card" : "Show card"}</small>
           <span
             className="asset-map-filters-card-toggle-indicator"
             aria-hidden="true"
@@ -646,6 +648,9 @@ export function AssetMapRecordsCard({
       <button
         type="button"
         className="asset-map-records-card-toggle"
+        aria-label={
+          expandedState.expanded ? "Collapse Map Records" : "Expand Map Records"
+        }
         aria-expanded={expandedState.expanded}
         aria-controls={panelId}
         onClick={() => expandedState.setExpanded((current) => !current)}
@@ -655,7 +660,6 @@ export function AssetMapRecordsCard({
           <p>{recordCountLabel}</p>
         </div>
         <div className="asset-map-records-card-toggle-meta">
-          <small>{expandedState.expanded ? "Hide card" : "Show card"}</small>
           <span
             className="asset-map-records-card-toggle-indicator"
             aria-hidden="true"
@@ -1123,6 +1127,11 @@ export function AssetMapCanvas({
   assetSubtypeOptions = [],
   assetSubtypeVisibility = {},
   initialWeatherOverlayVisibility,
+  filterMode = "inline",
+  filtersOpen = false,
+  onFiltersOpenChange = () => undefined,
+  filterDialogId,
+  filterDialogTitleId,
   onShowAssetsChange,
   onShowRailRoutesChange,
   onShowVesselsChange,
@@ -1162,6 +1171,11 @@ export function AssetMapCanvas({
   assetSubtypeOptions: string[];
   assetSubtypeVisibility: Record<string, boolean>;
   initialWeatherOverlayVisibility?: WeatherOverlayVisibilityState;
+  filterMode?: "inline" | "dialog";
+  filtersOpen?: boolean;
+  onFiltersOpenChange?: (open: boolean) => void;
+  filterDialogId?: string;
+  filterDialogTitleId?: string;
   onShowAssetsChange?: (visible: boolean) => void;
   onShowRailRoutesChange?: (visible: boolean) => void;
   onShowVesselsChange?: (visible: boolean) => void;
@@ -2655,12 +2669,12 @@ export function AssetMapCanvas({
     weatherRadarTileProvider,
   ]);
 
-  return (
-    <div className="asset-map-canvas-shell">
-      <AssetMapFiltersCard
-        summary={filterSummary}
-        collapsibleStateKey={filterCardStateKey}
-      >
+  const resolvedFilterDialogId =
+    filterDialogId ?? collapsiblePanelId(`${filterCardStateKey}.dialog`);
+  const resolvedFilterDialogTitleId =
+    filterDialogTitleId ?? `${resolvedFilterDialogId}-title`;
+  const filterControlsContent = (
+    <>
         <div
           className="asset-map-layer-controls"
           aria-label="Map layer visibility controls"
@@ -3104,7 +3118,76 @@ export function AssetMapCanvas({
             </p>
           ) : null}
         </div>
+    </>
+  );
+  const filterSurface =
+    filterMode === "dialog" ? (
+      filtersOpen ? (
+        <div
+          className="asset-map-filters-dialog-overlay"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              onFiltersOpenChange(false);
+            }
+          }}
+        >
+          <section
+            id={resolvedFilterDialogId}
+            className="asset-map-filters-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={resolvedFilterDialogTitleId}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                onFiltersOpenChange(false);
+              }
+            }}
+          >
+            <header className="asset-map-filters-dialog-head">
+              <div>
+                <span className="eyebrow">Map</span>
+                <h3 id={resolvedFilterDialogTitleId}>Map Filters</h3>
+                <p>{filterSummary}</p>
+              </div>
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={() => onFiltersOpenChange(false)}
+              >
+                Close
+              </button>
+            </header>
+            <div
+              className="asset-map-filters-dialog-body"
+              aria-label="Map filters"
+            >
+              {filterControlsContent}
+            </div>
+            <footer className="asset-map-filters-dialog-actions">
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => onFiltersOpenChange(false)}
+              >
+                Done
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null
+    ) : (
+      <AssetMapFiltersCard
+        summary={filterSummary}
+        collapsibleStateKey={filterCardStateKey}
+      >
+        {filterControlsContent}
       </AssetMapFiltersCard>
+    );
+
+  return (
+    <div className="asset-map-canvas-shell">
+      {filterSurface}
 
       <div
         ref={mapFrameRef}

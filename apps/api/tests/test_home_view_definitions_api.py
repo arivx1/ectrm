@@ -272,12 +272,40 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
         self.assertEqual(payload["immutable"], True)
         self.assertEqual(
             [card["card_id"] for card in payload["cards"]],
-            ["timeframe", "prices", "news", "map", "documents", "communication", "prompt"],
+            [
+                "timeframe",
+                "exchanges",
+                "calendar",
+                "prices",
+                "news",
+                "map",
+                "documents",
+                "communication",
+                "prompt",
+            ],
         )
-        self.assertEqual(payload["cards"][1]["kind"], "market_prices")
-        self.assertEqual(payload["cards"][1]["label"], "Market Prices")
-        self.assertEqual(payload["cards"][2]["kind"], "market_news")
-        self.assertEqual(payload["cards"][2]["label"], "Market News")
+        self.assertEqual(
+            [card["instance_id"] for card in payload["cards"]],
+            [
+                "timeframe",
+                "exchanges",
+                "calendar",
+                "prices",
+                "news",
+                "map",
+                "documents",
+                "communication",
+                "prompt",
+            ],
+        )
+        self.assertEqual(payload["cards"][1]["kind"], "exchange_sessions")
+        self.assertEqual(payload["cards"][1]["label"], "Exchanges")
+        self.assertEqual(payload["cards"][2]["kind"], "calendar")
+        self.assertEqual(payload["cards"][2]["label"], "Calendar")
+        self.assertEqual(payload["cards"][3]["kind"], "market_prices")
+        self.assertEqual(payload["cards"][3]["label"], "Market Prices")
+        self.assertEqual(payload["cards"][4]["kind"], "market_news")
+        self.assertEqual(payload["cards"][4]["label"], "Market News")
 
     def test_home_view_definitions_are_personal_named_instances(self) -> None:
         admin_session = self._bootstrap_admin()
@@ -312,9 +340,33 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
         self.assertTrue(created["definition_key"].startswith("home_view_"))
         self.assertEqual(
             [card["card_id"] for card in created["cards"]],
-            ["prices", "map", "timeframe", "news", "documents", "communication", "prompt"],
+            [
+                "prices",
+                "map",
+                "timeframe",
+                "exchanges",
+                "calendar",
+                "news",
+                "documents",
+                "communication",
+                "prompt",
+            ],
         )
-        self.assertEqual([card["placement"]["order"] for card in created["cards"]], [0, 1, 2, 3, 4, 5, 6])
+        self.assertEqual(
+            [card["instance_id"] for card in created["cards"]],
+            [
+                "prices",
+                "map",
+                "timeframe",
+                "exchanges",
+                "calendar",
+                "news",
+                "documents",
+                "communication",
+                "prompt",
+            ],
+        )
+        self.assertEqual([card["placement"]["order"] for card in created["cards"]], [0, 1, 2, 3, 4, 5, 6, 7, 8])
         self.assertEqual(created["cards"][0]["kind"], "market_prices")
         self.assertEqual(created["cards"][0]["label"], "Market Prices")
         self.assertEqual(created["cards"][0]["parameters"], {"price_sort": "updated_desc"})
@@ -367,6 +419,7 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
         self.assertEqual(updated["persona_hint"], "risk")
         self.assertEqual(updated["version"], 2)
         self.assertEqual(updated["cards"][0]["card_id"], "prompt")
+        self.assertEqual(updated["cards"][0]["instance_id"], "prompt")
         self.assertEqual(updated["cards"][0]["kind"], "assistant_prompt")
         self.assertEqual(updated["cards"][0]["parameters"], {"starter_kit": "risk"})
 
@@ -380,10 +433,20 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
         self.assertEqual(reset["global_filters"], {})
         self.assertEqual(
             [card["card_id"] for card in reset["cards"]],
-            ["timeframe", "prices", "news", "map", "documents", "communication", "prompt"],
+            [
+                "timeframe",
+                "exchanges",
+                "calendar",
+                "prices",
+                "news",
+                "map",
+                "documents",
+                "communication",
+                "prompt",
+            ],
         )
-        self.assertEqual(reset["cards"][1]["parameters"], {})
-        self.assertEqual(reset["cards"][1]["filters"], {})
+        self.assertEqual(reset["cards"][3]["parameters"], {})
+        self.assertEqual(reset["cards"][3]["filters"], {})
 
         delete_response = self.client.delete(
             f"/home-view-definitions/{definition_id}",
@@ -396,6 +459,55 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         self.assertEqual(get_deleted.status_code, 404)
+
+    def test_home_view_definitions_accept_expanded_card_height_limit(self) -> None:
+        admin_session = self._bootstrap_admin()
+        admin_token = admin_session["access_token"]
+
+        tall_card = self._home_view_payload(name="Tall Prices")
+        tall_card["cards"] = [
+            {
+                "card_id": "prices",
+                "placement": {
+                    "order": 0,
+                    "collapsed_column_span": 2,
+                    "collapsed_row_span": 1,
+                    "expanded_column_span": 2,
+                    "expanded_row_span": 8,
+                },
+            },
+        ]
+        response = self.client.post(
+            "/home-view-definitions",
+            json=tall_card,
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.json()["cards"][0]["placement"]["expanded_row_span"],
+            8,
+        )
+
+        oversized_card = self._home_view_payload(name="Too Tall Prices")
+        oversized_card["cards"] = [
+            {
+                "card_id": "prices",
+                "placement": {
+                    "order": 0,
+                    "collapsed_column_span": 2,
+                    "collapsed_row_span": 1,
+                    "expanded_column_span": 2,
+                    "expanded_row_span": 9,
+                },
+            },
+        ]
+        response = self.client.post(
+            "/home-view-definitions",
+            json=oversized_card,
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("expanded_row_span", response.text)
 
     def test_home_view_definition_validation_rejects_unsupported_contracts(self) -> None:
         admin_session = self._bootstrap_admin()
@@ -413,16 +525,87 @@ class HomeViewDefinitionsApiTests(unittest.TestCase):
 
         duplicate_cards = self._home_view_payload(name="Duplicate Cards")
         duplicate_cards["cards"] = [
-            {"card_id": "prices", "placement": {"order": 0, "column_span": 2, "row_span": 1}},
-            {"card_id": "prices", "placement": {"order": 1, "column_span": 2, "row_span": 1}},
+            {
+                "instance_id": "prices",
+                "card_id": "prices",
+                "placement": {"order": 0, "column_span": 2, "row_span": 1},
+            },
+            {
+                "instance_id": "prices-copy-2",
+                "card_id": "prices",
+                "placement": {"order": 1, "column_span": 2, "row_span": 1},
+            },
         ]
         response = self.client.post(
             "/home-view-definitions",
             json=duplicate_cards,
             headers={"Authorization": f"Bearer {admin_token}"},
         )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            [card["instance_id"] for card in response.json()["cards"][:2]],
+            ["prices", "prices-copy-2"],
+        )
+        self.assertEqual(
+            [card["card_id"] for card in response.json()["cards"][:2]],
+            ["prices", "prices"],
+        )
+
+        split_time_cards = self._home_view_payload(name="Split Time Cards")
+        split_time_cards["cards"] = [
+            {
+                "card_id": "timeframe",
+                "placement": {"order": 0, "column_span": 2, "row_span": 1},
+                "parameters": {"time_zone": "America/Chicago"},
+            },
+            {
+                "card_id": "exchanges",
+                "placement": {"order": 1, "column_span": 2, "row_span": 1},
+                "parameters": {"time_zone": "America/New_York"},
+                "filters": {"region": "North America"},
+            },
+            {
+                "card_id": "calendar",
+                "placement": {"order": 2, "column_span": 2, "row_span": 1},
+                "parameters": {"calendar_display": "agenda", "time_zone": "America/Los_Angeles"},
+                "filters": {"calendar_source": "desktop"},
+            },
+        ]
+        response = self.client.post(
+            "/home-view-definitions",
+            json=split_time_cards,
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            [card["card_id"] for card in response.json()["cards"][:3]],
+            ["timeframe", "exchanges", "calendar"],
+        )
+        self.assertEqual(
+            [card["kind"] for card in response.json()["cards"][:3]],
+            ["desk_time", "exchange_sessions", "calendar"],
+        )
+
+        duplicate_instances = self._home_view_payload(name="Duplicate Instance IDs")
+        duplicate_instances["cards"] = [
+            {
+                "instance_id": "prices-copy",
+                "card_id": "prices",
+                "placement": {"order": 0, "column_span": 2, "row_span": 1},
+            },
+            {
+                "instance_id": "prices-copy",
+                "card_id": "prices",
+                "placement": {"order": 1, "column_span": 2, "row_span": 1},
+            },
+        ]
+        response = self.client.post(
+            "/home-view-definitions",
+            json=duplicate_instances,
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
         self.assertEqual(response.status_code, 422)
-        self.assertIn("duplicate card ids", response.text)
+        self.assertIn("duplicate instance ids", response.text)
 
         invalid_filter = self._home_view_payload(name="Invalid Filter")
         invalid_filter["cards"] = [

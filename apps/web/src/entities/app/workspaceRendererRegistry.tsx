@@ -35,9 +35,9 @@ const PromptHomeWorkspace = lazy(() =>
     default: module.PromptHomeWorkspace,
   })),
 )
-const DashboardWorkspace = lazy(() =>
-  import('../../workspaces/dashboard/DashboardWorkspace').then((module) => ({
-    default: module.DashboardWorkspace,
+const HomeWorkspace = lazy(() =>
+  import('../../workspaces/home/HomeWorkspace').then((module) => ({
+    default: module.HomeWorkspace,
   })),
 )
 const PreTradeWorkspace = lazy(() =>
@@ -716,22 +716,21 @@ function buildSettlementWindowNotices({
 const WORKSPACE_DESCRIPTOR_CONFIG: Record<ViewKey, WorkspaceDescriptorConfig> = {
   prompt: {
     key: 'prompt',
-    label: 'Start',
-    kicker: 'Start',
-    heroTitle: 'Start',
-    heroBody: 'Describe the job in front of you, then let the assistant answer, clarify, or route you into the right workspace.',
+    label: 'Apps',
+    kicker: 'Apps',
+    heroTitle: 'Apps',
+    heroBody: 'Open the configurable Home apps surface for saved views, market cards, maps, documents, messages, and assistant prompts.',
     dataGroups: [],
     blockingGroups: [],
   },
   dashboard: {
     key: 'dashboard',
-    label: 'Live Desk',
-    kicker: 'Monitor',
-    heroTitle: 'Live desk overview and market pulse',
-    heroBody:
-      'Track desk health, market marks, exposure, and recent activity from one screen before you drill into a workflow.',
-    dataGroups: ['trades', 'events', 'positions', 'reference'],
-    blockingGroups: ['trades', 'events', 'positions', 'reference'],
+    label: 'Home',
+    kicker: 'Home',
+    heroTitle: 'Home',
+    heroBody: 'One brief. One next move. Live context.',
+    dataGroups: ['trades', 'events', 'reference'],
+    blockingGroups: [],
   },
   pretrade: {
     key: 'pretrade',
@@ -1042,23 +1041,17 @@ export const WORKSPACE_RENDERERS: Record<
   },
   dashboard: {
     render: (context) => (
-      <DashboardWorkspace
-        authSession={context.workspaceData.authSession}
-        routeHandoff={context.routeHandoff}
-        globalFilter={GLOBAL_FILTER_DISABLED}
+      <HomeWorkspace
+        authDisplayName={context.workspaceData.authSession?.user.display_name ?? null}
+        health={context.workspaceData.health}
+        summary={context.workspaceData.workspaceBootstrapSummary}
+        activeTrades={context.summary.activeTrades}
+        events={context.workspaceData.events}
+        priceIndices={context.workspaceData.priceIndices}
+        appLoading={context.workspaceData.appLoading}
         onOpenView={context.navigateToView}
         onOpenTrade={context.navigateToTrade}
-        onClearHandoff={() => context.replaceView('dashboard', null)}
-        appLoading={context.workspaceData.appLoading}
-        activeTrades={context.summary.activeTrades}
-        dashboardSummary={context.workspaceData.workspaceBootstrapSummary?.dashboard ?? null}
-        priceIndices={context.workspaceData.priceIndices}
-        positionsWithClass={context.summary.positionsWithClass}
-        events={context.workspaceData.events}
-        formatCommodityClass={formatCommodityClass}
-        formatMoney={formatMoney}
-        formatNumber={formatNumber}
-        formatDate={formatDate}
+        onRefreshData={context.workspaceData.loadData}
       />
     ),
   },

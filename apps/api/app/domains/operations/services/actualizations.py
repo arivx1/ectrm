@@ -56,6 +56,24 @@ def _audit_actualization_payload(actualization: DeliveryActualizationOut) -> dic
     return actualization.model_dump(mode="json")
 
 
+def _audit_actualization_ledger_payload(
+    db: Session,
+    *,
+    actualization: TradeActualization,
+) -> dict[str, object]:
+    from apps.api.app.domains.operations.services.actualization_ledger import (
+        build_actualization_ledger_entry,
+    )
+
+    return jsonable_encoder(
+        build_actualization_ledger_entry(
+            db,
+            actualization=actualization,
+            generated_at=_coerce_utc(actualization.updated_at),
+        )
+    )
+
+
 def _coerce_utc(value: Optional[datetime]) -> Optional[datetime]:
     if value is None:
         return None
@@ -573,6 +591,10 @@ def upsert_trade_actualization(
             }
         ),
         "actualization": _audit_actualization_payload(actualization_out),
+        "actualization_ledger": _audit_actualization_ledger_payload(
+            db,
+            actualization=actualization,
+        ),
     }
     if leg_no is not None:
         payload["leg_no"] = leg_no
@@ -645,6 +667,10 @@ def void_trade_actualization(
         ),
         "previous_actualization": _audit_actualization_payload(previous_actualization),
         "actualization": _audit_actualization_payload(actualization_out),
+        "actualization_ledger": _audit_actualization_ledger_payload(
+            db,
+            actualization=actualization,
+        ),
     }
     if leg_no is not None:
         payload["leg_no"] = leg_no

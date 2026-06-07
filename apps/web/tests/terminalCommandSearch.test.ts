@@ -111,7 +111,7 @@ describe('terminal command search', () => {
     }
 
     expect(state.groups.map((group) => group.label)).toEqual(['Functions', 'Workspaces', 'Reports', 'Trades'])
-    expect(state.groups[0]?.results[0]?.title).toBe('MON - Live Desk Monitor')
+    expect(state.groups[0]?.results[0]?.title).toBe('HOME - Apps')
     expect(state.groups[1]?.results[0]?.title).toBeTruthy()
     expect(state.groups[2]?.results[0]?.title).toBe('Reporting Overview')
     expect(state.groups[3]?.results[0]?.title).toBe('TRD-1001')
@@ -266,10 +266,10 @@ describe('terminal command search', () => {
       return
     }
     expect(monitorState.scope).toBe('function')
-    expect(monitorState.groups[0]?.results[0]?.title).toBe('MON - Live Desk Monitor')
+    expect(monitorState.groups[0]?.results[0]?.title).toBe('HOME - Apps')
     expect(monitorState.groups[0]?.results[0]?.action).toEqual({
       kind: 'view',
-      view: 'dashboard',
+      view: 'prompt',
       handoff: null,
     })
 
@@ -322,13 +322,12 @@ describe('terminal command search', () => {
     if (result.action.kind !== 'view') {
       return
     }
-    expect(result.action.view).toBe('dashboard')
+    expect(result.action.view).toBe('reports')
     expect(result.action.handoff).toMatchObject({
-      source: 'terminal',
+      source: 'home',
       focus: {
-        type: 'market_instrument',
-        id: 'price_index:HENRY_DA',
-        label: 'Henry Hub Daily',
+        type: 'report',
+        id: 'reports-price-bi',
       },
       filter: 'HENRY_DA',
     })
@@ -361,7 +360,7 @@ describe('terminal command search', () => {
 
   test('routes workspace and price-index lookups with safe terminal handoffs', () => {
     const workspaceState = resolveTerminalCommandSearchState({
-      query: 'workspace: live desk',
+      query: 'workspace: home',
       isLoading: false,
       trades: SAMPLE_TRADES,
       counterparties: SAMPLE_COUNTERPARTIES,
@@ -376,10 +375,10 @@ describe('terminal command search', () => {
 
     const workspaceResult = workspaceState.groups[0]?.results[0]
     assert.ok(workspaceResult)
-    expect(workspaceResult.title).toBe('Live Desk')
+    expect(workspaceResult.title).toBe('Apps')
     expect(workspaceResult.action).toEqual({
       kind: 'view',
-      view: 'dashboard',
+      view: 'prompt',
       handoff: null,
     })
 

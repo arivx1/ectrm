@@ -8,8 +8,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.risk.services.official_marks import (
+    OfficialMark,
+    get_official_mark,
+)
 from apps.api.app.models.event import Event
-from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_price_term import TradePriceTerm
 
@@ -27,13 +30,15 @@ OPTION_LIFECYCLE_EVENT_TO_STATUS = {
 DEFAULT_PRICING_TYPE = "FIXED"
 DEFAULT_INSTRUMENT_TYPE = "LINEAR"
 DEFAULT_TRADE_STRUCTURE = "SINGLE"
-TRADE_PNL_BASIS = "trade_event_history_mark_to_market"
+TRADE_PNL_BASIS = "trade_event_history_official_mark_to_market"
 TRADE_PNL_METHODOLOGY = (
-    "Event-sourced daily history values trade lifecycle state against the latest available "
-    "price-index observation for each day. End-of-window trade breakdown prefers the projected "
-    "primary price term when the report reaches the latest known trade state. v1 values only "
-    "LINEAR single-leg trades: FIXED uses the fixed price, INDEX uses the market observation, "
-    "HYBRID uses market observation plus fixed differential, settlement changes move priced "
+    "Event-sourced daily history values trade lifecycle state against the latest official "
+    "price-index mark for each day. Official marks are selected from the active approved source "
+    "for the linked price index, use the latest observation on or before the as-of date, and do "
+    "not interpolate in v1. End-of-window trade breakdown prefers the projected primary price "
+    "term when the report reaches the latest known trade state. v1 values only LINEAR single-leg "
+    "trades: FIXED uses the fixed price, INDEX uses the official mark, HYBRID uses official mark "
+    "plus fixed differential, settlement changes move priced "
     "trades between realized and unrealized buckets, OPTION, SWAP, and FORMULA trades stay out "
     "of MTM totals until dedicated valuation support lands, and legacy projection-only trades "
     "without event history enter the timeline on their latest trustworthy projection date rather "
@@ -151,6 +156,7 @@ class TradeValuation:
     price_index_code: str | None
     market_price: Decimal | None
     effective_mark: Decimal | None
+    mark_evidence: dict[str, Any] | None
     quantity: Decimal | None
     direction: int
     trade_currency_code: str | None
@@ -278,7 +284,7 @@ def _pricing_inputs_for_state(
 
 def _build_trade_valuation(
     state: dict[str, Any] | None,
-    latest_marks: dict[str, Decimal],
+    official_marks: dict[str, OfficialMark],
     *,
     primary_price_term: PrimaryPriceTerm | None = None,
 ) -> TradeValuation | None:
@@ -306,7 +312,9 @@ def _build_trade_valuation(
     quantity_raw = _decimal_or_none(state.get("volume"))
     quantity = abs(quantity_raw) if quantity_raw is not None else None
     direction = int(_trade_direction(state))
-    market_price = latest_marks.get(price_index_code) if price_index_code else None
+    official_mark = official_marks.get(price_index_code) if price_index_code else None
+    market_price = official_mark.value if official_mark is not None else None
+    mark_evidence = _serialize_mark_evidence(official_mark) if price_index_code else None
 
     valuation_status = VALUATION_STATUS_VALUED
     valuation_status_reason: str | None = None
@@ -338,7 +346,11 @@ def _build_trade_valuation(
             valuation_status_reason = "Index pricing requires a linked price index."
         elif market_price is None:
             valuation_status = VALUATION_STATUS_UNPRICED_MISSING_MARK
-            valuation_status_reason = "No market observation is available yet for the linked price index."
+            valuation_status_reason = (
+                official_mark.reason
+                if official_mark is not None and official_mark.reason
+                else "No official mark is available yet for the linked price index."
+            )
         else:
             effective_mark = market_price
     elif pricing_type == "HYBRID":
@@ -350,7 +362,11 @@ def _build_trade_valuation(
             valuation_status_reason = "Hybrid pricing requires a linked price index."
         elif market_price is None:
             valuation_status = VALUATION_STATUS_UNPRICED_MISSING_MARK
-            valuation_status_reason = "No market observation is available yet for the linked price index."
+            valuation_status_reason = (
+                official_mark.reason
+                if official_mark is not None and official_mark.reason
+                else "No official mark is available yet for the linked price index."
+            )
         else:
             effective_mark = market_price + fixed_price
 
@@ -377,6 +393,7 @@ def _build_trade_valuation(
         price_index_code=price_index_code,
         market_price=market_price,
         effective_mark=effective_mark,
+        mark_evidence=mark_evidence,
         quantity=quantity,
         direction=direction,
         trade_currency_code=trade_currency_code,
@@ -390,13 +407,13 @@ def _build_trade_valuation(
 
 def _pnl_snapshot_for_state(
     state: dict[str, Any] | None,
-    latest_marks: dict[str, Decimal],
+    official_marks: dict[str, OfficialMark],
     *,
     primary_price_term: PrimaryPriceTerm | None = None,
 ) -> PnlSnapshot:
     valuation = _build_trade_valuation(
         state,
-        latest_marks,
+        official_marks,
         primary_price_term=primary_price_term,
     )
     if valuation is None or not valuation.included_in_totals or valuation.pnl_contribution is None:
@@ -561,8 +578,30 @@ def _serialize_attribution_driver_event(event: Event) -> dict[str, Any]:
     }
 
 
-def _serialize_trade_valuation(valuation: TradeValuation) -> dict[str, Any]:
+def _serialize_mark_evidence(mark: OfficialMark | None) -> dict[str, Any] | None:
+    if mark is None:
+        return None
+
     return {
+        "price_index_code": mark.price_index_code,
+        "valuation_basis": mark.valuation_basis,
+        "interpolation_method": mark.interpolation_method,
+        "approval_status": mark.approval_status,
+        "freshness_status": mark.freshness_status,
+        "as_of_date": mark.as_of_date,
+        "observation_date": mark.observation_date,
+        "source_provider": mark.source_provider,
+        "source_series_id": mark.source_series_id,
+        "source_published_at": mark.source_published_at,
+        "downloaded_at": mark.downloaded_at,
+        "run_id": mark.run_id,
+        "days_stale": mark.days_stale,
+        "reason": mark.reason,
+    }
+
+
+def _serialize_trade_valuation(valuation: TradeValuation) -> dict[str, Any]:
+    payload = {
         "trade_id": valuation.trade_id,
         "book": valuation.book,
         "portfolio": valuation.portfolio,
@@ -591,6 +630,9 @@ def _serialize_trade_valuation(valuation: TradeValuation) -> dict[str, Any]:
         "valuation_status_reason": valuation.valuation_status_reason,
         "included_in_totals": valuation.included_in_totals,
     }
+    if valuation.mark_evidence is not None:
+        payload["mark_evidence"] = valuation.mark_evidence
+    return payload
 
 
 def _empty_pnl_history_report(generated_at: datetime) -> dict[str, Any]:
@@ -978,32 +1020,29 @@ def _load_trade_driver_events(
     return grouped_events
 
 
-def _load_daily_mark_updates(
+def _load_daily_official_marks(
     db: Session,
     *,
     price_index_codes: set[str],
+    start_date: date,
     end_date: date,
-) -> dict[date, dict[str, Decimal]]:
+) -> dict[date, dict[str, OfficialMark]]:
     if not price_index_codes:
         return {}
 
-    rows = db.execute(
-        select(PriceIndexObservation)
-        .where(
-            PriceIndexObservation.price_index_code.in_(sorted(price_index_codes)),
-            PriceIndexObservation.observation_date <= end_date,
-        )
-        .order_by(
-            PriceIndexObservation.observation_date.asc(),
-            PriceIndexObservation.downloaded_at.asc(),
-            PriceIndexObservation.id.asc(),
-        )
-    ).scalars().all()
-
-    by_date: dict[date, dict[str, Decimal]] = {}
-    for row in rows:
-        daily_marks = by_date.setdefault(row.observation_date, {})
-        daily_marks[row.price_index_code] = Decimal(str(row.value))
+    by_date: dict[date, dict[str, OfficialMark]] = {}
+    current_date = start_date
+    normalized_codes = sorted(price_index_codes)
+    while current_date <= end_date:
+        by_date[current_date] = {
+            price_index_code: get_official_mark(
+                db,
+                price_index_code=price_index_code,
+                as_of_date=current_date,
+            )
+            for price_index_code in normalized_codes
+        }
+        current_date += timedelta(days=1)
 
     return by_date
 
@@ -1075,12 +1114,6 @@ def build_pnl_history_report(
     if not start_dates:
         return _empty_pnl_history_report(generated_at)
 
-    daily_mark_updates = _load_daily_mark_updates(
-        db,
-        price_index_codes=relevant_price_index_codes,
-        end_date=end_date,
-    )
-
     start_date = min(start_dates)
     if end_date < start_date:
         return _empty_pnl_history_report(generated_at)
@@ -1088,13 +1121,20 @@ def build_pnl_history_report(
     if window_start_date and window_start_date > end_date:
         return _empty_pnl_history_report(generated_at)
 
+    daily_official_marks = _load_daily_official_marks(
+        db,
+        price_index_codes=relevant_price_index_codes,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
     current_date = start_date
     active_states: dict[str, dict[str, Any]] = {}
-    latest_marks: dict[str, Decimal] = {}
+    official_marks: dict[str, OfficialMark] = {}
     latest_snapshot = PnlSnapshot()
     points: list[dict[str, Any]] = []
     while current_date <= end_date:
-        latest_marks.update(daily_mark_updates.get(current_date, {}))
+        official_marks.update(daily_official_marks.get(current_date, {}))
 
         for state in legacy_starts_by_date.get(current_date, []):
             active_states[state["trade_id"]] = dict(state)
@@ -1114,7 +1154,7 @@ def build_pnl_history_report(
                 continue
             latest_snapshot = _add_pnl_snapshots(
                 latest_snapshot,
-                _pnl_snapshot_for_state(state, latest_marks),
+                _pnl_snapshot_for_state(state, official_marks),
             )
 
         if window_start_date is None or current_date >= window_start_date:
@@ -1158,7 +1198,7 @@ def build_pnl_history_report(
     for state in end_states:
         valuation = _build_trade_valuation(
             state,
-            latest_marks,
+            official_marks,
             primary_price_term=primary_price_terms.get(state["trade_id"]),
         )
         if valuation is None:
@@ -1167,7 +1207,7 @@ def build_pnl_history_report(
             end_snapshot,
             _pnl_snapshot_for_state(
                 state,
-                latest_marks,
+                official_marks,
                 primary_price_term=primary_price_terms.get(state["trade_id"]),
             ),
         )

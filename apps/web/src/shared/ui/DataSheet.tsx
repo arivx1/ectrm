@@ -1,7 +1,31 @@
-import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+} from 'react'
 
 type DataSheetInputType = 'text' | 'textarea'
 type CellFocusableElement = HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement
+type DataSheetComparable = string | number | boolean | Date | null | undefined
+export type DataSheetSortDirection = 'asc' | 'desc'
+export type DataSheetSortState = {
+  columnId: string
+  direction: DataSheetSortDirection
+}
+
+export type DataSheetRowAction<Row> = {
+  id: string
+  label: string
+  tone?: 'default' | 'danger'
+  disabled?: boolean | ((row: Row) => boolean)
+  onSelect: (row: Row) => void
+}
 
 type DataSheetEditableConfig<Row> = {
   inputType?: DataSheetInputType
@@ -13,19 +37,24 @@ type DataSheetEditableConfig<Row> = {
   error?: (row: Row) => string | null
 }
 
-type DataSheetColumnBase = {
+type DataSheetColumnBase<Row> = {
   id: string
   label: string
   align?: 'start' | 'center' | 'end'
   width?: string
+  enableSort?: boolean
+  enableFilter?: boolean
+  filterPlaceholder?: string
+  sortValue?: (row: Row, rowIndex: number) => DataSheetComparable
+  filterValue?: (row: Row, rowIndex: number) => string
 }
 
 export type DataSheetColumn<Row> =
-  | (DataSheetColumnBase & {
-      renderCell: (row: Row) => ReactNode
+  | (DataSheetColumnBase<Row> & {
+      renderCell: (row: Row, rowIndex: number) => ReactNode
       editable?: never
     })
-  | (DataSheetColumnBase & {
+  | (DataSheetColumnBase<Row> & {
       renderCell?: never
       editable: DataSheetEditableConfig<Row>
     })
@@ -39,6 +68,7 @@ type DataSheetProps<Row> = {
   label: string
   description: string
   toolbarActions?: ReactNode
+  appendRows?: ReactNode
   columns: DataSheetColumn<Row>[]
   rows: Row[]
   getRowId: (row: Row) => string
@@ -46,6 +76,9 @@ type DataSheetProps<Row> = {
   selectedRowId: string | null
   onSelectRow: (row: Row) => void
   emptyMessage: string
+  defaultSort?: DataSheetSortState
+  enableColumnControls?: boolean
+  rowActions?: (row: Row) => DataSheetRowAction<Row>[]
 }
 
 function clampIndex(value: number, maxIndex: number): number {
@@ -97,10 +130,97 @@ function isEditableColumn<Row>(column: DataSheetColumn<Row>): column is Extract<
   return 'editable' in column
 }
 
+function normalizeDataSheetText(value: DataSheetComparable): string {
+  if (value == null) {
+    return ''
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  return String(value)
+}
+
+function resolveRenderedCellText(value: ReactNode): string {
+  switch (typeof value) {
+    case 'string':
+    case 'number':
+    case 'boolean':
+      return String(value)
+    default:
+      return ''
+  }
+}
+
+function resolveColumnFilterText<Row>(column: DataSheetColumn<Row>, row: Row, rowIndex: number): string {
+  if (column.filterValue) {
+    return column.filterValue(row, rowIndex)
+  }
+
+  if (column.sortValue) {
+    return normalizeDataSheetText(column.sortValue(row, rowIndex))
+  }
+
+  if (isEditableColumn(column)) {
+    return column.editable.value(row)
+  }
+
+  return resolveRenderedCellText(column.renderCell(row, rowIndex))
+}
+
+function resolveColumnSortValue<Row>(column: DataSheetColumn<Row>, row: Row, rowIndex: number): DataSheetComparable {
+  if (column.sortValue) {
+    return column.sortValue(row, rowIndex)
+  }
+
+  return resolveColumnFilterText(column, row, rowIndex)
+}
+
+function compareDataSheetValues(left: DataSheetComparable, right: DataSheetComparable): number {
+  if (left == null && right == null) {
+    return 0
+  }
+
+  if (left == null) {
+    return 1
+  }
+
+  if (right == null) {
+    return -1
+  }
+
+  if (left instanceof Date || right instanceof Date) {
+    return new Date(left as string | number | Date).getTime() - new Date(right as string | number | Date).getTime()
+  }
+
+  if (typeof left === 'number' && typeof right === 'number') {
+    return left - right
+  }
+
+  if (typeof left === 'boolean' && typeof right === 'boolean') {
+    return Number(left) - Number(right)
+  }
+
+  return String(left).localeCompare(String(right), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  })
+}
+
+function columnIsSortable<Row>(column: DataSheetColumn<Row>, enableColumnControls: boolean): boolean {
+  return enableColumnControls && column.enableSort !== false
+}
+
+function columnIsFilterable<Row>(column: DataSheetColumn<Row>, enableColumnControls: boolean): boolean {
+  return enableColumnControls && column.enableFilter !== false
+}
+
 export function DataSheet<Row>({
   label,
   description,
   toolbarActions,
+  appendRows,
   columns,
   rows,
   getRowId,
@@ -108,19 +228,67 @@ export function DataSheet<Row>({
   selectedRowId,
   onSelectRow,
   emptyMessage,
+  defaultSort,
+  enableColumnControls = true,
+  rowActions,
 }: DataSheetProps<Row>) {
   const descriptionId = useId()
-  const rowIds = useMemo(() => rows.map((row) => getRowId(row)), [getRowId, rows])
+  const actionMenuId = useId()
+  const [sortState, setSortState] = useState<DataSheetSortState | null>(() => defaultSort ?? null)
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({})
+  const [rowActionMenu, setRowActionMenu] = useState<{ rowId: string; x: number; y: number } | null>(null)
+  const visibleRows = useMemo(() => {
+    const normalizedFilters = Object.entries(columnFilters)
+      .map(([columnId, value]) => [columnId, value.trim().toLocaleLowerCase()] as const)
+      .filter(([, value]) => value.length > 0)
+    const indexedRows = rows.map((row, rowIndex) => ({ row, rowIndex }))
+    const filteredRows =
+      normalizedFilters.length > 0
+        ? indexedRows.filter(({ row, rowIndex }) =>
+            normalizedFilters.every(([columnId, filterValue]) => {
+              const column = columns.find((candidate) => candidate.id === columnId)
+              if (!column || !columnIsFilterable(column, enableColumnControls)) {
+                return true
+              }
+
+              return resolveColumnFilterText(column, row, rowIndex).toLocaleLowerCase().includes(filterValue)
+            }),
+          )
+        : indexedRows
+
+    const sortedRows = [...filteredRows]
+    if (sortState) {
+      const sortedColumn = columns.find((column) => column.id === sortState.columnId)
+      if (sortedColumn && columnIsSortable(sortedColumn, enableColumnControls)) {
+        sortedRows.sort((left, right) => {
+          const comparison = compareDataSheetValues(
+            resolveColumnSortValue(sortedColumn, left.row, left.rowIndex),
+            resolveColumnSortValue(sortedColumn, right.row, right.rowIndex),
+          )
+
+          if (comparison !== 0) {
+            return sortState.direction === 'asc' ? comparison : -comparison
+          }
+
+          return left.rowIndex - right.rowIndex
+        })
+      }
+    }
+
+    return sortedRows.map(({ row }) => row)
+  }, [columnFilters, columns, enableColumnControls, rows, sortState])
+  const rowIds = useMemo(() => visibleRows.map((row) => getRowId(row)), [getRowId, visibleRows])
   const cellRefs = useRef(new Map<string, CellFocusableElement>())
+  const rowActionMenuRef = useRef<HTMLDivElement | null>(null)
   const pendingFocusRef = useRef(false)
   const [requestedActiveCell, setRequestedActiveCell] = useState<ActiveCell>(() =>
     resolveActiveCell(
       {
-        rowIndex: rows.length > 0 ? Math.max(rowIds.indexOf(selectedRowId ?? ''), 0) : -1,
+        rowIndex: visibleRows.length > 0 ? Math.max(rowIds.indexOf(selectedRowId ?? ''), 0) : -1,
         columnIndex: columns.length > 0 ? 0 : -1,
       },
       {
-        rowCount: rows.length,
+        rowCount: visibleRows.length,
         columnCount: columns.length,
         rowIds,
         selectedRowId,
@@ -130,12 +298,12 @@ export function DataSheet<Row>({
   const activeCell = useMemo(
     () =>
       resolveActiveCell(requestedActiveCell, {
-        rowCount: rows.length,
+        rowCount: visibleRows.length,
         columnCount: columns.length,
         rowIds,
         selectedRowId,
       }),
-    [columns.length, requestedActiveCell, rowIds, rows.length, selectedRowId],
+    [columns.length, requestedActiveCell, rowIds, selectedRowId, visibleRows.length],
   )
 
   useEffect(() => {
@@ -163,18 +331,63 @@ export function DataSheet<Row>({
     requestAnimationFrame(() => cell.focus())
   }, [activeCell, columns, rowIds])
 
-  const activeRow = activeCell.rowIndex >= 0 ? rows[activeCell.rowIndex] ?? null : null
-  const activeColumn = activeCell.columnIndex >= 0 ? columns[activeCell.columnIndex] ?? null : null
-  const activeCellAddress =
-    activeRow && activeColumn ? `${columnAddress(activeCell.columnIndex)}${activeCell.rowIndex + 1}` : '—'
-  const hasEditableColumns = columns.some((column) => isEditableColumn(column))
-
-  function moveFocus(nextRowIndex: number, nextColumnIndex: number) {
-    if (rows.length === 0 || columns.length === 0) {
+  useEffect(() => {
+    if (!rowActionMenu) {
       return
     }
 
-    const clampedRowIndex = clampIndex(nextRowIndex, rows.length - 1)
+    function handleDocumentPointerDown(event: globalThis.MouseEvent) {
+      if (rowActionMenuRef.current?.contains(event.target as Node)) {
+        return
+      }
+
+      setRowActionMenu(null)
+    }
+
+    function handleDocumentKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setRowActionMenu(null)
+      }
+    }
+
+    document.addEventListener('mousedown', handleDocumentPointerDown)
+    document.addEventListener('keydown', handleDocumentKeyDown)
+
+    return () => {
+      document.removeEventListener('mousedown', handleDocumentPointerDown)
+      document.removeEventListener('keydown', handleDocumentKeyDown)
+    }
+  }, [rowActionMenu])
+
+  const activeRow = activeCell.rowIndex >= 0 ? visibleRows[activeCell.rowIndex] ?? null : null
+  const activeColumn = activeCell.columnIndex >= 0 ? columns[activeCell.columnIndex] ?? null : null
+  const activeActionMenuRow = rowActionMenu
+    ? visibleRows.find((row) => getRowId(row) === rowActionMenu.rowId) ?? null
+    : null
+  const activeRowActions = activeActionMenuRow && rowActions ? rowActions(activeActionMenuRow) : []
+  const activeCellAddress =
+    activeRow && activeColumn ? `${columnAddress(activeCell.columnIndex)}${activeCell.rowIndex + 1}` : '—'
+  const hasEditableColumns = columns.some((column) => isEditableColumn(column))
+  const activeFilterCount = Object.values(columnFilters).filter((value) => value.trim().length > 0).length
+  const hasColumnFilters = activeFilterCount > 0
+  const sortMatchesDefault =
+    (!sortState && !defaultSort) ||
+    (sortState?.columnId === defaultSort?.columnId && sortState?.direction === defaultSort?.direction)
+  const hasCustomSort = !sortMatchesDefault
+  const hasColumnControls = enableColumnControls && columns.some((column) => columnIsSortable(column, true) || columnIsFilterable(column, true))
+  const hasFilterRow = enableColumnControls && columns.some((column) => columnIsFilterable(column, true))
+  const shouldRenderTable = rows.length > 0 || Boolean(appendRows)
+  const rowCountLabel =
+    visibleRows.length === rows.length
+      ? `${rows.length} row${rows.length === 1 ? '' : 's'}`
+      : `${visibleRows.length} of ${rows.length} rows`
+
+  function moveFocus(nextRowIndex: number, nextColumnIndex: number) {
+    if (visibleRows.length === 0 || columns.length === 0) {
+      return
+    }
+
+    const clampedRowIndex = clampIndex(nextRowIndex, visibleRows.length - 1)
     const clampedColumnIndex = clampIndex(nextColumnIndex, columns.length - 1)
     if (clampedRowIndex < 0 || clampedColumnIndex < 0) {
       return
@@ -183,7 +396,7 @@ export function DataSheet<Row>({
     pendingFocusRef.current = true
     setRequestedActiveCell({ rowIndex: clampedRowIndex, columnIndex: clampedColumnIndex })
 
-    const nextRow = rows[clampedRowIndex]
+    const nextRow = visibleRows[clampedRowIndex]
     if (nextRow && getRowId(nextRow) !== selectedRowId) {
       onSelectRow(nextRow)
     }
@@ -198,10 +411,38 @@ export function DataSheet<Row>({
       return { rowIndex, columnIndex }
     })
 
-    const row = rows[rowIndex]
+    const row = visibleRows[rowIndex]
     if (row && getRowId(row) !== selectedRowId) {
       onSelectRow(row)
     }
+  }
+
+  function openRowActionMenu(row: Row, event: MouseEvent<HTMLElement>) {
+    if (!rowActions || rowActions(row).length === 0) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+    const rowId = getRowId(row)
+    if (rowId !== selectedRowId) {
+      onSelectRow(row)
+    }
+    setRowActionMenu({
+      rowId,
+      x: event.clientX,
+      y: event.clientY,
+    })
+  }
+
+  function handleRowActionSelect(row: Row, action: DataSheetRowAction<Row>) {
+    const disabled = typeof action.disabled === 'function' ? action.disabled(row) : action.disabled ?? false
+    if (disabled) {
+      return
+    }
+
+    action.onSelect(row)
+    setRowActionMenu(null)
   }
 
   function handleReadOnlyCellKeyDown(event: KeyboardEvent<HTMLButtonElement>, rowIndex: number, columnIndex: number, row: Row) {
@@ -236,7 +477,7 @@ export function DataSheet<Row>({
         return
       case 'PageDown':
         event.preventDefault()
-        moveFocus(rows.length - 1, columnIndex)
+        moveFocus(visibleRows.length - 1, columnIndex)
         return
       case ' ':
       case 'Enter':
@@ -257,6 +498,50 @@ export function DataSheet<Row>({
     cellRefs.current.delete(cellId)
   }
 
+  function cycleSort(column: DataSheetColumn<Row>) {
+    if (!columnIsSortable(column, enableColumnControls)) {
+      return
+    }
+
+    setSortState((current) => {
+      if (!current || current.columnId !== column.id) {
+        return { columnId: column.id, direction: 'asc' }
+      }
+
+      if (current.direction === 'asc') {
+        return { columnId: column.id, direction: 'desc' }
+      }
+
+      return null
+    })
+  }
+
+  function updateColumnFilter(columnId: string, value: string) {
+    setColumnFilters((current) => {
+      const next = { ...current }
+      if (value.trim().length > 0) {
+        next[columnId] = value
+      } else {
+        delete next[columnId]
+      }
+
+      return next
+    })
+  }
+
+  function resetColumnControls() {
+    setSortState(defaultSort ?? null)
+    setColumnFilters({})
+  }
+
+  function sortLabelForColumn(column: DataSheetColumn<Row>): string {
+    if (sortState?.columnId !== column.id) {
+      return 'Sort'
+    }
+
+    return sortState.direction === 'asc' ? 'Asc' : 'Desc'
+  }
+
   return (
     <div className="data-sheet-shell">
       <div className="data-sheet-toolbar">
@@ -268,16 +553,26 @@ export function DataSheet<Row>({
         <div className="data-sheet-status">
           {toolbarActions ? <div className="data-sheet-actions">{toolbarActions}</div> : null}
           <span className="entity-chip entity-chip-soft">
-            {rows.length} row{rows.length === 1 ? '' : 's'} • {columns.length} column{columns.length === 1 ? '' : 's'}
+            {rowCountLabel} • {columns.length} column{columns.length === 1 ? '' : 's'}
           </span>
+          {hasColumnFilters ? (
+            <span className="entity-chip entity-chip-soft">
+              {activeFilterCount} filter{activeFilterCount === 1 ? '' : 's'}
+            </span>
+          ) : null}
           <span className="entity-chip entity-chip-soft">
             Active cell {activeCellAddress}
             {activeColumn ? ` • ${activeColumn.label}` : ''}
           </span>
+          {hasColumnControls && (hasColumnFilters || hasCustomSort) ? (
+            <button type="button" className="button button-ghost data-sheet-reset-button" onClick={resetColumnControls}>
+              Reset Table
+            </button>
+          ) : null}
         </div>
       </div>
 
-      {rows.length > 0 ? (
+      {shouldRenderTable ? (
         <>
           <div className="table-shell data-sheet-table-shell">
             <table className="data-table data-sheet-table" role="grid" aria-describedby={descriptionId}>
@@ -293,18 +588,69 @@ export function DataSheet<Row>({
                       key={column.id}
                       className={`data-sheet-column-head data-sheet-align-${column.align ?? 'start'}`}
                       scope="col"
+                      aria-sort={
+                        sortState?.columnId === column.id
+                          ? sortState.direction === 'asc'
+                            ? 'ascending'
+                            : 'descending'
+                          : 'none'
+                      }
                     >
-                      {column.label}
+                      {columnIsSortable(column, enableColumnControls) ? (
+                        <button
+                          type="button"
+                          className={`data-sheet-sort-button ${sortState?.columnId === column.id ? 'is-active' : ''}`}
+                          onClick={() => cycleSort(column)}
+                          title={`Sort by ${column.label}`}
+                        >
+                          <span>{column.label}</span>
+                          <span className="data-sheet-sort-state">{sortLabelForColumn(column)}</span>
+                        </button>
+                      ) : (
+                        <span className="data-sheet-static-column-label">{column.label}</span>
+                      )}
                     </th>
                   ))}
                 </tr>
+                {hasFilterRow ? (
+                  <tr className="data-sheet-filter-row">
+                    {columns.map((column) => (
+                      <th key={`${column.id}-filter`} className={`data-sheet-align-${column.align ?? 'start'}`} scope="col">
+                        {columnIsFilterable(column, enableColumnControls) ? (
+                          <input
+                            className="data-sheet-column-filter"
+                            type="search"
+                            value={columnFilters[column.id] ?? ''}
+                            placeholder={column.filterPlaceholder ?? 'Filter'}
+                            aria-label={`Filter ${column.label}`}
+                            onChange={(event) => updateColumnFilter(column.id, event.target.value)}
+                          />
+                        ) : (
+                          <span className="data-sheet-filter-placeholder" aria-hidden="true" />
+                        )}
+                      </th>
+                    ))}
+                  </tr>
+                ) : null}
               </thead>
               <tbody>
-                {rows.map((row, rowIndex) => {
+                {visibleRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={columns.length} className="data-sheet-no-results">
+                      {hasColumnFilters ? 'No rows match the current column filters.' : emptyMessage}
+                    </td>
+                  </tr>
+                ) : null}
+                {visibleRows.map((row, rowIndex) => {
                   const rowId = getRowId(row)
                   const rowSelected = rowId === selectedRowId
                   return (
-                    <tr key={rowId} className={rowSelected ? 'is-selected' : ''}>
+                    <tr
+                      key={rowId}
+                      className={rowSelected ? 'is-selected' : ''}
+                      onContextMenu={(event) => openRowActionMenu(row, event)}
+                      onDoubleClick={(event) => openRowActionMenu(row, event)}
+                    >
                       {columns.map((column, columnIndex) => {
                         const cellId = `${rowId}:${column.id}`
                         const active = activeCell.rowIndex === rowIndex && activeCell.columnIndex === columnIndex
@@ -363,7 +709,7 @@ export function DataSheet<Row>({
                               onFocus={() => handleCellFocus(rowIndex, columnIndex)}
                               onKeyDown={(event) => handleReadOnlyCellKeyDown(event, rowIndex, columnIndex, row)}
                             >
-                              {column.renderCell(row)}
+                              {column.renderCell(row, rowIndex)}
                             </button>
                           </td>
                         )
@@ -371,9 +717,42 @@ export function DataSheet<Row>({
                     </tr>
                   )
                 })}
+                {appendRows}
               </tbody>
             </table>
           </div>
+
+          {activeActionMenuRow && rowActionMenu && activeRowActions.length > 0 ? (
+            <div
+              ref={rowActionMenuRef}
+              id={actionMenuId}
+              className="data-sheet-row-action-menu"
+              role="menu"
+              aria-label={`Options for ${getRowLabel(activeActionMenuRow)}`}
+              style={{ left: rowActionMenu.x, top: rowActionMenu.y }}
+            >
+              <span className="data-sheet-row-action-menu-title">Row Options</span>
+              {activeRowActions.map((action) => {
+                const disabled =
+                  typeof action.disabled === 'function' ? action.disabled(activeActionMenuRow) : action.disabled ?? false
+
+                return (
+                  <button
+                    key={action.id}
+                    type="button"
+                    role="menuitem"
+                    className={`data-sheet-row-action-menu-item ${
+                      action.tone === 'danger' ? 'data-sheet-row-action-menu-item-danger' : ''
+                    }`}
+                    disabled={disabled}
+                    onClick={() => handleRowActionSelect(activeActionMenuRow, action)}
+                  >
+                    {action.label}
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
 
           <div className="data-sheet-footer" aria-live="polite">
             <span>{activeRow ? getRowLabel(activeRow) : 'No row selected'}</span>

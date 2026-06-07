@@ -56,16 +56,11 @@ const TERMINAL_WORKSPACE_SETS: readonly TerminalWorkspaceSet[] = [
     operatorGoal: 'Open the screens a trader usually wants before deciding where to act.',
     routes: [
       {
-        id: 'live-desk',
-        view: 'dashboard',
-        label: 'Live Desk',
-        purpose: 'Market monitor, watchlist alerts, desk headlines, prices, and exposure context.',
+        id: 'home',
+        view: 'prompt',
+        label: 'Apps',
+        purpose: 'Configurable Home apps, saved views, market cards, and assistant prompts.',
         role: 'primary',
-        preset: {
-          workspaceId: 'dashboard',
-          presetId: 'market-overview',
-          label: 'Market Overview',
-        },
       },
       {
         id: 'trade-capture',
@@ -100,7 +95,7 @@ const TERMINAL_WORKSPACE_SETS: readonly TerminalWorkspaceSet[] = [
     label: 'Risk Review',
     shortLabel: 'Risk',
     description: 'Bring exposure, net positions, market context, and reports together for risk review.',
-    operatorGoal: 'Compare the live desk picture with risk and position screens without losing route safety.',
+    operatorGoal: 'Compare Home apps with risk and position screens without losing route safety.',
     routes: [
       {
         id: 'exposure',
@@ -122,16 +117,11 @@ const TERMINAL_WORKSPACE_SETS: readonly TerminalWorkspaceSet[] = [
         role: 'monitor',
       },
       {
-        id: 'live-desk',
-        view: 'dashboard',
-        label: 'Live Desk',
-        purpose: 'Market Overview preset for monitor board, headlines, watchlists, and external context.',
+        id: 'home',
+        view: 'prompt',
+        label: 'Apps',
+        purpose: 'Configurable Home apps and market context before risk drill-down.',
         role: 'monitor',
-        preset: {
-          workspaceId: 'dashboard',
-          presetId: 'market-overview',
-          label: 'Market Overview',
-        },
       },
       {
         id: 'reports',

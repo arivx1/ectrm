@@ -95,10 +95,11 @@ The MVP should use or prepare these durable work objects:
 | --- | --- | --- |
 | Pre-trade scenario | Existing | Extend draft fields only after schema and handoff implications are clear. |
 | Pre-trade review item | Existing | Primary human review object before trade capture. |
-| Market opportunity | Planned | Start as recommendation output; promote to first-class object only if humans reuse it. |
+| Market opportunity | Review-draft object implemented | Governance promotion signals can create shared market-opportunity review drafts tied to approved review and recommendation evidence. No trade, pricing, offer, order, execution, credit, risk-limit, or external-commitment authority. |
 | Netting set | Review-draft object implemented | Governance promotion signals can create shared review-only netting-set drafts tied to recommendation evidence. No legal, settlement, transfer, or booking authority. |
 | Hedge recommendation | Review-draft object implemented | Governance promotion signals can create shared hedge-recommendation review drafts tied to the deterministic decision table. No order, execution, hedge-accounting designation, margin, or treasury authority. |
 | Risk scenario | Review-draft object implemented | Governance promotion signals can create shared risk-scenario review drafts tied to approved review and recommendation evidence. No stress-limit, policy, trade, hedge, credit, or external-commitment authority. |
+| Promotion outcome metrics | Implemented | Shared read-only metrics summarize promoted draft creation, source-evidence reuse, retirement, source-review rejection, booked-trade merge, and blocking missing-evidence outcomes. No promotion, approval, trade, hedge, policy, credit, or external-commitment authority. |
 
 ## Delivery Order
 
@@ -130,6 +131,11 @@ The MVP should use or prepare these durable work objects:
 12. TRMVP-12 pre-trade netting-set review drafts - implemented
 13. TRMVP-13 pre-trade hedge-recommendation review drafts - implemented
 14. TRMVP-14 pre-trade risk-scenario review drafts - implemented
+15. TRMVP-15 pre-trade market-opportunity review drafts - implemented
+
+### Wave 5: Outcome Measurement
+
+16. TRMVP-16 promoted-draft review-outcome metrics - implemented
 
 ## Shared Definition Of Done
 
@@ -768,10 +774,12 @@ candidate into a durable work object.
 ### Implementation Status
 
 Implemented. The governance service now emits read-only promotion candidates
-for netting sets, hedge recommendations, and Risk scenarios. Candidates remain
-review-only signals: rejected reviews do not count, overrides hold candidates in
-watch status, partial netting evidence preserves stop reasons, and no business
-records are created by the signal.
+for netting sets, hedge recommendations, Risk scenarios, and market
+opportunities. Candidates remain review-only signals: rejected reviews do not
+count, overrides hold candidates in watch status, partial netting evidence
+preserves stop reasons, market-opportunity signals are limited to supported
+mark-gap or arbitrage recommendation evidence, and no business records are
+created by the signal.
 
 ## TRMVP-12: Pre-Trade Netting-Set Review Drafts
 
@@ -989,21 +997,178 @@ path is idempotent for the same latest run/review evidence, visible in the
 Pre-Trade governance tile, and remains review-only with no trade, hedge,
 stress-limit, policy, credit, settlement, or external-commitment authority.
 
+## TRMVP-15: Pre-Trade Market-Opportunity Review Drafts
+
+Status: implemented.
+
+### Priority
+
+P1
+
+### Size
+
+M
+
+### Outcome
+
+The strongest reviewer-approved market-opportunity promotion signal can be
+promoted into a durable, shared, review-only market-opportunity draft with
+review provenance, recommendation evidence, opportunity summary, optional
+arbitrage economics, residual exposure, missing evidence, and reviewer focus
+preserved.
+
+### Scope
+
+- add a typed backend service for pre-trade market-opportunity review drafts
+- create drafts only from a current `MARKET_OPPORTUNITY` governance promotion
+  signal with a linked pre-trade review, linked recommendation run, and
+  supported `MARK_GAP` or `ARBITRAGE` opportunity category
+- carry linked recommendation-run evidence, including opportunity summary,
+  optional arbitrage candidate, residual exposure, input snapshots, missing
+  evidence, next actions, and reviewer focus
+- persist the source promotion score, evidence counts, latest ids, sample ids,
+  rationale, stop reasons, source review status/thesis/notes/owner, and
+  recommendation stance/score/headline
+- keep creation idempotent for the same latest review/run source evidence
+- expose list and promote-from-governance API endpoints
+- surface existing market-opportunity drafts in the Pre-Trade governance
+  promotion drill-through
+
+### Out Of Scope
+
+- trade booking, trade amendment, automatic review approval, or offer acceptance
+- order routing, broker/venue communication, external counterparty outreach, or
+  logistics/payment commitment
+- official price marks, valuation methodology, or pricing policy changes
+- stress-limit, exposure-limit, credit, compliance, or policy override changes
+- hedge execution, hedge-accounting designation, margin, treasury, collateral,
+  settlement, or position-transfer workflow
+
+### Acceptance Criteria
+
+- `GET /pretrade/market-opportunities` lists shared review drafts
+- `POST /pretrade/market-opportunities/from-promotion` creates or returns the
+  review draft for the current market-opportunity promotion signal
+- unsupported opportunity categories or missing review/run evidence return a
+  reviewable error instead of creating a weak draft
+- the Pre-Trade workspace shows market-opportunity drafts alongside promotion
+  signals and existing netting, hedge, and risk-scenario drafts
+- agents and UI copy preserve the boundary between review-draft market
+  opportunities and trade, price-mark, order, credit, risk-limit, hedge,
+  settlement, or external-commitment authority
+
+### Verification
+
+- `./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api`
+- `npm --prefix apps/web run test -- preTradeApi.test.ts`
+- `npm --prefix apps/web run build`
+- `npm --prefix apps/web run lint`
+- `npm --prefix apps/web run test:smoke -- --grep "pre-trade smoke"`
+
+### Implementation Status
+
+Implemented. A governance `MARKET_OPPORTUNITY` promotion signal can now create
+a shared `REVIEW_DRAFT` market-opportunity work object that preserves the
+linked review, linked recommendation run, source score, source evidence
+summary, rationale, stop reasons, review status/thesis/notes/owner,
+recommendation stance/score/headline, recommendation draft, opportunity
+summary, optional arbitrage candidate, residual exposure, input snapshots,
+missing evidence, next actions, and reviewer focus. The promotion path is
+idempotent for the same latest run/review evidence, visible in the Pre-Trade
+governance tile, and remains review-only with no trade, price-mark, order,
+execution, hedge, risk-limit, credit, settlement, or external-commitment
+authority.
+
+## TRMVP-16: Promoted-Draft Review-Outcome Metrics
+
+Status: implemented.
+
+### Priority
+
+P1
+
+### Size
+
+S
+
+### Outcome
+
+Promoted netting-set, hedge-recommendation, risk-scenario, and
+market-opportunity review drafts now have read-only outcome metrics that show
+whether drafts were created, reused by source evidence, retired, rejected by
+the source review, merged into a booked trade, or still blocked by missing
+evidence.
+
+### Scope
+
+- add a typed backend service that reads all shared promoted draft records
+- derive outcome buckets from persisted draft payloads plus live linked
+  pre-trade review and trade status where available
+- expose aggregate counts, per-draft-type counts, and per-draft evidence rows
+  through `GET /pretrade/promotion-outcomes`
+- surface the outcome metrics and latest promoted draft rows in the Pre-Trade
+  governance tile
+- keep outcome metrics read-only and suitable for future agent/autonomy
+  promotion analysis
+
+### Out Of Scope
+
+- changing draft status, approving reviews, or retiring drafts automatically
+- creating action requests from outcome metrics
+- trade booking, trade amendment, hedge execution, price-mark changes, credit
+  approval, policy changes, settlement workflow, or external commitments
+- using outcome metrics as sufficient proof for autonomous execution without a
+  separate owner-approved threshold policy
+
+### Acceptance Criteria
+
+- `GET /pretrade/promotion-outcomes` requires authentication and returns all
+  six outcome buckets
+- counts are split by promoted draft type and backed by per-draft evidence rows
+- booked linked reviews appear as booked-trade merge outcomes with linked trade
+  status when the trade is visible
+- rejected source reviews, retired draft payloads, repeated source evidence,
+  and blocking missing evidence are counted separately
+- the Pre-Trade workspace shows the metrics without creating any new business
+  mutation path
+
+### Verification
+
+- `./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api`
+- `npm --prefix apps/web run test -- preTradeApi.test.ts`
+- `npm --prefix apps/web run build`
+- targeted frontend ESLint for touched Pre-Trade files
+- `npm --prefix apps/web run test:smoke -- --grep "pre-trade smoke"`
+
+### Implementation Status
+
+Implemented. The reports domain now builds a shared promoted-draft outcome
+summary across netting-set, hedge-recommendation, risk-scenario, and
+market-opportunity review drafts. The summary is deterministic, read-only, and
+derives its buckets from persisted promotion evidence plus live linked
+pre-trade review/trade state. The Pre-Trade governance tile renders the
+aggregate counts, per-object counts, and latest draft rows while preserving the
+existing boundary: metrics inform humans and future policy design, but they do
+not approve reviews, retire drafts, book trades, execute hedges, change price
+marks, change credit/risk policy, or externally commit the firm.
+
 ## Recommended First Implementation Slice
 
-The TRMVP-01 through TRMVP-14 sequence is now implemented as the evidence,
+The TRMVP-01 through TRMVP-16 sequence is now implemented as the evidence,
 triage, rationale handoff, workspace-review, deterministic netting,
 deterministic hedge-draft, Risk workspace exposure triage, assistant-eval, and
 regression-smoke foundation plus reviewer-reuse promotion signals and the first
-durable netting-set, hedge-recommendation, and risk-scenario review drafts for
+durable netting-set, hedge-recommendation, risk-scenario, and
+market-opportunity review drafts, with promoted-draft outcome metrics for
 trader/risk decision support.
 
-Next recommended work should use the remaining promotion signals and review
-outcomes rather than adding another prompt-only layer:
+Next recommended work should turn those outcomes into explicit lifecycle and
+promotion policy, still before adding higher-authority workflows:
 
-1. Review governance promotion-signal counts and stop reasons after users have
-   reused a few drafts.
-2. Promote the next strongest owner-approved object: market-opportunity review
-   object.
+1. Add manual promoted-draft lifecycle controls for owner notes, retire
+   reasons, and stale/reopened review handling.
+2. Define owner-approved promotion thresholds that use outcome metrics:
+   minimum reuse, maximum rejection/correction rate, no blocking evidence, and
+   documented rollback/correction paths.
 3. Only deepen hedge-accounting, margin, treasury, or execution workflows after
    owner-approved policies and source contracts exist.

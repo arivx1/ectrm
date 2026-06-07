@@ -1,6 +1,14 @@
+/* eslint-disable react-refresh/only-export-components -- This widget intentionally exports deterministic news tagging helpers for focused tests and Home filter wiring. */
 import { useEffect, useMemo, useState } from 'react'
 
-import { loadMarketNewsHeadlines } from '../../entities/news/api'
+import {
+  loadMarketNewsHeadlineTags,
+  loadMarketNewsHeadlines,
+  type MarketNewsHeadlineTaggingImpactRecord,
+  type MarketNewsHeadlineTaggingItemRecord,
+  type MarketNewsHeadlineTaggingRequestItem,
+  type MarketNewsHeadlineTaggingLocationRecord,
+} from '../../entities/news/api'
 import type { MarketNewsHeadlineRecord, MarketNewsRecord } from '../../shared/models'
 
 export type MarketNewsImpactDirection = 'up' | 'down' | 'neutral'
@@ -32,6 +40,7 @@ type MarketNewsPanelProps = {
   detail?: string
   filters?: MarketNewsPanelFilters
   formatDate?: (value: string | null | undefined) => string
+  onHeadlinesChange?: (items: MarketNewsHeadlineRecord[]) => void
 }
 
 export type MarketNewsPanelFilters = {
@@ -49,6 +58,9 @@ type MarketNewsHeadlineEffects = {
 type MarketNewsHeadlineEffect = {
   direction: MarketNewsImpactDirection
   horizon: MarketNewsImpactHorizon
+  source?: 'deterministic' | 'ai'
+  confidence?: number | null
+  rationale?: string | null
 }
 
 type MarketNewsLocationRule = {
@@ -60,6 +72,17 @@ type MarketNewsLocationRule = {
 type MarketNewsMarketLocation = {
   label: string
   scope: MarketNewsLocationScope
+  source?: 'deterministic' | 'ai'
+  confidence?: number | null
+  rationale?: string | null
+}
+
+type MarketNewsTableRow = {
+  id: string
+  item: MarketNewsHeadlineRecord
+  effects: MarketNewsHeadlineEffects
+  location: MarketNewsMarketLocation
+  hasAiTags: boolean
 }
 
 type NormalizedMarketNewsPanelFilters = {
@@ -245,6 +268,30 @@ const MARKET_NEWS_EFFECT_FILTER_DIRECTIONS: Record<
   negative: 'down',
   neutral: 'neutral',
 }
+
+const MARKET_NEWS_IMPACT_DIRECTIONS = new Set<MarketNewsImpactDirection>([
+  'up',
+  'down',
+  'neutral',
+])
+
+const MARKET_NEWS_IMPACT_HORIZONS = new Set<MarketNewsImpactHorizon>([
+  'immediate',
+  'near_term',
+  'mid_term',
+  'long_term',
+  'very_long_term',
+])
+
+const MARKET_NEWS_LOCATION_SCOPES = new Set<MarketNewsLocationScope>([
+  'region',
+  'country',
+  'state',
+  'province',
+  'territory',
+  'city',
+  'unspecified',
+])
 
 function normalizeOptionalNewsText(value: string | null | undefined): string | null {
   const trimmedValue = value?.trim()
@@ -495,6 +542,147 @@ export function filterMarketNewsHeadlines(
   })
 }
 
+function marketNewsHeadlineId(index: number): string {
+  return `headline-${index}`
+}
+
+function isMarketNewsImpactDirection(value: unknown): value is MarketNewsImpactDirection {
+  return typeof value === 'string' && MARKET_NEWS_IMPACT_DIRECTIONS.has(value as MarketNewsImpactDirection)
+}
+
+function isMarketNewsImpactHorizon(value: unknown): value is MarketNewsImpactHorizon {
+  return typeof value === 'string' && MARKET_NEWS_IMPACT_HORIZONS.has(value as MarketNewsImpactHorizon)
+}
+
+function isMarketNewsLocationScope(value: unknown): value is MarketNewsLocationScope {
+  return typeof value === 'string' && MARKET_NEWS_LOCATION_SCOPES.has(value as MarketNewsLocationScope)
+}
+
+function normalizeMarketNewsConfidence(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null
+  }
+  return Math.max(0, Math.min(value, 1))
+}
+
+function normalizeMarketNewsRationale(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const normalizedValue = value.replace(/\s+/g, ' ').trim()
+  return normalizedValue || null
+}
+
+function buildMarketNewsTaggingRequestItem(
+  item: MarketNewsHeadlineRecord,
+  index: number,
+): MarketNewsHeadlineTaggingRequestItem {
+  const effects = inferMarketNewsHeadlineEffects(item)
+  const location = inferMarketNewsMarketLocation(item)
+
+  return {
+    id: marketNewsHeadlineId(index),
+    title: item.title,
+    source: item.source,
+    published_at: item.published_at,
+    deterministic: {
+      supply: effects.supply,
+      demand: effects.demand,
+      market_location: location,
+    },
+  }
+}
+
+function applyDeterministicSource(effect: MarketNewsHeadlineEffect): MarketNewsHeadlineEffect {
+  return { ...effect, source: 'deterministic', confidence: null, rationale: null }
+}
+
+function applyDeterministicLocationSource(
+  location: MarketNewsMarketLocation,
+): MarketNewsMarketLocation {
+  return { ...location, source: 'deterministic', confidence: null, rationale: null }
+}
+
+function normalizeAiMarketNewsImpact(
+  effect: MarketNewsHeadlineTaggingImpactRecord | undefined,
+  fallback: MarketNewsHeadlineEffect,
+): MarketNewsHeadlineEffect {
+  if (
+    effect &&
+    isMarketNewsImpactDirection(effect.direction) &&
+    isMarketNewsImpactHorizon(effect.horizon)
+  ) {
+    return {
+      direction: effect.direction,
+      horizon: effect.horizon,
+      source: 'ai',
+      confidence: normalizeMarketNewsConfidence(effect.confidence),
+      rationale: normalizeMarketNewsRationale(effect.rationale),
+    }
+  }
+
+  return applyDeterministicSource(fallback)
+}
+
+function normalizeAiMarketNewsLocation(
+  location: MarketNewsHeadlineTaggingLocationRecord | undefined,
+  fallback: MarketNewsMarketLocation,
+): MarketNewsMarketLocation {
+  if (location && isMarketNewsLocationScope(location.scope)) {
+    const label = location.label.trim()
+    return {
+      label: location.scope === 'unspecified' ? 'Unspecified' : label || fallback.label,
+      scope: location.scope,
+      source: 'ai',
+      confidence: normalizeMarketNewsConfidence(location.confidence),
+      rationale: normalizeMarketNewsRationale(location.rationale),
+    }
+  }
+
+  return applyDeterministicLocationSource(fallback)
+}
+
+export function buildMarketNewsTableRows(
+  items: MarketNewsHeadlineRecord[],
+  aiTagsById: Record<string, MarketNewsHeadlineTaggingItemRecord>,
+): MarketNewsTableRow[] {
+  return items.map((item, index) => {
+    const id = marketNewsHeadlineId(index)
+    const deterministicEffects = inferMarketNewsHeadlineEffects(item)
+    const deterministicLocation = inferMarketNewsMarketLocation(item)
+    const aiTags = aiTagsById[id]
+
+    return {
+      id,
+      item,
+      effects: {
+        supply: normalizeAiMarketNewsImpact(aiTags?.supply, deterministicEffects.supply),
+        demand: normalizeAiMarketNewsImpact(aiTags?.demand, deterministicEffects.demand),
+      },
+      location: normalizeAiMarketNewsLocation(aiTags?.market_location, deterministicLocation),
+      hasAiTags: Boolean(aiTags),
+    }
+  })
+}
+
+export function filterMarketNewsTableRows(
+  rows: MarketNewsTableRow[],
+  filters: MarketNewsPanelFilters | null | undefined,
+): MarketNewsTableRow[] {
+  const normalizedFilters = normalizeMarketNewsPanelFilters(filters)
+  if (!hasActiveMarketNewsTableFilters(normalizedFilters)) {
+    return rows
+  }
+
+  return rows.filter(
+    (row) =>
+      marketNewsLocationMatches(row.location, normalizedFilters.marketLocation) &&
+      marketNewsHorizonMatches(row.effects, normalizedFilters.horizon) &&
+      marketNewsEffectMatches(row.effects.supply, normalizedFilters.supplyEffect) &&
+      marketNewsEffectMatches(row.effects.demand, normalizedFilters.demandEffect),
+  )
+}
+
 function MarketNewsImpactCell({
   axis,
   effect,
@@ -507,13 +695,20 @@ function MarketNewsImpactCell({
   const impactLabel = `${axis} ${impact.label.toLowerCase()}`
   const horizonLabel = `${axis} ${horizon.label.toLowerCase()} impact`
   const showHorizon = shouldShowMarketNewsImpactHorizon(effect)
+  const sourceLabel =
+    effect.source === 'ai'
+      ? `AI-assisted${typeof effect.confidence === 'number' ? `, ${Math.round(effect.confidence * 100)}% confidence` : ''}`
+      : 'Deterministic'
+  const detailTitle = effect.rationale
+    ? `${impactLabel}. ${sourceLabel}: ${effect.rationale}`
+    : `${impactLabel}. ${sourceLabel} tag.`
 
   return (
     <span className="market-news-impact-group">
       <span
         className={`market-news-impact market-news-impact-${effect.direction}`}
         aria-label={impactLabel}
-        title={impactLabel}
+        title={detailTitle}
       >
         <span className="market-news-impact-symbol" aria-hidden="true">
           {impact.symbol}
@@ -524,7 +719,7 @@ function MarketNewsImpactCell({
         <span
           className={`market-news-horizon ${horizon.className}`}
           aria-label={horizonLabel}
-          title={horizonLabel}
+          title={detailTitle}
         >
           {horizon.label}
         </span>
@@ -535,10 +730,10 @@ function MarketNewsImpactCell({
 
 function MarketNewsTable({
   formatDate,
-  items,
+  rows,
 }: {
   formatDate: (value: string | null | undefined) => string
-  items: MarketNewsHeadlineRecord[]
+  rows: MarketNewsTableRow[]
 }) {
   return (
     <div className="market-news-table-scroll">
@@ -553,11 +748,17 @@ function MarketNewsTable({
           </tr>
         </thead>
         <tbody>
-          {items.map((item) => {
-            const effects = inferMarketNewsHeadlineEffects(item)
-            const location = inferMarketNewsMarketLocation(item)
+          {rows.map((row) => {
+            const { effects, item, location } = row
+            const locationSource =
+              location.source === 'ai'
+                ? `AI-assisted${typeof location.confidence === 'number' ? `, ${Math.round(location.confidence * 100)}% confidence` : ''}`
+                : 'Deterministic'
+            const locationTitle = location.rationale
+              ? `${location.label}. ${locationSource}: ${location.rationale}`
+              : `${location.label}. ${locationSource} tag.`
             return (
-              <tr key={`${item.link}-${item.title}`}>
+              <tr key={row.id}>
                 <td className="market-news-title-cell">
                   <a href={item.link} target="_blank" rel="noreferrer">
                     {item.title}
@@ -567,7 +768,7 @@ function MarketNewsTable({
                   <span>{newsHeadlineSourceLabel(item)}</span>
                   {item.published_at ? <small>{formatDate(item.published_at)}</small> : null}
                 </td>
-                <td className="market-news-location-cell">
+                <td className="market-news-location-cell" title={locationTitle}>
                   <span>{location.label}</span>
                   <small>{formatMarketNewsLocationScope(location.scope)}</small>
                 </td>
@@ -597,6 +798,7 @@ export function MarketNewsPanel({
   detail = 'Recent headlines matched to this market context.',
   filters = undefined,
   formatDate = formatFallbackNewsDate,
+  onHeadlinesChange,
 }: MarketNewsPanelProps) {
   const normalizedCommodity = normalizeOptionalNewsText(commodity)
   const normalizedQuery = normalizeOptionalNewsText(query)
@@ -605,6 +807,9 @@ export function MarketNewsPanel({
   const [news, setNews] = useState<MarketNewsRecord | null>(null)
   const [loading, setLoading] = useState(Boolean(normalizedCommodity || normalizedQuery))
   const [error, setError] = useState('')
+  const [aiTagsById, setAiTagsById] = useState<Record<string, MarketNewsHeadlineTaggingItemRecord>>({})
+  const [aiTaggingLoading, setAiTaggingLoading] = useState(false)
+  const [aiTaggingWarning, setAiTaggingWarning] = useState('')
 
   useEffect(() => {
     if (!normalizedCommodity && !normalizedQuery) {
@@ -654,14 +859,94 @@ export function MarketNewsPanel({
     normalizedQuery,
   ])
 
+  useEffect(() => {
+    if (variant !== 'table' || !news || news.items.length === 0) {
+      setAiTagsById({})
+      setAiTaggingLoading(false)
+      setAiTaggingWarning('')
+      return
+    }
+
+    const requestItems = news.items
+      .slice(0, 10)
+      .map((item, index) => buildMarketNewsTaggingRequestItem(item, index))
+    let cancelled = false
+    setAiTaggingLoading(true)
+    setAiTaggingWarning('')
+
+    async function loadAiTags() {
+      try {
+        const payload = await loadMarketNewsHeadlineTags(apiBase, {
+          commodity: normalizedCommodity ?? news?.commodity ?? null,
+          items: requestItems,
+        })
+        if (cancelled) {
+          return
+        }
+
+        const requestedIds = new Set(requestItems.map((item) => item.id))
+        const nextTagsById: Record<string, MarketNewsHeadlineTaggingItemRecord> = {}
+        for (const item of payload.items) {
+          if (requestedIds.has(item.id)) {
+            nextTagsById[item.id] = item
+          }
+        }
+        setAiTagsById(nextTagsById)
+        setAiTaggingWarning(payload.warnings?.[0] ?? '')
+      } catch (nextError) {
+        if (!cancelled) {
+          setAiTagsById({})
+          setAiTaggingWarning(
+            nextError instanceof Error
+              ? nextError.message
+              : 'AI tagging unavailable; deterministic tags shown.',
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setAiTaggingLoading(false)
+        }
+      }
+    }
+
+    void loadAiTags()
+
+    return () => {
+      cancelled = true
+    }
+  }, [apiBase, news, normalizedCommodity, variant])
+
   const generatedAt = news?.generated_at ? formatDate(news.generated_at) : null
   const panelClassName =
     variant === 'table' ? 'market-news-panel market-news-panel-table' : 'market-news-panel'
-  const filteredItems = useMemo(
+  const tableRows = useMemo(
+    () => (news ? buildMarketNewsTableRows(news.items, aiTagsById) : []),
+    [aiTagsById, news],
+  )
+  const filteredTableRows = useMemo(
+    () => filterMarketNewsTableRows(tableRows, filters),
+    [filters, tableRows],
+  )
+  const filteredListItems = useMemo(
     () => (news ? filterMarketNewsHeadlines(news.items, filters) : []),
     [filters, news],
   )
+  const filteredItems = useMemo(
+    () =>
+      variant === 'table'
+        ? filteredTableRows.map((row) => row.item)
+        : filteredListItems,
+    [filteredListItems, filteredTableRows, variant],
+  )
   const hasActiveTableFilters = hasActiveMarketNewsTableFilters(filters)
+  const aiTaggedRowsCount = tableRows.filter((row) => row.hasAiTags).length
+  const aiTaggingFallbackTitle = aiTaggingWarning
+    ? `AI tagging unavailable or partial: ${aiTaggingWarning}`
+    : 'AI tagging unavailable; deterministic tags shown.'
+
+  useEffect(() => {
+    onHeadlinesChange?.(filteredItems)
+  }, [filteredItems, onHeadlinesChange])
 
   return (
     <div className={panelClassName}>
@@ -675,6 +960,26 @@ export function MarketNewsPanel({
           {generatedAt ? <span className="entity-chip entity-chip-soft">Updated {generatedAt}</span> : null}
           {hasActiveTableFilters && news && news.items.length > 0 ? (
             <span className="entity-chip entity-chip-soft">{filteredItems.length} matched</span>
+          ) : null}
+          {variant === 'table' && aiTaggingLoading ? (
+            <span className="entity-chip entity-chip-soft">AI tagging</span>
+          ) : null}
+          {variant === 'table' && !aiTaggingLoading && aiTaggedRowsCount > 0 ? (
+            <span
+              className="entity-chip entity-chip-soft"
+              title={aiTaggingWarning || 'Validated AI tags applied after deterministic classification.'}
+            >
+              AI-assisted tags
+            </span>
+          ) : null}
+          {variant === 'table' &&
+          !aiTaggingLoading &&
+          news &&
+          news.items.length > 0 &&
+          aiTaggedRowsCount === 0 ? (
+            <span className="entity-chip entity-chip-soft" title={aiTaggingFallbackTitle}>
+              Deterministic tags
+            </span>
           ) : null}
         </div>
       </div>
@@ -695,7 +1000,7 @@ export function MarketNewsPanel({
           <p>Adjust the market location, term, or supply and demand effect filters.</p>
         </div>
       ) : news && filteredItems.length > 0 && variant === 'table' ? (
-        <MarketNewsTable items={filteredItems} formatDate={formatDate} />
+        <MarketNewsTable rows={filteredTableRows} formatDate={formatDate} />
       ) : news && filteredItems.length > 0 ? (
         <div className="market-news-list">
           {filteredItems.map((item) => (

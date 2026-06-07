@@ -369,7 +369,7 @@ test("prompt home timeline cards hide calendar sections when a card is unchecked
   assert.doesNotMatch(markup, /Calendar agenda/);
   assert.doesNotMatch(markup, /This week/);
   assert.match(markup, /This month/);
-  assert.match(markup, /Google Calendar hidden in Settings for this card/);
+  assert.match(markup, /Google Calendar hidden in Settings for this app/);
   assert.match(markup, /Google Calendar hidden in Settings/);
   assert.match(markup, /Weekend nominations/);
 });

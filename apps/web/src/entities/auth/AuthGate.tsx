@@ -335,8 +335,11 @@ export function AuthGate({
       </div>
       <img className="auth-gate-corner-logo" src={tonysSkunkworksLogoUrl} alt="Tony's Skunkworks" />
       <section className="auth-gate-frame">
-        <header className="auth-gate-wordmark" aria-label="Strata">
-          <span className="brand-mark">Strata</span>
+        <header className="auth-gate-wordmark" aria-label="Strata and Nexus">
+          <div className="brand-mark-row">
+            <span className="brand-mark">Strata</span>
+            <span className="brand-mark">Nexus</span>
+          </div>
         </header>
 
         <section ref={authPanelRef} className="surface auth-gate-panel">

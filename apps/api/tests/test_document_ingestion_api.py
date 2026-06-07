@@ -39,6 +39,7 @@ from apps.api.app.domains.documents.services.document_packet_split_corrections i
 )
 from apps.api.app.domains.documents.services.document_facets import suggest_document_facets_from_text
 from apps.api.app.domains.documents.services.document_processor import _build_openai_text_format
+from apps.api.app.domains.documents.services.document_processor import _generate_anthropic_document_analysis
 from apps.api.app.domains.documents.services.document_processor import _generate_openai_document_analysis
 from apps.api.app.domains.documents.services.document_processor import DocumentProcessorOutcome
 from apps.api.app.domains.documents.services.document_processor import DocumentProcessorPageResult
@@ -257,6 +258,20 @@ class DocumentIngestionApiTests(unittest.TestCase):
             enabled=True,
             is_default=True,
             setup_env_var="OPENAI_API_KEY",
+        )
+
+    def _anthropic_provider_config(self) -> DocumentProcessorProviderConfig:
+        return DocumentProcessorProviderConfig(
+            provider="anthropic",
+            label="Claude",
+            api_key="anthropic-test-key",
+            model="claude-sonnet-4-0",
+            model_options=("claude-sonnet-4-0", "claude-opus-4-0"),
+            base_url="https://api.anthropic.com",
+            configured=True,
+            enabled=True,
+            is_default=True,
+            setup_env_var="ANTHROPIC_API_KEY",
         )
 
     def _openai_page_payload(
@@ -2627,6 +2642,45 @@ class DocumentIngestionApiTests(unittest.TestCase):
         self.assertEqual(file_input["type"], "input_file")
         self.assertEqual(file_input["filename"], "small.pdf")
         self.assertTrue(file_input["file_data"].startswith("data:application/pdf;base64,"))
+
+    def test_anthropic_document_processor_sends_pdf_document_block(self) -> None:
+        provider = self._anthropic_provider_config()
+        payload = b"%PDF-anthropic"
+        page = self._summary_page(page_number=1, document_kind="INVOICE")
+        page.raw_text = "Fallback invoice text"
+
+        with patch(
+            "apps.api.app.domains.documents.services.document_processor._post_json",
+            return_value={
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps({"pages": [self._openai_page_payload(page_number=1)]}),
+                    }
+                ]
+            },
+        ) as post_json_mock:
+            result = _generate_anthropic_document_analysis(
+                provider=provider,
+                model=provider.model,
+                filename="invoice.pdf",
+                payload=payload,
+                pages=[page],
+            )
+
+        self.assertEqual(result.pages[0].document_kind, "INVOICE")
+        post_kwargs = post_json_mock.call_args.kwargs
+        self.assertEqual(post_kwargs["url"], "https://api.anthropic.com/v1/messages")
+        self.assertEqual(post_kwargs["headers"]["x-api-key"], "anthropic-test-key")
+        self.assertEqual(post_kwargs["headers"]["anthropic-version"], "2023-06-01")
+        request_payload = post_kwargs["payload"]
+        self.assertEqual(request_payload["model"], "claude-sonnet-4-0")
+        content_blocks = request_payload["messages"][0]["content"]
+        self.assertEqual(content_blocks[0]["type"], "document")
+        self.assertEqual(content_blocks[0]["source"]["media_type"], "application/pdf")
+        self.assertEqual(base64.b64decode(content_blocks[0]["source"]["data"]), payload)
+        self.assertIn("Read the attached PDF directly", content_blocks[1]["text"])
+        self.assertIn("Fallback invoice text", content_blocks[1]["text"])
 
     def test_openai_document_processor_uploads_large_pdf_payloads_and_cleans_up(self) -> None:
         settings.DOCUMENT_AI_OPENAI_INLINE_FILE_MAX_BYTES = 1

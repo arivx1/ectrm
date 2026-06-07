@@ -61,13 +61,20 @@ async function signInFromPromptHome(page: Page): Promise<void> {
   ).toBeVisible();
   await authGate.getByRole("button", { name: "Single Sign On" }).click();
   await expect(authGate).toBeHidden();
-  await expect(page.getByText("Signed in as Ops Admin")).toBeVisible();
+  await expect(profileAvatarButton(page)).toBeVisible();
 }
 
 async function signOutFromPromptHome(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Sign Out" }).click();
+  await profileAvatarButton(page).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
   await expect(page.locator(".auth-gate-stage")).toBeVisible();
   await expect(page.getByLabel("Operator prompt")).toHaveCount(0);
+}
+
+function profileAvatarButton(page: Page): Locator {
+  return page.getByRole("button", {
+    name: "Open profile menu for Ops Admin",
+  });
 }
 
 async function installSpeechSynthesisRecorder(page: Page): Promise<void> {
@@ -137,6 +144,43 @@ async function expectLocatorsOnSameLine(
   expect(Math.abs(firstBox.y - secondBox.y)).toBeLessThanOrEqual(10);
 }
 
+async function expectLocatorStableX(
+  locator: Locator,
+  expectedX: number,
+  threshold = 1,
+): Promise<void> {
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) {
+    return;
+  }
+
+  expect(Math.abs(Math.round(box.x) - expectedX)).toBeLessThanOrEqual(threshold);
+}
+
+async function expectLocatorsSameHeight(
+  locators: Locator[],
+  threshold = 1,
+): Promise<void> {
+  const boxes = await Promise.all(locators.map((locator) => locator.boundingBox()));
+  for (const box of boxes) {
+    expect(box).not.toBeNull();
+  }
+
+  const heights = boxes
+    .filter((box): box is NonNullable<typeof box> => box !== null)
+    .map((box) => Math.round(box.height));
+  const expectedHeight = heights[0];
+  expect(expectedHeight).toBeDefined();
+  if (typeof expectedHeight !== "number") {
+    return;
+  }
+
+  for (const height of heights) {
+    expect(Math.abs(height - expectedHeight)).toBeLessThanOrEqual(threshold);
+  }
+}
+
 async function expectLocatorNearRightEdge(
   container: Locator,
   target: Locator,
@@ -175,7 +219,7 @@ async function expectLocatorAbove(
   expect(firstBox.y).toBeLessThanOrEqual(secondBox.y + threshold);
 }
 
-test("dashboard smoke boots against the seeded browser harness", async ({
+test("home smoke boots against the seeded browser harness", async ({
   page,
 }) => {
   const harness = await startSmokeHarness();
@@ -186,41 +230,213 @@ test("dashboard smoke boots against the seeded browser harness", async ({
       waitUntil: "domcontentloaded",
     });
 
-    await dismissStartHereOverlay(page);
-
-    await expect(page.getByText("Market Monitor Board")).toBeVisible();
-    await expect(page.getByText("Desk Headlines")).toBeVisible();
-    await expect(page.getByText("Pricing gap on T-AMEND-100")).toBeVisible();
-    await expect(page.getByText("Watchlist Alerts")).toBeVisible();
+    const persistentTopbar = page.locator(".workspace-topbar-persistent");
+    await expect(page.locator(".start-here-dialog")).toHaveCount(0);
+    await expect(persistentTopbar).toBeVisible();
+    await expect(persistentTopbar.getByText("Apps", { exact: true })).toBeVisible();
+    await expect(persistentTopbar.getByText("Tokens Today")).toBeVisible();
+    await expect(persistentTopbar.getByText("4,200", { exact: true })).toBeVisible();
+    await expect(persistentTopbar.getByText("DB Size")).toBeVisible();
+    await expect(persistentTopbar.getByText("1 KB", { exact: true })).toBeVisible();
+    await expect(profileAvatarButton(page)).toBeVisible();
+    const persistentTopbarSearchTrigger = persistentTopbar.locator(
+      ".terminal-command-trigger",
+    );
+    const persistentBackButton = persistentTopbar.locator(".app-back-button-desktop");
+    await expectLocatorsSameHeight([
+      persistentBackButton,
+      persistentTopbarSearchTrigger,
+      persistentTopbar.locator(".terminal-shortcut-trigger"),
+      persistentTopbar.locator(".workspace-topbar-token"),
+      persistentTopbar.locator(".workspace-topbar-db-size"),
+      persistentTopbar.locator(".hero-session-pill"),
+      persistentTopbar.locator(".profile-avatar-trigger"),
+    ]);
+    await expectLocatorsOnSameLine(
+      persistentTopbarSearchTrigger,
+      persistentTopbar.locator(".hero-session-pill"),
+    );
+    await expectLocatorsOnSameLine(
+      persistentTopbar.locator(".workspace-topbar-token"),
+      persistentTopbar.locator(".workspace-topbar-db-size"),
+    );
+    await expectLocatorsOnSameLine(
+      persistentTopbar.locator(".workspace-topbar-db-size"),
+      persistentTopbar.locator(".profile-avatar-trigger"),
+    );
+    const stableTopbarSearchX = Math.round(
+      (await persistentTopbarSearchTrigger.boundingBox())?.x ?? 0,
+    );
+    await expect(page.getByText("Home apps")).toHaveCount(0);
+    await expect(page.locator(".prompt-home-preset-switcher select")).toContainText(
+      "Waste & Recyclables",
+    );
+    await expect(page.getByText("Saved Views")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Manage Apps/ })).toBeVisible();
+    await expect(page.getByText("Desk Assistant")).toBeVisible();
+    await expect(page.getByText("Live Desk")).toHaveCount(0);
+    const strataProduct = page.getByRole("radio", { name: "Strata" });
+    const nexusProduct = page.getByRole("radio", { name: "Nexus" });
+    await expect(strataProduct).toHaveAttribute("aria-checked", "true");
+    await expect(nexusProduct).toHaveAttribute("aria-checked", "false");
+    await nexusProduct.click();
+    await expect(nexusProduct).toHaveAttribute("aria-checked", "true");
+    await expect(strataProduct).toHaveAttribute("aria-checked", "false");
+    await expect(page.getByRole("navigation", { name: "Nexus" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Relationship CRM" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Tools", exact: true })).toBeVisible();
+    await expect(persistentTopbar.getByText("CRM", { exact: true })).toBeVisible();
+    await expect(persistentBackButton).toBeEnabled();
+    await expect(persistentBackButton).toHaveAttribute("aria-label", "Go back to Strata");
+    await expectLocatorStableX(persistentTopbarSearchTrigger, stableTopbarSearchX);
+    await expect(page.locator(".nexus-crm-workspace").getByRole("heading", { name: "CRM" })).toBeVisible();
+    const nexusCrmSheet = page.locator(".nexus-crm-workspace .data-sheet-table");
+    const nexusCrmDataRows = nexusCrmSheet.locator("tbody tr:not(.nexus-client-entry-row)");
+    const nexusClientEntryRow = page.locator(".nexus-crm-workspace .nexus-client-entry-row");
     await expect(
-      page
-        .locator(".watchlist-alert-list")
-        .getByText(/Pricing exceptions:/),
+      nexusCrmDataRows.first().getByRole("button", { name: "Client: Abercore" }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Save Watchlist" }).click();
-    await expect(page.getByText("Saved terminal watchlist", { exact: true })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Instrument Brief" })).toBeVisible();
-    await expect(page.getByText("Common Starting Points")).toBeVisible();
+    await nexusClientEntryRow.getByLabel("New client").fill("Blue Ridge Trading");
+    await nexusClientEntryRow.getByLabel("New relationship").fill("Prospect");
+    await nexusClientEntryRow.getByLabel("New next action").fill("Send onboarding packet");
+    await nexusClientEntryRow.getByRole("button", { name: "Add" }).click();
     await expect(
-      page.getByRole("button", { name: "Open Exposure" }).first(),
+      nexusCrmDataRows.last().getByRole("button", { name: "Client: Blue Ridge Trading" }),
     ).toBeVisible();
-
-    await page.getByRole("button", { name: "Customize view" }).click();
-    await page.getByLabel("Monitor preset").selectOption({ label: "Market Overview" });
+    await nexusCrmSheet.getByLabel("Filter Client").fill("Blue Ridge Trading");
+    await expect(nexusCrmDataRows).toHaveCount(1);
+    const blueRidgeCrmRow = nexusCrmDataRows.filter({ hasText: "Blue Ridge Trading" });
+    await expect(blueRidgeCrmRow.getByRole("button", { name: "Client: Blue Ridge Trading" })).toBeVisible();
+    await expect(blueRidgeCrmRow.getByText("Prospect", { exact: true })).toBeVisible();
+    await expect(blueRidgeCrmRow.getByText("Send onboarding packet", { exact: true })).toBeVisible();
+    await page.locator(".nexus-crm-workspace").getByRole("button", { name: "Reset Table" }).click();
+    await nexusCrmSheet.getByRole("button", { name: "Client Sort" }).click();
     await expect(
-      page.getByText(
-        "Lead with a terminal-style market strip and monitor board before rolling into desk reporting, prices, exposure, and attention.",
-      ),
+      nexusCrmDataRows.first().getByRole("button", { name: "Client: Abercore" }),
     ).toBeVisible();
-    await expect(page.locator("#quick-start")).toHaveCount(0);
+    await nexusCrmSheet.getByRole("button", { name: "Client Asc" }).click();
     await expect(
-      page.getByRole("button", { name: "Add Common Starting Points" }),
+      nexusCrmDataRows.first().getByRole("button", { name: "Client: Westfeldt Brothers" }),
     ).toBeVisible();
-
-    await page.keyboard.press("Alt+F");
-    await expect(page.getByLabel("Search current screen")).toBeFocused();
-    await page.keyboard.press("Alt+2");
-    await expect(page).toHaveURL(/view=dashboard/);
+    await nexusCrmSheet.getByLabel("Filter Client").fill("hartree");
+    await expect(nexusCrmDataRows).toHaveCount(1);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Client: Hartree" })).toBeVisible();
+    await nexusCrmSheet.getByRole("button", { name: "Client: Hartree" }).click();
+    const nexusClientWorkspace = page.locator(".nexus-client-workspace");
+    await expect(persistentTopbar.getByText("Hartree", { exact: true })).toBeVisible();
+    await expect(persistentBackButton).toBeEnabled();
+    await expect(persistentBackButton).toHaveAttribute("aria-label", "Go back to CRM");
+    await expectLocatorStableX(persistentTopbarSearchTrigger, stableTopbarSearchX);
+    await expect(nexusClientWorkspace.getByRole("heading", { name: "Hartree" })).toBeVisible();
+    await expect(nexusClientWorkspace.getByText("Hartree Partners", { exact: true })).toBeVisible();
+    await expect(nexusClientWorkspace.getByText("hartreepartners.com", { exact: true })).toBeVisible();
+    await expect(nexusClientWorkspace.getByText("Alex Hartree", { exact: true })).toBeVisible();
+    await expect(nexusClientWorkspace.getByText("Hartree Partners (Expansion)", { exact: true })).toBeVisible();
+    await nexusClientWorkspace.getByLabel("Add contact").fill("Jane Hartree");
+    await nexusClientWorkspace.getByRole("button", { name: "Add Contact" }).click();
+    await expect(nexusClientWorkspace.getByText("1 contact", { exact: true })).toBeVisible();
+    await expect(nexusClientWorkspace.getByText("Jane Hartree", { exact: true })).toBeVisible();
+    await nexusClientWorkspace.getByLabel("Add to-do").fill("Call Hartree about June positions");
+    await nexusClientWorkspace.getByRole("button", { name: "Add To-Do" }).click();
+    await expect(
+      nexusClientWorkspace.getByText("Call Hartree about June positions", { exact: true }),
+    ).toBeVisible();
+    await persistentBackButton.click();
+    await expect(persistentTopbar.getByText("CRM", { exact: true })).toBeVisible();
+    const hartreeCrmRow = page.locator(".nexus-crm-workspace .data-sheet-table tbody tr").filter({ hasText: "Hartree" });
+    await expect(hartreeCrmRow.getByRole("button", { name: "Client: Hartree" })).toBeVisible();
+    await expect(hartreeCrmRow.getByText("1 contact", { exact: true })).toBeVisible();
+    await expect(hartreeCrmRow.getByText("1 open", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Work To-Do", exact: true }).click();
+    const nexusTodoWorkspace = page.locator(".nexus-todo-workspace");
+    await expect(persistentTopbar.getByText("To-Do", { exact: true })).toBeVisible();
+    await expect(persistentBackButton).toBeEnabled();
+    await expect(persistentBackButton).toHaveAttribute("aria-label", "Go back to CRM");
+    await expectLocatorStableX(persistentTopbarSearchTrigger, stableTopbarSearchX);
+    await expect(nexusTodoWorkspace.getByRole("heading", { name: "To-Do" })).toBeVisible();
+    await expect(
+      nexusTodoWorkspace.getByText("Call Hartree about June positions", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      nexusTodoWorkspace
+        .locator(".nexus-todo-list-global li")
+        .filter({ hasText: "Call Hartree about June positions" })
+        .getByText("Hartree", { exact: true }),
+    ).toBeVisible();
+    await nexusTodoWorkspace.getByLabel("New to-do").fill("Review freight docs");
+    await nexusTodoWorkspace.getByRole("button", { name: "Add To-Do" }).click();
+    await expect(nexusTodoWorkspace.getByText("Review freight docs", { exact: true })).toBeVisible();
+    await persistentBackButton.click();
+    await expect(persistentTopbar.getByText("CRM", { exact: true })).toBeVisible();
+    await expect(persistentBackButton).toHaveAttribute("aria-label", "Go back to Strata");
+    await page.getByRole("button", { name: "Tools", exact: true }).click();
+    const nexusToolsWorkspace = page.locator(".nexus-tools-workspace");
+    await expect(persistentTopbar.getByText("Tools", { exact: true })).toBeVisible();
+    await expect(persistentBackButton).toBeEnabled();
+    await expect(persistentBackButton).toHaveAttribute("aria-label", "Go back to CRM");
+    await expect(nexusToolsWorkspace.getByRole("heading", { name: "Tools", exact: true })).toBeVisible();
+    const nexusToolsSheet = nexusToolsWorkspace.locator(".data-sheet-table");
+    const nexusToolEntryRow = nexusToolsWorkspace.locator(".nexus-tool-entry-row");
+    const nexusToolDataRows = nexusToolsSheet.locator("tbody tr:not(.nexus-tool-entry-row)");
+    await expect(nexusToolsSheet).toBeVisible();
+    await expect(nexusToolsSheet.getByRole("button", { name: "Access Method Sort" })).toBeVisible();
+    await expect(nexusToolsSheet.getByRole("button", { name: "Application Sort" })).toBeVisible();
+    await expect(nexusToolsSheet.getByRole("button", { name: "Browser Sort" })).toBeVisible();
+    await expect(nexusToolsSheet.getByRole("button", { name: "API Sort" })).toBeVisible();
+    await nexusToolEntryRow.getByLabel("New tool", { exact: true }).fill("Nexus Handbook");
+    await expect(nexusToolEntryRow.getByRole("button", { name: "Add" })).toBeEnabled();
+    await nexusToolEntryRow.getByRole("button", { name: "Add" }).click();
+    await expect(nexusToolDataRows).toHaveCount(1);
+    await expect(nexusToolsSheet.getByRole("button", { name: "Tool: Nexus Handbook" })).toBeVisible();
+    await expect(nexusToolsSheet.getByText("No link added", { exact: true })).toBeVisible();
+    await expect(
+      nexusToolDataRows
+        .filter({ hasText: "Nexus Handbook" })
+        .getByRole("button", { name: "Access Method: Nexus Handbook" }),
+    ).toContainText("FALSE");
+    await nexusToolEntryRow.getByLabel("New tool", { exact: true }).fill("Nexus Portal");
+    await nexusToolEntryRow.getByLabel("New tool link", { exact: true }).fill("example.com/nexus");
+    await nexusToolEntryRow.getByLabel("New tool access method", { exact: true }).check();
+    await nexusToolEntryRow.getByLabel("New tool browser", { exact: true }).check();
+    await nexusToolEntryRow.getByLabel("New tool API", { exact: true }).check();
+    await nexusToolEntryRow.getByRole("button", { name: "Add" }).click();
+    await expect(nexusToolDataRows).toHaveCount(2);
+    await expect(nexusToolsSheet.getByRole("button", { name: "Tool: Nexus Portal" })).toBeVisible();
+    await expect(nexusToolsSheet.getByText("https://example.com/nexus", { exact: true })).toBeVisible();
+    const nexusPortalRow = nexusToolDataRows.filter({ hasText: "Nexus Portal" });
+    await expect(nexusPortalRow.getByRole("button", { name: "Access Method: Nexus Portal" })).toContainText("TRUE");
+    await expect(nexusPortalRow.getByRole("button", { name: "Application: Nexus Portal" })).toContainText("FALSE");
+    await expect(nexusPortalRow.getByRole("button", { name: "Browser: Nexus Portal" })).toContainText("TRUE");
+    await expect(nexusPortalRow.getByRole("button", { name: "API: Nexus Portal" })).toContainText("TRUE");
+    await nexusToolDataRows
+      .filter({ hasText: "Nexus Portal" })
+      .getByRole("button", { name: "Tool: Nexus Portal" })
+      .dblclick();
+    const nexusPortalMenu = page.getByRole("menu", { name: "Options for Nexus Portal" });
+    await expect(nexusPortalMenu.getByRole("menuitem", { name: "Open" })).toBeVisible();
+    await expect(nexusPortalMenu.getByRole("menuitem", { name: "Delete" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await nexusToolDataRows
+      .filter({ hasText: "Nexus Handbook" })
+      .getByRole("button", { name: "Tool: Nexus Handbook" })
+      .dblclick();
+    await page.getByRole("menuitem", { name: "Delete" }).click();
+    await expect(nexusToolsSheet.getByRole("button", { name: "Tool: Nexus Handbook" })).toHaveCount(0);
+    await expect(nexusToolDataRows).toHaveCount(1);
+    await persistentBackButton.click();
+    await expect(persistentTopbar.getByText("CRM", { exact: true })).toBeVisible();
+    await expect(persistentBackButton).toHaveAttribute("aria-label", "Go back to Strata");
+    await persistentBackButton.click();
+    await expect(strataProduct).toHaveAttribute("aria-checked", "true");
+    await expect(nexusProduct).toHaveAttribute("aria-checked", "false");
+    await expect(page.getByRole("navigation", { name: "Strata" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Relationship CRM" })).toHaveCount(0);
+    await expect(persistentTopbar.getByText("Apps", { exact: true })).toBeVisible();
+    await expectLocatorStableX(persistentTopbarSearchTrigger, stableTopbarSearchX);
+    await page.keyboard.press("Alt+1");
+    await expect(persistentTopbar.getByText("Apps", { exact: true })).toBeVisible();
+    await expectLocatorStableX(persistentTopbarSearchTrigger, stableTopbarSearchX);
+    await expect(page.getByText("Desk Assistant")).toBeVisible();
 
     await page.keyboard.press("Control+K");
     await expect(
@@ -229,25 +445,21 @@ test("dashboard smoke boots against the seeded browser harness", async ({
     await page.getByLabel("Search terminal navigation targets").fill("risk");
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/view=risk/);
+    await expect(persistentTopbar).toBeVisible();
+    await expect(persistentTopbar.getByText("Exposure", { exact: true })).toBeVisible();
+    await expectLocatorStableX(persistentTopbarSearchTrigger, stableTopbarSearchX);
+    await dismissStartHereOverlay(page);
     await page.keyboard.press("Alt+1");
-    await expect(page).toHaveURL(/view=dashboard/);
-    await expect(page.getByText("Market Monitor Board")).toBeVisible();
+    await expect(persistentTopbar.getByText("Apps", { exact: true })).toBeVisible();
+    await expectLocatorStableX(persistentTopbarSearchTrigger, stableTopbarSearchX);
+    await expect(page.getByText("Desk Assistant")).toBeVisible();
 
     await page.keyboard.press("?");
-    await expect(page.getByRole("dialog", { name: "Terminal Shortcuts" })).toBeVisible();
+    const shortcutsDialog = page.getByRole("dialog", { name: "Terminal Shortcuts" });
+    await expect(shortcutsDialog).toBeVisible();
+    await expect(shortcutsDialog.getByText("Home", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(page.getByRole("dialog", { name: "Terminal Shortcuts" })).toBeHidden();
-
-    const gasFocusRow = page
-      .locator(".market-monitor-focus-row")
-      .filter({ hasText: "NATURAL GAS" });
-    await expect(gasFocusRow).toBeVisible();
-    await gasFocusRow.getByRole("button", { name: "Open Brief" }).click();
-    await expect(page).toHaveURL(/focusType=market_instrument/);
-    await expect(page.getByText("Commodity Class Brief")).toBeVisible();
-    await expect(
-      page.locator("#instrument-brief").getByText("T-AMEND-100", { exact: true }),
-    ).toBeVisible();
+    await expect(shortcutsDialog).toBeHidden();
 
     assertNoHarnessRequestFailures(harness);
   } finally {
@@ -255,7 +467,7 @@ test("dashboard smoke boots against the seeded browser harness", async ({
   }
 });
 
-test("dashboard candidate drilldowns hand off into focused operations context", async ({
+test("home recommended action opens the settlement workspace", async ({
   page,
 }) => {
   const harness = await startSmokeHarness();
@@ -266,42 +478,79 @@ test("dashboard candidate drilldowns hand off into focused operations context", 
       waitUntil: "domcontentloaded",
     });
 
-    await dismissStartHereOverlay(page);
-
-    const confirmationRow = page
-      .locator(".dashboard-issue-row")
-      .filter({ hasText: "Confirmation backlog" });
-    await expect(confirmationRow).toBeVisible();
-    await expect(confirmationRow.getByText("1 open")).toBeVisible();
-
-    await confirmationRow
-      .getByRole("button", { name: "Open candidates" })
-      .click();
     await expect(
-      page.getByText(
-        "Priority: Older unconfirmed trades rise first in the confirmation queue.",
-      ),
+      page.getByRole("heading", {
+        name: "Settlement · T-AMEND-100",
+      }),
     ).toBeVisible();
-    await expect(
-      page.getByText(
-        "Review the confirmation blocker with the operations owner.",
-      ),
-    ).toBeVisible();
-    await page.getByRole("button", { name: "Open confirmation" }).click();
+    await page.evaluate(() => {
+      window.localStorage.setItem(
+        "ectrm.start-here-onboarding",
+        JSON.stringify({
+          dismissedWhileSignedOut: false,
+          dismissedAuthenticatedSessionId: "smoke-session-1",
+        }),
+      );
+    });
+    await page.getByRole("button", { name: "Settlement", exact: true }).click();
 
-    const handoffBanner = page.locator(".workspace-focus-banner");
-    await expect(page).toHaveURL(/view=operations/);
-    await expect(page).toHaveURL(/handoff=assistant/);
-    await expect(page).toHaveURL(/focusTrade=T-AMEND-100/);
-    await expect(page).toHaveURL(/focusFilter=41/);
-    await expect(handoffBanner.getByText("Open confirmation")).toBeVisible();
-    await expect(
-      handoffBanner.getByText(
-        "This trade already has a confirmation row that needs issue or follow-through.",
-      ),
-    ).toBeVisible();
-    await expect(handoffBanner.getByText("Trade: T-AMEND-100")).toBeVisible();
-    await expect(handoffBanner.getByText("Filter: 41")).toBeVisible();
+    await expect(page).toHaveURL(/view=settlement/);
+    await expect(page.getByRole("heading", { name: "Open Settlement Queue" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Settlement Control Board" })).toBeVisible();
+
+    assertNoHarnessRequestFailures(harness);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("Strata and Nexus restore independent color mode preferences", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness();
+
+  try {
+    await seedSignedInSession(page, harness);
+    await page.addInitScript(() => {
+      window.localStorage.setItem(
+        "ectrm.start-here-onboarding",
+        JSON.stringify({
+          dismissedWhileSignedOut: false,
+          dismissedAuthenticatedSessionId: "smoke-session-1",
+        }),
+      );
+      window.localStorage.setItem(
+        "ectrm.appearance-settings",
+        JSON.stringify({
+          colorMode: "dark",
+          workspaceMode: "default",
+          lightMode: {
+            accent: "#127c6c",
+            highlight: "#4c78b6",
+          },
+          darkMode: {
+            accent: "#3dd6a0",
+            highlight: "#4ea7ff",
+          },
+        }),
+      );
+    });
+    await page.goto(`${harness.origin}/?view=dashboard`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const root = page.locator("html");
+    await expect(root).toHaveAttribute("data-color-mode", "dark");
+    await page.getByRole("radio", { name: "Nexus" }).click();
+    await expect(root).toHaveAttribute("data-color-mode", "dark");
+    await expect(page.locator(".appearance-toggle-desktop")).toHaveAttribute(
+      "aria-label",
+      "Switch to light mode",
+    );
+    await page.locator(".appearance-toggle-desktop").click();
+    await expect(root).toHaveAttribute("data-color-mode", "light");
+    await page.getByRole("radio", { name: "Strata" }).click();
+    await expect(root).toHaveAttribute("data-color-mode", "dark");
 
     assertNoHarnessRequestFailures(harness);
   } finally {
@@ -721,14 +970,15 @@ test("single-user smoke signs into the prompt home when one-click access is enab
     });
 
     await expect(page.locator(".auth-gate-stage")).toBeVisible();
-    await expect(page.locator(".workspace-topbar-prompt")).toHaveCount(0);
+    await expect(page.locator(".workspace-topbar")).toHaveCount(0);
     await expect(page.locator(".hero")).toHaveCount(0);
     await expect(page.locator(".nav-global-filter")).toHaveCount(0);
     await expect(page.getByLabel("Operator prompt")).toHaveCount(0);
     await signInFromPromptHome(page);
 
+    await expect(page.locator(".workspace-topbar-persistent")).toBeVisible();
     await expect(page.getByLabel("Operator prompt")).toBeVisible();
-    await expect(page.getByText("Signed in as Ops Admin")).toBeVisible();
+    await expect(profileAvatarButton(page)).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Assistant Console", exact: true }),
     ).toHaveCount(0);
@@ -740,9 +990,6 @@ test("single-user smoke signs into the prompt home when one-click access is enab
     ).toHaveCount(0);
     await expect(page.getByText("Contextual starting points")).toHaveCount(0);
     await expect(page.getByText("Recent prompt threads")).toHaveCount(0);
-    await expect(page.locator(".prompt-home-map-card")).toContainText(
-      "all 1 shown on map",
-    );
     await expect(page.locator(".prompt-home-map-card")).toContainText(
       "Map Records1 map record",
     );
@@ -822,21 +1069,30 @@ test("prompt home prompt card expands and collapses independently", async ({
     const operatorPrompt = page.getByLabel("Operator prompt");
     const currentPromptThread = promptCard.locator(".prompt-home-chat");
 
-    await expect(promptCard).toContainText("Ask the desk assistant");
-    await expect(promptCardToggle).toContainText("Hide card");
+    await expect(promptCard).toContainText("Desk Assistant");
+    await expect(promptCardToggle).toHaveAttribute(
+      "aria-label",
+      "Collapse Desk Assistant",
+    );
     await expect(promptCardBody).toBeVisible();
     await expect(operatorPrompt).toBeVisible();
     await expect(page.locator(".prompt-home-quick-prompts")).toHaveCount(0);
     await expect(currentPromptThread).toBeVisible();
 
     await promptCardToggle.click();
-    await expect(promptCardToggle).toContainText("Show card");
+    await expect(promptCardToggle).toHaveAttribute(
+      "aria-label",
+      "Expand Desk Assistant",
+    );
     await expect(promptCardBody).toBeHidden();
     await expect(operatorPrompt).toBeHidden();
     await expect(currentPromptThread).toBeHidden();
 
     await promptCardToggle.click();
-    await expect(promptCardToggle).toContainText("Hide card");
+    await expect(promptCardToggle).toHaveAttribute(
+      "aria-label",
+      "Collapse Desk Assistant",
+    );
     await expect(promptCardBody).toBeVisible();
     await expect(operatorPrompt).toBeVisible();
     await expect(currentPromptThread).toBeVisible();
@@ -898,7 +1154,7 @@ test("prompt home verbalize auto-reads assistant replies only when enabled", asy
   }
 });
 
-test("prompt home keeps the simplified map visible while desk time cards collapse independently", async ({
+test("prompt home keeps the simplified map visible while time apps collapse independently", async ({
   page,
 }) => {
   const harness = await startSmokeHarness();
@@ -917,6 +1173,10 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     });
 
     const deskTimePanel = page.locator("#prompt-home-timeframe-panel");
+    const exchangesPanel = page.locator("#prompt-home-exchanges-panel");
+    const calendarPanel = page.locator("#prompt-home-calendar-panel");
+    const pricesCard = page.locator(".prompt-home-prices-card");
+    const newsCard = page.locator(".prompt-home-news-card");
     const deskTimeHead = page.locator(".prompt-home-timeframe-panel-head");
     const dayPanel = page.locator("#prompt-home-day-panel");
     const weekPanel = page.locator("#prompt-home-week-panel");
@@ -925,22 +1185,25 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     const deskTimeToggle = page.locator(
       ".prompt-home-timeframe-panel-toggle-action",
     );
+    const exchangesToggle = page.locator(".prompt-home-exchanges-card-toggle");
+    const calendarToggle = page.locator(
+      ".prompt-home-calendar-card-toggle-action",
+    );
     const deskTimeCopy = page.locator(".prompt-home-timeframe-panel-copy");
+    const deskTimeSummary = deskTimeCopy.locator(
+      ".prompt-home-timeframe-panel-summary",
+    );
     const mapToggle = page.locator(".prompt-home-map-card-toggle");
-    const mapFiltersCard = page.locator(
-      ".prompt-home-map-card .asset-map-filters-card",
-    );
-    const mapFiltersToggle = mapFiltersCard.locator(
-      ".asset-map-filters-card-toggle",
-    );
-    const mapFiltersBody = mapFiltersCard.locator(
-      ".asset-map-filters-card-body",
-    );
-    const savePresetInput = mapFiltersCard.getByLabel("Save map filters as");
-    const savedPresetSelect = mapFiltersCard.getByLabel(
+    const mapActions = page.getByLabel("Map actions");
+    const mapFiltersDialog = page.getByRole("dialog", { name: "Map Filters" });
+    const calendarSettingsDialog = page.getByRole("dialog", {
+      name: "Calendar Settings",
+    });
+    const savePresetInput = mapFiltersDialog.getByLabel("Save map filters as");
+    const savedPresetSelect = mapFiltersDialog.getByLabel(
       "Saved map filter presets",
     );
-    const savePresetButton = mapFiltersCard.getByRole("button", {
+    const savePresetButton = mapFiltersDialog.getByRole("button", {
       name: "Save",
     });
     const mapRecordsCard = page.locator(
@@ -952,34 +1215,48 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     const mapRecordsBody = mapRecordsCard.locator(
       ".asset-map-records-card-body",
     );
-    const myLocationToggle = page.getByRole("checkbox", {
+    const myLocationToggle = mapFiltersDialog.getByRole("checkbox", {
       name: "My Location",
     });
-    const assetsToggle = page.getByRole("checkbox", { name: "Assets" });
-    const weatherToggle = page.getByRole("checkbox", { name: "Weather" });
-    const activityControls = page.getByLabel("Activity visibility controls");
-    const geographyControls = page.getByLabel("Geography visibility controls");
-    const assetTypeControls = page.getByLabel("Asset type visibility controls");
-    const countrySearch = page.getByRole("searchbox", {
+    const assetsToggle = mapFiltersDialog.getByRole("checkbox", {
+      name: "Assets",
+    });
+    const weatherToggle = mapFiltersDialog.getByRole("checkbox", {
+      name: "Weather",
+    });
+    const activityControls = mapFiltersDialog.getByLabel(
+      "Activity visibility controls",
+    );
+    const geographyControls = mapFiltersDialog.getByLabel(
+      "Geography visibility controls",
+    );
+    const assetTypeControls = mapFiltersDialog.getByLabel(
+      "Asset type visibility controls",
+    );
+    const countrySearch = mapFiltersDialog.getByRole("searchbox", {
       name: "Country",
     });
-    const subdivisionSearch = page.getByRole("searchbox", {
+    const subdivisionSearch = mapFiltersDialog.getByRole("searchbox", {
       name: "State or Territory",
     });
-    const northAmericaToggle = page.getByRole("checkbox", {
+    const northAmericaToggle = mapFiltersDialog.getByRole("checkbox", {
       name: "North America",
     });
-    const positionsActivityToggle = page.getByRole("checkbox", {
+    const positionsActivityToggle = mapFiltersDialog.getByRole("checkbox", {
       name: "Positions",
     });
-    const shipmentsActivityToggle = page.getByRole("checkbox", {
+    const shipmentsActivityToggle = mapFiltersDialog.getByRole("checkbox", {
       name: "Shipments",
     });
-    const inventoryActivityToggle = page.getByRole("checkbox", {
+    const inventoryActivityToggle = mapFiltersDialog.getByRole("checkbox", {
       name: "Inventory",
     });
-    const tooltipToggle = page.getByRole("checkbox", { name: "Tooltips" });
-    const weatherOverlayControls = page.getByLabel("Weather overlay controls");
+    const tooltipToggle = mapFiltersDialog.getByRole("checkbox", {
+      name: "Tooltips",
+    });
+    const weatherOverlayControls = mapFiltersDialog.getByLabel(
+      "Weather overlay controls",
+    );
     const radarOverlayToggle = weatherOverlayControls.getByRole("checkbox", {
       name: "Radar",
     });
@@ -1004,6 +1281,84 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     const timeZoneSelect = page.getByLabel("Preferred time zone");
 
     await expect(deskTimePanel).toBeVisible();
+    await expect(exchangesPanel).toBeVisible();
+    await expect(calendarPanel).toBeVisible();
+    await calendarPanel.getByRole("button", { name: "Settings" }).click();
+    await expect(calendarSettingsDialog).toBeVisible();
+    await expect(calendarSettingsDialog).toContainText("Active calendars");
+    await expect(calendarSettingsDialog).toContainText(
+      "Available Google calendars",
+    );
+    await calendarSettingsDialog.getByRole("button", { name: "Done" }).click();
+    await expect(calendarSettingsDialog).toHaveCount(0);
+    await expect(
+      pricesCard.locator(".prompt-home-prices-ticker-strip"),
+    ).toBeVisible();
+    await expect(
+      pricesCard.locator(".prompt-home-prices-ticker-item").first(),
+    ).toContainText(/HENRY_HUB_GAS · 3\.21 USD\/MMBTU/);
+    const priceActions = pricesCard.getByLabel("Market price actions");
+    await expect(priceActions).toBeVisible();
+    await expect(
+      priceActions.getByRole("button", { name: "Filter" }),
+    ).toBeVisible();
+    await expect(
+      priceActions.getByRole("button", { name: "Sync latest prices" }),
+    ).toBeVisible();
+    await expect(
+      priceActions.getByRole("button", { name: "Errors" }),
+    ).toBeVisible();
+    await expect(
+      priceActions.getByRole("button", { name: "Sources" }),
+    ).toBeVisible();
+    await pricesCard
+      .getByRole("button", { name: "Collapse Market Prices" })
+      .click();
+    await expect(priceActions).toHaveCount(0);
+    await pricesCard.getByRole("button", { name: "Expand Market Prices" }).click();
+    await expect(priceActions).toBeVisible();
+    await expect(
+      pricesCard.locator(".prompt-home-prices-filter-bar"),
+    ).toHaveCount(0);
+    await pricesCard.getByRole("button", { name: "Filter" }).click();
+    const priceFiltersDialog = page.getByRole("dialog", { name: "Filters" });
+    await expect(priceFiltersDialog).toBeVisible();
+    await expect(priceFiltersDialog.getByLabel("Price filters")).toBeVisible();
+    await expect(
+      priceFiltersDialog.getByPlaceholder("Code, market, commodity, type"),
+    ).toBeVisible();
+    await expect(priceFiltersDialog.getByLabel("Provider")).toBeVisible();
+    await expect(priceFiltersDialog.getByLabel("Commodity")).toBeVisible();
+    await expect(priceFiltersDialog.getByLabel("Index")).toBeVisible();
+    await expect(
+      priceFiltersDialog.getByLabel("Filter by mark status"),
+    ).toBeVisible();
+    await priceFiltersDialog.getByRole("button", { name: "Done" }).click();
+    await expect(priceFiltersDialog).toHaveCount(0);
+    await expect(
+      newsCard.locator(".prompt-home-news-headline-strip"),
+    ).toBeVisible();
+    const newsActions = newsCard.getByLabel("Market news actions");
+    await expect(newsActions).toBeVisible();
+    await expect(newsActions.getByRole("button", { name: "Filter" })).toBeVisible();
+    await expect(newsCard.locator(".prompt-home-news-filter-bar")).toHaveCount(0);
+    await newsActions.getByRole("button", { name: "Filter" }).click();
+    const newsFiltersDialog = page.locator(".prompt-home-news-filter-dialog");
+    await expect(newsFiltersDialog).toBeVisible();
+    await expect(newsFiltersDialog.getByLabel("News filters")).toBeVisible();
+    await expect(
+      newsFiltersDialog.getByPlaceholder("OPEC, LNG, storm impacts"),
+    ).toBeVisible();
+    await expect(newsFiltersDialog.getByLabel("Commodity")).toBeVisible();
+    await expect(newsFiltersDialog.getByLabel("Market Location")).toBeVisible();
+    await expect(newsFiltersDialog.getByLabel("Supply Effect")).toBeVisible();
+    await expect(newsFiltersDialog.getByLabel("Demand Effect")).toBeVisible();
+    await newsFiltersDialog.getByRole("button", { name: "Done" }).click();
+    await expect(newsFiltersDialog).toHaveCount(0);
+    await expect(newsCard).toContainText(
+      "Henry Hub gas holds steady in smoke fixture",
+    );
+    await expect(newsCard).not.toContainText("Live headline context");
     await expect(dayPanel).toBeVisible();
     await expect(weekPanel).toBeVisible();
     await expect(monthPanel).toBeVisible();
@@ -1026,11 +1381,39 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(page.locator(".prompt-home-map-card")).not.toContainText(
       "All currently loaded assets meet the map-ready rules.",
     );
-    await expect(mapToggle).toContainText("Map");
-    await expect(mapToggle).toContainText("Hide card");
-    await expect(mapFiltersCard).toContainText("Map Filters");
-    await expect(mapFiltersToggle).toContainText("Hide card");
-    await expect(mapFiltersBody).toBeVisible();
+    await expect(mapToggle).toHaveAttribute("aria-label", "Collapse Asset map");
+    await expect(mapActions).toBeVisible();
+    await expect(
+      mapActions.getByRole("button", { name: "Filter" }),
+    ).toBeVisible();
+    await expect(
+      page.locator(".prompt-home-map-card .asset-map-filters-card"),
+    ).toHaveCount(0);
+    await mapActions.getByRole("button", { name: "Filter" }).click();
+    await expect(mapFiltersDialog).toBeVisible();
+    await expect(
+      mapFiltersDialog.locator(".asset-map-filters-dialog-body"),
+    ).toBeVisible();
+    await expect(
+      mapFiltersDialog.getByText("Map Filters", { exact: true }),
+    ).toBeVisible();
+    await mapFiltersDialog.getByRole("button", { name: "Close" }).click();
+    await expect(mapFiltersDialog).toHaveCount(0);
+    await mapToggle.click();
+    await expect(mapActions).toHaveCount(0);
+    await mapToggle.click();
+    await expect(mapActions).toBeVisible();
+    await mapActions.getByRole("button", { name: "Filter" }).click();
+    await expect(mapFiltersDialog).toBeVisible();
+    await expect(
+      mapFiltersDialog.locator(".asset-map-filters-dialog-body"),
+    ).toBeVisible();
+    await expect(
+      mapFiltersDialog.getByLabel("Map layer visibility controls"),
+    ).toBeVisible();
+    await expect(
+      mapFiltersDialog.getByRole("button", { name: "Done" }),
+    ).toBeVisible();
     await expect(myLocationToggle).toBeVisible();
     await expect(myLocationToggle).toBeChecked();
     await expect(assetsToggle).toBeVisible();
@@ -1044,14 +1427,18 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(positionsActivityToggle).toBeChecked();
     await expect(shipmentsActivityToggle).toBeChecked();
     await expect(inventoryActivityToggle).toBeChecked();
-    await expect(page.getByText("Geography")).toBeVisible();
+    await expect(mapFiltersDialog.getByText("Geography")).toBeVisible();
     await expect(northAmericaToggle).toBeVisible();
     await expect(northAmericaToggle).toBeChecked();
     await expect(
-      page.getByRole("checkbox", { name: "South America" }),
+      mapFiltersDialog.getByRole("checkbox", { name: "South America" }),
     ).toBeVisible();
-    await expect(page.getByRole("checkbox", { name: "EMEA" })).toBeVisible();
-    await expect(page.getByRole("checkbox", { name: "APAC" })).toBeVisible();
+    await expect(
+      mapFiltersDialog.getByRole("checkbox", { name: "EMEA" }),
+    ).toBeVisible();
+    await expect(
+      mapFiltersDialog.getByRole("checkbox", { name: "APAC" }),
+    ).toBeVisible();
     await expect(
       geographyControls.getByRole("button", { name: "Uncheck all" }),
     ).toBeVisible();
@@ -1079,7 +1466,7 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(
       weatherOverlayControls.getByRole("checkbox", { name: "Temperature" }),
     ).toHaveCount(0);
-    await expect(page.getByText("Asset Types")).toBeVisible();
+    await expect(mapFiltersDialog.getByText("Asset Types")).toBeVisible();
     await expect(
       assetTypeControls.getByRole("button", { name: "Uncheck all" }),
     ).toBeVisible();
@@ -1091,10 +1478,9 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(savedPresetSelect).toBeVisible();
     await expect(savedPresetSelect).toBeDisabled();
     await expect(savedPresetSelect).toHaveValue("");
-    await expectLocatorsOnSameLine(savePresetButton, savedPresetSelect);
     await expect(savePresetButton).toBeDisabled();
     await expect(
-      page.getByRole("checkbox", { name: "Pipeline" }),
+      mapFiltersDialog.getByRole("checkbox", { name: "Pipeline" }),
     ).toBeChecked();
     await expect(page.getByText(/tracked weather points visible/)).toHaveCount(0);
     await expect(page.locator(".asset-map-weather-marker")).toHaveCount(0);
@@ -1103,19 +1489,36 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
       0,
     );
     await expect(page.locator(".asset-map-user-marker")).toBeVisible();
+    await expect(page.locator(".prompt-home-exchanges-card")).toContainText(
+      "major venue sessions",
+    );
+    await expect(page.locator(".prompt-home-exchanges-card")).toContainText(
+      "ICE Brent",
+    );
+    await expect(page.locator(".prompt-home-exchanges-card")).toContainText(
+      "Alpha Vantage exchange coverage",
+    );
+    await expect(page.locator(".prompt-home-exchanges-card")).toContainText(
+      "NASDAQ, NYSE, AMEX, BATS",
+    );
+    await expect(page.locator(".prompt-home-calendar-card")).toContainText(
+      "Calendar",
+    );
+    await expect(exchangesToggle).toHaveAttribute(
+      "aria-label",
+      "Collapse Exchanges",
+    );
+    await expect(calendarToggle).toHaveAttribute(
+      "aria-label",
+      "Collapse Calendar",
+    );
     await expect(timeZoneSelect).toBeVisible();
     await expectLocatorNearRightEdge(deskTimeHead, deskTimeToggle);
-    await mapFiltersToggle.click();
-    await expect(mapFiltersToggle).toContainText("Show card");
-    await expect(mapFiltersBody).toBeHidden();
-    await mapFiltersToggle.click();
-    await expect(mapFiltersToggle).toContainText("Hide card");
-    await expect(mapFiltersBody).toBeVisible();
     await expect(savePresetButton).toBeDisabled();
     await savePresetInput.fill("Smoke Home Filters");
     await expect(savePresetButton).toBeEnabled();
     await savePresetButton.click();
-    await expect(mapFiltersCard).toContainText(
+    await expect(mapFiltersDialog).toContainText(
       'Saved preset "Smoke Home Filters".',
     );
     await expect(savedPresetSelect).toBeEnabled();
@@ -1154,7 +1557,7 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await savedPresetSelect.selectOption("");
     await expect(savedPresetSelect).toHaveValue("");
     await savedPresetSelect.selectOption("Smoke Home Filters");
-    await expect(mapFiltersCard).toContainText(
+    await expect(mapFiltersDialog).toContainText(
       'Loaded preset "Smoke Home Filters".',
     );
     await expect(savedPresetSelect).toHaveValue("Smoke Home Filters");
@@ -1163,7 +1566,10 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(page.locator(".asset-map-marker")).toHaveCount(1);
     await expect(mapRecordsCard).toContainText("Map Records");
     await expect(mapRecordsCard).toContainText(/\d+ map records?/);
-    await expect(mapRecordsToggle).toContainText("Show card");
+    await expect(mapRecordsToggle).toHaveAttribute(
+      "aria-label",
+      "Expand Map Records",
+    );
     await expect(mapRecordsBody).toBeHidden();
 
     await assetTypeControls
@@ -1173,7 +1579,7 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
       assetTypeControls.getByRole("button", { name: "Check all" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("checkbox", { name: "Pipeline" }),
+      mapFiltersDialog.getByRole("checkbox", { name: "Pipeline" }),
     ).not.toBeChecked();
     await expect(page.locator(".prompt-home-map-card")).toContainText(
       "No selected asset types are visible right now.",
@@ -1186,23 +1592,30 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
       assetTypeControls.getByRole("button", { name: "Uncheck all" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("checkbox", { name: "Pipeline" }),
+      mapFiltersDialog.getByRole("checkbox", { name: "Pipeline" }),
     ).toBeChecked();
-    await geographyControls
-      .getByRole("button", { name: "Uncheck all" })
-      .click();
-    await expect(
-      geographyControls.getByRole("button", { name: "Check all" }),
-    ).toBeVisible();
-    await expect(northAmericaToggle).not.toBeChecked();
-    await geographyControls.getByRole("button", { name: "Check all" }).click();
-    await expect(
-      geographyControls.getByRole("button", { name: "Uncheck all" }),
-    ).toBeVisible();
-    await expect(northAmericaToggle).toBeChecked();
     await tooltipToggle.check();
+    await myLocationToggle.uncheck();
+    await expect(page.locator(".asset-map-user-marker")).toHaveCount(0);
+    await myLocationToggle.check();
+    await expect(page.locator(".asset-map-user-marker")).toBeVisible();
+
+    await assetsToggle.uncheck();
+    await expect(page.locator(".asset-map-marker")).toHaveCount(0);
+    await assetsToggle.check();
+    await page.waitForFunction(
+      () => document.querySelectorAll(".asset-map-marker").length > 0,
+    );
+
+    await weatherToggle.uncheck();
+    await expect(page.locator(".asset-map-weather-marker")).toHaveCount(0);
+    await mapFiltersDialog.getByRole("button", { name: "Done" }).click();
+    await expect(mapFiltersDialog).toHaveCount(0);
     await mapRecordsToggle.click();
-    await expect(mapRecordsToggle).toContainText("Hide card");
+    await expect(mapRecordsToggle).toHaveAttribute(
+      "aria-label",
+      "Collapse Map Records",
+    );
     await expect(mapRecordsBody).toBeVisible();
     await expect(
       mapRecordsBody.getByRole("button", {
@@ -1213,7 +1626,6 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await dayToggle.click();
     await expect(dayPanel).toBeHidden();
     await expect(dayCard).toContainText("Desk window HE07 to HE22");
-    await expect(dayCard).toContainText("venue sessions");
     await expectLocatorsOnSameLine(
       dayCard.locator(".prompt-home-time-meter-card-collapsed-line strong"),
       dayCard.locator(".prompt-home-time-meter-card-summary"),
@@ -1274,36 +1686,45 @@ test("prompt home keeps the simplified map visible while desk time cards collaps
     await expect(page.locator(".asset-map-weather-marker")).toHaveCount(0);
     await expect(page.locator(".asset-map-weather-preview")).toHaveCount(0);
 
-    await myLocationToggle.uncheck();
-    await expect(page.locator(".asset-map-user-marker")).toHaveCount(0);
-    await myLocationToggle.check();
-    await expect(page.locator(".asset-map-user-marker")).toBeVisible();
-
-    await assetsToggle.uncheck();
-    await expect(page.locator(".asset-map-marker")).toHaveCount(0);
-    await assetsToggle.check();
-    await page.waitForFunction(
-      () => document.querySelectorAll(".asset-map-marker").length > 0,
-    );
-
-    await weatherToggle.uncheck();
-    await expect(page.locator(".asset-map-weather-marker")).toHaveCount(0);
-    await expect(page.locator(".asset-map-weather-preview")).toHaveCount(0);
-    await weatherToggle.check();
-    await expect(page.locator(".asset-map-weather-marker")).toHaveCount(0);
-
     await mapToggle.click();
     await expect(mapPanel).toBeHidden();
-    await expect(mapToggle).toContainText("Show card");
+    await expect(mapToggle).toHaveAttribute("aria-label", "Expand Asset map");
 
     await deskTimeToggle.click();
     await expect(deskTimePanel).toBeHidden();
-    await expect(deskTimeToggle).toContainText("Show card");
-    await expect(deskTimeCopy).toContainText(
-      /\d{1,2}:\d{2}\s(?:AM|PM)\s\|\sHE\d{2}\s\|\s(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\s\|\s[A-Z][a-z]{2}\s\d{2}/,
+    await expect(deskTimeToggle).toHaveAttribute(
+      "aria-label",
+      "Expand Desk Time",
+    );
+    await expect(deskTimeSummary).toHaveText(
+      /^\s*\d{1,2}:\d{2}\s(?:AM|PM)\s\|\sHE\d{2}\s*$/,
     );
     await expect(timeZoneSelect).toHaveCount(0);
+    await expect(exchangesPanel).toBeVisible();
+    await expect(calendarPanel).toBeVisible();
     await expect(mapPanel).toBeHidden();
+
+    await exchangesToggle.click();
+    await expect(exchangesPanel).toBeHidden();
+    await expect(exchangesToggle).toHaveAttribute(
+      "aria-label",
+      "Expand Exchanges",
+    );
+    await expect(deskTimePanel).toBeHidden();
+    await expect(calendarPanel).toBeVisible();
+    await exchangesToggle.click();
+    await expect(exchangesPanel).toBeVisible();
+
+    await calendarToggle.click();
+    await expect(calendarPanel).toBeHidden();
+    await expect(calendarToggle).toHaveAttribute(
+      "aria-label",
+      "Expand Calendar",
+    );
+    await expect(deskTimePanel).toBeHidden();
+    await expect(exchangesPanel).toBeVisible();
+    await calendarToggle.click();
+    await expect(calendarPanel).toBeVisible();
 
     await mapToggle.click();
     await expect(mapPanel).toBeVisible();
@@ -1455,7 +1876,7 @@ test("stored signed-out prompt draft resumes and sends after sign-in", async ({
       .click();
 
     await expect(page).toHaveURL(/^(?!.*view=settings).*$/);
-    await expect(page.getByText("Signed in as Ops Admin")).toBeVisible();
+    await expect(profileAvatarButton(page)).toBeVisible();
     await expect(
       page
         .locator(".assistant-message-user")
@@ -2353,7 +2774,7 @@ test("prompt home approves a staged Home view and opens the saved instance", asy
     const viewSwitcher = page.locator(".prompt-home-view-switcher select");
     await expect(viewSwitcher).toContainText("HH NG Watch");
     await viewSwitcher.selectOption({ label: "HH NG Watch" });
-    await page.getByRole("button", { name: /Edit cards/ }).click();
+    await page.getByRole("button", { name: /Manage Apps/ }).click();
     await expect(page.locator(".prompt-home-view-actions")).toContainText(
       "HH NG Watch",
     );

@@ -375,6 +375,17 @@ as-of semantics.
 - document interpolation or no-interpolation behavior for v1
 - connect selected gas marks to valuation basis
 
+### Current Implementation Note
+
+- `apps/api/app/domains/risk/services/official_marks.py` now provides the
+  first read-only official mark and curve seam. It selects the latest
+  observation on or before the as-of date only from active price-index sources,
+  reports `FRESH`, `STALE`, or `MISSING`, and uses explicit `NONE`
+  interpolation for v1.
+- Remaining bridge work: decide whether official marks need persisted approval
+  records beyond active source configuration, add route/report exposure, and
+  expand curve construction beyond the first read-only gas seam.
+
 ### Verification
 
 - focused API tests for source, approval, freshness, and as-of behavior
@@ -400,6 +411,20 @@ coverage, exclusions, and stale-data stops.
 - separate realized, unrealized, and excluded valuations
 - include methodology text and source evidence in API outputs
 - stop or degrade when official marks, quantities, or units are missing
+
+### Current Implementation Note
+
+- `apps/api/app/domains/reports/services/pnl_history.py` now values indexed and
+  hybrid trades through the PGB-06 official mark service instead of reading raw
+  `PriceIndexObservation` rows directly.
+- P&L valuation payloads include mark evidence for indexed pricing, including
+  basis, no-interpolation method, approved-source status, freshness, selected
+  observation date, source provider/series, run id, staleness, and missing-mark
+  reason when applicable.
+- Remaining bridge work: persist/report official marks as first-class records
+  if owners require approval workflows beyond active source configuration,
+  tighten unit/currency compatibility stops, and broaden valuation coverage
+  beyond LINEAR single-leg fixed/index/hybrid trades.
 
 ### Verification
 
@@ -427,6 +452,23 @@ commodity, location, tenor, side, physical/financial status, and price basis.
 - add risk-factor dimensions needed by valuation, credit, and EOD reporting
 - preserve projection freshness and replay evidence
 
+### Current Implementation Note
+
+- `apps/api/app/domains/risk/services/position_as_of.py` now provides the first
+  read-only position-as-of service. It replays trade lifecycle events through
+  the requested as-of date, excludes inactive and option trades, decomposes swap
+  legs, and groups signed exposure by book, portfolio, commodity, location,
+  tenor, side, physical/financial status, pricing basis, and unit.
+- Rows preserve replay evidence through source basis, contributing trade ids,
+  latest change timestamp, per-row event counts, and legacy projection counts.
+  Legacy trades without event history enter only when their trustworthy
+  projection timestamp is on or before the as-of date and remain labelled as
+  `LEGACY_PROJECTION`.
+- Remaining bridge work: expose the service through route/report contracts,
+  reconcile it with the current `positions` projection, add unit conversion
+  policy, and feed credit, EOD, and exposure decomposition from the same
+  position-as-of basis.
+
 ### Verification
 
 - focused projection and position tests
@@ -453,6 +495,24 @@ capture, review, reporting, and assistant explanation.
 - make policy output machine-readable with stop conditions and override hooks
 - integrate with trade command validation and reports
 
+### Current Implementation Note
+
+- `apps/api/app/domains/risk/services/counterparty_credit_policy.py` now
+  provides the first typed counterparty credit-limit policy service. It
+  calculates current and projected exposure, assigns `CLEAR`, `WATCH`,
+  `BREACH`, `STALE_REVIEW`, and `OVERRIDE_APPROVED` statuses, and emits
+  machine-readable action, stop, warning, freshness, utilization, and override
+  evidence.
+- `apps/api/app/domains/reports/services/counterparty_credit.py` now delegates
+  trade-policy evaluation and report exposure calculations to that risk service
+  while preserving the existing policy dict keys used by trade validation and
+  credit workflow helpers.
+- Remaining bridge work: persist versioned limit-policy configuration beyond
+  the current credit profile fields, wire active credit exceptions directly into
+  the policy override input, expose policy evidence through report/API
+  contracts, and feed command validation from the typed result without the
+  compatibility dict layer.
+
 ### Verification
 
 - focused API tests for clear, watch, breach, stale review, and override cases
@@ -477,6 +537,25 @@ turning recommendations into execution.
 - support flat price, basis, volume, and delivery-disruption shocks
 - report affected trades, positions, MTM delta, and missing evidence
 - keep hedge execution and autonomous action out of scope
+
+### Current Implementation Note
+
+- `apps/api/app/domains/risk/services/scenario_stress.py` now provides the
+  first read-only scenario stress service. It consumes PGB-07 P&L valuations
+  and PGB-08 position-as-of rows, applies flat-price, basis, volume, and
+  delivery-disruption shocks in memory, and labels the result as
+  `READ_ONLY_NO_EXECUTION`.
+- Trade impacts preserve official-mark evidence and produce MTM deltas only
+  when the source valuation is included in governed P&L totals. Missing marks
+  or incomplete valuation inputs become blocking missing-evidence rows rather
+  than invented prices.
+- Position impacts use the event-replayed position rows for volume and
+  delivery-disruption effects. Delivery disruptions require overlapping tenor
+  evidence; missing tenors are reported as missing evidence.
+- Remaining bridge work: expose scenario runs through route/UI contracts, add
+  persisted scenario templates/run history if owners need repeatable libraries,
+  broaden shock factor coverage beyond the locked gas slice, and connect EOD or
+  assistant read tools to the same read-only service.
 
 ### Verification
 
@@ -505,6 +584,29 @@ operations, settlement, and assistant tools can trust.
 - validate required fields for pipeline-style gas movement
 - expose readiness and blocker state to operations queues
 
+### Current Implementation Note
+
+- `apps/api/app/domains/operations/services/gas_scheduling.py` now provides the
+  first deterministic gas schedule commitment service over existing delivery
+  obligations and pipeline detail records. It models scheduled quantity, unit,
+  start/end gas day, owner, pipeline system, route/path, receipt/delivery
+  locations, contract/cycle, and nomination reference with an explicit
+  `delivery_obligation_pipeline_nomination_v1` basis.
+- The service defines nomination status transitions across `PENDING`,
+  `SCHEDULED`, `NOMINATED`, `COMPLETED`, and `NOT_REQUIRED`; validates pipeline
+  gas movement blockers before status transitions; updates the trade nomination
+  status and delivery execution status only through the typed service; and
+  writes trade audit events for schedule capture/status changes.
+- `apps/api/app/domains/operations/services/shipments.py` now reuses the gas
+  scheduling blocker helper so operations delivery-board rows surface missing
+  schedule owner, pipeline system/path, receipt/delivery point, and nomination
+  reference evidence.
+- Remaining bridge work: expose the schedule commitment contract directly
+  through route/UI schemas, add persisted schedule-run/version history if
+  operators need multiple nomination cycles, connect scheduling readiness to
+  settlement/actualization preview, and extend from the first gas pipeline slice
+  into richer pipeline bulletin-board or nomination-feed integrations.
+
 ### Verification
 
 - focused API tests for scheduling lifecycle and blocker transitions
@@ -531,6 +633,29 @@ settlement preview, accruals, and position updates.
 - record actual quantity, unit, location, gas day, source, and evidence
 - define whether inventory is in scope for the first gas slice or explicitly
   deferred behind actualization-only treatment
+
+### Current Implementation Note
+
+- `apps/api/app/domains/operations/services/actualization_ledger.py` now
+  provides the first deterministic actualization ledger report over existing
+  `TradeActualization`, `DeliveryObligation`, and `DeliveryPipelineDetail`
+  records. It emits the `trade_actualization_schedule_evidence_v1` basis,
+  actual quantity, unit, actual gas day, delivery location, source evidence,
+  linked schedule commitment evidence, settlement eligibility/blockers, and
+  correction metadata.
+- `upsert_trade_actualization` and `void_trade_actualization` continue to own
+  actualization writes, accrual synchronization, workflow synchronization, and
+  audit events. Their trade audit payloads now include an
+  `actualization_ledger` snapshot so create, correction, and void actions carry
+  the same settlement and inventory boundary evidence that reports use.
+- Inventory is explicitly deferred for this first gas slice with
+  `ACTUALIZATION_ONLY_INVENTORY_DEFERRED`: no inventory ledger entries are
+  created, and actualization records are treated as settlement/accrual
+  evidence until custody, ownership, and balance policy are approved.
+- Remaining bridge work: expose the ledger through an operations or settlement
+  route contract, connect it directly to the settlement preview engine, add
+  inventory policy/ledger posting if approved, and expand gas-day handling when
+  pipeline feeds provide a business gas-day separate from actualized timestamp.
 
 ### Verification
 

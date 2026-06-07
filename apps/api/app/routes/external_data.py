@@ -15,6 +15,7 @@ from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reference_data.services.external_data import (
     import_counterparty_credit_snapshots,
     preview_dnb_counterparty_credit_rows,
+    sync_alpha_vantage_prices,
     sync_bls_ppi_series,
     sync_caiso_series,
     sync_cftc_series,
@@ -38,6 +39,9 @@ from apps.api.app.domains.reference_data.services.external_data.market_news impo
     MarketNewsClientError,
     load_market_news_headlines,
 )
+from apps.api.app.domains.reference_data.services.external_data.market_news_ai import (
+    build_market_news_ai_tags,
+)
 from apps.api.app.domains.reference_data.services.external_data.price_source_review import (
     list_price_source_review_rows,
 )
@@ -59,6 +63,8 @@ from apps.api.app.schemas.external_data import (
     ExternalSeriesObservationOut,
     ExternalSeriesSyncRequest,
     MarketContextOut,
+    MarketNewsTaggingOut,
+    MarketNewsTaggingRequest,
     MarketNewsOut,
     PriceSourceReviewOut,
     PriceIndexObservationOut,
@@ -143,6 +149,21 @@ def trigger_fred_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(
     run = sync_fred_series(
         db,
         series_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/alpha-vantage/sync", response_model=ExternalDataRunOut)
+def trigger_alpha_vantage_sync(
+    payload: ExternalSeriesSyncRequest,
+    db: Session = Depends(get_db),
+) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_alpha_vantage_prices(
+        db,
+        price_index_code=payload.series_code,
         lookback_days=payload.lookback_days,
         requested_by=actor_id,
     )
@@ -435,6 +456,14 @@ def list_market_news_headlines(
         ) from exc
 
     return MarketNewsOut(**payload)
+
+
+@router.post("/market-data/news/headlines/tagging", response_model=MarketNewsTaggingOut)
+async def tag_market_news_headlines(
+    payload: MarketNewsTaggingRequest,
+) -> MarketNewsTaggingOut:
+    tags_payload = await build_market_news_ai_tags(payload)
+    return MarketNewsTaggingOut(**tags_payload)
 
 
 @router.get(

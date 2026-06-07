@@ -21,6 +21,8 @@ from apps.api.app.routes.events import router as events_router
 from apps.api.app.routes.external_data import admin_router as external_data_admin_router
 from apps.api.app.routes.external_data import router as external_data_router
 from apps.api.app.routes.home_view_definitions import router as home_view_definitions_router
+from apps.api.app.routes.integrations import admin_router as integrations_admin_router
+from apps.api.app.routes.integrations import router as integrations_router
 from apps.api.app.routes.layout_definitions import router as layout_definitions_router
 from apps.api.app.routes.messages import router as messages_router
 from apps.api.app.routes.option_exposures import router as option_exposures_router
@@ -58,6 +60,8 @@ HTTP_ROUTE_REGISTRATIONS: tuple[HttpRouteRegistration, ...] = (
     HttpRouteRegistration(domain="admin", name="trading-sources-admin", router=trading_sources_admin_router),
     HttpRouteRegistration(domain="external-data", name="external-data", router=external_data_router),
     HttpRouteRegistration(domain="admin", name="external-data-admin", router=external_data_admin_router),
+    HttpRouteRegistration(domain="integrations", name="integrations", router=integrations_router),
+    HttpRouteRegistration(domain="integrations", name="integrations-admin", router=integrations_admin_router),
     HttpRouteRegistration(domain="assistant", name="assistant", router=assistant_router),
     HttpRouteRegistration(domain="assistant", name="assistant-admin", router=assistant_admin_router),
     HttpRouteRegistration(domain="mcp", name="mcp-status", router=mcp_router),

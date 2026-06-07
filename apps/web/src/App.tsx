@@ -1,4 +1,14 @@
-import { Suspense, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import {
+  Suspense,
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 
 import './App.css'
 import './appearance.css'
@@ -8,11 +18,15 @@ import {
   type PrimaryNavigationSectionKey,
   primaryNavigationSectionByKey,
   primaryNavigationSectionForView,
+  primaryNavigationSectionRendersNestedViews,
+  shouldHandleClientSideNavigation,
 } from './app/navigation'
 import { AppStartHereOverlay } from './entities/app/AppStartHereOverlay'
+import { ProfileAvatarMenu } from './entities/app/ProfileAvatarMenu'
 import { TerminalCommandBar } from './entities/app/TerminalCommandBar'
 import { TerminalShortcutReference } from './entities/app/TerminalShortcutReference'
 import { TerminalWorkspaceSetLauncher } from './entities/app/TerminalWorkspaceSetLauncher'
+import { WorkspaceTopbarDatabaseSizeBadge } from './entities/app/WorkspaceTopbarDatabaseSizeBadge'
 import { AppWorkspaceContent } from './entities/app/AppWorkspaceContent'
 import {
   APP_VIEWS,
@@ -30,6 +44,10 @@ import { useAppAppearance } from './entities/app/useAppAppearance'
 import { useAppTradeCaptureSettings } from './entities/app/useAppTradeCaptureSettings'
 import { useAppWorkspaceData } from './entities/app/useAppWorkspaceData'
 import { useAppWorkspaceSummary } from './entities/app/useAppWorkspaceSummary'
+import {
+  loadAttioClientEnrichment,
+  type AttioClientEnrichmentRecord,
+} from './entities/integrations/api'
 import {
   isEditableShortcutTarget,
   resolveTerminalWorkspaceShortcut,
@@ -50,6 +68,7 @@ import { useReferenceDataController } from './features/reference-data/useReferen
 import { useTradeAmendForm } from './features/trades/useTradeAmendForm'
 import { useTradeCaptureForm } from './features/trades/useTradeCaptureForm'
 import { appConfig } from './shared/config'
+import { DataSheet, type DataSheetColumn, type DataSheetRowAction } from './shared/ui/DataSheet'
 import {
   buildRailRouteWorkspaceHandoff,
   describeAppRouteHandoff,
@@ -68,6 +87,10 @@ import {
 } from './shared/promptResumeIntent'
 import { commodityClassOrder } from './shared/trading'
 import { PromptHomeAvailableTokenBadge } from './workspaces/prompt/PromptHomeAvailableTokenBadge'
+import {
+  ASSISTANT_TOKEN_TRACKER_ANCHOR_ID,
+  ASSISTANT_TOKEN_TRACKER_VIEW_KEY,
+} from './workspaces/assistant/assistantTokenTrackerAnchor'
 import { resolvePriceIndexReportRouteFocus } from './workspaces/reports/reportRouteHandoffs'
 
 function WorkspaceLoadState({
@@ -184,10 +207,289 @@ type AppTradeCaptureSettingsController = ReturnType<typeof useAppTradeCaptureSet
 type AppWorkspaceDataController = ReturnType<typeof useAppWorkspaceData>
 type AppStartHereRoutingController = ReturnType<typeof useStartHereRouting>
 
+const WORKSPACE_PRODUCTS = [
+  { key: 'strata', label: 'Strata' },
+  { key: 'nexus', label: 'Nexus' },
+] as const
+
+type WorkspaceProductKey = (typeof WORKSPACE_PRODUCTS)[number]['key']
+
+const NEXUS_NAV_ITEMS = [
+  { key: 'crm', kicker: 'Relationship', label: 'CRM' },
+  { key: 'todo', kicker: 'Work', label: 'To-Do' },
+  { key: 'tools', label: 'Tools' },
+] as const
+
+type NexusViewKey = (typeof NEXUS_NAV_ITEMS)[number]['key'] | 'client'
+
+const NEXUS_EXISTING_CLIENT_BASE = [
+  'Abercore',
+  'American Plant Food',
+  'Asili',
+  'Cargill',
+  'Cefetra',
+  'CIAMSA',
+  'Crown Point',
+  'CSC Sugar',
+  'Cumberland',
+  'ETG',
+  'Fibre Trade',
+  'Hartree',
+  'Howlett Farms',
+  'International Materials',
+  'Interoceanic',
+  'LinkOne',
+  'Redwood Group',
+  'Ryco Holdings',
+  'Smirks',
+  'Spring Valley',
+  'SureSource',
+  'Telf Ag',
+  'Westfeldt Brothers',
+] as const
+
+type NexusClientName = string
+
+type NexusClientRecord = {
+  clientName: NexusClientName
+  relationship: string
+  nextAction: string
+}
+
+type NexusClientDraft = NexusClientRecord
+
+const DEFAULT_NEXUS_CLIENT_RELATIONSHIP = 'Existing client'
+
+function createNexusClientRecord(clientName: NexusClientName): NexusClientRecord {
+  return {
+    clientName,
+    relationship: DEFAULT_NEXUS_CLIENT_RELATIONSHIP,
+    nextAction: '',
+  }
+}
+
+const WORKSPACE_TOPBAR_TITLE_SIZER_LABEL = [
+  ...APP_VIEWS.map((view) => view.label),
+  ...PRIMARY_NAV_SECTIONS.map((section) => section.label),
+  ...NEXUS_NAV_ITEMS.map((item) => item.label),
+  ...NEXUS_EXISTING_CLIENT_BASE,
+].reduce((longest, label) => (label.length > longest.length ? label : longest), 'Workspace')
+
+type NexusTodo = {
+  id: string
+  clientName: NexusClientName
+  title: string
+}
+
+type NexusTool = {
+  id: string
+  title: string
+  url: string | null
+  accessMethod: boolean
+  application: boolean
+  browser: boolean
+  api: boolean
+}
+
+type NexusToolBooleanDraft = Pick<NexusTool, 'accessMethod' | 'application' | 'browser' | 'api'>
+
+function createNexusToolBooleanDraft(): NexusToolBooleanDraft {
+  return {
+    accessMethod: false,
+    application: false,
+    browser: false,
+    api: false,
+  }
+}
+
+function renderNexusBooleanCell(value: boolean) {
+  return <span className={`nexus-boolean-cell ${value ? 'is-true' : 'is-false'}`}>{value ? 'TRUE' : 'FALSE'}</span>
+}
+
+function formatAttioMatchBasis(matchBasis: AttioClientEnrichmentRecord['match_basis']): string {
+  if (matchBasis === 'exact_name') {
+    return 'Name match'
+  }
+  if (matchBasis === 'search') {
+    return 'Search match'
+  }
+  return 'No match'
+}
+
+function buildAttioDealMeta(deal: AttioClientEnrichmentRecord['deals'][number]): string {
+  return [deal.stage, deal.value, deal.close_date].filter(Boolean).join(' - ')
+}
+
+function buildAttioContactMeta(contact: AttioClientEnrichmentRecord['contacts'][number]): string {
+  return [contact.title, contact.email, contact.phone].filter(Boolean).join(' - ')
+}
+
+type NexusContact = {
+  id: string
+  clientName: NexusClientName
+  name: string
+}
+
+type NexusClientRow = {
+  clientName: NexusClientName
+  relationship: string
+  relationshipSortRank: number
+  contactCount: number
+  todoCount: number
+  nextAction: string
+}
+
+function resolveNexusRelationshipSortRank(relationship: string): number {
+  return relationship
+    .trim()
+    .localeCompare(DEFAULT_NEXUS_CLIENT_RELATIONSHIP, undefined, { sensitivity: 'accent' }) === 0
+    ? 0
+    : 1
+}
+
+const NEXUS_CLIENT_TABLE_COLUMNS: DataSheetColumn<NexusClientRow>[] = [
+  {
+    id: 'row-number',
+    label: 'ID',
+    width: '3.4rem',
+    align: 'end',
+    enableSort: false,
+    enableFilter: false,
+    renderCell: (_row, rowIndex) => String(rowIndex + 1).padStart(2, '0'),
+  },
+  {
+    id: 'client',
+    label: 'Client',
+    width: '18rem',
+    filterPlaceholder: 'Client',
+    sortValue: (row) => row.clientName,
+    filterValue: (row) => row.clientName,
+    renderCell: (row) => <strong className="nexus-client-name">{row.clientName}</strong>,
+  },
+  {
+    id: 'relationship',
+    label: 'Relationship',
+    width: '12rem',
+    filterPlaceholder: 'Type',
+    sortValue: (row) => row.relationshipSortRank,
+    filterValue: (row) => row.relationship,
+    renderCell: (row) => <span className="nexus-client-status">{row.relationship}</span>,
+  },
+  {
+    id: 'contacts',
+    label: 'Contacts',
+    width: '9rem',
+    align: 'end',
+    filterPlaceholder: 'Count',
+    sortValue: (row) => row.contactCount,
+    filterValue: (row) => `${row.contactCount} contact${row.contactCount === 1 ? '' : 's'}`,
+    renderCell: (row) => (
+      <span className="nexus-client-contact-count">
+        {row.contactCount} contact{row.contactCount === 1 ? '' : 's'}
+      </span>
+    ),
+  },
+  {
+    id: 'todo-count',
+    label: 'Open To-Dos',
+    width: '10rem',
+    align: 'end',
+    filterPlaceholder: 'Count',
+    sortValue: (row) => row.todoCount,
+    filterValue: (row) => `${row.todoCount} open`,
+    renderCell: (row) => <span className="nexus-client-todo-count">{row.todoCount} open</span>,
+  },
+  {
+    id: 'next-action',
+    label: 'Next Action',
+    width: '14rem',
+    filterPlaceholder: 'Action',
+    sortValue: (row) => row.nextAction,
+    filterValue: (row) => row.nextAction,
+    renderCell: (row) => <span className="nexus-client-next-action">{row.nextAction}</span>,
+  },
+]
+
+const NEXUS_TOOL_TABLE_COLUMNS: DataSheetColumn<NexusTool>[] = [
+  {
+    id: 'row-number',
+    label: 'ID',
+    width: '3.4rem',
+    align: 'end',
+    enableSort: false,
+    enableFilter: false,
+    renderCell: (_row, rowIndex) => String(rowIndex + 1).padStart(2, '0'),
+  },
+  {
+    id: 'tool',
+    label: 'Tool',
+    width: '18rem',
+    filterPlaceholder: 'Tool',
+    sortValue: (row) => row.title,
+    filterValue: (row) => row.title,
+    renderCell: (row) => <strong className="nexus-tool-name">{row.title}</strong>,
+  },
+  {
+    id: 'link',
+    label: 'Link',
+    width: '22rem',
+    filterPlaceholder: 'Link',
+    sortValue: (row) => row.url ?? '',
+    filterValue: (row) => row.url ?? 'No link added',
+    renderCell: (row) => (
+      <span className={row.url ? 'nexus-tool-link' : 'nexus-tool-link nexus-tool-link-empty'}>
+        {row.url ?? 'No link added'}
+      </span>
+    ),
+  },
+  {
+    id: 'access-method',
+    label: 'Access Method',
+    width: '9rem',
+    align: 'center',
+    filterPlaceholder: 'TRUE/FALSE',
+    sortValue: (row) => row.accessMethod,
+    filterValue: (row) => (row.accessMethod ? 'TRUE' : 'FALSE'),
+    renderCell: (row) => renderNexusBooleanCell(row.accessMethod),
+  },
+  {
+    id: 'application',
+    label: 'Application',
+    width: '8rem',
+    align: 'center',
+    filterPlaceholder: 'TRUE/FALSE',
+    sortValue: (row) => row.application,
+    filterValue: (row) => (row.application ? 'TRUE' : 'FALSE'),
+    renderCell: (row) => renderNexusBooleanCell(row.application),
+  },
+  {
+    id: 'browser',
+    label: 'Browser',
+    width: '8rem',
+    align: 'center',
+    filterPlaceholder: 'TRUE/FALSE',
+    sortValue: (row) => row.browser,
+    filterValue: (row) => (row.browser ? 'TRUE' : 'FALSE'),
+    renderCell: (row) => renderNexusBooleanCell(row.browser),
+  },
+  {
+    id: 'api',
+    label: 'API',
+    width: '6rem',
+    align: 'center',
+    filterPlaceholder: 'TRUE/FALSE',
+    sortValue: (row) => row.api,
+    filterValue: (row) => (row.api ? 'TRUE' : 'FALSE'),
+    renderCell: (row) => renderNexusBooleanCell(row.api),
+  },
+]
+
 type AuthenticatedWorkspaceShellProps = {
   route: AppRouteController
   shell: AppShellController
   appearance: AppAppearanceController
+  activeProduct: WorkspaceProductKey
+  setActiveProduct: (product: WorkspaceProductKey) => void
   tradeCapturePreferences: AppTradeCaptureSettingsController
   workspaceData: AppWorkspaceDataController
   startHereRouting: AppStartHereRoutingController
@@ -204,6 +506,8 @@ function AuthenticatedWorkspaceShell({
   route,
   shell,
   appearance,
+  activeProduct,
+  setActiveProduct,
   tradeCapturePreferences,
   workspaceData,
   startHereRouting,
@@ -217,6 +521,81 @@ function AuthenticatedWorkspaceShell({
 }: AuthenticatedWorkspaceShellProps) {
   const { currentView, routeHandoff, selectedTradeId } = route
   const authSession = workspaceData.authSession
+  const [activeNexusView, setActiveNexusView] = useState<NexusViewKey>('crm')
+  const [nexusClients, setNexusClients] = useState<NexusClientRecord[]>(() =>
+    NEXUS_EXISTING_CLIENT_BASE.map((clientName) => createNexusClientRecord(clientName)),
+  )
+  const [nexusClientDraft, setNexusClientDraft] = useState<NexusClientDraft>(() => createNexusClientRecord(''))
+  const [selectedNexusClient, setSelectedNexusClient] = useState<NexusClientName>(NEXUS_EXISTING_CLIENT_BASE[0])
+  const [nexusContactDraft, setNexusContactDraft] = useState('')
+  const [nexusContacts, setNexusContacts] = useState<NexusContact[]>([])
+  const [nexusTodoDraft, setNexusTodoDraft] = useState('')
+  const [nexusTodoClientDraft, setNexusTodoClientDraft] = useState<NexusClientName>(NEXUS_EXISTING_CLIENT_BASE[0])
+  const [nexusTodos, setNexusTodos] = useState<NexusTodo[]>([])
+  const [nexusToolTitleDraft, setNexusToolTitleDraft] = useState('')
+  const [nexusToolUrlDraft, setNexusToolUrlDraft] = useState('')
+  const [nexusToolBooleanDraft, setNexusToolBooleanDraft] = useState<NexusToolBooleanDraft>(() =>
+    createNexusToolBooleanDraft(),
+  )
+  const [nexusTools, setNexusTools] = useState<NexusTool[]>([])
+  const [selectedNexusToolId, setSelectedNexusToolId] = useState<string | null>(null)
+  const [attioClientEnrichmentByName, setAttioClientEnrichmentByName] = useState<
+    Record<string, AttioClientEnrichmentRecord>
+  >({})
+  const [attioClientEnrichmentLoading, setAttioClientEnrichmentLoading] = useState(false)
+  const [attioClientEnrichmentError, setAttioClientEnrichmentError] = useState('')
+  const isNexusProduct = activeProduct === 'nexus'
+  const activeNexusNavItem =
+    NEXUS_NAV_ITEMS.find((item) => item.key === activeNexusView) ?? NEXUS_NAV_ITEMS[0]
+  const trimmedNexusClientDraft = nexusClientDraft.clientName.trim()
+  const nexusClientDraftAlreadyExists =
+    trimmedNexusClientDraft.length > 0 &&
+    nexusClients.some(
+      (client) => client.clientName.localeCompare(trimmedNexusClientDraft, undefined, { sensitivity: 'accent' }) === 0,
+    )
+  const selectedNexusClientTodos = useMemo(
+    () => nexusTodos.filter((todo) => todo.clientName === selectedNexusClient),
+    [nexusTodos, selectedNexusClient],
+  )
+  const selectedNexusClientContacts = useMemo(
+    () => nexusContacts.filter((contact) => contact.clientName === selectedNexusClient),
+    [nexusContacts, selectedNexusClient],
+  )
+  const selectedAttioClientEnrichment = attioClientEnrichmentByName[selectedNexusClient] ?? null
+  const nexusContactCountByClient = useMemo(() => {
+    const counts = new Map<NexusClientName, number>()
+    nexusContacts.forEach((contact) => {
+      counts.set(contact.clientName, (counts.get(contact.clientName) ?? 0) + 1)
+    })
+    return counts
+  }, [nexusContacts])
+  const nexusTodoCountByClient = useMemo(() => {
+    const counts = new Map<NexusClientName, number>()
+    nexusTodos.forEach((todo) => {
+      counts.set(todo.clientName, (counts.get(todo.clientName) ?? 0) + 1)
+    })
+    return counts
+  }, [nexusTodos])
+  const nexusClientRows = useMemo(
+    () =>
+      nexusClients.map((client) => {
+        const clientName = client.clientName
+        const relationship = client.relationship.trim() || DEFAULT_NEXUS_CLIENT_RELATIONSHIP
+        const contactCount = nexusContactCountByClient.get(clientName) ?? 0
+        const todoCount = nexusTodoCountByClient.get(clientName) ?? 0
+        const nextAction = client.nextAction.trim() || (todoCount > 0 ? 'Review open To-Dos' : 'Add To-Do')
+
+        return {
+          clientName,
+          relationship,
+          relationshipSortRank: resolveNexusRelationshipSortRank(relationship),
+          contactCount,
+          todoCount,
+          nextAction,
+        }
+      }),
+    [nexusClients, nexusContactCountByClient, nexusTodoCountByClient],
+  )
   const activePrimarySection = route.activeNavigationSectionKey
     ? primaryNavigationSectionByKey(route.activeNavigationSectionKey)
     : primaryNavigationSectionForView(currentView)
@@ -380,8 +759,9 @@ function AuthenticatedWorkspaceShell({
   const showHeroBadge = showingNavigationSectionLanding || (currentView !== 'library' && currentView !== 'messages')
   const mainStageClassName = [
     'main-stage',
-    isPromptHomeView ? 'main-stage-prompt' : null,
+    isPromptHomeView && !isNexusProduct ? 'main-stage-prompt' : null,
     isMessagingWorkspaceView ? 'main-stage-messages' : null,
+    isNexusProduct ? 'main-stage-nexus' : null,
   ]
     .filter(Boolean)
     .join(' ')
@@ -414,6 +794,14 @@ function AuthenticatedWorkspaceShell({
     workspaceLabel(route.currentView)
   const currentWorkspaceDetail =
     priceReportRouteFocus?.badgeDetail ?? `${workspaceData.events.length} loaded events across the current session`
+  const topbarWorkspaceLabel = showingNavigationSectionLanding
+    ? activePrimarySection.label
+    : currentWorkspaceLabel
+  const displayedTopbarWorkspaceLabel = isNexusProduct
+    ? activeNexusView === 'client'
+      ? selectedNexusClient
+      : activeNexusNavItem.label
+    : topbarWorkspaceLabel
   const shellModeClassName = appearance.isTerminalMode ? 'app-shell-terminal-mode' : ''
   const [terminalCommandBarOpen, setTerminalCommandBarOpen] = useState(false)
   const [shortcutReferenceOpen, setShortcutReferenceOpen] = useState(false)
@@ -481,6 +869,7 @@ function AuthenticatedWorkspaceShell({
       const workspaceShortcut = resolveTerminalWorkspaceShortcut(event)
       if (workspaceShortcut) {
         event.preventDefault()
+        setActiveProduct('strata')
         route.navigateToView(workspaceShortcut.view)
         shell.setMobileNavOpen(false)
         return
@@ -519,9 +908,57 @@ function AuthenticatedWorkspaceShell({
     openShortcutReference,
     resetWorkspaceFocus,
     route,
+    setActiveProduct,
     shell,
     shortcutReferenceOpen,
     terminalCommandBarOpen,
+  ])
+
+  useEffect(() => {
+    if (!isNexusProduct || activeNexusView !== 'client' || !authSession?.accessToken) {
+      setAttioClientEnrichmentLoading(false)
+      return
+    }
+
+    if (selectedAttioClientEnrichment) {
+      setAttioClientEnrichmentLoading(false)
+      setAttioClientEnrichmentError('')
+      return
+    }
+
+    let cancelled = false
+    setAttioClientEnrichmentLoading(true)
+    setAttioClientEnrichmentError('')
+
+    loadAttioClientEnrichment(appConfig.apiBase, authSession.accessToken, selectedNexusClient)
+      .then((payload) => {
+        if (cancelled) {
+          return
+        }
+        setAttioClientEnrichmentByName((currentEnrichment) => ({
+          ...currentEnrichment,
+          [selectedNexusClient]: payload,
+        }))
+        setAttioClientEnrichmentLoading(false)
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return
+        }
+        const message = error instanceof Error ? error.message : 'Attio client data could not be loaded.'
+        setAttioClientEnrichmentError(message)
+        setAttioClientEnrichmentLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    activeNexusView,
+    authSession?.accessToken,
+    isNexusProduct,
+    selectedAttioClientEnrichment,
+    selectedNexusClient,
   ])
 
   function handleReconnectWorkspace() {
@@ -565,18 +1002,34 @@ function AuthenticatedWorkspaceShell({
     )
   }
 
+  function navigateNexusBack() {
+    if (activeNexusView === 'crm') {
+      setActiveProduct('strata')
+    } else {
+      setActiveNexusView('crm')
+    }
+    shell.setMobileNavOpen(false)
+  }
+
   function renderBackButton(className?: string) {
+    const backDisabled = isNexusProduct ? false : !route.canNavigateBack
+    const nexusBackTarget = activeNexusView === 'crm' ? 'Strata' : 'CRM'
+
     return (
       <button
         type="button"
         className={['button button-ghost app-back-button', className].filter(Boolean).join(' ')}
         onClick={() => {
+          if (isNexusProduct) {
+            navigateNexusBack()
+            return
+          }
           route.navigateBack()
           shell.setMobileNavOpen(false)
         }}
-        disabled={!route.canNavigateBack}
-        aria-label="Go back to the previous view"
-        title={route.canNavigateBack ? 'Go back' : 'No previous view'}
+        disabled={backDisabled}
+        aria-label={isNexusProduct ? `Go back to ${nexusBackTarget}` : 'Go back to the previous view'}
+        title={backDisabled ? 'No previous view' : isNexusProduct ? `Back to ${nexusBackTarget}` : 'Go back'}
       >
         Back
       </button>
@@ -597,15 +1050,409 @@ function AuthenticatedWorkspaceShell({
             libraryDocumentId: null,
           })
         }
-        navigateToView={(view) =>
+        navigateToView={(view) => {
+          setActiveProduct('strata')
           route.navigateToView(view, null, {
             tradeId: null,
             messagingConversationId: null,
             libraryDocumentId: null,
           })
-        }
+        }}
         onNavigate={() => shell.setMobileNavOpen(false)}
       />
+    )
+  }
+
+  function renderAttioClientSection() {
+    const enrichment = selectedAttioClientEnrichment
+    const company = enrichment?.company ?? null
+
+    return (
+      <section className="nexus-attio-section" aria-labelledby="nexus-attio-heading">
+        <div className="nexus-section-head nexus-attio-head">
+          <div>
+            <span className="eyebrow">Attio</span>
+            <strong id="nexus-attio-heading">Relationship data</strong>
+          </div>
+          {company?.web_url ? (
+            <a className="button button-ghost nexus-attio-open" href={company.web_url} target="_blank" rel="noreferrer">
+              Open Attio
+            </a>
+          ) : null}
+        </div>
+
+        {attioClientEnrichmentLoading ? (
+          <div className="nexus-attio-empty">Loading Attio...</div>
+        ) : attioClientEnrichmentError ? (
+          <div className="nexus-attio-empty nexus-attio-error" role="alert">
+            {attioClientEnrichmentError}
+          </div>
+        ) : !enrichment ? (
+          <div className="nexus-attio-empty">No Attio data loaded.</div>
+        ) : !enrichment.matched || !company ? (
+          <div className="nexus-attio-empty">No Attio company match found.</div>
+        ) : (
+          <>
+            <div className="nexus-attio-company">
+              <div className="nexus-attio-company-title">
+                <strong>{company.label}</strong>
+                <span>{company.status ?? formatAttioMatchBasis(enrichment.match_basis)}</span>
+              </div>
+              {company.domains.length > 0 ? (
+                <div className="nexus-attio-domain-list" aria-label="Attio company domains">
+                  {company.domains.map((domain) => (
+                    <span key={domain}>{domain}</span>
+                  ))}
+                </div>
+              ) : null}
+              {company.description ? <p>{company.description}</p> : null}
+              {enrichment.warnings.length > 0 ? (
+                <div className="nexus-attio-warning">{enrichment.warnings.join(' ')}</div>
+              ) : null}
+            </div>
+
+            <div className="nexus-attio-grid">
+              <section className="nexus-attio-column" aria-labelledby="nexus-attio-contacts-heading">
+                <div className="nexus-section-head">
+                  <span className="eyebrow">Contacts</span>
+                  <strong id="nexus-attio-contacts-heading">{enrichment.contacts.length}</strong>
+                </div>
+                {enrichment.contacts.length > 0 ? (
+                  <ul className="nexus-attio-list">
+                    {enrichment.contacts.map((contact) => {
+                      const contactMeta = buildAttioContactMeta(contact)
+                      return (
+                        <li key={contact.record_id}>
+                          <div>
+                            {contact.web_url ? (
+                              <a href={contact.web_url} target="_blank" rel="noreferrer">
+                                {contact.name}
+                              </a>
+                            ) : (
+                              <strong>{contact.name}</strong>
+                            )}
+                            <span>{contactMeta || 'No Attio detail'}</span>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                ) : (
+                  <div className="nexus-attio-empty nexus-attio-empty-compact">No Attio contacts.</div>
+                )}
+              </section>
+
+              <section className="nexus-attio-column" aria-labelledby="nexus-attio-deals-heading">
+                <div className="nexus-section-head">
+                  <span className="eyebrow">Deals</span>
+                  <strong id="nexus-attio-deals-heading">{enrichment.deals.length}</strong>
+                </div>
+                {enrichment.deals.length > 0 ? (
+                  <ul className="nexus-attio-list">
+                    {enrichment.deals.map((deal) => {
+                      const dealMeta = buildAttioDealMeta(deal)
+                      return (
+                        <li key={deal.record_id}>
+                          <div>
+                            {deal.web_url ? (
+                              <a href={deal.web_url} target="_blank" rel="noreferrer">
+                                {deal.name}
+                              </a>
+                            ) : (
+                              <strong>{deal.name}</strong>
+                            )}
+                            <span>{dealMeta || 'No Attio detail'}</span>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                ) : (
+                  <div className="nexus-attio-empty nexus-attio-empty-compact">No Attio deals.</div>
+                )}
+              </section>
+            </div>
+          </>
+        )}
+      </section>
+    )
+  }
+
+  function openNexusClient(clientName: NexusClientName) {
+    setSelectedNexusClient(clientName)
+    setNexusTodoClientDraft(clientName)
+    setNexusContactDraft('')
+    setNexusTodoDraft('')
+    setActiveNexusView('client')
+    shell.setMobileNavOpen(false)
+  }
+
+  function updateNexusClientDraft(field: keyof NexusClientDraft, value: string) {
+    setNexusClientDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value,
+    }))
+  }
+
+  function handleAddNexusClient() {
+    const clientName = nexusClientDraft.clientName.trim()
+    if (!clientName) {
+      return
+    }
+
+    const existingClient = nexusClients.find(
+      (currentClient) => currentClient.clientName.localeCompare(clientName, undefined, { sensitivity: 'accent' }) === 0,
+    )
+    if (existingClient) {
+      setSelectedNexusClient(existingClient.clientName)
+      setNexusTodoClientDraft(existingClient.clientName)
+      return
+    }
+
+    const relationship = nexusClientDraft.relationship.trim() || DEFAULT_NEXUS_CLIENT_RELATIONSHIP
+    const nextAction = nexusClientDraft.nextAction.trim()
+
+    setNexusClients((currentClients) => [
+      ...currentClients,
+      {
+        clientName,
+        relationship,
+        nextAction,
+      },
+    ])
+    setSelectedNexusClient(clientName)
+    setNexusTodoClientDraft(clientName)
+    setNexusClientDraft(createNexusClientRecord(''))
+  }
+
+  function handleNexusClientDraftKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key !== 'Enter') {
+      return
+    }
+
+    event.preventDefault()
+    if (!trimmedNexusClientDraft || nexusClientDraftAlreadyExists) {
+      return
+    }
+
+    handleAddNexusClient()
+  }
+
+  function handleAddNexusContact(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const name = nexusContactDraft.trim()
+    if (!name) {
+      return
+    }
+
+    setNexusContacts((currentContacts) => [
+      ...currentContacts,
+      {
+        id: `nexus-contact-${Date.now()}-${currentContacts.length}`,
+        clientName: selectedNexusClient,
+        name,
+      },
+    ])
+    setNexusContactDraft('')
+  }
+
+  function handleAddNexusTodo(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const title = nexusTodoDraft.trim()
+    if (!title) {
+      return
+    }
+
+    setNexusTodos((currentTodos) => [
+      ...currentTodos,
+      {
+        id: `nexus-todo-${Date.now()}-${currentTodos.length}`,
+        clientName: activeNexusView === 'todo' ? nexusTodoClientDraft : selectedNexusClient,
+        title,
+      },
+    ])
+    setNexusTodoDraft('')
+  }
+
+  function handleAddNexusTool() {
+    const title = nexusToolTitleDraft.trim()
+    const rawUrl = nexusToolUrlDraft.trim()
+    if (!title) {
+      return
+    }
+
+    const normalizedUrl = rawUrl ? (/^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`) : null
+    const toolId = `nexus-tool-${Date.now()}-${nexusTools.length}`
+    setNexusTools((currentTools) => [
+      ...currentTools,
+      {
+        id: toolId,
+        title,
+        url: normalizedUrl,
+        ...nexusToolBooleanDraft,
+      },
+    ])
+    setSelectedNexusToolId(toolId)
+    setNexusToolTitleDraft('')
+    setNexusToolUrlDraft('')
+    setNexusToolBooleanDraft(createNexusToolBooleanDraft())
+  }
+
+  function updateNexusToolBooleanDraft(field: keyof NexusToolBooleanDraft, value: boolean) {
+    setNexusToolBooleanDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value,
+    }))
+  }
+
+  function handleNexusToolDraftKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key !== 'Enter') {
+      return
+    }
+
+    event.preventDefault()
+    if (!nexusToolTitleDraft.trim()) {
+      return
+    }
+
+    handleAddNexusTool()
+  }
+
+  function handleOpenNexusTool(tool: NexusTool) {
+    if (!tool.url) {
+      return
+    }
+
+    window.open(tool.url, '_blank', 'noopener,noreferrer')
+  }
+
+  function handleDeleteNexusTool(tool: NexusTool) {
+    setNexusTools((currentTools) => currentTools.filter((currentTool) => currentTool.id !== tool.id))
+    setSelectedNexusToolId((currentToolId) => (currentToolId === tool.id ? null : currentToolId))
+  }
+
+  function nexusToolRowActions(tool: NexusTool): DataSheetRowAction<NexusTool>[] {
+    const actions: DataSheetRowAction<NexusTool>[] = []
+    if (tool.url) {
+      actions.push({
+        id: 'open',
+        label: 'Open',
+        onSelect: handleOpenNexusTool,
+      })
+    }
+
+    actions.push({
+      id: 'delete',
+      label: 'Delete',
+      tone: 'danger',
+      onSelect: handleDeleteNexusTool,
+    })
+
+    return actions
+  }
+
+  function renderProductSwitch(className = '') {
+    return (
+      <div
+        className={`brand-mark-row product-switch ${className}`.trim()}
+        role="radiogroup"
+        aria-label="Product navigation"
+      >
+        {WORKSPACE_PRODUCTS.map((product) => {
+          const selected = activeProduct === product.key
+
+          return (
+            <button
+              key={product.key}
+              type="button"
+              role="radio"
+              className={`brand-mark product-switch-button ${selected ? 'is-active' : ''}`}
+              aria-checked={selected}
+              onClick={() => setActiveProduct(product.key)}
+            >
+              {product.label}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
+
+  function renderProfileAvatarMenu() {
+    return (
+      <ProfileAvatarMenu
+        key={authSession?.user.user_id ?? 'signed-out'}
+        authSession={authSession}
+        onOpenSettings={() => {
+          setActiveProduct('strata')
+          route.navigateToView('settings')
+          shell.setMobileNavOpen(false)
+        }}
+        onSignOut={onSignOut}
+        signOutPending={signOutPending}
+      />
+    )
+  }
+
+  function handleAssistantTokenTrackerClick(event: ReactMouseEvent<HTMLAnchorElement>) {
+    if (!shouldHandleClientSideNavigation(event)) {
+      return
+    }
+
+    event.preventDefault()
+    setActiveProduct('strata')
+    route.navigateToView(ASSISTANT_TOKEN_TRACKER_VIEW_KEY, null, {
+      tradeId: null,
+      messagingConversationId: null,
+      libraryDocumentId: null,
+      hash: ASSISTANT_TOKEN_TRACKER_ANCHOR_ID,
+    })
+    shell.setMobileNavOpen(false)
+    window.requestAnimationFrame(() => {
+      document.getElementById(ASSISTANT_TOKEN_TRACKER_ANCHOR_ID)?.scrollIntoView({
+        block: 'start',
+      })
+    })
+  }
+
+  function renderWorkspaceTopbar() {
+    return (
+      <header className="workspace-topbar workspace-topbar-persistent">
+        <div className="workspace-topbar-copy">
+          <div className="workspace-topbar-title-row">
+            {renderBackButton('app-back-button-desktop')}
+            <span className="workspace-topbar-title-stack">
+              <strong className="workspace-topbar-title">{displayedTopbarWorkspaceLabel}</strong>
+              <strong className="workspace-topbar-title-sizer" aria-hidden="true">
+                {WORKSPACE_TOPBAR_TITLE_SIZER_LABEL}
+              </strong>
+            </span>
+          </div>
+        </div>
+        <div className="workspace-topbar-actions">
+          <div className="workspace-topbar-command-actions">
+            {renderTerminalCommandTrigger()}
+            {renderShortcutReferenceTrigger()}
+            <PromptHomeAvailableTokenBadge
+              href={route.hrefForView(ASSISTANT_TOKEN_TRACKER_VIEW_KEY, {
+                tradeId: null,
+                messagingConversationId: null,
+                libraryDocumentId: null,
+                hash: ASSISTANT_TOKEN_TRACKER_ANCHOR_ID,
+              })}
+              onClick={handleAssistantTokenTrackerClick}
+            />
+            <WorkspaceTopbarDatabaseSizeBadge />
+          </div>
+          <div className="workspace-topbar-account-actions">
+            <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
+              {effectiveSystemStateLabel}
+            </span>
+            {renderProfileAvatarMenu()}
+            {signOutError ? <small className="workspace-topbar-error">{signOutError}</small> : null}
+          </div>
+        </div>
+      </header>
     )
   }
 
@@ -615,9 +1462,7 @@ function AuthenticatedWorkspaceShell({
       <div className="app-aura app-aura-right" />
 
       <div className="mobile-topbar">
-        <div>
-          <span className="brand-mark">Strata</span>
-        </div>
+        {renderProductSwitch('product-switch-mobile')}
         <div className="mobile-topbar-actions">
           {renderBackButton('app-back-button-mobile')}
           {renderTerminalCommandTrigger('terminal-command-trigger-mobile')}
@@ -656,12 +1501,12 @@ function AuthenticatedWorkspaceShell({
 
       <aside
         id={MOBILE_NAVIGATION_PANEL_ID}
-        className={`side-rail ${shell.mobileNavOpen ? 'is-open' : ''} ${isPromptHomeView ? 'side-rail-prompt' : ''}`}
+        className={`side-rail ${shell.mobileNavOpen ? 'is-open' : ''} ${isPromptHomeView && !isNexusProduct ? 'side-rail-prompt' : ''}`}
         hidden={shell.mobileNavHidden}
         aria-hidden={shell.mobileNavHidden ? true : undefined}
       >
         <div className="brand-lockup">
-          <span className="brand-mark">Strata</span>
+          {renderProductSwitch('product-switch-desktop')}
         </div>
 
         <button
@@ -684,72 +1529,114 @@ function AuthenticatedWorkspaceShell({
           </span>
         </button>
 
-        <nav className="nav-stack" aria-label="Primary">
-          {PRIMARY_NAV_SECTIONS.map((section) => {
-            const expanded = isNavSectionOpen(section.key)
-            const containsCurrentView =
-              route.activeNavigationSectionKey === section.key ||
-              (route.activeNavigationSectionKey === null && section.views.some((view) => view.key === route.currentView))
+        <nav className="nav-stack" aria-label={isNexusProduct ? 'Nexus' : 'Strata'}>
+          {isNexusProduct ? (
+            NEXUS_NAV_ITEMS.map((item) => {
+              const selected =
+                item.key === 'crm'
+                  ? activeNexusView === 'crm' || activeNexusView === 'client'
+                  : activeNexusView === item.key
 
-            return (
-              <section key={section.key} className="nav-section">
-                <div className="nav-section-header">
-                  <button
-                    type="button"
-                    className={`nav-item nav-section-toggle ${containsCurrentView ? 'is-active' : ''}`}
-                    aria-expanded={expanded}
-                    aria-controls={`nav-section-${section.key}`}
-                    onClick={() => {
-                      toggleNavSection(section.key)
-                      route.navigateToSection(section.key)
-                      shell.setMobileNavOpen(false)
-                    }}
-                  >
-                    <div className="nav-section-copy">
-                      <span>{section.kicker}</span>
-                      <strong>{section.label}</strong>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={`nav-item nav-section-toggle-button ${expanded ? 'is-active' : ''}`}
-                    aria-expanded={expanded}
-                    aria-controls={`nav-section-${section.key}`}
-                    aria-label={`${expanded ? 'Collapse' : 'Expand'} ${section.label} section`}
-                    onClick={() => toggleNavSection(section.key)}
-                  >
-                    <span className="nav-section-indicator" aria-hidden="true">
-                      {expanded ? '-' : '+'}
-                    </span>
-                  </button>
-                </div>
-
-                <div id={`nav-section-${section.key}`} className="nav-section-children" hidden={!expanded}>
-                  {section.views.map((view) => (
-                    <a
-                      key={view.key}
-                      href={route.hrefForView(view.key)}
-                      className={`nav-item nav-item-nested ${
-                        route.activeNavigationSectionKey === null && route.currentView === view.key ? 'is-active' : ''
-                      }`}
-                      aria-current={
-                        route.activeNavigationSectionKey === null && route.currentView === view.key ? 'page' : undefined
-                      }
-                      onClick={(event) => {
-                        if (route.handleViewLinkClick(event, view.key)) {
-                          shell.setMobileNavOpen(false)
-                        }
+              return (
+                <section key={item.key} className="nav-section nav-section-leaf">
+                  <div className="nav-section-header nav-section-header-leaf">
+                    <button
+                      type="button"
+                      className={`nav-item nav-section-toggle ${selected ? 'is-active' : ''}`}
+                      aria-current={selected ? 'page' : undefined}
+                      onClick={() => {
+                        setActiveNexusView(item.key)
+                        shell.setMobileNavOpen(false)
                       }}
                     >
-                      <span>{view.kicker}</span>
-                      <strong>{view.label}</strong>
-                    </a>
-                  ))}
-                </div>
-              </section>
-            )
-          })}
+                      <div className="nav-section-copy">
+                        <span
+                          className={`nav-section-kicker ${'kicker' in item ? '' : 'nav-section-kicker-empty'}`.trim()}
+                          aria-hidden={'kicker' in item ? undefined : true}
+                        >
+                          {'kicker' in item ? item.kicker : ''}
+                        </span>
+                        <strong>{item.label}</strong>
+                      </div>
+                    </button>
+                  </div>
+                </section>
+              )
+            })
+          ) : (
+            PRIMARY_NAV_SECTIONS.map((section) => {
+              const expanded = isNavSectionOpen(section.key)
+              const rendersNestedViews = primaryNavigationSectionRendersNestedViews(section)
+              const containsCurrentView =
+                route.activeNavigationSectionKey === section.key ||
+                (route.activeNavigationSectionKey === null && section.views.some((view) => view.key === route.currentView))
+
+              return (
+                <section key={section.key} className={`nav-section ${rendersNestedViews ? '' : 'nav-section-leaf'}`}>
+                  <div className={`nav-section-header ${rendersNestedViews ? '' : 'nav-section-header-leaf'}`}>
+                    <button
+                      type="button"
+                      className={`nav-item nav-section-toggle ${containsCurrentView ? 'is-active' : ''}`}
+                      aria-expanded={rendersNestedViews ? expanded : undefined}
+                      aria-controls={rendersNestedViews ? `nav-section-${section.key}` : undefined}
+                      onClick={() => {
+                        if (rendersNestedViews) {
+                          toggleNavSection(section.key)
+                        }
+                        route.navigateToSection(section.key)
+                        shell.setMobileNavOpen(false)
+                      }}
+                    >
+                      <div className="nav-section-copy">
+                        <span>{section.kicker}</span>
+                        <strong>{section.label}</strong>
+                      </div>
+                    </button>
+
+                    {rendersNestedViews ? (
+                      <button
+                        type="button"
+                        className={`nav-item nav-section-toggle-button ${expanded ? 'is-active' : ''}`}
+                        aria-expanded={expanded}
+                        aria-controls={`nav-section-${section.key}`}
+                        aria-label={`${expanded ? 'Collapse' : 'Expand'} ${section.label} section`}
+                        onClick={() => toggleNavSection(section.key)}
+                      >
+                        <span className="nav-section-indicator" aria-hidden="true">
+                          {expanded ? '-' : '+'}
+                        </span>
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {rendersNestedViews ? (
+                    <div id={`nav-section-${section.key}`} className="nav-section-children" hidden={!expanded}>
+                      {section.views.map((view) => (
+                        <a
+                          key={view.key}
+                          href={route.hrefForView(view.key)}
+                          className={`nav-item nav-item-nested ${
+                            route.activeNavigationSectionKey === null && route.currentView === view.key ? 'is-active' : ''
+                          }`}
+                          aria-current={
+                            route.activeNavigationSectionKey === null && route.currentView === view.key ? 'page' : undefined
+                          }
+                          onClick={(event) => {
+                            if (route.handleViewLinkClick(event, view.key)) {
+                              shell.setMobileNavOpen(false)
+                            }
+                          }}
+                        >
+                          <span>{view.kicker}</span>
+                          <strong>{view.label}</strong>
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              )
+            })
+          )}
         </nav>
       </aside>
 
@@ -758,7 +1645,7 @@ function AuthenticatedWorkspaceShell({
         tabIndex={-1}
         data-terminal-shortcut-target="main-stage"
       >
-        {showStartHereOverlay ? (
+        {!isNexusProduct && showStartHereOverlay ? (
           <AppStartHereOverlay
             authSession={authSession}
             onDismiss={dismissStartHere}
@@ -766,62 +1653,23 @@ function AuthenticatedWorkspaceShell({
           />
         ) : null}
 
-        {isPromptHomeView ? (
-          <header className="workspace-topbar workspace-topbar-prompt">
-            <div className="workspace-topbar-copy">
-              <div className="workspace-topbar-title-row">
-                {renderBackButton('app-back-button-desktop')}
-                <strong>{currentWorkspaceLabel}</strong>
-              </div>
-            </div>
-            <div className="workspace-topbar-actions">
-              {renderTerminalCommandTrigger()}
-              {renderShortcutReferenceTrigger()}
-              <PromptHomeAvailableTokenBadge />
-              <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
-                {effectiveSystemStateLabel}
-              </span>
-              {authSession ? (
-                <small className="workspace-topbar-session">
-                  Signed in as {authSession.user.display_name}
-                </small>
-              ) : null}
-              {authSession ? (
-                <button
-                  type="button"
-                  className="button button-ghost workspace-topbar-signout"
-                  onClick={() => void onSignOut()}
-                  disabled={signOutPending}
-                >
-                  {signOutPending ? 'Signing Out...' : 'Sign Out'}
-                </button>
-              ) : null}
-              {signOutError ? <small className="workspace-topbar-error">{signOutError}</small> : null}
-            </div>
-          </header>
-        ) : (
+        {renderWorkspaceTopbar()}
+
+        {!isNexusProduct && !isPromptHomeView ? (
           <header className={heroClassName}>
             <div className="hero-copy">
               {isMessagingWorkspaceView ? (
                 <div className="hero-compact-heading-row">
                   <div className="hero-title-with-back">
-                    {renderBackButton('app-back-button-desktop')}
                     <h2>{displayedHeroTitle}</h2>
                   </div>
-                  <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
-                    {effectiveSystemStateLabel}
-                  </span>
                 </div>
               ) : (
                 <>
                   <div className="hero-heading-row">
                     <div className="hero-heading-meta">
-                      {renderBackButton('app-back-button-desktop')}
                       <span className="eyebrow">Workspace</span>
                     </div>
-                    <span className={`hero-session-pill hero-session-pill-${effectiveSystemStateTone}`}>
-                      {effectiveSystemStateLabel}
-                    </span>
                   </div>
                   <h2>{displayedHeroTitle}</h2>
                 </>
@@ -850,48 +1698,28 @@ function AuthenticatedWorkspaceShell({
                     ? `${selectedTrade.commodity} • ${selectedTrade.book}`
                     : currentWorkspaceDetail}
                 </small>
-                <div className="hero-badge-actions">
-                  {renderTerminalCommandTrigger()}
-                  {renderShortcutReferenceTrigger()}
-                  {authSession ? (
-                    <small className="hero-badge-session">
-                      Signed in as {authSession.user.display_name}
-                    </small>
-                  ) : null}
-                  {authSession ? (
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      onClick={() => void onSignOut()}
-                      disabled={signOutPending}
-                    >
-                      {signOutPending ? 'Signing Out...' : 'Sign Out'}
-                    </button>
-                  ) : null}
-                  {signOutError ? <small className="hero-badge-error">{signOutError}</small> : null}
-                </div>
               </div>
             ) : null}
           </header>
-        )}
+        ) : null}
 
-        {renderWorkspaceSetLauncher()}
+        {!isNexusProduct ? renderWorkspaceSetLauncher() : null}
 
-        {!showingNavigationSectionLanding && workspaceData.error ? (
+        {!isNexusProduct && !showingNavigationSectionLanding && workspaceData.error ? (
           <WorkspaceErrorBanner
             message={workspaceShellErrorMessage}
             onReconnect={workspaceShellReconnectAvailable ? handleReconnectWorkspace : null}
             reconnectPending={workspaceReconnectPending}
           />
         ) : null}
-        {!showingNavigationSectionLanding && workspaceWarning ? (
+        {!isNexusProduct && !showingNavigationSectionLanding && workspaceWarning ? (
           <WorkspaceErrorBanner
             message={workspaceWarningMessage}
             onReconnect={workspaceWarningReconnectAvailable ? handleReconnectWorkspace : null}
             reconnectPending={workspaceReconnectPending}
           />
         ) : null}
-        {!showingNavigationSectionLanding && routeHandoffBanner && !currentWorkspaceOwnsHandoffBanner ? (
+        {!isNexusProduct && !showingNavigationSectionLanding && routeHandoffBanner && !currentWorkspaceOwnsHandoffBanner ? (
           <section className="feedback-banner workspace-handoff-banner" aria-live="polite">
             <div className="workspace-handoff-banner-copy">
               <strong>{routeHandoffBanner.title}</strong>
@@ -907,7 +1735,329 @@ function AuthenticatedWorkspaceShell({
           </section>
         ) : null}
 
-        {showingNavigationSectionLanding ? (
+        {isNexusProduct && activeNexusView === 'crm' ? (
+          <section className="nexus-crm-workspace" aria-labelledby="nexus-crm-heading">
+            <article className="nexus-crm-card">
+              <span className="eyebrow">Nexus</span>
+              <h2 id="nexus-crm-heading">CRM</h2>
+              <section className="nexus-client-base" aria-label="Existing Client Base">
+                <DataSheet
+                  label="Existing Client Base"
+                  description="Sort or filter Nexus relationships, then open a client row to manage Contacts and To-Dos."
+                  columns={NEXUS_CLIENT_TABLE_COLUMNS}
+                  rows={nexusClientRows}
+                  getRowId={(row) => row.clientName}
+                  getRowLabel={(row) => row.clientName}
+                  selectedRowId={selectedNexusClient}
+                  onSelectRow={(row) => openNexusClient(row.clientName)}
+                  emptyMessage="No Nexus clients are available yet."
+                  appendRows={
+                    <tr className="nexus-client-entry-row">
+                      <td className="data-sheet-align-end">
+                        <button
+                          type="button"
+                          className="button button-primary nexus-client-entry-add"
+                          disabled={!trimmedNexusClientDraft || nexusClientDraftAlreadyExists}
+                          onClick={handleAddNexusClient}
+                        >
+                          Add
+                        </button>
+                      </td>
+                      <td>
+                        <input
+                          className="nexus-client-entry-input"
+                          type="text"
+                          value={nexusClientDraft.clientName}
+                          onChange={(event) => updateNexusClientDraft('clientName', event.target.value)}
+                          onKeyDown={handleNexusClientDraftKeyDown}
+                          placeholder="Client name"
+                          aria-label="New client"
+                          aria-describedby={nexusClientDraftAlreadyExists ? 'nexus-client-entry-status' : undefined}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="nexus-client-entry-input"
+                          type="text"
+                          value={nexusClientDraft.relationship}
+                          onChange={(event) => updateNexusClientDraft('relationship', event.target.value)}
+                          onKeyDown={handleNexusClientDraftKeyDown}
+                          placeholder={DEFAULT_NEXUS_CLIENT_RELATIONSHIP}
+                          aria-label="New relationship"
+                        />
+                      </td>
+                      <td className="data-sheet-align-end">
+                        <span className="nexus-client-contact-count">0 contacts</span>
+                      </td>
+                      <td className="data-sheet-align-end">
+                        <span className="nexus-client-todo-count">0 open</span>
+                      </td>
+                      <td>
+                        <div className="nexus-client-entry-next-action">
+                          <input
+                            className="nexus-client-entry-input"
+                            type="text"
+                            value={nexusClientDraft.nextAction}
+                            onChange={(event) => updateNexusClientDraft('nextAction', event.target.value)}
+                            onKeyDown={handleNexusClientDraftKeyDown}
+                            placeholder="Add To-Do"
+                            aria-label="New next action"
+                          />
+                          {nexusClientDraftAlreadyExists ? (
+                            <span id="nexus-client-entry-status" className="nexus-client-entry-status">
+                              Already in CRM
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  }
+                />
+              </section>
+            </article>
+          </section>
+        ) : isNexusProduct && activeNexusView === 'client' ? (
+          <section className="nexus-crm-workspace nexus-client-workspace" aria-labelledby="nexus-client-heading">
+            <article className="nexus-crm-card">
+              <div className="nexus-client-detail-head">
+                <button
+                  type="button"
+                  className="button button-ghost nexus-client-back"
+                  onClick={() => setActiveNexusView('crm')}
+                >
+                  CRM
+                </button>
+                <div>
+                  <span className="eyebrow">Nexus client</span>
+                  <h2 id="nexus-client-heading">{selectedNexusClient}</h2>
+                </div>
+              </div>
+              {renderAttioClientSection()}
+              <form className="nexus-contact-form" onSubmit={handleAddNexusContact}>
+                <label className="nexus-contact-field">
+                  <span>Add contact</span>
+                  <input
+                    type="text"
+                    value={nexusContactDraft}
+                    onChange={(event) => setNexusContactDraft(event.target.value)}
+                    placeholder={`Contact at ${selectedNexusClient}`}
+                  />
+                </label>
+                <button type="submit" className="button button-primary" disabled={!nexusContactDraft.trim()}>
+                  Add Contact
+                </button>
+              </form>
+              <section className="nexus-client-contacts" aria-labelledby="nexus-client-contacts-heading">
+                <div className="nexus-section-head">
+                  <span className="eyebrow">Contacts</span>
+                  <strong id="nexus-client-contacts-heading">
+                    {selectedNexusClientContacts.length} contact
+                    {selectedNexusClientContacts.length === 1 ? '' : 's'}
+                  </strong>
+                </div>
+                {selectedNexusClientContacts.length > 0 ? (
+                  <ul className="nexus-contact-list">
+                    {selectedNexusClientContacts.map((contact) => (
+                      <li key={contact.id}>
+                        <strong>{contact.name}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="nexus-contact-empty">No Contacts for this client yet.</div>
+                )}
+              </section>
+              <form className="nexus-todo-form" onSubmit={handleAddNexusTodo}>
+                <label className="nexus-todo-field">
+                  <span>Add to-do</span>
+                  <input
+                    type="text"
+                    value={nexusTodoDraft}
+                    onChange={(event) => setNexusTodoDraft(event.target.value)}
+                    placeholder={`Follow up with ${selectedNexusClient}`}
+                  />
+                </label>
+                <button type="submit" className="button button-primary" disabled={!nexusTodoDraft.trim()}>
+                  Add To-Do
+                </button>
+              </form>
+              <section className="nexus-client-todos" aria-labelledby="nexus-client-todos-heading">
+                <div className="nexus-section-head">
+                  <span className="eyebrow">To-Dos</span>
+                  <strong id="nexus-client-todos-heading">{selectedNexusClientTodos.length} open</strong>
+                </div>
+                {selectedNexusClientTodos.length > 0 ? (
+                  <ul className="nexus-todo-list">
+                    {selectedNexusClientTodos.map((todo) => (
+                      <li key={todo.id}>
+                        <strong>{todo.title}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="nexus-todo-empty">No To-Do items for this client yet.</div>
+                )}
+              </section>
+            </article>
+          </section>
+        ) : isNexusProduct && activeNexusView === 'todo' ? (
+          <section className="nexus-crm-workspace nexus-todo-workspace" aria-labelledby="nexus-todo-heading">
+            <article className="nexus-crm-card">
+              <span className="eyebrow">Nexus</span>
+              <h2 id="nexus-todo-heading">To-Do</h2>
+              <form className="nexus-todo-form nexus-todo-form-global" onSubmit={handleAddNexusTodo}>
+                <label className="nexus-todo-field">
+                  <span>New to-do</span>
+                  <input
+                    type="text"
+                    value={nexusTodoDraft}
+                    onChange={(event) => setNexusTodoDraft(event.target.value)}
+                    placeholder="Add a Nexus follow-up"
+                  />
+                </label>
+                <label className="nexus-todo-field nexus-todo-client-field">
+                  <span>Client</span>
+                  <select
+                    value={nexusTodoClientDraft}
+                    onChange={(event) => setNexusTodoClientDraft(event.target.value)}
+                  >
+                    {nexusClientRows.map((client) => (
+                      <option key={client.clientName} value={client.clientName}>
+                        {client.clientName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button type="submit" className="button button-primary" disabled={!nexusTodoDraft.trim()}>
+                  Add To-Do
+                </button>
+              </form>
+              {nexusTodos.length > 0 ? (
+                <ul className="nexus-todo-list nexus-todo-list-global">
+                  {nexusTodos.map((todo) => (
+                    <li key={todo.id}>
+                      <div>
+                        <strong>{todo.title}</strong>
+                        <span>{todo.clientName}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="button button-ghost nexus-todo-client-link"
+                        onClick={() => openNexusClient(todo.clientName)}
+                      >
+                        Open client
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="nexus-todo-empty">No To-Do items yet.</div>
+              )}
+            </article>
+          </section>
+        ) : isNexusProduct && activeNexusView === 'tools' ? (
+          <section className="nexus-crm-workspace nexus-tools-workspace" aria-labelledby="nexus-tools-heading">
+            <article className="nexus-crm-card">
+              <span className="eyebrow">Nexus</span>
+              <h2 id="nexus-tools-heading">Tools</h2>
+              <section className="nexus-client-base" aria-label="Nexus Tools">
+                <DataSheet
+                  label="Nexus Tools"
+                  description="Sort or filter saved tools. Right-click, two-finger click, or double-click a row for options."
+                  columns={NEXUS_TOOL_TABLE_COLUMNS}
+                  rows={nexusTools}
+                  getRowId={(row) => row.id}
+                  getRowLabel={(row) => row.title}
+                  selectedRowId={selectedNexusToolId}
+                  onSelectRow={(row) => setSelectedNexusToolId(row.id)}
+                  emptyMessage="No tools yet. Use the entry row below to add one."
+                  rowActions={nexusToolRowActions}
+                  appendRows={
+                    <tr className="nexus-client-entry-row nexus-tool-entry-row">
+                      <td className="data-sheet-align-end">
+                        <button
+                          type="button"
+                          className="button button-primary nexus-client-entry-add"
+                          disabled={!nexusToolTitleDraft.trim()}
+                          onClick={handleAddNexusTool}
+                        >
+                          Add
+                        </button>
+                      </td>
+                      <td>
+                        <input
+                          className="nexus-client-entry-input"
+                          type="text"
+                          value={nexusToolTitleDraft}
+                          onChange={(event) => setNexusToolTitleDraft(event.target.value)}
+                          onKeyDown={handleNexusToolDraftKeyDown}
+                          placeholder="Tool name"
+                          aria-label="New tool"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="nexus-client-entry-input"
+                          type="text"
+                          inputMode="url"
+                          value={nexusToolUrlDraft}
+                          onChange={(event) => setNexusToolUrlDraft(event.target.value)}
+                          onKeyDown={handleNexusToolDraftKeyDown}
+                          placeholder="Optional URL"
+                          aria-label="New tool link"
+                        />
+                      </td>
+                      <td className="data-sheet-align-center">
+                        <label className="nexus-tool-entry-boolean">
+                          <input
+                            type="checkbox"
+                            checked={nexusToolBooleanDraft.accessMethod}
+                            onChange={(event) => updateNexusToolBooleanDraft('accessMethod', event.target.checked)}
+                            aria-label="New tool access method"
+                          />
+                          <span>{nexusToolBooleanDraft.accessMethod ? 'TRUE' : 'FALSE'}</span>
+                        </label>
+                      </td>
+                      <td className="data-sheet-align-center">
+                        <label className="nexus-tool-entry-boolean">
+                          <input
+                            type="checkbox"
+                            checked={nexusToolBooleanDraft.application}
+                            onChange={(event) => updateNexusToolBooleanDraft('application', event.target.checked)}
+                            aria-label="New tool application"
+                          />
+                          <span>{nexusToolBooleanDraft.application ? 'TRUE' : 'FALSE'}</span>
+                        </label>
+                      </td>
+                      <td className="data-sheet-align-center">
+                        <label className="nexus-tool-entry-boolean">
+                          <input
+                            type="checkbox"
+                            checked={nexusToolBooleanDraft.browser}
+                            onChange={(event) => updateNexusToolBooleanDraft('browser', event.target.checked)}
+                            aria-label="New tool browser"
+                          />
+                          <span>{nexusToolBooleanDraft.browser ? 'TRUE' : 'FALSE'}</span>
+                        </label>
+                      </td>
+                      <td className="data-sheet-align-center">
+                        <label className="nexus-tool-entry-boolean">
+                          <input
+                            type="checkbox"
+                            checked={nexusToolBooleanDraft.api}
+                            onChange={(event) => updateNexusToolBooleanDraft('api', event.target.checked)}
+                            aria-label="New tool API"
+                          />
+                          <span>{nexusToolBooleanDraft.api ? 'TRUE' : 'FALSE'}</span>
+                        </label>
+                      </td>
+                    </tr>
+                  }
+                />
+              </section>
+            </article>
+          </section>
+        ) : showingNavigationSectionLanding ? (
           <Suspense
             fallback={
               <WorkspaceLoadState
@@ -1005,8 +2155,14 @@ function AuthenticatedWorkspaceShell({
         counterparties={workspaceData.counterparties}
         commodities={workspaceData.commodities}
         priceIndices={workspaceData.priceIndices}
-        navigateToView={route.navigateToView}
-        navigateToTrade={navigateToTrade}
+        navigateToView={(view, handoff, options) => {
+          setActiveProduct('strata')
+          route.navigateToView(view, handoff, options)
+        }}
+        navigateToTrade={(tradeId, handoff) => {
+          setActiveProduct('strata')
+          navigateToTrade(tradeId, handoff)
+        }}
         referenceNavigator={{
           setReferenceTab: referenceState.setReferenceTab,
           startEditCommodity: referenceState.startEditCommodity,
@@ -1031,7 +2187,8 @@ export default function App() {
     route.currentView,
     route.currentView === 'trades' ? initialAuthInterruptionResume?.inspectorTab ?? null : null,
   )
-  const appearance = useAppAppearance()
+  const [activeProduct, setActiveProduct] = useState<WorkspaceProductKey>('strata')
+  const appearance = useAppAppearance(activeProduct)
   const tradeCapturePreferences = useAppTradeCaptureSettings()
   const workspaceData = useAppWorkspaceData(route.currentView)
   const startHere = useAppStartHere(workspaceData.authSession)
@@ -1230,6 +2387,8 @@ export default function App() {
       route={route}
       shell={shell}
       appearance={appearance}
+      activeProduct={activeProduct}
+      setActiveProduct={setActiveProduct}
       tradeCapturePreferences={tradeCapturePreferences}
       workspaceData={workspaceData}
       startHereRouting={startHereRouting}

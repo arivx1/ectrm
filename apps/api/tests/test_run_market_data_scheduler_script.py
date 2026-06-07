@@ -161,6 +161,41 @@ class RunMarketDataSchedulerScriptTests(unittest.TestCase):
         kalshi_mock.assert_called_once()
         self.assertIn("KALSHI scheduler run", buffer.getvalue())
 
+    def test_main_runs_alpha_vantage_provider_when_due(self) -> None:
+        session = _FakeSession()
+        with patch.object(run_market_data_scheduler, "SessionLocal", return_value=session), patch.object(
+            run_market_data_scheduler,
+            "build_external_data_sync_status",
+            return_value={"providers": [{"provider": "ALPHA_VANTAGE", "due_for_sync": True}]},
+        ), patch.object(
+            run_market_data_scheduler,
+            "sync_alpha_vantage_prices",
+            return_value=SimpleNamespace(
+                id=21,
+                status="SUCCEEDED",
+                series_count=3,
+                observation_count=3,
+                error_summary=None,
+            ),
+        ) as alpha_vantage_mock, patch(
+            "sys.argv",
+            [
+                "run_market_data_scheduler.py",
+                "--provider",
+                "alpha-vantage",
+                "--max-cycles",
+                "1",
+            ],
+        ):
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                exit_code = run_market_data_scheduler.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(session.closed)
+        alpha_vantage_mock.assert_called_once()
+        self.assertIn("ALPHA_VANTAGE scheduler run", buffer.getvalue())
+
     def test_main_runs_eia_fundamentals_provider_when_due(self) -> None:
         session = _FakeSession()
         with patch.object(run_market_data_scheduler, "SessionLocal", return_value=session), patch.object(

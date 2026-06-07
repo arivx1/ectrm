@@ -518,7 +518,7 @@ class DeliveriesApiTests(unittest.TestCase):
 
         self.assertEqual(
             [delivery.delivery_id for delivery in payload],
-            ["DLV-T-LOG-1", "DLV-T-POWER-1", "DLV-T-GAS-1", "DLV-T-SWAP-1-L1", "DLV-T-SWAP-1-L2"],
+            ["DLV-T-LOG-1", "DLV-T-GAS-1", "DLV-T-POWER-1", "DLV-T-SWAP-1-L1", "DLV-T-SWAP-1-L2"],
         )
 
         logistics = payload[0]
@@ -547,7 +547,33 @@ class DeliveriesApiTests(unittest.TestCase):
         )
         self.assertIn("Explicit transport mode is missing for discrete logistics delivery.", logistics.blockers)
 
-        power = payload[1]
+        gas = payload[1]
+        self.assertEqual(gas.mode_family, "NETWORK_FLOW")
+        self.assertEqual(gas.transport_mode, "PIPELINE")
+        self.assertEqual(gas.transport_mode_source, "DERIVED")
+        self.assertEqual(gas.delivery_profile, "FLOW_WINDOW")
+        self.assertEqual(gas.direction, "OUTBOUND")
+        self.assertEqual(gas.status, "BLOCKED")
+        self.assertEqual(gas.volume, 10000.0)
+        self.assertEqual(gas.confirmation_status, "CONFIRMED")
+        self.assertEqual(gas.nomination_status, "NOMINATED")
+        self.assertEqual(gas.allocation_status, "ALLOCATED")
+        self.assertEqual(gas.actualization_status, "PENDING")
+        self.assertEqual(gas.invoice_status, "PENDING")
+        self.assertEqual(gas.payment_status, "PENDING")
+        self.assertEqual(gas.scheduling_stage, "BLOCKED")
+        self.assertEqual(gas.scheduling_owner, "scheduler.gas")
+        self.assertEqual(gas.next_scheduling_workflow_type, "NOMINATION")
+        self.assertEqual(gas.next_scheduling_workflow_status, "NOMINATED")
+        self.assertEqual(gas.open_scheduling_work_item_count, 2)
+        self.assertIn("Operations owner is required for gas schedule commitment.", gas.blockers)
+        self.assertIn("Pipeline system is required for gas schedule commitment.", gas.blockers)
+        self.assertIn("Pipeline route/path is required for gas schedule commitment.", gas.blockers)
+        self.assertIn("Receipt location is required for gas schedule commitment.", gas.blockers)
+        self.assertIn("Delivery location is required for gas schedule commitment.", gas.blockers)
+        self.assertIn("Nomination reference is required once gas movement is nominated or completed.", gas.blockers)
+
+        power = payload[2]
         self.assertEqual(power.mode_family, "POWER_SCHEDULE")
         self.assertEqual(power.transport_mode, "POWER_GRID")
         self.assertEqual(power.transport_mode_source, "DERIVED")
@@ -565,26 +591,6 @@ class DeliveriesApiTests(unittest.TestCase):
         self.assertEqual(power.next_scheduling_workflow_type, "NOMINATION")
         self.assertEqual(power.next_scheduling_workflow_status, "SCHEDULED")
         self.assertEqual(power.scheduling_work_items[0].owner, "scheduler.power")
-
-        gas = payload[2]
-        self.assertEqual(gas.mode_family, "NETWORK_FLOW")
-        self.assertEqual(gas.transport_mode, "PIPELINE")
-        self.assertEqual(gas.transport_mode_source, "DERIVED")
-        self.assertEqual(gas.delivery_profile, "FLOW_WINDOW")
-        self.assertEqual(gas.direction, "OUTBOUND")
-        self.assertEqual(gas.status, "READY")
-        self.assertEqual(gas.volume, 10000.0)
-        self.assertEqual(gas.confirmation_status, "CONFIRMED")
-        self.assertEqual(gas.nomination_status, "NOMINATED")
-        self.assertEqual(gas.allocation_status, "ALLOCATED")
-        self.assertEqual(gas.actualization_status, "PENDING")
-        self.assertEqual(gas.invoice_status, "PENDING")
-        self.assertEqual(gas.payment_status, "PENDING")
-        self.assertEqual(gas.scheduling_stage, "IN_FLIGHT")
-        self.assertEqual(gas.scheduling_owner, "scheduler.gas")
-        self.assertEqual(gas.next_scheduling_workflow_type, "NOMINATION")
-        self.assertEqual(gas.next_scheduling_workflow_status, "NOMINATED")
-        self.assertEqual(gas.open_scheduling_work_item_count, 2)
 
         swap_leg_one = payload[3]
         swap_leg_two = payload[4]

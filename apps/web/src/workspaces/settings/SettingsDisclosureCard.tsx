@@ -58,6 +58,7 @@ export function SettingsDisclosureCard({
       <button
         type="button"
         className="settings-disclosure-toggle"
+        aria-label={`${expanded ? 'Collapse' : 'Expand'} ${title}`}
         aria-expanded={expanded}
         aria-controls={panelId}
         onClick={() => setExpanded((current) => !current)}
@@ -68,7 +69,6 @@ export function SettingsDisclosureCard({
           <strong>{summary}</strong>
         </div>
         <div className="settings-disclosure-toggle-meta">
-          <small>{expanded ? 'Hide card' : 'Show card'}</small>
           <span className="settings-disclosure-toggle-indicator" aria-hidden="true">
             {expanded ? '−' : '+'}
           </span>

@@ -95,6 +95,10 @@ function defaultAppViewKey(): ViewKey {
   return resolvePreferredHomeView(getAppearanceSettingsSnapshot())
 }
 
+function normalizeDeprecatedAppView(view: ViewKey): ViewKey {
+  return view === 'dashboard' ? defaultAppViewKey() : view
+}
+
 export type AppRouteState = {
   section: PrimaryNavigationSectionKey | null
   view: ViewKey
@@ -127,7 +131,9 @@ function readAppRouteState(): AppRouteState {
   const sectionParam = params.get('section')
   const viewParam = params.get('view')
   const preferredDefaultView = defaultAppViewKey()
-  const view: ViewKey = isViewKey(viewParam) ? viewParam : preferredDefaultView
+  const view: ViewKey = normalizeDeprecatedAppView(
+    isViewKey(viewParam) ? viewParam : preferredDefaultView,
+  )
   const section = isPrimaryNavigationSectionKey(sectionParam) ? sectionParam : null
   const sectionLandingView = section === null ? null : primaryNavigationSectionLandingView(section)
   const routeView = sectionLandingView ?? view
@@ -269,6 +275,7 @@ export function useAppRouteState() {
     handoff: AppRouteHandoff | null = null,
     options: AppRouteNavigationOptions = {},
   ) {
+    const nextView = normalizeDeprecatedAppView(view)
     const nextTradeId = options.tradeId !== undefined ? options.tradeId : selectedTradeId
     const nextMessagingConversationId =
       options.messagingConversationId !== undefined
@@ -281,13 +288,13 @@ export function useAppRouteState() {
     const nextHash =
       options.hash !== undefined
         ? normalizeHashFragment(options.hash)
-        : view === 'settings'
+        : nextView === 'settings'
           ? window.location.hash
           : ''
     syncRouteState(
       {
         section: null,
-        view,
+        view: nextView,
         tradeId: nextTradeId,
         messagingConversationId: nextMessagingConversationId,
         libraryDocumentId: nextLibraryDocumentId,
@@ -297,7 +304,7 @@ export function useAppRouteState() {
       nextHash,
     )
     setActiveNavigationSectionKey(null)
-    setCurrentView(view)
+    setCurrentView(nextView)
     setRouteHandoff(handoff)
     if (options.tradeId !== undefined) {
       setSelectedTradeId(options.tradeId)
@@ -311,6 +318,7 @@ export function useAppRouteState() {
   }
 
   function hrefForView(view: ViewKey, hashOrOptions?: string | null | AppRouteNavigationOptions) {
+    const nextView = normalizeDeprecatedAppView(view)
     const options =
       typeof hashOrOptions === 'object' && hashOrOptions !== null
         ? hashOrOptions
@@ -318,13 +326,13 @@ export function useAppRouteState() {
     const nextHash =
       options.hash !== undefined
         ? normalizeHashFragment(options.hash)
-        : view === 'settings'
+        : nextView === 'settings'
           ? window.location.hash
           : ''
     return buildAppRouteUrl(
       {
         section: null,
-        view,
+        view: nextView,
         tradeId: options.tradeId !== undefined ? options.tradeId : selectedTradeId,
         messagingConversationId:
           options.messagingConversationId !== undefined

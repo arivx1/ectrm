@@ -60,6 +60,12 @@ PROVIDER_LABELS: dict[AssistantProvider, str] = {
     "google": "Gemini",
 }
 
+PROVIDER_API_LABELS: dict[AssistantProvider, str] = {
+    "openai": "OpenAI",
+    "anthropic": "Anthropic",
+    "google": "Google",
+}
+
 PROVIDER_SETUP_ENV_VARS: dict[AssistantProvider, str] = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
@@ -67,6 +73,7 @@ PROVIDER_SETUP_ENV_VARS: dict[AssistantProvider, str] = {
 }
 
 VALID_PROVIDERS: tuple[AssistantProvider, ...] = ("openai", "anthropic", "google")
+AGENT_BUILDER_PROVIDERS: tuple[AssistantProvider, ...] = ("openai", "anthropic")
 logger = get_logger(__name__)
 
 ASSISTANT_ACTION_DEFINITIONS: tuple[AssistantActionDefinitionOut, ...] = (
@@ -213,79 +220,86 @@ class AssistantService:
             tool_calls=[trace.to_out() for trace in (completion.tool_calls or [])],
         )
 
+    async def build_agent_draft(
+        self,
+        payload: AssistantAgentBuildRequest,
+    ) -> AssistantAgentBuildSuggestionOut:
+        requested_provider = payload.current_draft.provider if payload.current_draft else None
+        provider = _resolve_agent_builder_provider_config(requested_provider)
+        return await self._build_agent_draft_with_provider(payload=payload, provider=provider)
+
     async def build_agent_draft_with_openai(
         self,
         payload: AssistantAgentBuildRequest,
     ) -> AssistantAgentBuildSuggestionOut:
         provider = resolve_provider_config("openai")
-        builder_model = settings.OPENAI_AGENT_BUILDER_MODEL.strip() or provider.model
+        return await self._build_agent_draft_with_provider(payload=payload, provider=provider)
+
+    async def _build_agent_draft_with_provider(
+        self,
+        *,
+        payload: AssistantAgentBuildRequest,
+        provider: AssistantProviderConfig,
+    ) -> AssistantAgentBuildSuggestionOut:
+        provider_label = _provider_api_label(provider.provider)
+        builder_model = _resolve_agent_builder_model(provider)
         current_draft = payload.current_draft.model_dump(mode="json", exclude_none=True) if payload.current_draft else {}
         published_tool_names = [tool.name for tool in self._tool_definitions]
-        runtime_model = _resolve_openai_runtime_model(payload, provider.model)
-        warnings = _collect_agent_builder_warnings(payload, runtime_model)
-
-        response_payload = await _post_json(
-            url=f"{provider.base_url.rstrip('/')}/responses",
-            headers={
-                "Authorization": f"Bearer {provider.api_key}",
-                "Content-Type": "application/json",
-            },
-            payload={
-                "model": builder_model,
-                "max_output_tokens": settings.ASSISTANT_MAX_OUTPUT_TOKENS,
-                "instructions": _build_openai_agent_builder_instructions(),
-                "input": json_dumps(
-                    {
-                        "brief": payload.brief,
-                        "current_draft": current_draft,
-                        "runtime_target": {
-                            "provider": "openai",
-                            "model": runtime_model,
-                        },
-                        "workspace_options": list(get_args(AssistantWorkspace)),
-                        "capability_options": list(get_args(AssistantAgentCapability)),
-                        "skill_options": list(list_agent_skill_keys()),
-                        "action_type_options": list(get_args(AssistantActionType)),
-                        "tool_catalog": [
-                            {
-                                "name": tool.name,
-                                "description": tool.description,
-                            }
-                            for tool in self._tool_definitions
-                        ],
-                    }
-                ),
-                "text": {
-                    "format": {
-                        "type": "json_schema",
-                        "name": "assistant_agent_builder_draft",
-                        "strict": True,
-                        "schema": _build_openai_agent_builder_schema(published_tool_names),
-                    }
+        published_tool_names_set = set(published_tool_names)
+        runtime_model = _resolve_agent_builder_runtime_model(payload, provider)
+        warnings = _collect_agent_builder_warnings(payload, provider, runtime_model)
+        response_schema = _build_openai_agent_builder_schema(published_tool_names)
+        response_payload = await _post_agent_json_request(
+            provider=provider,
+            provider_label=f"{provider_label} Agent Builder",
+            model=builder_model,
+            instructions=_build_agent_builder_instructions(provider_label),
+            input_payload={
+                "brief": payload.brief,
+                "current_draft": current_draft,
+                "runtime_target": {
+                    "provider": provider.provider,
+                    "model": runtime_model,
                 },
+                "workspace_options": list(get_args(AssistantWorkspace)),
+                "capability_options": list(get_args(AssistantAgentCapability)),
+                "skill_options": list(list_agent_skill_keys()),
+                "action_type_options": list(get_args(AssistantActionType)),
+                "tool_catalog": [
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                    }
+                    for tool in self._tool_definitions
+                ],
             },
-            provider_label="OpenAI Agent Builder",
+            response_format_name="assistant_agent_builder_draft",
+            response_schema=response_schema,
         )
 
-        generated_payload = _parse_openai_agent_builder_output(response_payload)
+        generated_payload = _parse_agent_json_output(
+            response_payload,
+            provider=provider.provider,
+            provider_label=f"{provider_label} Agent Builder",
+        )
         invalid_tool_names = [
             tool_name
             for tool_name in generated_payload.get("allowed_tools", [])
-            if tool_name not in set(published_tool_names)
+            if tool_name not in published_tool_names_set
         ]
         if invalid_tool_names:
             warnings.append(
-                f"OpenAI suggested unpublished live tools ({', '.join(invalid_tool_names)}), so they were removed from the draft."
+                f"{provider_label} suggested unpublished live tools ({', '.join(invalid_tool_names)}), so they were removed from the draft."
             )
             generated_payload["allowed_tools"] = [
                 tool_name
                 for tool_name in generated_payload.get("allowed_tools", [])
-                if tool_name in set(published_tool_names)
+                if tool_name in published_tool_names_set
             ]
         if "READ" not in {capability.upper() for capability in generated_payload.get("capabilities", [])}:
             if generated_payload.get("allowed_tools"):
                 warnings.append(
-                    "OpenAI suggested live tools without the READ capability, so the tool allowlist was cleared."
+                    f"{provider_label} suggested live tools without the READ capability, so the tool allowlist was cleared."
                 )
             generated_payload["allowed_tools"] = []
         if (
@@ -293,7 +307,7 @@ class AssistantService:
             and INTER_AGENT_CONSULTATION_SKILL not in set(generated_payload.get("skills", []))
         ):
             warnings.append(
-                "OpenAI suggested inter-agent coordination tools without the inter_agent_consultation skill, so those tools were removed."
+                f"{provider_label} suggested inter-agent coordination tools without the inter_agent_consultation skill, so those tools were removed."
             )
             generated_payload["allowed_tools"] = [
                 tool_name
@@ -303,7 +317,7 @@ class AssistantService:
         if "ACTION" not in {capability.upper() for capability in generated_payload.get("capabilities", [])}:
             if generated_payload.get("allowed_action_types"):
                 warnings.append(
-                    "OpenAI suggested governed actions without the ACTION capability, so the action allowlist was cleared."
+                    f"{provider_label} suggested governed actions without the ACTION capability, so the action allowlist was cleared."
                 )
             generated_payload["allowed_action_types"] = []
 
@@ -317,7 +331,7 @@ class AssistantService:
                 else "DRAFT"
             ),
             scope=generated_payload["scope"],
-            provider="openai",
+            provider=provider.provider,
             model=runtime_model,
             allowed_workspaces=generated_payload["allowed_workspaces"],
             capabilities=generated_payload["capabilities"],
@@ -325,11 +339,24 @@ class AssistantService:
             allowed_tools=generated_payload["allowed_tools"],
             allowed_action_types=generated_payload["allowed_action_types"],
             system_prompt=str(generated_payload["system_prompt"]),
-            builder_provider="openai",
+            builder_provider=provider.provider,
             builder_model=builder_model,
             warnings=warnings,
         )
         return suggestion
+
+    async def build_agent_self_update_draft(
+        self,
+        *,
+        agent_definition: ManagedAssistantAgent,
+        brief: str,
+    ) -> AssistantAgentSelfUpdateSuggestionOut:
+        provider = _resolve_agent_builder_provider_config(agent_definition.provider)
+        return await self._build_agent_self_update_draft_with_provider(
+            agent_definition=agent_definition,
+            brief=brief,
+            provider=provider,
+        )
 
     async def build_agent_self_update_draft_with_openai(
         self,
@@ -338,63 +365,66 @@ class AssistantService:
         brief: str,
     ) -> AssistantAgentSelfUpdateSuggestionOut:
         provider = resolve_provider_config("openai")
-        builder_model = settings.OPENAI_AGENT_BUILDER_MODEL.strip() or provider.model
-        published_tool_names = [tool.name for tool in self._tool_definitions]
-
-        response_payload = await _post_json(
-            url=f"{provider.base_url.rstrip('/')}/responses",
-            headers={
-                "Authorization": f"Bearer {provider.api_key}",
-                "Content-Type": "application/json",
-            },
-            payload={
-                "model": builder_model,
-                "max_output_tokens": settings.ASSISTANT_MAX_OUTPUT_TOKENS,
-                "instructions": _build_openai_agent_self_update_instructions(),
-                "input": json_dumps(
-                    {
-                        "brief": brief,
-                        "current_agent": {
-                            "agent_id": agent_definition.agent_id,
-                            "name": agent_definition.name,
-                            "description": agent_definition.description,
-                            "status": agent_definition.status,
-                            "scope": agent_definition.scope,
-                            "provider": agent_definition.provider,
-                            "model": agent_definition.model,
-                            "role_key": agent_definition.role_key,
-                            "profile_kind": agent_definition.profile_kind,
-                            "human_owner_role": agent_definition.human_owner_role,
-                            "authority_ceiling": agent_definition.authority_ceiling,
-                            "allowed_workspaces": list(agent_definition.allowed_workspaces),
-                            "capabilities": list(agent_definition.capabilities),
-                            "skills": list(agent_definition.skills),
-                            "allowed_tools": list(agent_definition.allowed_tools),
-                            "allowed_action_types": list(agent_definition.allowed_action_types),
-                            "system_prompt": agent_definition.system_prompt,
-                        },
-                        "tool_catalog": [
-                            {
-                                "name": tool.name,
-                                "description": tool.description,
-                            }
-                            for tool in self._tool_definitions
-                        ],
-                    }
-                ),
-                "text": {
-                    "format": {
-                        "type": "json_schema",
-                        "name": "assistant_agent_self_update_draft",
-                        "strict": True,
-                        "schema": _build_openai_agent_self_update_schema(agent_definition),
-                    }
-                },
-            },
-            provider_label="OpenAI Agent Self Update",
+        return await self._build_agent_self_update_draft_with_provider(
+            agent_definition=agent_definition,
+            brief=brief,
+            provider=provider,
         )
 
-        generated_payload = _parse_openai_agent_self_update_output(response_payload)
+    async def _build_agent_self_update_draft_with_provider(
+        self,
+        *,
+        agent_definition: ManagedAssistantAgent,
+        brief: str,
+        provider: AssistantProviderConfig,
+    ) -> AssistantAgentSelfUpdateSuggestionOut:
+        provider_label = _provider_api_label(provider.provider)
+        builder_model = _resolve_agent_builder_model(provider)
+        published_tool_names = [tool.name for tool in self._tool_definitions]
+        response_schema = _build_openai_agent_self_update_schema(agent_definition)
+        response_payload = await _post_agent_json_request(
+            provider=provider,
+            provider_label=f"{provider_label} Agent Self Update",
+            model=builder_model,
+            instructions=_build_agent_self_update_instructions(),
+            input_payload={
+                "brief": brief,
+                "current_agent": {
+                    "agent_id": agent_definition.agent_id,
+                    "name": agent_definition.name,
+                    "description": agent_definition.description,
+                    "status": agent_definition.status,
+                    "scope": agent_definition.scope,
+                    "provider": agent_definition.provider,
+                    "model": agent_definition.model,
+                    "role_key": agent_definition.role_key,
+                    "profile_kind": agent_definition.profile_kind,
+                    "human_owner_role": agent_definition.human_owner_role,
+                    "authority_ceiling": agent_definition.authority_ceiling,
+                    "allowed_workspaces": list(agent_definition.allowed_workspaces),
+                    "capabilities": list(agent_definition.capabilities),
+                    "skills": list(agent_definition.skills),
+                    "allowed_tools": list(agent_definition.allowed_tools),
+                    "allowed_action_types": list(agent_definition.allowed_action_types),
+                    "system_prompt": agent_definition.system_prompt,
+                },
+                "tool_catalog": [
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                    }
+                    for tool in self._tool_definitions
+                ],
+            },
+            response_format_name="assistant_agent_self_update_draft",
+            response_schema=response_schema,
+        )
+
+        generated_payload = _parse_agent_json_output(
+            response_payload,
+            provider=provider.provider,
+            provider_label=f"{provider_label} Agent Self Update",
+        )
         warnings: list[str] = []
         allowed_tools = list(generated_payload.get("allowed_tools", []))
         allowed_action_types = list(generated_payload.get("allowed_action_types", []))
@@ -445,7 +475,7 @@ class AssistantService:
             allowed_action_types=allowed_action_types,
             system_prompt=str(generated_payload["system_prompt"]),
             change_summary=generated_payload["change_summary"],
-            builder_provider="openai",
+            builder_provider=provider.provider,
             builder_model=builder_model,
             warnings=warnings,
         )
@@ -1091,6 +1121,58 @@ def determine_effective_default_provider(
     return fallback.provider if fallback is not None else None
 
 
+def _resolve_agent_builder_provider_config(requested_provider: str | None = None) -> AssistantProviderConfig:
+    if not settings.ASSISTANT_ENABLED:
+        raise AssistantServiceError(
+            status_code=503,
+            detail="Assistant interactions are disabled on this API.",
+        )
+
+    provider_configs = {config.provider: config for config in list_provider_configs()}
+    normalized_requested_provider = _normalize_provider(requested_provider)
+    if normalized_requested_provider in AGENT_BUILDER_PROVIDERS:
+        requested_config = provider_configs[normalized_requested_provider]
+        if requested_config.configured:
+            return requested_config
+
+    effective_default_provider = determine_effective_default_provider(provider_configs.values())
+    if effective_default_provider in AGENT_BUILDER_PROVIDERS:
+        default_config = provider_configs[effective_default_provider]
+        if default_config.configured:
+            return default_config
+
+    for provider in AGENT_BUILDER_PROVIDERS:
+        config = provider_configs[provider]
+        if config.configured:
+            return config
+
+    raise AssistantServiceError(
+        status_code=503,
+        detail="No assistant providers that support agent draft generation are configured on this API.",
+    )
+
+
+def _normalize_provider(value: str | None) -> AssistantProvider | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in VALID_PROVIDERS:
+        return cast(AssistantProvider, normalized)
+    return None
+
+
+def _provider_api_label(provider: AssistantProvider) -> str:
+    return PROVIDER_API_LABELS[provider]
+
+
+def _resolve_agent_builder_model(provider: AssistantProviderConfig) -> str:
+    if provider.provider == "openai":
+        return settings.OPENAI_AGENT_BUILDER_MODEL.strip() or provider.model
+    if provider.provider == "anthropic":
+        return settings.ANTHROPIC_AGENT_BUILDER_MODEL.strip() or provider.model
+    return provider.model
+
+
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
     deduped_values: list[str] = []
     seen: set[str] = set()
@@ -1220,7 +1302,7 @@ def build_system_prompt(
     return "\n\n".join(prompt_parts)
 
 
-def _build_openai_agent_builder_instructions() -> str:
+def _build_agent_builder_instructions(runtime_provider_label: str) -> str:
     return "\n".join(
         [
             "You are designing a managed assistant agent for the ECTRM operator console.",
@@ -1234,12 +1316,12 @@ def _build_openai_agent_builder_instructions() -> str:
             "If the role does not need approval-gated mutations, omit ACTION and return an empty allowed_action_types array.",
             "If the role needs all published approval-gated mutations, keep ACTION and still return an empty allowed_action_types array.",
             "Write a concrete system_prompt that explains mission, evidence standards, style, and guardrails.",
-            "This generated agent will be pinned to the OpenAI provider for runtime use.",
+            f"This generated agent will be pinned to the {runtime_provider_label} provider for runtime use.",
         ]
     )
 
 
-def _build_openai_agent_self_update_instructions() -> str:
+def _build_agent_self_update_instructions() -> str:
     return "\n".join(
         [
             "You are revising a managed assistant agent for the ECTRM operator console after it learned from mistakes.",
@@ -1256,25 +1338,26 @@ def _build_openai_agent_self_update_instructions() -> str:
     )
 
 
-def _resolve_openai_runtime_model(
+def _resolve_agent_builder_runtime_model(
     payload: AssistantAgentBuildRequest,
-    default_model: str,
+    provider: AssistantProviderConfig,
 ) -> str:
     current_draft = payload.current_draft
     if current_draft is None:
-        return default_model
+        return provider.model
 
     draft_model = (current_draft.model or "").strip()
     if not draft_model:
-        return default_model
+        return provider.model
 
-    if current_draft.provider is None or current_draft.provider == "openai":
+    if current_draft.provider is None or current_draft.provider == provider.provider:
         return draft_model
-    return default_model
+    return provider.model
 
 
 def _collect_agent_builder_warnings(
     payload: AssistantAgentBuildRequest,
+    provider: AssistantProviderConfig,
     runtime_model: str,
 ) -> list[str]:
     current_draft = payload.current_draft
@@ -1282,11 +1365,12 @@ def _collect_agent_builder_warnings(
         return []
 
     warnings: list[str] = []
-    if current_draft.provider and current_draft.provider != "openai":
+    provider_label = _provider_api_label(provider.provider)
+    if current_draft.provider and current_draft.provider != provider.provider:
         warnings.append(
-            f"Runtime provider was pinned to OpenAI instead of {current_draft.provider} so the built agent can answer through the existing OpenAI integration."
+            f"Runtime provider was pinned to {provider_label} instead of {current_draft.provider} so the built agent can answer through the configured {provider_label} integration."
         )
-    if current_draft.model and current_draft.provider and current_draft.provider != "openai":
+    if current_draft.model and current_draft.provider and current_draft.provider != provider.provider:
         warnings.append(
             f"Runtime model was reset to {runtime_model} because the previous model only applied to {current_draft.provider}."
         )
@@ -1499,12 +1583,17 @@ def _build_openai_agent_builder_schema(published_tool_names: list[str]) -> dict[
     }
 
 
-def _parse_openai_agent_builder_output(response_payload: dict[str, Any]) -> dict[str, Any]:
-    response_text = _extract_openai_text(response_payload)
+def _parse_agent_json_output(
+    response_payload: dict[str, Any],
+    *,
+    provider: AssistantProvider,
+    provider_label: str,
+) -> dict[str, Any]:
+    response_text = _extract_agent_json_response_text(response_payload, provider=provider)
     if not response_text:
         raise AssistantServiceError(
             status_code=502,
-            detail="OpenAI Agent Builder returned an empty response.",
+            detail=f"{provider_label} returned an empty response.",
         )
 
     try:
@@ -1512,41 +1601,97 @@ def _parse_openai_agent_builder_output(response_payload: dict[str, Any]) -> dict
     except json.JSONDecodeError as exc:
         raise AssistantServiceError(
             status_code=502,
-            detail="OpenAI Agent Builder returned invalid JSON.",
+            detail=f"{provider_label} returned invalid JSON.",
         ) from exc
 
     if not isinstance(parsed_payload, dict):
         raise AssistantServiceError(
             status_code=502,
-            detail="OpenAI Agent Builder returned an unexpected payload shape.",
+            detail=f"{provider_label} returned an unexpected payload shape.",
         )
 
     return cast(dict[str, Any], parsed_payload)
 
 
-def _parse_openai_agent_self_update_output(response_payload: dict[str, Any]) -> dict[str, Any]:
-    response_text = _extract_openai_text(response_payload)
-    if not response_text:
-        raise AssistantServiceError(
-            status_code=502,
-            detail="OpenAI Agent Self Update returned an empty response.",
+def _extract_agent_json_response_text(response_payload: dict[str, Any], *, provider: AssistantProvider) -> str:
+    if provider == "anthropic":
+        return _extract_anthropic_text(response_payload.get("content", []))
+    return _extract_openai_text(response_payload)
+
+
+async def _post_agent_json_request(
+    *,
+    provider: AssistantProviderConfig,
+    provider_label: str,
+    model: str,
+    instructions: str,
+    input_payload: dict[str, Any],
+    response_format_name: str,
+    response_schema: dict[str, Any],
+) -> dict[str, Any]:
+    if provider.provider == "openai":
+        return await _post_json(
+            url=f"{provider.base_url.rstrip('/')}/responses",
+            headers={
+                "Authorization": f"Bearer {provider.api_key}",
+                "Content-Type": "application/json",
+            },
+            payload={
+                "model": model,
+                "max_output_tokens": settings.ASSISTANT_MAX_OUTPUT_TOKENS,
+                "instructions": instructions,
+                "input": json_dumps(input_payload),
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": response_format_name,
+                        "strict": True,
+                        "schema": response_schema,
+                    }
+                },
+            },
+            provider_label=provider_label,
         )
 
-    try:
-        parsed_payload = json.loads(response_text)
-    except json.JSONDecodeError as exc:
-        raise AssistantServiceError(
-            status_code=502,
-            detail="OpenAI Agent Self Update returned invalid JSON.",
-        ) from exc
-
-    if not isinstance(parsed_payload, dict):
-        raise AssistantServiceError(
-            status_code=502,
-            detail="OpenAI Agent Self Update returned an unexpected payload shape.",
+    if provider.provider == "anthropic":
+        return await _post_json(
+            url=f"{provider.base_url.rstrip('/')}/v1/messages",
+            headers={
+                "x-api-key": provider.api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            payload={
+                "model": model,
+                "max_tokens": settings.ASSISTANT_MAX_OUTPUT_TOKENS,
+                "system": instructions,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": json_dumps(
+                                    {
+                                        "input": input_payload,
+                                        "response_schema": response_schema,
+                                        "response_contract": (
+                                            "Return one JSON object only. Do not include markdown fences or prose."
+                                        ),
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            },
+            provider_label=provider_label,
         )
 
-    return cast(dict[str, Any], parsed_payload)
+    raise AssistantServiceError(
+        status_code=503,
+        detail=f"{_provider_api_label(provider.provider)} does not support agent draft generation.",
+    )
 
 
 def _build_provider_config(

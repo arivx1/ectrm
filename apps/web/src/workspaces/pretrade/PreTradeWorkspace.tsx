@@ -13,12 +13,15 @@ import {
   loadPreTradeHedgeRecommendations,
   loadPreTradeGovernanceItems,
   loadPreTradeGovernanceSummary,
+  loadPreTradeMarketOpportunities,
   loadPreTradeNettingSets,
+  loadPreTradePromotionOutcomes,
   loadPreTradeRecommendationRuns,
   loadPreTradeReviewItems,
   loadPreTradeRiskScenarios,
   loadPreTradeScenarios,
   promotePreTradeHedgeRecommendationFromGovernance,
+  promotePreTradeMarketOpportunityFromGovernance,
   promotePreTradeNettingSetFromGovernance,
   promotePreTradeRiskScenarioFromGovernance,
   updatePreTradeReviewItem,
@@ -40,6 +43,9 @@ import type {
   PreTradeGovernancePromotionCandidateRecord,
   PreTradeGovernanceSummaryRecord,
   PreTradeNettingSetRecord,
+  PreTradeMarketOpportunityRecord,
+  PreTradePromotionOutcomeSummaryRecord,
+  PreTradePromotionOutcomeType,
   PreTradeRecommendationDraftAnalysisRecord,
   PreTradeRecommendationStance,
   PreTradeRecommendationRunRecord,
@@ -323,6 +329,23 @@ function promotionCandidateTone(status: PreTradeGovernancePromotionCandidateReco
   return status === 'CANDIDATE' ? 'active' : 'in-progress'
 }
 
+function promotionOutcomeLabel(outcome: PreTradePromotionOutcomeType): string {
+  switch (outcome) {
+    case 'CREATED':
+      return 'Created'
+    case 'REUSED':
+      return 'Reused'
+    case 'RETIRED':
+      return 'Retired'
+    case 'REJECTED':
+      return 'Rejected'
+    case 'MERGED_INTO_BOOKED_TRADE':
+      return 'Booked Merge'
+    case 'BLOCKED_BY_MISSING_EVIDENCE':
+      return 'Evidence Blocked'
+  }
+}
+
 function recommendationRequiresOverride(stance: PreTradeRecommendationStance | null | undefined): boolean {
   return stance === 'ESCALATE' || stance === 'WAIT_FOR_DATA'
 }
@@ -408,9 +431,11 @@ export function PreTradeWorkspace({
   const [recommendationRuns, setRecommendationRuns] = useState<PreTradeRecommendationRunRecord[]>([])
   const [governanceSummary, setGovernanceSummary] = useState<PreTradeGovernanceSummaryRecord | null>(null)
   const [governanceItems, setGovernanceItems] = useState<PreTradeGovernanceItemsRecord | null>(null)
+  const [promotionOutcomes, setPromotionOutcomes] = useState<PreTradePromotionOutcomeSummaryRecord | null>(null)
   const [nettingSets, setNettingSets] = useState<PreTradeNettingSetRecord[]>([])
   const [hedgeRecommendations, setHedgeRecommendations] = useState<PreTradeHedgeRecommendationRecord[]>([])
   const [riskScenarios, setRiskScenarios] = useState<PreTradeRiskScenarioRecord[]>([])
+  const [marketOpportunities, setMarketOpportunities] = useState<PreTradeMarketOpportunityRecord[]>([])
   const [selectedGovernanceBucket, setSelectedGovernanceBucket] = useState<GovernanceBucketKey>('pending')
   const [reviewQueueFilter, setReviewQueueFilter] = useState<ReviewQueueFilterKey>('all')
   const [focusedReviewId, setFocusedReviewId] = useState<number | null>(null)
@@ -461,27 +486,33 @@ export function PreTradeWorkspace({
         nextRecommendationRuns,
         nextGovernanceSummary,
         nextGovernanceItems,
+        nextPromotionOutcomes,
         nextNettingSets,
         nextHedgeRecommendations,
         nextRiskScenarios,
+        nextMarketOpportunities,
       ] = await Promise.all([
         loadPreTradeScenarios(appConfig.apiBase, accessToken),
         loadPreTradeReviewItems(appConfig.apiBase, accessToken),
         loadPreTradeRecommendationRuns(appConfig.apiBase, accessToken, { limit: 20 }),
         loadPreTradeGovernanceSummary(appConfig.apiBase, accessToken),
         loadPreTradeGovernanceItems(appConfig.apiBase, accessToken),
+        loadPreTradePromotionOutcomes(appConfig.apiBase, accessToken),
         loadPreTradeNettingSets(appConfig.apiBase, accessToken),
         loadPreTradeHedgeRecommendations(appConfig.apiBase, accessToken),
         loadPreTradeRiskScenarios(appConfig.apiBase, accessToken),
+        loadPreTradeMarketOpportunities(appConfig.apiBase, accessToken),
       ])
       setScenarios(nextScenarios)
       setReviews(nextReviews)
       setRecommendationRuns(nextRecommendationRuns)
       setGovernanceSummary(nextGovernanceSummary)
       setGovernanceItems(nextGovernanceItems)
+      setPromotionOutcomes(nextPromotionOutcomes)
       setNettingSets(nextNettingSets)
       setHedgeRecommendations(nextHedgeRecommendations)
       setRiskScenarios(nextRiskScenarios)
+      setMarketOpportunities(nextMarketOpportunities)
     } catch (error) {
       setCollectionError(error instanceof Error ? error.message : 'Could not load pre-trade scenarios or review queue.')
     } finally {
@@ -499,9 +530,11 @@ export function PreTradeWorkspace({
       setRecommendationRuns([])
       setGovernanceSummary(null)
       setGovernanceItems(null)
+      setPromotionOutcomes(null)
       setNettingSets([])
       setHedgeRecommendations([])
       setRiskScenarios([])
+      setMarketOpportunities([])
       setReviewQueueFilter('all')
       setFocusedReviewId(null)
       setCollectionError('')
@@ -1051,6 +1084,22 @@ export function PreTradeWorkspace({
     })
   }
 
+  async function handlePromoteMarketOpportunityCandidate(candidate: PreTradeGovernancePromotionCandidateRecord) {
+    if (candidate.candidate_type !== 'MARKET_OPPORTUNITY') {
+      setActionError('Only market-opportunity promotion signals can create a market opportunity review draft right now.')
+      setActionMessage('')
+      return
+    }
+
+    await withAuthenticatedAction('promote-market-opportunity', async (accessToken) => {
+      const created = await promotePreTradeMarketOpportunityFromGovernance(appConfig.apiBase, accessToken, {
+        review_note: candidate.promotion_rationale,
+      })
+      await refreshPersistedState(accessToken)
+      setActionMessage(`Created market opportunity review draft "${created.name}".`)
+    })
+  }
+
   const governanceReviewItemsForBucket = useCallback((bucket: GovernanceReviewBucketKey): PreTradeReviewItemRecord[] => {
     switch (bucket) {
       case 'pending':
@@ -1106,6 +1155,8 @@ export function PreTradeWorkspace({
       count: governanceSummary?.booked_with_override_count ?? null,
     },
   ]
+  const promotionOutcomeMetricCards = promotionOutcomes?.metrics ?? []
+  const latestPromotionOutcomeDrafts = promotionOutcomes?.drafts.slice(0, 4) ?? []
   const selectedGovernanceReviewBucket = selectedGovernanceBucket === 'stale-evidence' || selectedGovernanceBucket === 'promotion-candidates'
     ? null
     : selectedGovernanceBucket
@@ -1151,7 +1202,7 @@ export function PreTradeWorkspace({
   )
   const recommendationDescription = recommendation?.summary ?? (
     draftAnalysisLoading
-      ? 'Refreshing the deterministic recommendation from live desk evidence.'
+      ? 'Refreshing the deterministic recommendation from current desk evidence.'
       : authSession
         ? (draftAnalysisError || 'No live draft analysis is available for the current scenario yet.')
         : 'Sign in to analyze the current draft with the shared pre-trade evidence contract.'
@@ -1197,6 +1248,81 @@ export function PreTradeWorkspace({
                 <strong>{metric.count ?? 'n/a'}</strong>
               </button>
             ))}
+          </div>
+          <div className="surface pretrade-next-actions">
+            <div className="pretrade-review-head">
+              <div>
+                <span className="eyebrow">Promoted Draft Outcomes</span>
+                <p>
+                  {promotionOutcomes
+                    ? `${promotionOutcomes.total_draft_count} promoted draft${promotionOutcomes.total_draft_count === 1 ? '' : 's'} tracked through review outcomes.`
+                    : 'No promoted draft outcome metrics are loaded yet.'}
+                </p>
+              </div>
+              {promotionOutcomes ? (
+                <span className="entity-chip entity-chip-soft">
+                  {formatDate(promotionOutcomes.generated_at)}
+                </span>
+              ) : null}
+            </div>
+            {promotionOutcomeMetricCards.length > 0 ? (
+              <div className="pretrade-metric-grid">
+                {promotionOutcomeMetricCards.map((metric) => (
+                  <div key={metric.outcome} className="pretrade-metric-card">
+                    <span>{promotionOutcomeLabel(metric.outcome)}</span>
+                    <strong>{metric.count}</strong>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {promotionOutcomes && promotionOutcomes.by_draft_type.some((row) => row.total_count > 0) ? (
+              <div className="pretrade-card-list">
+                {promotionOutcomes.by_draft_type
+                  .filter((row) => row.total_count > 0)
+                  .map((row) => (
+                    <small key={row.draft_type}>
+                      {row.label}: {row.total_count} total | {row.reused_count} reused | {row.merged_into_booked_trade_count} booked | {row.blocked_by_missing_evidence_count} blocked
+                    </small>
+                  ))}
+              </div>
+            ) : null}
+            {latestPromotionOutcomeDrafts.length > 0 ? (
+              <div className="pretrade-card-list">
+                {latestPromotionOutcomeDrafts.map((draftOutcome) => (
+                  <article key={`${draftOutcome.draft_type}-${draftOutcome.draft_id}`} className="pretrade-record-card pretrade-record-static">
+                    <div className="pretrade-review-head">
+                      <div>
+                        <strong>{draftOutcome.name}</strong>
+                        <span>
+                          {draftOutcome.draft_type.replaceAll('_', ' ')} | score {draftOutcome.source_promotion_score}
+                        </span>
+                      </div>
+                      <span className="status-pill status-pill-in-progress">
+                        {draftOutcome.status.replaceAll('_', ' ')}
+                      </span>
+                    </div>
+                    <small>
+                      Outcomes: {draftOutcome.outcomes.map((outcome) => promotionOutcomeLabel(outcome)).join(' | ')}
+                    </small>
+                    {draftOutcome.source_linked_trade_id ? (
+                      <small>
+                        Booked trade {draftOutcome.source_linked_trade_id}
+                        {draftOutcome.source_linked_trade_status ? ` | ${draftOutcome.source_linked_trade_status}` : ''}
+                      </small>
+                    ) : null}
+                    <small>
+                      Source review {draftOutcome.source_latest_review_id ?? 'n/a'}
+                      {draftOutcome.source_review_status ? ` | ${draftOutcome.source_review_status.replaceAll('_', ' ')}` : ''}
+                      {' | '}
+                      reviews {draftOutcome.source_review_count} | runs {draftOutcome.source_run_count}
+                    </small>
+                    {draftOutcome.has_blocking_missing_evidence ? (
+                      <small>Blocking missing evidence remains on the draft.</small>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            ) : null}
           </div>
           <div className="surface pretrade-next-actions">
             <span className="eyebrow">Control Readout</span>
@@ -1273,6 +1399,12 @@ export function PreTradeWorkspace({
                       && item.source_latest_review_id === candidate.latest_review_id,
                     ) ?? null
                     : null
+                  const existingMarketOpportunity = candidate.candidate_type === 'MARKET_OPPORTUNITY'
+                    ? marketOpportunities.find((item) =>
+                      item.source_latest_run_id === candidate.latest_run_id
+                      && item.source_latest_review_id === candidate.latest_review_id,
+                    ) ?? null
+                    : null
                   return (
                     <article key={candidate.candidate_type} className="pretrade-record-card pretrade-record-static">
                       <div className="pretrade-review-head">
@@ -1310,6 +1442,11 @@ export function PreTradeWorkspace({
                           Risk scenario draft: {existingRiskScenario.name} | {existingRiskScenario.status.replaceAll('_', ' ')}
                         </small>
                       ) : null}
+                      {existingMarketOpportunity ? (
+                        <small>
+                          Market opportunity draft: {existingMarketOpportunity.name} | {existingMarketOpportunity.status.replaceAll('_', ' ')}
+                        </small>
+                      ) : null}
                       <div className="pretrade-inline-actions">
                         {candidate.candidate_type === 'NETTING_SET' ? (
                           <button
@@ -1339,6 +1476,16 @@ export function PreTradeWorkspace({
                             disabled={actionPending !== '' || !authSession}
                           >
                             {existingRiskScenario ? 'Refresh Risk Scenario Draft' : 'Create Risk Scenario Draft'}
+                          </button>
+                        ) : null}
+                        {candidate.candidate_type === 'MARKET_OPPORTUNITY' ? (
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => void handlePromoteMarketOpportunityCandidate(candidate)}
+                            disabled={actionPending !== '' || !authSession}
+                          >
+                            {existingMarketOpportunity ? 'Refresh Market Opportunity Draft' : 'Create Market Opportunity Draft'}
                           </button>
                         ) : null}
                         {candidate.latest_review_id ? (
@@ -1482,6 +1629,75 @@ export function PreTradeWorkspace({
                         ))}
                         {riskScenario.source_stop_reasons.length > 0 ? (
                           <small>{riskScenario.source_stop_reasons.join(' | ')}</small>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+                {marketOpportunities.length > 0 ? (
+                  <div className="pretrade-card-list">
+                    <span className="eyebrow">Market Opportunity Drafts</span>
+                    {marketOpportunities.map((marketOpportunity) => (
+                      <article key={marketOpportunity.market_opportunity_id} className="pretrade-record-card pretrade-record-static">
+                        <div className="pretrade-review-head">
+                          <div>
+                            <strong>{marketOpportunity.name}</strong>
+                            <span>
+                              {marketOpportunity.status.replaceAll('_', ' ')} | score {marketOpportunity.source_promotion_score} | {marketOpportunity.source_evidence_summary}
+                            </span>
+                          </div>
+                          <span className={`status-pill status-pill-${reviewStatusTone(marketOpportunity.source_review_status)}`}>
+                            {marketOpportunity.source_review_status.replaceAll('_', ' ')}
+                          </span>
+                        </div>
+                        <p>{marketOpportunity.review_note ?? marketOpportunity.opportunity_summary.detail}</p>
+                        <small>
+                          {marketOpportunity.opportunity_summary.title} | {marketOpportunity.opportunity_summary.category.replaceAll('_', ' ')}
+                        </small>
+                        <small>
+                          Source review: {marketOpportunity.source_review_name} | owner {marketOpportunity.source_review_owner ?? marketOpportunity.owner ?? 'unassigned'}
+                        </small>
+                        <small>
+                          Recommendation {marketOpportunity.source_recommendation_stance.replaceAll('_', ' ')} | score {marketOpportunity.source_recommendation_score} | {marketOpportunity.source_recommendation_headline}
+                        </small>
+                        {marketOpportunity.arbitrage_candidate ? (
+                          <small>
+                            Arbitrage {marketOpportunity.arbitrage_candidate.family.replaceAll('_', ' ')}
+                            {marketOpportunity.arbitrage_candidate.net_opportunity !== null
+                              ? ` | net ${formatNumber(marketOpportunity.arbitrage_candidate.net_opportunity, 2)}`
+                              : ''}
+                            {marketOpportunity.arbitrage_candidate.estimated_value !== null
+                              ? ` | value ${formatMoney(marketOpportunity.arbitrage_candidate.estimated_value)}`
+                              : ''}
+                          </small>
+                        ) : null}
+                        {marketOpportunity.residual_exposure ? (
+                          <small>
+                            Residual {marketOpportunity.residual_exposure.exposure_effect.replaceAll('_', ' ')}
+                            {marketOpportunity.residual_exposure.residual_after_trade !== null
+                              ? ` | after ${formatNumber(marketOpportunity.residual_exposure.residual_after_trade, 0)}`
+                              : ''}
+                          </small>
+                        ) : null}
+                        {marketOpportunity.input_snapshots.length > 0 ? (
+                          <small>
+                            Evidence: {marketOpportunity.input_snapshots.slice(0, 3).map((snapshot) => snapshot.adapter_label ?? snapshot.source_key).join(' | ')}
+                            {marketOpportunity.input_snapshots.length > 3 ? ` | +${marketOpportunity.input_snapshots.length - 3} more` : ''}
+                          </small>
+                        ) : null}
+                        {marketOpportunity.reviewer_focus.slice(0, 4).map((focus) => (
+                          <small key={`${marketOpportunity.market_opportunity_id}-${focus}`}>Focus: {focus}</small>
+                        ))}
+                        {marketOpportunity.missing_evidence.slice(0, 3).map((missing) => (
+                          <small key={`${marketOpportunity.market_opportunity_id}-${missing.evidence_key}`}>
+                            Missing {missing.severity.toLowerCase()}: {missing.label} | {missing.detail}
+                          </small>
+                        ))}
+                        {marketOpportunity.next_actions.slice(0, 3).map((action) => (
+                          <small key={`${marketOpportunity.market_opportunity_id}-${action}`}>Next: {action}</small>
+                        ))}
+                        {marketOpportunity.source_stop_reasons.length > 0 ? (
+                          <small>{marketOpportunity.source_stop_reasons.join(' | ')}</small>
                         ) : null}
                       </article>
                     ))}

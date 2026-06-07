@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { test } from "vitest";
 
+import { WorkspaceTopbarDatabaseSizeBadge } from "../src/entities/app/WorkspaceTopbarDatabaseSizeBadge";
 import { PromptHomeAvailableTokenBadge } from "../src/workspaces/prompt/PromptHomeAvailableTokenBadge";
 import type {
   DeliveryRecord,
@@ -33,8 +34,8 @@ import {
 } from "../src/workspaces/prompt/promptHomePrices";
 import {
   PromptHomeWorkspace,
-  shouldSubmitPromptHomeComposerKey,
 } from "../src/workspaces/prompt/PromptHomeWorkspace";
+import { shouldSubmitPromptHomeComposerKey } from "../src/workspaces/prompt/promptHomeComposerKeybindings";
 
 const defaultCounts = {
   activeTrades: 12,
@@ -142,14 +143,16 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     }),
   );
   const deskTimeIndex = markup.indexOf("Desk Time");
-  const pricesIndex = markup.indexOf("Market Prices");
-  const newsIndex = markup.indexOf("Market News");
+  const exchangesIndex = markup.indexOf("Exchanges");
+  const calendarIndex = markup.indexOf("Calendar");
+  const pricesIndex = markup.indexOf('aria-label="Scrolling market prices"');
+  const newsIndex = markup.indexOf("Headlines loading");
   const mapIndex = markup.indexOf("Open Map Workspace");
   const documentUploadIndex = markup.indexOf("Upload documents");
   const communicationIndex = markup.indexOf("Communication center");
-  const promptCardIndex = markup.indexOf("Ask the desk assistant");
+  const promptCardIndex = markup.indexOf("Desk Assistant");
   const operatorPromptIndex = markup.indexOf("Operator prompt");
-  const cardFilterIndex = markup.indexOf("Home cards");
+  const cardFilterIndex = markup.indexOf('<span class="eyebrow">Apps</span>');
 
   assert.doesNotMatch(markup, /Show live context/);
   assert.doesNotMatch(markup, />Assistant Console</);
@@ -172,6 +175,8 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     /The traditional screens are still here when you already know where the work belongs\./,
   );
   assert.doesNotMatch(markup, /Guided Prompts/);
+  assert.doesNotMatch(markup, /Current prompt thread/);
+  assert.doesNotMatch(markup, /Responses can explain, route, draft/);
   assert.doesNotMatch(markup, /What are you trying to do\?/);
   assert.doesNotMatch(
     markup,
@@ -205,7 +210,9 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.ok(cardFilterIndex >= 0);
   assert.ok(deskTimeIndex >= 0);
   assert.ok(deskTimeIndex > cardFilterIndex);
-  assert.ok(pricesIndex > deskTimeIndex);
+  assert.ok(exchangesIndex > deskTimeIndex);
+  assert.ok(calendarIndex > exchangesIndex);
+  assert.ok(pricesIndex > calendarIndex);
   assert.ok(newsIndex > pricesIndex);
   assert.ok(mapIndex > newsIndex);
   assert.ok(documentUploadIndex > mapIndex);
@@ -214,11 +221,43 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.ok(promptCardIndex > communicationIndex);
   assert.ok(operatorPromptIndex > promptCardIndex);
   assert.match(markup, />Voice Unavailable</);
-  assert.match(markup, /<span class="eyebrow">Cards<\/span>/);
-  assert.match(markup, /<strong id="prompt-home-card-filter-heading">Home cards<\/strong>/);
-  assert.match(markup, /<span>View<\/span>/);
+  assert.match(markup, /<span class="eyebrow">Apps<\/span>/);
+  assert.doesNotMatch(markup, />Home apps<\/strong>/);
+  assert.match(
+    markup,
+    /<label class="prompt-home-preset-switcher"><span>Presets<\/span><select/,
+  );
+  assert.match(markup, /<option value="Energy" selected="">Energy<\/option>/);
+  assert.match(markup, /<option value="Agriculture">Agriculture<\/option>/);
+  assert.match(markup, /<option value="Metals">Metals<\/option>/);
+  assert.match(markup, /<option value="Chemicals">Chemicals<\/option>/);
+  assert.match(markup, /<option value="Waste &amp; Recyclables">Waste &amp; Recyclables<\/option>/);
+  assert.match(markup, /<option value="Other">Other<\/option>/);
+  assert.match(
+    markup,
+    /<label class="prompt-home-view-switcher"><span>Saved Views<\/span><select/,
+  );
+  assert.match(markup, />Undo<\/button>/);
+  assert.match(markup, />Copy<\/button>/);
+  assert.match(markup, />Cut<\/button>/);
+  assert.match(markup, />Duplicate<\/button>/);
+  assert.match(markup, />Delete<\/button>/);
+  assert.doesNotMatch(markup, />W-<\/button>/);
+  assert.doesNotMatch(markup, />W\+<\/button>/);
+  assert.doesNotMatch(markup, />H-<\/button>/);
+  assert.doesNotMatch(markup, />H\+<\/button>/);
+  assert.match(markup, /aria-label="Resize Desk Time app width"/);
+  assert.match(markup, /aria-label="Resize Desk Time app height"/);
+  assert.match(markup, /aria-label="Resize Exchanges app width"/);
+  assert.match(markup, /aria-label="Resize Calendar app width"/);
+  assert.match(
+    markup,
+    /<div class="prompt-home-card-slot-inner"><div class="prompt-home-card-slot-actions"/,
+  );
+  assert.match(markup, /data-home-card-delete-target="true"/);
+  assert.match(markup, /aria-label="Home apps\. Drop a Home app here to delete it\."/);
   assert.match(markup, /Local Home/);
-  assert.match(markup, /7 visible · 0 hidden/);
+  assert.doesNotMatch(markup, /7 enabled · 0 disabled/);
   assert.match(
     markup,
     /aria-expanded="false" aria-controls="prompt-home-card-filter-panel"/,
@@ -227,15 +266,25 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     markup,
     /id="prompt-home-card-filter-panel" class="prompt-home-card-filter-body" hidden=""/,
   );
-  assert.match(markup, /Edit cards/);
-  assert.match(markup, /aria-label="Movable Home cards"/);
+  assert.match(markup, /Manage Apps/);
+  assert.match(markup, /aria-label="Movable Home apps"/);
   assert.match(markup, /data-home-card-drag-handle="true"/);
-  assert.match(markup, /aria-label="Drag Desk Time card by its header"/);
-  assert.match(markup, /aria-label="Drag Market Prices card by its header"/);
+  assert.match(markup, /aria-label="Drag Desk Time app by its header"/);
+  assert.match(markup, /aria-label="Drag Exchanges app by its header"/);
+  assert.match(markup, /aria-label="Drag Calendar app by its header"/);
+  assert.match(markup, /aria-label="Drag Market Prices app by its header"/);
   assert.doesNotMatch(markup, />Move<\/button>/);
-  assert.doesNotMatch(markup, /Drag Home cards card by its header/);
+  assert.doesNotMatch(markup, /Drag Home apps app by its header/);
   assert.match(markup, /Desk Time/);
   assert.match(
+    markup,
+    /<span class="eyebrow">Prices<\/span><div class="prompt-home-prices-ticker-strip is-static" aria-label="Scrolling market prices">/,
+  );
+  assert.match(
+    markup,
+    /<strong class="prompt-home-prices-ticker-item" aria-hidden="false">NATGAS HENRY_HUB · No mark yet<\/strong>/,
+  );
+  assert.doesNotMatch(
     markup,
     /<span class="eyebrow">Prices<\/span><strong>Market Prices<\/strong>/,
   );
@@ -248,6 +297,16 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     /id="prompt-home-prices-panel" class="prompt-home-prices-card-body"/,
   );
   assert.match(markup, /class="market-news-panel market-news-panel-table"/);
+  assert.match(
+    markup,
+    /aria-label="Scrolling market headlines"/,
+  );
+  assert.match(markup, /Headlines loading/);
+  assert.doesNotMatch(markup, /Live headline context/);
+  assert.doesNotMatch(
+    markup,
+    /<span class="eyebrow">News<\/span><strong>Market News<\/strong>/,
+  );
   assert.doesNotMatch(markup, /No latest price marks/);
   assert.match(markup, /aria-label="Sort prices by Product"/);
   assert.match(markup, /aria-label="Sort prices by Change"/);
@@ -264,26 +323,40 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     /aria-label="Double-click to open the price report for Henry Hub Natural Gas"/,
   );
   assert.match(markup, /No mark yet/);
-  assert.match(markup, /Market price marks/);
-  assert.match(markup, /0 latest marks · 1 active index/);
-  assert.match(markup, /Code, market, commodity/);
-  assert.match(markup, /Market Location/);
-  assert.match(markup, /All terms/);
-  assert.match(markup, /Supply Effect/);
-  assert.match(markup, /All supply effects/);
-  assert.match(markup, /Demand Effect/);
-  assert.match(markup, /All demand effects/);
-  assert.match(markup, /All providers/);
-  assert.match(markup, /All commodities/);
-  assert.match(markup, /All indices/);
-  assert.match(markup, /Filter by mark status/);
-  assert.match(markup, /0 latest marks across 1 active index/);
+  assert.doesNotMatch(markup, /Market price marks/);
+  assert.doesNotMatch(markup, /0 latest marks · 1 active index/);
+  assert.match(markup, /aria-label="Collapse Market Prices"/);
+  assert.match(
+    markup,
+    /class="prompt-home-prices-card-head-actions" aria-label="Market price actions">[\s\S]*>Filter<\/button>[\s\S]*aria-label="Sync latest prices"[\s\S]*>Errors<\/button>[\s\S]*>Sources<\/button>/,
+  );
+  assert.doesNotMatch(markup, /prompt-home-prices-card-footer/);
+  assert.match(
+    markup,
+    /aria-controls="prompt-home-prices-filter-dialog[^"]*" aria-expanded="false">Filter<\/button>/,
+  );
+  assert.doesNotMatch(markup, /aria-label="Price filters"/);
+  assert.match(
+    markup,
+    /class="prompt-home-news-card-head-actions" aria-label="Market news actions">[\s\S]*aria-controls="prompt-home-news-filter-dialog[^"]*" aria-expanded="false">Filter<\/button>/,
+  );
+  assert.doesNotMatch(markup, /aria-label="News filters"/);
+  assert.doesNotMatch(markup, /OPEC, LNG, storm impacts/);
+  assert.doesNotMatch(markup, /All supply effects/);
+  assert.doesNotMatch(markup, /All demand effects/);
+  assert.doesNotMatch(markup, /Code, market, commodity, type/);
+  assert.doesNotMatch(markup, /Filter by mark status/);
+  assert.doesNotMatch(markup, /0 latest marks across 1 active index/);
   assert.match(
     markup,
     /aria-label="Sync latest prices" title="Admin session required to sync price sources" disabled="">Sync<\/button>/,
   );
-  assert.match(markup, />Review Sources<\/button>/);
-  assert.match(markup, /Open Dashboard/);
+  assert.match(
+    markup,
+    /aria-controls="prompt-home-prices-errors-dialog[^"]*" aria-expanded="false" title="No price errors to review" disabled="">Errors<\/button>/,
+  );
+  assert.match(markup, />Sources<\/button>/);
+  assert.doesNotMatch(markup, /Open Home/);
   assert.doesNotMatch(markup, /Desk clocks and calendars/);
   assert.match(
     markup,
@@ -293,6 +366,38 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     markup,
     /id="prompt-home-timeframe-panel" class="prompt-home-timeframe-panel-body"/,
   );
+  assert.match(
+    markup,
+    /<span class="eyebrow">Exchanges<\/span><strong>[^<]*venue sessions/,
+  );
+  assert.match(markup, /27 Alpha Vantage venues/);
+  assert.match(
+    markup,
+    /aria-expanded="true" aria-controls="prompt-home-exchanges-panel"/,
+  );
+  assert.match(
+    markup,
+    /id="prompt-home-exchanges-panel" class="prompt-home-exchanges-card-body"/,
+  );
+  assert.match(markup, /Representative venue sessions converted into/);
+  assert.match(markup, /Alpha Vantage exchange coverage/);
+  assert.match(markup, /MARKET_STATUS coverage/);
+  assert.match(markup, /NASDAQ, NYSE, AMEX, BATS/);
+  assert.match(markup, /XETRA, Berlin, Frankfurt, Munich, Stuttgart/);
+  assert.match(
+    markup,
+    /<span class="eyebrow">Calendar<\/span><strong class="prompt-home-calendar-card-summary">/,
+  );
+  assert.match(
+    markup,
+    /aria-expanded="true" aria-controls="prompt-home-calendar-panel"/,
+  );
+  assert.match(
+    markup,
+    /id="prompt-home-calendar-panel" class="prompt-home-calendar-card-body"/,
+  );
+  assert.match(markup, /aria-controls="prompt-home-calendar-settings-dialog[^"]*" aria-expanded="false">Settings<\/button>/);
+  assert.doesNotMatch(markup, /Calendar Settings/);
   assert.match(
     markup,
     /id="prompt-home-map-panel" class="prompt-home-map-card-body"/,
@@ -321,54 +426,16 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     markup,
     /aria-expanded="true" aria-controls="prompt-home-map-panel"/,
   );
-  assert.match(markup, /Map Filters/);
   assert.match(
     markup,
-    /aria-expanded="true" aria-controls="prompt-home-map-filters-card-panel"/,
+    /class="prompt-home-map-card-head-actions" aria-label="Map actions">[\s\S]*aria-controls="prompt-home-map-filter-dialog[^"]*" aria-expanded="false">Filter<\/button>/,
   );
-  assert.match(
-    markup,
-    /id="prompt-home-map-filters-card-panel" class="asset-map-filters-card-body"/,
-  );
-  assert.match(markup, /Activity/);
-  assert.match(markup, /Positions/);
-  assert.match(markup, /Shipments/);
-  assert.match(markup, /Inventory/);
-  assert.match(markup, /Geography/);
-  assert.match(markup, /North America/);
-  assert.match(markup, /South America/);
-  assert.match(markup, /EMEA/);
-  assert.match(markup, /APAC/);
-  assert.match(markup, /Country/);
-  assert.match(markup, /All countries/);
-  assert.match(markup, /State or Territory/);
-  assert.match(markup, /All states or territories/);
-  assert.match(markup, /Save As/);
-  assert.match(markup, /Filter preset name/);
-  assert.match(markup, />Save</);
-  assert.match(markup, /Presets/);
-  assert.match(markup, /No saved presets/);
-  assert.match(markup, /Tooltips/);
-  assert.match(markup, /Weather Overlay/);
-  assert.match(
-    markup,
-    /aria-expanded="true" aria-controls="prompt-home-map-filters-card-weather-overlay-panel"/,
-  );
-  assert.match(
-    markup,
-    /id="prompt-home-map-filters-card-weather-overlay-panel" class="asset-map-weather-overlay-body"/,
-  );
-  assert.match(markup, /aria-label="Uncheck all weather overlays"/);
-  assert.match(markup, /Weather overlay layers/);
-  assert.match(markup, /Opacity/);
-  assert.match(markup, /US NOAA radar/);
-  assert.match(markup, /Radar/);
-  assert.match(
-    markup,
-    /<input type="checkbox" checked=""\/><span>Radar<\/span>/,
-  );
-  assert.match(markup, /Radar overlay opacity/);
-  assert.match(markup, /aria-label="Show Radar overlay details"/);
+  assert.doesNotMatch(markup, /Map Filters/);
+  assert.doesNotMatch(markup, /asset-map-filters-card/);
+  assert.doesNotMatch(markup, /prompt-home-map-filters-card-panel/);
+  assert.doesNotMatch(markup, /Activity visibility controls/);
+  assert.doesNotMatch(markup, /Filter preset name/);
+  assert.doesNotMatch(markup, /Weather Overlay/);
   assert.doesNotMatch(markup, /aria-label="Weather overlay layer"/);
   assert.doesNotMatch(markup, /Precipitation/);
   assert.doesNotMatch(markup, /Temperature/);
@@ -407,9 +474,9 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     /id="prompt-home-document-upload-panel" class="prompt-home-document-upload-card-body" hidden=""/,
   );
   assert.match(markup, /Communication center/);
-  assert.match(
+  assert.doesNotMatch(
     markup,
-    /One inbox for email, work follow-through, issues, and app messages\. Expand a row only when you need the detail\./,
+    /One inbox for email, Slack, work follow-through, issues, and app messages\. Expand a row only when you need the detail\./,
   );
   assert.match(
     markup,
@@ -419,6 +486,11 @@ test("prompt home renders guided prompts without legacy home actions", () => {
     markup,
     /id="prompt-home-communication-panel" class="prompt-home-communication-card-body"/,
   );
+  assert.match(
+    markup,
+    /aria-controls="prompt-home-communication-settings-dialog" aria-expanded="false">Settings<\/button>/,
+  );
+  assert.doesNotMatch(markup, /Messaging Settings/);
   assert.match(markup, /aria-label="Communication inbox"/);
   assert.match(markup, /Email/);
   assert.match(markup, /To-Do/);
@@ -464,7 +536,7 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   );
   assert.match(
     markup,
-    /After sign-in, the same inbox shape can be filled with live communication records\./,
+    /After sign-in, synced Slack rows can appear beside the local Home inbox lanes\./,
   );
   assert.match(markup, /Open Messages Workspace/);
   assert.doesNotMatch(markup, /Open Assistant Console/);
@@ -472,7 +544,7 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.doesNotMatch(markup, /Sign In to Review Communication/);
   assert.match(
     markup,
-    /<div class="prompt-home-prompt-card-copy"><span class="eyebrow">Prompt<\/span><strong>Ask the desk assistant<\/strong><\/div>/,
+    /<div class="prompt-home-prompt-card-copy"><span class="eyebrow prompt-home-prompt-card-title">Desk Assistant<\/span><\/div>/,
   );
   assert.match(
     markup,
@@ -503,20 +575,19 @@ test("prompt home renders guided prompts without legacy home actions", () => {
   assert.match(markup, /EOD 10:00 PM local/);
   assert.match(
     markup,
-    /id="prompt-home-timeframe-panel" class="prompt-home-timeframe-panel-body">[\s\S]*Add Event/,
+    /id="prompt-home-calendar-panel" class="prompt-home-calendar-card-body">[\s\S]*Add Event/,
+  );
+  assert.match(
+    markup,
+    /id="prompt-home-calendar-panel" class="prompt-home-calendar-card-body">[\s\S]*Settings/,
   );
   assert.match(markup, /href="\/\?view=settings#settings-custom-events-card"/);
-  assert.match(markup, /Representative trading hours/);
-  assert.match(markup, /Show details/);
-  assert.match(
-    markup,
-    /aria-expanded="false" aria-controls="prompt-home-trading-hours-panel"/,
-  );
-  assert.match(
-    markup,
-    /id="prompt-home-trading-hours-panel" class="prompt-home-session-board" hidden=""/,
-  );
+  assert.doesNotMatch(markup, /prompt-home-trading-hours-panel/);
   assert.match(markup, /Representative venue sessions converted into/);
+  assert.match(markup, /Alpha Vantage exchange coverage/);
+  assert.match(markup, /27 primary venues across 16 market rows/);
+  assert.match(markup, /NSE, BSE/);
+  assert.match(markup, /Cryptocurrency · Global/);
   assert.match(markup, /ICE Brent/);
   assert.match(markup, /LMEselect/);
   assert.match(markup, /LME Ring/);
@@ -1486,8 +1557,11 @@ test("prompt home map enables the vessels layer when tracked deliveries are avai
     }),
   );
 
-  assert.match(markup, /Vessels/);
-  assert.match(markup, /1 vessel/);
+  assert.match(
+    markup,
+    /class="prompt-home-map-card-head-actions" aria-label="Map actions">[\s\S]*aria-controls="prompt-home-map-filter-dialog[^"]*" aria-expanded="false">Filter<\/button>/,
+  );
+  assert.doesNotMatch(markup, /asset-map-filters-card/);
   assert.doesNotMatch(
     markup,
     /<input type="checkbox" checked="" disabled=""\/><span>Vessels<\/span>/,
@@ -1520,11 +1594,13 @@ test("prompt home map adds located market prices as a map layer", () => {
     }),
   );
 
-  assert.match(markup, /No asset records match the current filters · 1 market price\./);
-  assert.match(markup, /<input type="checkbox" checked=""\/><span>Market Prices<\/span>/);
-  assert.match(markup, /1 market price visible/);
-  assert.match(markup, /United States/);
-  assert.match(markup, /US-LA/);
+  assert.doesNotMatch(markup, /No asset records match the current filters · 1 market price\./);
+  assert.match(
+    markup,
+    /class="prompt-home-map-card-head-actions" aria-label="Map actions">[\s\S]*aria-controls="prompt-home-map-filter-dialog[^"]*" aria-expanded="false">Filter<\/button>/,
+  );
+  assert.doesNotMatch(markup, /asset-map-filters-card/);
+  assert.doesNotMatch(markup, /<input type="checkbox" checked=""\/><span>Market Prices<\/span>/);
 });
 
 test("prompt home map summarizes filtered records and caps the visible map directory at 1000 rows", () => {
@@ -1565,7 +1641,7 @@ test("prompt home map summarizes filtered records and caps the visible map direc
     }),
   );
 
-  assert.match(markup, /1,000 of 1,050 shown on map/);
+  assert.doesNotMatch(markup, /1,000 of 1,050 shown on map/);
   assert.match(markup, /Showing 1,000 of 1,050 map records/);
   assert.equal(
     (markup.match(/aria-label="Focus HOME_\d{4} on map"/g) ?? []).length,
@@ -1615,10 +1691,7 @@ test("prompt home map reports zero records when the assets layer starts hidden",
     }),
   );
 
-  assert.match(
-    markup,
-    /Assets hidden · 0 shown on map/,
-  );
+  assert.doesNotMatch(markup, /Assets hidden · 0 shown on map/);
   assert.match(markup, /<p>0 map records<\/p>/);
   assert.match(
     markup,
@@ -1636,6 +1709,16 @@ test("prompt home topbar token badge renders a loading state before budgets reso
   assert.match(markup, /Loading\.\.\./);
   assert.match(markup, /Checking assistant token usage\./);
   assert.match(markup, /href="\/\?view=token-analysis#assistant-token-tracker"/);
+});
+
+test("workspace topbar database size badge renders a loading state before settings resolve", () => {
+  const markup = renderToStaticMarkup(
+    createElement(WorkspaceTopbarDatabaseSizeBadge),
+  );
+
+  assert.match(markup, /DB Size/);
+  assert.match(markup, /Loading\.\.\./);
+  assert.match(markup, /Checking database size\./);
 });
 
 test("prompt home shows prompt thread messages in chronological order", () => {

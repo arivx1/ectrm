@@ -3,6 +3,8 @@
 Top-level product areas should live here:
 
 - dashboard
+- home
+- prompt
 - trading
 - deliveries
 - scheduling

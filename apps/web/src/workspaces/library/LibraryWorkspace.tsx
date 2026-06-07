@@ -2036,12 +2036,16 @@ export function LibraryWorkspace({
               <button
                 type="button"
                 className="prompt-home-document-upload-card-toggle"
+                aria-label={
+                  showUploadComposer
+                    ? 'Collapse upload composer'
+                    : 'Expand upload composer'
+                }
                 aria-expanded={showUploadComposer}
                 aria-controls={LIBRARY_UPLOAD_CARD_PANEL_ID}
                 onClick={() => setUploadCardExpanded((current) => !current)}
               >
                 <div className="prompt-home-document-upload-card-toggle-meta">
-                  <small>{showUploadComposer ? 'Hide card' : 'Show card'}</small>
                   <span className="prompt-home-support-toggle-indicator" aria-hidden="true">
                     {showUploadComposer ? '−' : '+'}
                   </span>
@@ -2273,13 +2277,16 @@ export function LibraryWorkspace({
               <button
                 type="button"
                 className="prompt-home-document-upload-card-toggle"
-                aria-label={showDocumentList ? 'Hide document list card' : 'Show document list card'}
+                aria-label={
+                  showDocumentList
+                    ? 'Collapse document list'
+                    : 'Expand document list'
+                }
                 aria-expanded={showDocumentList}
                 aria-controls={LIBRARY_DOCUMENT_LIST_CARD_PANEL_ID}
                 onClick={() => setDocumentListCardExpanded((current) => !current)}
               >
                 <div className="prompt-home-document-upload-card-toggle-meta">
-                  <small>{showDocumentList ? 'Hide card' : 'Show card'}</small>
                   <span className="prompt-home-support-toggle-indicator" aria-hidden="true">
                     {showDocumentList ? '−' : '+'}
                   </span>

@@ -143,6 +143,23 @@ class ProviderSyncTests(unittest.TestCase):
             settings.BLS_PPI_SYNC_DEFAULT_LOOKBACK_DAYS,
         )
 
+    def test_sync_external_data_provider_runs_alpha_vantage_provider(self) -> None:
+        db = object()
+        with patch.object(
+            provider_sync,
+            "sync_alpha_vantage_prices",
+            return_value=SimpleNamespace(id=18),
+        ) as sync_mock:
+            run = provider_sync.sync_external_data_provider(
+                db,
+                provider="alpha-vantage",
+                requested_by="login-user",
+            )
+
+        self.assertEqual(run.id, 18)
+        sync_mock.assert_called_once()
+        self.assertEqual(sync_mock.call_args.kwargs["requested_by"], "login-user")
+
     def test_sync_external_data_provider_runs_usda_nass_provider(self) -> None:
         db = object()
         with patch.object(

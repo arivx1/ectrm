@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 import uuid
 
 from sqlalchemy import and_, func, or_, select
@@ -10,6 +11,7 @@ from apps.api.app.core.auth import is_admin_role
 from apps.api.app.domains.home_views.services.registry import (
     HOME_SYSTEM_TEMPLATE_KEY,
     HOME_SYSTEM_TEMPLATE_VERSION,
+    HOME_VIEW_DEFAULT_CARD_COLLAPSED_ROW_SPAN,
     HOME_VIEW_CARD_REGISTRY,
     get_home_view_card_registry_entry,
 )
@@ -67,6 +69,9 @@ HOME_VIEW_NEWS_LIMIT_MIN = 1
 HOME_VIEW_NEWS_LIMIT_MAX = 10
 HOME_VIEW_NEWS_LOOKBACK_DAYS_MIN = 1
 HOME_VIEW_NEWS_LOOKBACK_DAYS_MAX = 14
+HOME_VIEW_CARD_INSTANCE_ID_MAX_LENGTH = 80
+HOME_VIEW_CARD_INSTANCE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]+$")
+HOME_VIEW_CARD_IDS = {entry.card_id for entry in HOME_VIEW_CARD_REGISTRY}
 
 
 class HomeViewDefinitionConflictError(ValueError):
@@ -117,6 +122,7 @@ def home_view_definition_is_shared(record: HomeViewDefinition) -> bool:
 
 def _default_card_for_entry(entry, *, order: int) -> HomeViewCardDefinition:
     return HomeViewCardDefinition(
+        instance_id=entry.card_id,
         card_id=entry.card_id,
         kind=entry.kind,
         label=entry.label,
@@ -125,10 +131,14 @@ def _default_card_for_entry(entry, *, order: int) -> HomeViewCardDefinition:
             order=order,
             column_span=entry.default_column_span,
             row_span=entry.default_row_span,
+            collapsed_column_span=entry.default_column_span,
+            collapsed_row_span=HOME_VIEW_DEFAULT_CARD_COLLAPSED_ROW_SPAN,
+            expanded_column_span=entry.default_column_span,
+            expanded_row_span=entry.default_row_span,
         ),
         parameters={},
         filters={},
-        data_bindings=list(entry.data_bindings),
+        data_bindings=list(entry.system_data_bindings()),
     )
 
 
@@ -152,6 +162,33 @@ def _ensure_system_template(base_template_key: str, base_template_version: int) 
         raise HomeViewDefinitionValidationError(
             f"base_template_version must be {HOME_SYSTEM_TEMPLATE_VERSION}."
         )
+
+
+def _normalize_card_instance_id(
+    *,
+    card_id: str,
+    instance_id: str | None,
+    seen_instance_ids: set[str],
+) -> str:
+    normalized = (instance_id or card_id).strip()
+    if not normalized:
+        raise HomeViewDefinitionValidationError("Home card instance_id must not be blank.")
+    if len(normalized) > HOME_VIEW_CARD_INSTANCE_ID_MAX_LENGTH:
+        raise HomeViewDefinitionValidationError(
+            f"Home card instance_id must be {HOME_VIEW_CARD_INSTANCE_ID_MAX_LENGTH} characters or fewer."
+        )
+    if not HOME_VIEW_CARD_INSTANCE_ID_PATTERN.fullmatch(normalized):
+        raise HomeViewDefinitionValidationError(
+            "Home card instance_id may only contain letters, numbers, underscore, dash, colon, or period."
+        )
+    if normalized in HOME_VIEW_CARD_IDS and normalized != card_id:
+        raise HomeViewDefinitionValidationError(
+            "Home card instance_id must not reuse another Home card id."
+        )
+    if normalized in seen_instance_ids:
+        raise HomeViewDefinitionValidationError("Home view cards must not contain duplicate instance ids.")
+
+    return normalized
 
 
 def _validate_mapping_keys(
@@ -467,13 +504,16 @@ def normalize_home_view_cards(
     db: Session | None = None,
 ) -> list[HomeViewCardDefinition]:
     seen_card_ids: set[str] = set()
+    seen_instance_ids: set[str] = set()
     normalized_cards: list[HomeViewCardDefinition] = []
 
     for card in cards:
-        if card.card_id in seen_card_ids:
-            raise HomeViewDefinitionValidationError("Home view cards must not contain duplicate card ids.")
-
         entry = get_home_view_card_registry_entry(card.card_id)
+        instance_id = _normalize_card_instance_id(
+            card_id=entry.card_id,
+            instance_id=card.instance_id,
+            seen_instance_ids=seen_instance_ids,
+        )
         _validate_mapping_keys(
             card_id=entry.card_id,
             field_label="Parameters",
@@ -493,7 +533,7 @@ def normalize_home_view_cards(
             filters=dict(card.filters),
         )
 
-        next_data_bindings = list(card.data_bindings or entry.data_bindings)
+        next_data_bindings = list(card.data_bindings or entry.system_data_bindings())
         unknown_bindings = sorted(set(next_data_bindings) - set(entry.data_bindings))
         if unknown_bindings:
             raise HomeViewDefinitionValidationError(
@@ -504,23 +544,33 @@ def normalize_home_view_cards(
             order=len(normalized_cards),
             column_span=entry.default_column_span,
             row_span=entry.default_row_span,
+            collapsed_column_span=entry.default_column_span,
+            collapsed_row_span=HOME_VIEW_DEFAULT_CARD_COLLAPSED_ROW_SPAN,
+            expanded_column_span=entry.default_column_span,
+            expanded_row_span=entry.default_row_span,
         )
         normalized_cards.append(
             HomeViewCardDefinition(
+                instance_id=instance_id,
                 card_id=entry.card_id,
                 kind=entry.kind,
                 label=entry.label,
                 visible=card.visible,
                 placement=HomeViewCardPlacement(
                     order=len(normalized_cards),
-                    column_span=placement.column_span,
-                    row_span=placement.row_span,
+                    column_span=placement.expanded_column_span,
+                    row_span=placement.expanded_row_span,
+                    collapsed_column_span=placement.collapsed_column_span,
+                    collapsed_row_span=placement.collapsed_row_span,
+                    expanded_column_span=placement.expanded_column_span,
+                    expanded_row_span=placement.expanded_row_span,
                 ),
                 parameters=normalized_parameters,
                 filters=normalized_filters,
                 data_bindings=next_data_bindings,
             )
         )
+        seen_instance_ids.add(instance_id)
         seen_card_ids.add(entry.card_id)
 
     for entry in HOME_VIEW_CARD_REGISTRY:

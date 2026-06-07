@@ -1828,7 +1828,15 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         descriptors = {row["resource_key"]: row for row in response.json()}
         self.assertEqual(
             set(descriptors),
-            {"confirmations", "deliveries", "shipments", "invoices", "payments", "work_items"},
+            {
+                "confirmations",
+                "deliveries",
+                "document_record_creation_requests",
+                "shipments",
+                "invoices",
+                "payments",
+                "work_items",
+            },
         )
         self.assertEqual(descriptors["confirmations"]["filters"], ["trade_id"])
         self.assertEqual(descriptors["deliveries"]["actions"][0], "sync_from_trades")

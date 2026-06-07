@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any
+from typing import Literal
 from typing import Optional
 
 from pydantic import BaseModel
@@ -299,6 +300,85 @@ class MarketNewsHeadlineOut(BaseModel):
     source: Optional[str]
     published_at: Optional[datetime]
     link: str
+
+
+MarketNewsImpactDirection = Literal["up", "down", "neutral"]
+MarketNewsImpactHorizon = Literal[
+    "immediate",
+    "near_term",
+    "mid_term",
+    "long_term",
+    "very_long_term",
+]
+MarketNewsLocationScope = Literal[
+    "region",
+    "country",
+    "state",
+    "province",
+    "territory",
+    "city",
+    "unspecified",
+]
+
+
+class MarketNewsTaggingImpactIn(BaseModel):
+    direction: MarketNewsImpactDirection
+    horizon: MarketNewsImpactHorizon
+
+
+class MarketNewsTaggingLocationIn(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
+    scope: MarketNewsLocationScope
+
+
+class MarketNewsTaggingBaselineIn(BaseModel):
+    supply: MarketNewsTaggingImpactIn
+    demand: MarketNewsTaggingImpactIn
+    market_location: MarketNewsTaggingLocationIn
+
+
+class MarketNewsTaggingItemIn(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=280)
+    source: Optional[str] = Field(default=None, max_length=160)
+    published_at: Optional[datetime] = None
+    deterministic: MarketNewsTaggingBaselineIn
+
+
+class MarketNewsTaggingRequest(BaseModel):
+    commodity: Optional[str] = Field(default=None, min_length=1, max_length=50)
+    items: list[MarketNewsTaggingItemIn] = Field(min_length=1, max_length=10)
+
+
+class MarketNewsTaggingImpactOut(BaseModel):
+    direction: MarketNewsImpactDirection
+    horizon: MarketNewsImpactHorizon
+    confidence: float = Field(ge=0, le=1)
+    rationale: Optional[str] = Field(default=None, max_length=240)
+    source: Literal["ai"] = "ai"
+
+
+class MarketNewsTaggingLocationOut(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
+    scope: MarketNewsLocationScope
+    confidence: float = Field(ge=0, le=1)
+    rationale: Optional[str] = Field(default=None, max_length=240)
+    source: Literal["ai"] = "ai"
+
+
+class MarketNewsTaggingItemOut(BaseModel):
+    id: str
+    supply: MarketNewsTaggingImpactOut
+    demand: MarketNewsTaggingImpactOut
+    market_location: MarketNewsTaggingLocationOut
+
+
+class MarketNewsTaggingOut(BaseModel):
+    generated_at: datetime
+    provider: str
+    model: Optional[str]
+    items: list[MarketNewsTaggingItemOut]
+    warnings: list[str] = Field(default_factory=list)
 
 
 class MarketNewsOut(BaseModel):

@@ -525,6 +525,9 @@ class PreTradeApiTests(unittest.TestCase):
         response = self.client.get("/pretrade/governance/export")
         self.assertEqual(response.status_code, 401)
 
+        response = self.client.get("/pretrade/promotion-outcomes")
+        self.assertEqual(response.status_code, 401)
+
         response = self.client.get("/pretrade/netting-sets")
         self.assertEqual(response.status_code, 401)
 
@@ -541,6 +544,12 @@ class PreTradeApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
 
         response = self.client.post("/pretrade/risk-scenarios/from-promotion", json={})
+        self.assertEqual(response.status_code, 401)
+
+        response = self.client.get("/pretrade/market-opportunities")
+        self.assertEqual(response.status_code, 401)
+
+        response = self.client.post("/pretrade/market-opportunities/from-promotion", json={})
         self.assertEqual(response.status_code, 401)
 
         response = self.client.get("/pretrade/reviews/1/drift")
@@ -1083,6 +1092,288 @@ class PreTradeApiTests(unittest.TestCase):
                 row["category"] == "PROMOTION_CANDIDATE"
                 and row["promotion_candidate_type"] == "NETTING_SET"
                 and row["promotion_status"] == "WATCH"
+                for row in governance_export["audit_rows"]
+            )
+        )
+
+    def test_promotion_outcomes_summarize_promoted_draft_results(self) -> None:
+        with self.SessionLocal() as session:
+            booked_review = ReportPreset(
+                preset_key="pretrade_review",
+                scope="SHARED",
+                scope_owner_key="__shared__",
+                name="Booked hedge review",
+                name_key="booked-hedge-review",
+                filters_json={
+                    "review_status": "APPROVED",
+                    "linked_trade_id": "TRD-OUTCOME-1",
+                    "booked_at": self.now.isoformat(),
+                },
+                created_at=self.now,
+                created_by="trader_one",
+                updated_at=self.now,
+                updated_by="trader_one",
+                version=1,
+            )
+            rejected_review = ReportPreset(
+                preset_key="pretrade_review",
+                scope="SHARED",
+                scope_owner_key="__shared__",
+                name="Rejected netting review",
+                name_key="rejected-netting-review",
+                filters_json={"review_status": "REJECTED"},
+                created_at=self.now,
+                created_by="trader_one",
+                updated_at=self.now,
+                updated_by="trader_two",
+                version=1,
+            )
+            session.add_all([booked_review, rejected_review])
+            session.flush()
+
+            session.add(
+                Trade(
+                    trade_id="TRD-OUTCOME-1",
+                    created_at=self.now,
+                    updated_at=self.now,
+                    book="GAS_PHYS",
+                    commodity_class="NATURAL_GAS",
+                    commodity="HENRY_HUB",
+                    trade_side="BUY",
+                    pricing_type="FIXED",
+                    status="ACTIVE",
+                    last_event_id="event-outcome-1",
+                )
+            )
+            session.add(
+                ReportPreset(
+                    preset_key="pretrade_hedge_recommendation",
+                    scope="SHARED",
+                    scope_owner_key="__shared__",
+                    name="Booked hedge recommendation draft",
+                    name_key="booked-hedge-draft",
+                    filters_json={
+                        "status": "REVIEW_DRAFT",
+                        "source_promotion_score": 82,
+                        "source_review_count": 2,
+                        "source_approved_review_count": 2,
+                        "source_booked_review_count": 1,
+                        "source_run_count": 2,
+                        "source_latest_review_id": booked_review.id,
+                        "source_latest_run_id": 41,
+                        "missing_evidence": [
+                            {
+                                "evidence_key": "credit_refresh",
+                                "label": "Credit refresh",
+                                "severity": "BLOCKING",
+                                "detail": "Credit evidence is stale.",
+                            }
+                        ],
+                    },
+                    created_at=self.now,
+                    created_by="trader_two",
+                    updated_at=self.now,
+                    updated_by="trader_two",
+                    version=1,
+                )
+            )
+            session.add(
+                ReportPreset(
+                    preset_key="pretrade_netting_set",
+                    scope="SHARED",
+                    scope_owner_key="__shared__",
+                    name="Rejected netting-set draft",
+                    name_key="rejected-netting-draft",
+                    filters_json={
+                        "status": "RETIRED",
+                        "source_promotion_score": 54,
+                        "source_review_count": 1,
+                        "source_approved_review_count": 0,
+                        "source_booked_review_count": 0,
+                        "source_run_count": 1,
+                        "source_latest_review_id": rejected_review.id,
+                        "source_latest_run_id": 42,
+                    },
+                    created_at=self.now,
+                    created_by="trader_two",
+                    updated_at=self.now,
+                    updated_by="trader_two",
+                    version=1,
+                )
+            )
+            session.commit()
+
+        response = self.client.get(
+            "/pretrade/promotion-outcomes",
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        summary = response.json()
+        self.assertEqual(summary["total_draft_count"], 2)
+        metric_counts = {metric["outcome"]: metric["count"] for metric in summary["metrics"]}
+        self.assertEqual(metric_counts["CREATED"], 2)
+        self.assertEqual(metric_counts["REUSED"], 1)
+        self.assertEqual(metric_counts["RETIRED"], 1)
+        self.assertEqual(metric_counts["REJECTED"], 1)
+        self.assertEqual(metric_counts["MERGED_INTO_BOOKED_TRADE"], 1)
+        self.assertEqual(metric_counts["BLOCKED_BY_MISSING_EVIDENCE"], 1)
+
+        counts_by_type = {row["draft_type"]: row for row in summary["by_draft_type"]}
+        self.assertEqual(counts_by_type["HEDGE_RECOMMENDATION"]["reused_count"], 1)
+        self.assertEqual(counts_by_type["HEDGE_RECOMMENDATION"]["merged_into_booked_trade_count"], 1)
+        self.assertEqual(counts_by_type["NETTING_SET"]["retired_count"], 1)
+        self.assertEqual(counts_by_type["NETTING_SET"]["rejected_count"], 1)
+
+        drafts_by_type = {draft["draft_type"]: draft for draft in summary["drafts"]}
+        hedge_draft = drafts_by_type["HEDGE_RECOMMENDATION"]
+        self.assertEqual(hedge_draft["source_linked_trade_id"], "TRD-OUTCOME-1")
+        self.assertEqual(hedge_draft["source_linked_trade_status"], "ACTIVE")
+        self.assertIn("MERGED_INTO_BOOKED_TRADE", hedge_draft["outcomes"])
+        self.assertIn("BLOCKED_BY_MISSING_EVIDENCE", hedge_draft["outcomes"])
+        self.assertTrue(hedge_draft["has_blocking_missing_evidence"])
+
+        netting_draft = drafts_by_type["NETTING_SET"]
+        self.assertEqual(netting_draft["source_review_status"], "REJECTED")
+        self.assertIn("RETIRED", netting_draft["outcomes"])
+        self.assertIn("REJECTED", netting_draft["outcomes"])
+
+    def test_market_opportunity_promotion_creates_review_draft(self) -> None:
+        scenario_payload = self._scenario_payload()
+        scenario_payload["name"] = "May gas mark-gap review"
+        scenario_payload["thesis"] = "Target economics are far enough from the captured mark to review as a market opportunity."
+        scenario_payload["draft"] = {
+            **scenario_payload["draft"],  # type: ignore[arg-type]
+            "target_price": 3.25,
+            "target_volume": 1000,
+        }
+        scenario_response = self.client.post(
+            "/pretrade/scenarios",
+            json=scenario_payload,
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(scenario_response.status_code, 201)
+        scenario_id = scenario_response.json()["scenario_id"]
+
+        recommendation_response = self.client.post(
+            "/pretrade/recommendations/runs",
+            json={
+                "name": "Mark gap opportunity recommendation",
+                "source_scenario_id": scenario_id,
+                "input_snapshots": self._recommendation_input_snapshots(),
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(recommendation_response.status_code, 201)
+        recommendation_run = recommendation_response.json()
+        self.assertEqual(recommendation_run["recommendation"]["opportunity_summary"]["category"], "MARK_GAP")
+
+        review_response = self.client.post(
+            "/pretrade/reviews",
+            json={
+                "name": "Market opportunity mark-gap review",
+                "thesis": "Queue the target-vs-mark gap for durable opportunity review.",
+                "source_scenario_id": scenario_id,
+                "recommendation_run_id": recommendation_run["run_id"],
+                "review_notes": "Market opportunity desk review: target-vs-mark gap for governance reuse.",
+                "draft": scenario_payload["draft"],
+            },
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(review_response.status_code, 201)
+        review_id = review_response.json()["review_id"]
+
+        approve_response = self.client.patch(
+            f"/pretrade/reviews/{review_id}",
+            json={
+                "review_status": "APPROVED",
+                "activity_comment": "Approved mark-gap opportunity for reviewer-reuse tracking.",
+            },
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(approve_response.status_code, 200)
+
+        governance_items_response = self.client.get(
+            "/pretrade/governance/items",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(governance_items_response.status_code, 200)
+        governance_items = governance_items_response.json()
+        candidates = {
+            candidate["candidate_type"]: candidate
+            for candidate in governance_items["promotion_candidates"]
+        }
+        self.assertIn("MARKET_OPPORTUNITY", candidates)
+        market_candidate = candidates["MARKET_OPPORTUNITY"]
+        self.assertEqual(market_candidate["latest_review_id"], review_id)
+        self.assertEqual(market_candidate["latest_run_id"], recommendation_run["run_id"])
+        self.assertEqual(market_candidate["approved_review_count"], 1)
+        self.assertEqual(market_candidate["sample_review_ids"], [review_id])
+
+        list_before_response = self.client.get(
+            "/pretrade/market-opportunities",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(list_before_response.status_code, 200)
+        self.assertEqual(list_before_response.json(), [])
+
+        promote_response = self.client.post(
+            "/pretrade/market-opportunities/from-promotion",
+            json={
+                "owner": "desk.lead",
+                "review_note": "Owner review requested from mark-gap market opportunity signal.",
+            },
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(promote_response.status_code, 201)
+        market_opportunity = promote_response.json()
+        self.assertEqual(market_opportunity["status"], "REVIEW_DRAFT")
+        self.assertEqual(market_opportunity["owner"], "desk.lead")
+        self.assertEqual(market_opportunity["source_promotion_candidate_type"], "MARKET_OPPORTUNITY")
+        self.assertEqual(market_opportunity["source_latest_review_id"], review_id)
+        self.assertEqual(market_opportunity["source_latest_run_id"], recommendation_run["run_id"])
+        self.assertEqual(market_opportunity["source_promotion_score"], market_candidate["score"])
+        self.assertEqual(market_opportunity["source_review_name"], "Market opportunity mark-gap review")
+        self.assertEqual(market_opportunity["source_review_status"], "APPROVED")
+        self.assertEqual(market_opportunity["source_recommendation_stance"], recommendation_run["recommendation"]["stance"])
+        self.assertEqual(market_opportunity["source_recommendation_score"], recommendation_run["recommendation"]["score"])
+        self.assertEqual(market_opportunity["opportunity_summary"]["category"], "MARK_GAP")
+        self.assertEqual(market_opportunity["opportunity_summary"]["title"], "Pricing gap review")
+        self.assertIsNone(market_opportunity["arbitrage_candidate"])
+        self.assertGreater(len(market_opportunity["input_snapshots"]), 0)
+        self.assertIn("No booked trade has reused this pattern yet.", market_opportunity["source_stop_reasons"])
+
+        duplicate_promote_response = self.client.post(
+            "/pretrade/market-opportunities/from-promotion",
+            json={},
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(duplicate_promote_response.status_code, 201)
+        self.assertEqual(
+            duplicate_promote_response.json()["market_opportunity_id"],
+            market_opportunity["market_opportunity_id"],
+        )
+
+        list_after_response = self.client.get(
+            "/pretrade/market-opportunities",
+            headers=self.trader_one_headers,
+        )
+        self.assertEqual(list_after_response.status_code, 200)
+        self.assertEqual(len(list_after_response.json()), 1)
+        self.assertEqual(
+            list_after_response.json()[0]["market_opportunity_id"],
+            market_opportunity["market_opportunity_id"],
+        )
+
+        governance_export_response = self.client.get(
+            "/pretrade/governance/export",
+            headers=self.trader_two_headers,
+        )
+        self.assertEqual(governance_export_response.status_code, 200)
+        governance_export = governance_export_response.json()
+        self.assertTrue(
+            any(
+                row["category"] == "PROMOTION_CANDIDATE"
+                and row["promotion_candidate_type"] == "MARKET_OPPORTUNITY"
                 for row in governance_export["audit_rows"]
             )
         )

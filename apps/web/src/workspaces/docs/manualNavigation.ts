@@ -128,7 +128,7 @@ export function relatedHelpForManualSection(sectionId: string): RelatedManualHel
     workspaceLinks: [
       {
         view: 'dashboard',
-        label: 'Open Dashboard',
+        label: 'Open Home',
       },
     ],
   }

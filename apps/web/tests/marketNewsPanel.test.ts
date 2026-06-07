@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
 import {
+  buildMarketNewsTableRows,
   filterMarketNewsHeadlines,
+  filterMarketNewsTableRows,
   inferMarketNewsHeadlineEffects,
   inferMarketNewsMarketLocation,
   normalizeMarketNewsEffectFilter,
@@ -243,6 +245,57 @@ test('filterMarketNewsHeadlines filters by location, horizon, and market effect'
       demandEffect: 'neutral',
     }).map((item) => item.link),
     ['https://example.test/local-roundup'],
+  )
+})
+
+test('filterMarketNewsTableRows applies validated AI tags after deterministic baseline', () => {
+  const items: MarketNewsHeadlineRecord[] = [
+    {
+      title: 'Beef output breaks all-time high in U.S.',
+      source: 'Market Wire',
+      published_at: null,
+      link: 'https://example.test/beef-output',
+    },
+  ]
+
+  assert.equal(inferMarketNewsHeadlineEffects(items[0]).supply.direction, 'neutral')
+
+  const rows = buildMarketNewsTableRows(items, {
+    'headline-0': {
+      id: 'headline-0',
+      supply: {
+        direction: 'up',
+        horizon: 'immediate',
+        confidence: 0.93,
+        rationale: 'Output breaking an all-time high indicates more physical beef supply.',
+        source: 'ai',
+      },
+      demand: {
+        direction: 'neutral',
+        horizon: 'near_term',
+        confidence: 0.82,
+        rationale: 'No demand driver is named.',
+        source: 'ai',
+      },
+      market_location: {
+        label: 'United States',
+        scope: 'country',
+        confidence: 0.91,
+        rationale: 'The headline explicitly mentions U.S.',
+        source: 'ai',
+      },
+    },
+  })
+
+  assert.equal(rows[0].effects.supply.direction, 'up')
+  assert.equal(rows[0].effects.supply.source, 'ai')
+  assert.deepEqual(
+    filterMarketNewsTableRows(rows, { supplyEffect: 'positive' }).map((row) => row.item.link),
+    ['https://example.test/beef-output'],
+  )
+  assert.deepEqual(
+    filterMarketNewsTableRows(rows, { supplyEffect: 'neutral' }).map((row) => row.item.link),
+    [],
   )
 })
 

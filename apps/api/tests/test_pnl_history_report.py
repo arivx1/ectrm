@@ -2,17 +2,27 @@ from __future__ import annotations
 
 import unittest
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from apps.api.app.domains.risk.services.official_marks import (
+    OFFICIAL_MARK_APPROVAL_APPROVED_SOURCE,
+    OFFICIAL_MARK_APPROVAL_MISSING_APPROVED_SOURCE,
+    OFFICIAL_MARK_FRESHNESS_MISSING,
+    OFFICIAL_MARK_FRESHNESS_STALE,
+    OFFICIAL_MARK_INTERPOLATION_NONE,
+)
 from apps.api.app.domains.reports.services.pnl_history import (
     build_pnl_comparison_report,
     build_pnl_history_report,
 )
 from apps.api.app.models.event import Base, Event
 from apps.api.app.models.price_index_observation import PriceIndexObservation
+from apps.api.app.models.reference_price_index import ReferencePriceIndex
+from apps.api.app.models.reference_price_index_source import ReferencePriceIndexSource
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_price_term import TradePriceTerm
 
@@ -37,9 +47,76 @@ class PnlHistoryReportTests(unittest.TestCase):
         with self.SessionLocal() as session:
             session.query(Event).delete()
             session.query(PriceIndexObservation).delete()
+            session.query(ReferencePriceIndexSource).delete()
+            session.query(ReferencePriceIndex).delete()
             session.query(TradePriceTerm).delete()
             session.query(Trade).delete()
             session.commit()
+
+    def _seed_price_index(
+        self,
+        session,
+        *,
+        code: str,
+        commodity_code: str = "REFINED_PRODUCTS",
+        unit_code: str = "GAL",
+        market: str = "USGC",
+        location_code: str = "USGC",
+    ) -> None:
+        now = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
+        session.add(
+            ReferencePriceIndex(
+                code=code,
+                name=f"{code} official mark",
+                commodity_code=commodity_code,
+                currency_code="USD",
+                unit_code=unit_code,
+                provider="EIA",
+                quote_type="SPOT",
+                market=market,
+                location_code=location_code,
+                calendar_code=None,
+                description="Test price index",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=now,
+                created_by="test",
+                updated_at=now,
+                updated_by="test",
+                version=1,
+            )
+        )
+
+    def _seed_price_index_source(
+        self,
+        session,
+        *,
+        price_index_code: str,
+        series_id: str,
+        provider: str = "EIA",
+        frequency: str = "DAILY",
+        source_unit: str = "GAL",
+    ) -> None:
+        now = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
+        session.add(
+            ReferencePriceIndexSource(
+                price_index_code=price_index_code,
+                provider=provider,
+                dataset_code="EIA",
+                series_id=series_id,
+                frequency=frequency,
+                source_unit=source_unit,
+                source_currency_code="USD",
+                transform_rule="field:value",
+                is_active=True,
+                created_at=now,
+                created_by="test",
+                updated_at=now,
+                updated_by="test",
+                version=1,
+            )
+        )
 
     def test_event_history_moves_pnl_between_realized_and_unrealized(self) -> None:
         with self.SessionLocal() as session:
@@ -222,6 +299,19 @@ class PnlHistoryReportTests(unittest.TestCase):
 
     def test_index_and_hybrid_trades_use_latest_available_market_marks(self) -> None:
         with self.SessionLocal() as session:
+            self._seed_price_index(session, code="GASOLINE_US_REG_W")
+            self._seed_price_index(session, code="USGC_DIESEL_SPOT_D")
+            self._seed_price_index_source(
+                session,
+                price_index_code="GASOLINE_US_REG_W",
+                series_id="GAS",
+                frequency="WEEKLY",
+            )
+            self._seed_price_index_source(
+                session,
+                price_index_code="USGC_DIESEL_SPOT_D",
+                series_id="DSL",
+            )
             session.add_all(
                 [
                     Event(
@@ -373,6 +463,167 @@ class PnlHistoryReportTests(unittest.TestCase):
                     "unrealized_trade_count": 2,
                 },
             ],
+        )
+
+    def test_pnl_uses_official_mark_instead_of_unapproved_raw_observation(self) -> None:
+        with self.SessionLocal() as session:
+            self._seed_price_index(
+                session,
+                code="HENRY_HUB_GAS_D",
+                commodity_code="NATURAL_GAS",
+                unit_code="MMBTU",
+                market="HENRY_HUB",
+                location_code="HENRY_HUB",
+            )
+            self._seed_price_index_source(
+                session,
+                price_index_code="HENRY_HUB_GAS_D",
+                series_id="NG.RNGWHHD.D",
+                source_unit="MMBTU",
+            )
+            session.add_all(
+                [
+                    Event(
+                        event_id="evt-official-mark-1",
+                        aggregate_type="trade",
+                        aggregate_id="T-OFFICIAL-MARK",
+                        event_type="TradeCreated",
+                        occurred_at=datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc),
+                        recorded_at=datetime(2026, 6, 1, 9, 1, tzinfo=timezone.utc),
+                        actor_id="ops",
+                        correlation_id=None,
+                        causation_id=None,
+                        schema_version=1,
+                        payload={
+                            "trade_side": "BUY",
+                            "pricing_type": "INDEX",
+                            "price_index_code": "HENRY_HUB_GAS_D",
+                            "price": None,
+                            "volume": 10.0,
+                            "trade_currency_code": "USD",
+                            "price_unit_code": "MMBTU",
+                            "settlement_status": "PENDING",
+                        },
+                    ),
+                    PriceIndexObservation(
+                        id=200,
+                        price_index_code="HENRY_HUB_GAS_D",
+                        observation_date=date(2026, 6, 1),
+                        value=Decimal("3.050000"),
+                        unit_code="MMBTU",
+                        currency_code="USD",
+                        source_provider="EIA",
+                        source_series_id="NG.RNGWHHD.D",
+                        source_frequency="DAILY",
+                        source_published_at=datetime(2026, 6, 1, 18, 0, tzinfo=timezone.utc),
+                        source_revision=None,
+                        downloaded_at=datetime(2026, 6, 1, 18, 5, tzinfo=timezone.utc),
+                        run_id=1,
+                        raw_payload=None,
+                        created_at=datetime(2026, 6, 1, 18, 5, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 6, 1, 18, 5, tzinfo=timezone.utc),
+                    ),
+                    PriceIndexObservation(
+                        id=201,
+                        price_index_code="HENRY_HUB_GAS_D",
+                        observation_date=date(2026, 6, 2),
+                        value=Decimal("9.990000"),
+                        unit_code="MMBTU",
+                        currency_code="USD",
+                        source_provider="BROKER",
+                        source_series_id="BROKER.HH.D",
+                        source_frequency="DAILY",
+                        source_published_at=datetime(2026, 6, 2, 18, 0, tzinfo=timezone.utc),
+                        source_revision=None,
+                        downloaded_at=datetime(2026, 6, 2, 18, 5, tzinfo=timezone.utc),
+                        run_id=2,
+                        raw_payload=None,
+                        created_at=datetime(2026, 6, 2, 18, 5, tzinfo=timezone.utc),
+                        updated_at=datetime(2026, 6, 2, 18, 5, tzinfo=timezone.utc),
+                    ),
+                ]
+            )
+            session.commit()
+
+            report = build_pnl_history_report(session, as_of=date(2026, 6, 2))
+
+        self.assertEqual(report["summary"]["total_pnl"], 30.5)
+        self.assertEqual(report["summary"]["unrealized_pnl"], 30.5)
+        self.assertEqual(len(report["valuations"]), 1)
+        valuation = report["valuations"][0]
+        self.assertEqual(valuation["trade_id"], "T-OFFICIAL-MARK")
+        self.assertEqual(valuation["market_price"], 3.05)
+        self.assertEqual(valuation["effective_mark"], 3.05)
+        self.assertEqual(valuation["pnl_contribution"], 30.5)
+        self.assertEqual(valuation["included_in_totals"], True)
+        self.assertEqual(valuation["valuation_status"], "VALUED")
+        self.assertEqual(
+            valuation["mark_evidence"],
+            {
+                "price_index_code": "HENRY_HUB_GAS_D",
+                "valuation_basis": "active_price_index_source_latest_observation_no_interpolation",
+                "interpolation_method": OFFICIAL_MARK_INTERPOLATION_NONE,
+                "approval_status": OFFICIAL_MARK_APPROVAL_APPROVED_SOURCE,
+                "freshness_status": OFFICIAL_MARK_FRESHNESS_STALE,
+                "as_of_date": date(2026, 6, 2),
+                "observation_date": date(2026, 6, 1),
+                "source_provider": "EIA",
+                "source_series_id": "NG.RNGWHHD.D",
+                "source_published_at": datetime(2026, 6, 1, 18, 0),
+                "downloaded_at": datetime(2026, 6, 1, 18, 5),
+                "run_id": 1,
+                "days_stale": 1,
+                "reason": None,
+            },
+        )
+
+    def test_pnl_excludes_index_trade_when_official_mark_is_missing(self) -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                Event(
+                    event_id="evt-missing-official-mark-1",
+                    aggregate_type="trade",
+                    aggregate_id="T-MISSING-OFFICIAL-MARK",
+                    event_type="TradeCreated",
+                    occurred_at=datetime(2026, 6, 1, 9, 0, tzinfo=timezone.utc),
+                    recorded_at=datetime(2026, 6, 1, 9, 1, tzinfo=timezone.utc),
+                    actor_id="ops",
+                    correlation_id=None,
+                    causation_id=None,
+                    schema_version=1,
+                    payload={
+                        "trade_side": "BUY",
+                        "pricing_type": "INDEX",
+                        "price_index_code": "UNCONFIGURED_GAS_D",
+                        "price": None,
+                        "volume": 10.0,
+                        "settlement_status": "PENDING",
+                    },
+                )
+            )
+            session.commit()
+
+            report = build_pnl_history_report(session, as_of=date(2026, 6, 1))
+
+        self.assertEqual(report["summary"]["total_pnl"], 0.0)
+        self.assertEqual(report["summary"]["priced_trade_count"], 0)
+        self.assertEqual(len(report["valuations"]), 1)
+        valuation = report["valuations"][0]
+        self.assertEqual(valuation["valuation_status"], "UNPRICED_MISSING_MARK")
+        self.assertEqual(
+            valuation["valuation_status_reason"],
+            "Price index is not configured as an active valuation index.",
+        )
+        self.assertEqual(valuation["included_in_totals"], False)
+        mark_evidence = valuation["mark_evidence"]
+        self.assertEqual(
+            mark_evidence["approval_status"],
+            OFFICIAL_MARK_APPROVAL_MISSING_APPROVED_SOURCE,
+        )
+        self.assertEqual(mark_evidence["freshness_status"], OFFICIAL_MARK_FRESHNESS_MISSING)
+        self.assertEqual(
+            mark_evidence["reason"],
+            "Price index is not configured as an active valuation index.",
         )
 
     def test_filters_limit_report_by_book_portfolio_commodity_class_and_date_window(self) -> None:

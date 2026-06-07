@@ -308,6 +308,34 @@
   box-shadow: 0 10px 30px rgba(17, 30, 41, 0.06);
 }
 
+:root[data-color-mode='light'] .brand-mark.product-switch-button {
+  border-color: rgba(18, 42, 56, 0.14);
+  background: rgba(255, 255, 255, 0.76);
+  color: #284255;
+  box-shadow: 0 8px 22px rgba(17, 30, 41, 0.05);
+}
+
+:root[data-color-mode='light'] .brand-mark.product-switch-button.is-active {
+  border-color: rgba(18, 124, 108, 0.54);
+  background:
+    linear-gradient(135deg, rgba(18, 124, 108, 0.98), rgba(11, 42, 71, 0.94)),
+    #127c6c;
+  color: #f4fffb;
+  box-shadow:
+    0 16px 34px rgba(18, 42, 56, 0.18),
+    0 0 0 1px rgba(18, 124, 108, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+:root[data-color-mode='light'] .brand-mark.product-switch-button.is-active::before {
+  width: 0.48rem;
+  height: 0.48rem;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18);
+  content: "";
+}
+
 :root[data-color-mode='light'] .nav-item {
   border: 1px solid rgba(18, 42, 56, 0.08);
   background: rgba(255, 255, 255, 0.62);
@@ -674,6 +702,17 @@
 
 :root[data-color-mode='light'] .data-table th {
   background: rgba(245, 248, 251, 0.96);
+  color: #66717c;
+}
+
+:root[data-color-mode='light'] .data-sheet-column-filter {
+  border-color: rgba(18, 42, 56, 0.1);
+  background: rgba(255, 255, 255, 0.9);
+  color: #13293d;
+}
+
+:root[data-color-mode='light'] .data-sheet-sort-state {
+  background: rgba(18, 42, 56, 0.06);
   color: #66717c;
 }
 

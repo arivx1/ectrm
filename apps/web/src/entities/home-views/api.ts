@@ -15,9 +15,14 @@ export type HomeViewCardPlacementPayload = {
   order: number
   column_span: PromptHomeCardPlacement['columnSpan']
   row_span: PromptHomeCardPlacement['rowSpan']
+  collapsed_column_span?: PromptHomeCardPlacement['collapsedColumnSpan']
+  collapsed_row_span?: PromptHomeCardPlacement['collapsedRowSpan']
+  expanded_column_span?: PromptHomeCardPlacement['expandedColumnSpan']
+  expanded_row_span?: PromptHomeCardPlacement['expandedRowSpan']
 }
 
 export type HomeViewCardPayload = {
+  instance_id: string
   card_id: PromptHomeCardKey
   kind?: PromptHomeCardKind | null
   label?: string | null
@@ -91,12 +96,17 @@ export type HomeViewDefinitionDuplicatePayload = {
 
 export function toHomeViewCardPayload(card: PromptHomeTemplateCard): HomeViewCardPayload {
   return {
+    instance_id: card.instanceId,
     card_id: card.cardId,
     visible: card.visible,
     placement: {
       order: card.placement.order,
       column_span: card.placement.columnSpan,
       row_span: card.placement.rowSpan,
+      collapsed_column_span: card.placement.collapsedColumnSpan,
+      collapsed_row_span: card.placement.collapsedRowSpan,
+      expanded_column_span: card.placement.expandedColumnSpan,
+      expanded_row_span: card.placement.expandedRowSpan,
     },
     parameters: { ...card.parameters },
     filters: { ...card.filters },
@@ -105,16 +115,31 @@ export function toHomeViewCardPayload(card: PromptHomeTemplateCard): HomeViewCar
 }
 
 export function homeViewCardPayloadToPromptHomeCard(card: HomeViewCardPayload): Record<string, unknown> {
+  const placement: Record<string, unknown> = {
+    order: card.placement.order,
+    columnSpan: card.placement.column_span,
+    rowSpan: card.placement.row_span,
+  }
+  if (card.placement.collapsed_column_span !== undefined) {
+    placement.collapsedColumnSpan = card.placement.collapsed_column_span
+  }
+  if (card.placement.collapsed_row_span !== undefined) {
+    placement.collapsedRowSpan = card.placement.collapsed_row_span
+  }
+  if (card.placement.expanded_column_span !== undefined) {
+    placement.expandedColumnSpan = card.placement.expanded_column_span
+  }
+  if (card.placement.expanded_row_span !== undefined) {
+    placement.expandedRowSpan = card.placement.expanded_row_span
+  }
+
   return {
+    instanceId: card.instance_id ?? card.card_id,
     cardId: card.card_id,
     kind: card.kind ?? undefined,
     label: card.label ?? undefined,
     visible: card.visible,
-    placement: {
-      order: card.placement.order,
-      columnSpan: card.placement.column_span,
-      rowSpan: card.placement.row_span,
-    },
+    placement,
     parameters: { ...card.parameters },
     filters: { ...card.filters },
     dataBindings: [...card.data_bindings],

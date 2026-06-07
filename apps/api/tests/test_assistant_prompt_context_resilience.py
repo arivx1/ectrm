@@ -16,7 +16,7 @@ from apps.api.app.domains.assistant.services.prompt_context import (
     _safe_count_active,
     _safe_count_where,
 )
-from apps.api.app.main import _attach_correlation_header
+from apps.api.app.core.http_runtime import attach_correlation_header as _attach_correlation_header
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.wiki_page import WikiPage

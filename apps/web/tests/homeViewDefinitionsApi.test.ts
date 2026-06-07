@@ -34,9 +34,10 @@ function homeViewResponse() {
     persona_hint: "trader",
     cards: [
       {
+        instance_id: "prompt",
         card_id: "prompt",
         kind: "assistant_prompt",
-        label: "Ask the desk assistant",
+        label: "Desk Assistant",
         visible: true,
         placement: { order: 0, column_span: 2, row_span: 1 },
         parameters: {},
@@ -134,18 +135,32 @@ test("home view API uses authenticated typed definition endpoints", async () => 
 
     const createBody = JSON.parse(String(calls[2]?.init?.body)) as {
       cards: Array<{
+        instance_id: string;
         card_id: string;
         visible: boolean;
-        placement: { column_span: number; row_span: number };
+        placement: {
+          column_span: number;
+          row_span: number;
+          collapsed_column_span: number;
+          collapsed_row_span: number;
+          expanded_column_span: number;
+          expanded_row_span: number;
+        };
       }>;
     };
+    assert.equal(createBody.cards[0]?.instance_id, "prompt");
+    assert.equal(createBody.cards[1]?.instance_id, "prices");
     assert.equal(createBody.cards[0]?.card_id, "prompt");
     assert.equal(createBody.cards[1]?.card_id, "prices");
     assert.equal(createBody.cards[1]?.visible, false);
     assert.deepEqual(createBody.cards[0]?.placement, {
       order: 0,
       column_span: 2,
-      row_span: 1,
+      row_span: 4,
+      collapsed_column_span: 2,
+      collapsed_row_span: 1,
+      expanded_column_span: 2,
+      expanded_row_span: 4,
     });
   } finally {
     globalThis.fetch = originalFetch;

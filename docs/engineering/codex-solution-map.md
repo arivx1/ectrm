@@ -70,9 +70,18 @@ instead of adding unrelated breadth.
 
 Primary entry points:
 
-- [apps/api/app/main.py](../../apps/api/app/main.py): FastAPI app, CORS,
-  request correlation, session auth middleware, protected route rules, public
-  runtime settings, error handling, and MCP mounting.
+- [apps/api/app/main.py](../../apps/api/app/main.py): FastAPI app assembly,
+  CORS setup, session factory state, route inclusion, MCP mounting, health and
+  runtime-settings routes, and registration of core HTTP middleware/exception
+  handlers.
+- [apps/api/app/core/http_session_middleware.py](../../apps/api/app/core/http_session_middleware.py):
+  request correlation, session principal resolution, protected route
+  enforcement, request identity context, and auth rejection responses.
+- [apps/api/app/core/http_exception_handlers.py](../../apps/api/app/core/http_exception_handlers.py):
+  API-wide exception handler registration and shared error response handling.
+- [apps/api/app/core/http_auth_policy.py](../../apps/api/app/core/http_auth_policy.py):
+  protected route classification, public write exemptions, authenticated read
+  rules, and HTTP/MCP source-surface classification.
 - [apps/api/app/domains/http.py](../../apps/api/app/domains/http.py): central
   HTTP route registration map.
 - [apps/api/app/db](../../apps/api/app/db): SQLAlchemy engine and sessions.
@@ -93,14 +102,15 @@ domain-first packages. New business logic should normally live under
 | --- | --- | --- |
 | Trade lifecycle | `domains/trading`, `routes/events.py`, `routes/trades.py` | Trade commands, lifecycle validation, event append semantics, trade projection application, stale-state checks. |
 | Reference data | `domains/reference_data`, `routes/reference_data.py`, `routes/reference_data_routes` | Master data validity, active/inactive eligibility, standards, dependency-safe changes, seed/import helpers. |
-| Risk | `domains/risk`, `routes/positions.py`, `routes/option_exposures.py` | Exposure views, option exposure logic, risk-oriented projections and exceptions. |
-| Operations | `domains/operations` | Confirmations, deliveries, shipments, workflow items, actualization, operational resources, document-intake work projections, tracking. |
+| Risk | `domains/risk`, `routes/positions.py`, `routes/option_exposures.py` | Exposure views, option exposure logic, official mark selection for valuation basis, position-as-of risk-factor decomposition, counterparty credit-limit policy, read-only scenario stress overlays, risk-oriented projections and exceptions. |
+| Operations | `domains/operations` | Confirmations, deliveries, shipments, gas schedule and nomination commitments, workflow items, actualization ledger evidence with inventory-deferred treatment, operational resources, document-intake work projections, tracking. |
 | Settlement and accruals | `domains/settlement`, `domains/accruals`, settlement-adjacent operations services | Invoice/payment state, settlement posture, accrual lots and entries, settlement exceptions. |
-| Documents | `domains/documents`, `routes/documents.py` | Ingestion, classification, extraction review, deterministic facets, linkage, document action planning, and missing-record creation intake/resolution. |
+| Documents | `domains/documents`, `routes/documents.py` | Ingestion, classification, extraction review, provider-routed document AI processors, deterministic facets, linkage, document action planning, and missing-record creation intake/resolution. |
 | Messages and collaboration | `routes/messages.py`, `domains/messages/services/workspace.py`, `domains/integrations/services/slack_messaging.py` | Durable conversation/message objects, Slack sync and mirror posting, in-thread assistant provenance, and authenticated external messaging. Not a hidden business-write path. |
-| Reports | `domains/reports` | Aggregation, report definitions, presets, exports, prompt-resolved read-only report lenses, pre-trade recommendation/governance services, review-only netting-set, hedge-recommendation, and risk-scenario drafts, and summaries over governed domain outputs. |
+| Integrations | `routes/integrations.py`, `domains/integrations/services` | Admin-visible external SaaS connectors and authenticated read adapters such as Attio CRM connection checks, Nexus client enrichment, Notion workspace search checks, and Anthropic admin API key status. Keep secrets in backend settings, return redacted runtime state, and avoid business writes unless a typed domain service owns the mutation. |
+| Reports | `domains/reports` | Aggregation, report definitions, presets, exports, prompt-resolved read-only report lenses, pre-trade recommendation/governance services, review-only netting-set, hedge-recommendation, risk-scenario, and market-opportunity drafts, promoted-draft outcome metrics, and summaries over governed domain outputs. |
 | Home view instances | `domains/home_views`, `routes/home_view_definitions.py`, assistant read tools in `domains/assistant/services/tools.py`, recipe registry in `domains/home_views/services/recipes.py` | System Home template metadata, personal and shared Home definitions, card registry and card configuration value validation, deterministic Home view recipes, shared lifecycle/admin inventory, assistant-readable Home catalog/visible-instance inspection, governed personal `create_home_view_instance` staging/execution, scope/audit fields, and reset behavior. Not live business data truth. |
-| Assistant and AI gateway | `domains/assistant`, `routes/assistant.py` | Prompt assembly, live tools, managed agents, run traces, evals, action planning, action governance. |
+| Assistant and AI gateway | `domains/assistant`, `routes/assistant.py` | Prompt assembly, provider-routed OpenAI/Anthropic/Google runtime calls, provider-routed agent draft/self-update generation for supported structured-output providers, live tools, managed agents, run traces, evals, action planning, action governance. |
 | Job scheduling | `domains/job_scheduling`, `models/job_schedule.py`, `apps/web/src/workspaces/admin/JobSchedulingPanel.tsx` | Admin-owned schedule definitions, time/event trigger materialization, queued job run intents, deterministic/agentic/hybrid execution plans, scheduler authority checks, and the Admin Console schedule/run surface. Not a business-write bypass. |
 | MCP | `domains/mcp` | External read transport and identity bridge. Future writes must map to typed services or action requests. |
 | Codex | `domains/codex`, `routes/codex.py` | Admin-owned engineering task dispatch, task state, callbacks, and smoke checks. Not business-record truth. |
@@ -127,7 +137,7 @@ Primary entry points:
 
 Frontend layering:
 
-- `workspaces`: top-level product areas such as Home, Live Desk, Pre-Trade,
+- `workspaces`: top-level product areas such as Home, Apps, Pre-Trade,
   Trade Capture, Activity Feed, Exposure, Net Positions, Deliveries,
   Scheduling, Work Queue, Settlement, Messages, Reports, Library, Map,
   Reference Data, Admin Console, Settings, Token Tracker, and Assistant
@@ -295,7 +305,7 @@ Current risks to keep in view:
 | Trade lifecycle write | `domains/trading/services/trade_commands.py`, `event_writes.py`, `trade_event_application.py` | Trade command/projection tests, `make api-contract-check` if metadata changes. |
 | Trade metadata contract | `domains/trading/services/trade_metadata.py`, `apps/api/contracts` | `make api-contract-check`; refresh only with `make api-contract-refresh` when intentional. |
 | Reference data | `domains/reference_data`, `routes/reference_data_routes`, `features/reference-data` | `apps/api/tests/test_reference_data.py`, focused web tests if UI changes. |
-| Pre-trade trader/risk decision support | `routes/pretrade.py`, `schemas/pretrade.py`, `domains/reports/services/pretrade_recommendations.py`, `pretrade_governance.py`, `pretrade_netting_sets.py`, `pretrade_hedge_recommendations.py`, `pretrade_risk_scenarios.py`, Pre-Trade workspace | `apps.api.tests.test_pretrade_api`, `apps.api.tests.test_pretrade_recommendation_triage`, focused Pre-Trade web tests, build/lint, and assistant evals when agent behavior changes. |
+| Pre-trade trader/risk decision support | `routes/pretrade.py`, `schemas/pretrade.py`, `domains/reports/services/pretrade_recommendations.py`, `pretrade_governance.py`, `pretrade_netting_sets.py`, `pretrade_hedge_recommendations.py`, `pretrade_risk_scenarios.py`, `pretrade_market_opportunities.py`, `pretrade_promotion_outcomes.py`, Pre-Trade workspace | `apps.api.tests.test_pretrade_api`, `apps.api.tests.test_pretrade_recommendation_triage`, focused Pre-Trade web tests, build/lint, and assistant evals when agent behavior changes. |
 | Web workspace behavior | `workspaceRendererRegistry.tsx`, `useAppWorkspaceBootstrap.ts`, owning workspace | `make web-test`, `make web-lint`, browser smoke for high-visibility flows. |
 | Home view instances | `domains/home_views`, `routes/home_view_definitions.py`, Prompt Home workspace, assistant read tools, Home recipe registry | `apps.api.tests.test_home_view_definitions_api`; `apps.api.tests.test_home_view_recipes` for recipe changes; `apps.api.tests.test_assistant_tooling` when assistant Home tools change; focused assistant action/API tests plus `make api-assistant-evals` when prompt-created Home views, recipe stop conditions, outcome metrics, or `create_home_view_instance` changes; focused web tests when Prompt Home rendering changes; browser smoke for prompt-created saved-instance approval/open paths. |
 | Assistant prompt context | `domains/assistant/services/prompt_context.py`, managed-agent services | `make api-assistant-evals`, focused assistant API tests. |

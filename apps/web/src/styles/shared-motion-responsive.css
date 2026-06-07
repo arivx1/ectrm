@@ -151,6 +151,7 @@
 
   .workspace-topbar {
     display: grid;
+    grid-template-columns: 1fr;
     gap: 0.75rem;
   }
 
@@ -197,6 +198,13 @@
   }
 
   .workspace-topbar-actions {
+    grid-template-columns: 1fr;
+    justify-content: flex-start;
+  }
+
+  .workspace-topbar-command-actions,
+  .workspace-topbar-account-actions {
+    flex-wrap: wrap;
     justify-content: flex-start;
   }
 
@@ -208,7 +216,12 @@
     display: inline-flex;
   }
 
-  .workspace-topbar-token {
+  .workspace-topbar-token,
+  .workspace-topbar-db-size {
+    flex: 0 0 auto;
+  }
+
+  .terminal-command-trigger {
     width: 100%;
   }
 
@@ -254,6 +267,16 @@
     padding: 1rem 1rem 0;
     background: linear-gradient(180deg, rgba(244, 241, 234, 0.96), rgba(244, 241, 234, 0.7), rgba(244, 241, 234, 0));
     backdrop-filter: blur(10px);
+  }
+
+  .product-switch-mobile {
+    --brand-mark-row-item-inline-size: 5.3rem;
+
+    flex: 0 1 auto;
+  }
+
+  .product-switch-mobile .product-switch-button {
+    padding-inline: 0.58rem;
   }
 
   .mobile-nav-button {
@@ -345,6 +368,17 @@
 }
 
 @media (max-width: 720px) {
+  .mobile-topbar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .mobile-topbar-actions {
+    flex: 1 1 16rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
   .metric-grid,
   .system-status-grid,
   .dependency-status-grid,

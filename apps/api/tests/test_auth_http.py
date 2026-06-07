@@ -525,7 +525,10 @@ class AuthHttpTests(unittest.TestCase):
     def test_unhandled_exception_is_logged_with_request_context(self) -> None:
         stream, handler, original_stream = self._swap_log_stream()
         try:
-            with patch("apps.api.app.main.build_database_overview", side_effect=RuntimeError("boom")):
+            with patch(
+                "apps.api.app.core.public_runtime_settings.build_database_overview",
+                side_effect=RuntimeError("boom"),
+            ):
                 with TestClient(app, raise_server_exceptions=False) as client:
                     response = client.get(
                         "/settings/public",

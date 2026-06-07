@@ -41,6 +41,12 @@ from apps.api.app.domains.reports.services.pretrade_hedge_recommendations import
     to_pretrade_hedge_recommendation_out,
     visible_pretrade_hedge_recommendation_records,
 )
+from apps.api.app.domains.reports.services.pretrade_market_opportunities import (
+    PreTradeMarketOpportunityPromotionError,
+    promote_governance_market_opportunity_draft,
+    to_pretrade_market_opportunity_out,
+    visible_pretrade_market_opportunity_records,
+)
 from apps.api.app.domains.reports.services.pretrade_netting_sets import (
     PreTradeNettingSetPromotionError,
     promote_governance_netting_set_draft,
@@ -52,6 +58,9 @@ from apps.api.app.domains.reports.services.pretrade_risk_scenarios import (
     promote_governance_risk_scenario_draft,
     to_pretrade_risk_scenario_out,
     visible_pretrade_risk_scenario_records,
+)
+from apps.api.app.domains.reports.services.pretrade_promotion_outcomes import (
+    build_pretrade_promotion_outcome_summary,
 )
 from apps.api.app.domains.reports.services.pretrade_review_drift import (
     build_pretrade_review_drift,
@@ -83,8 +92,11 @@ from apps.api.app.schemas.pretrade import (
     PreTradeHedgeRecommendationPromoteCreate,
     PreTradeGovernanceItemsOut,
     PreTradeGovernanceSummaryOut,
+    PreTradeMarketOpportunityOut,
+    PreTradeMarketOpportunityPromoteCreate,
     PreTradeNettingSetOut,
     PreTradeNettingSetPromoteCreate,
+    PreTradePromotionOutcomeSummaryOut,
     PreTradeRecommendationDraftAnalysisCreate,
     PreTradeRecommendationDraftAnalysisOut,
     PreTradeGovernanceStaleEvidenceRunOut,
@@ -640,6 +652,15 @@ def export_pretrade_governance_audit(
     )
 
 
+@router.get("/promotion-outcomes", response_model=PreTradePromotionOutcomeSummaryOut)
+def get_pretrade_promotion_outcomes(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradePromotionOutcomeSummaryOut:
+    require_authenticated_actor(request)
+    return build_pretrade_promotion_outcome_summary(db)
+
+
 @router.get("/netting-sets", response_model=list[PreTradeNettingSetOut])
 def get_pretrade_netting_sets(
     request: Request,
@@ -736,6 +757,40 @@ def promote_pretrade_risk_scenario_from_governance(
     except PreTradeRiskScenarioPromotionError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return to_pretrade_risk_scenario_out(record, actor_id=actor_id)
+
+
+@router.get("/market-opportunities", response_model=list[PreTradeMarketOpportunityOut])
+def get_pretrade_market_opportunities(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[PreTradeMarketOpportunityOut]:
+    actor_id = require_authenticated_actor(request)
+    return [
+        to_pretrade_market_opportunity_out(record, actor_id=actor_id)
+        for record in visible_pretrade_market_opportunity_records(db)
+    ]
+
+
+@router.post(
+    "/market-opportunities/from-promotion",
+    response_model=PreTradeMarketOpportunityOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def promote_pretrade_market_opportunity_from_governance(
+    payload: PreTradeMarketOpportunityPromoteCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradeMarketOpportunityOut:
+    actor_id = require_authenticated_actor(request)
+    try:
+        record = promote_governance_market_opportunity_draft(
+            db,
+            actor_id=actor_id,
+            payload=payload,
+        )
+    except PreTradeMarketOpportunityPromotionError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return to_pretrade_market_opportunity_out(record, actor_id=actor_id)
 
 
 @router.get("/recommendations/runs", response_model=list[PreTradeRecommendationRunOut])

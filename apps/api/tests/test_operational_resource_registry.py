@@ -14,6 +14,7 @@ class OperationalResourceRegistryTests(unittest.TestCase):
             {
                 "confirmations",
                 "deliveries",
+                "document_record_creation_requests",
                 "shipments",
                 "invoices",
                 "payments",

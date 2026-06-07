@@ -372,7 +372,6 @@ describe('ReportsWorkspace', () => {
     expect(markup).toContain('Open Henry Hub Natural Gas price report')
     expect(markup).toContain('Home')
     expect(markup).toContain('Filter: HH_NATGAS')
-    expect(markup).toContain('Price Report Tiles')
     expect(markup).toContain('NATGAS, HENRY_HUB, ICE · HH_NATGAS')
     expect(markup).toContain('Price Index News')
     expect(markup).toContain('Review Sources')

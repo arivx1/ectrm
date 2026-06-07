@@ -3,6 +3,7 @@ import {
   KeyboardSensor,
   PointerSensor,
   closestCenter,
+  useDroppable,
   useSensor,
   useSensors,
   type DraggableAttributes,
@@ -28,6 +29,7 @@ import {
   type CSSProperties,
   type FormEvent,
   type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 
@@ -75,15 +77,24 @@ import {
 } from "../../entities/app/promptNavigationIntent";
 import {
   describeGoogleCalendarEventWindow,
+  loadGoogleCalendars,
   loadUpcomingGoogleCalendarEvents,
   parseGoogleCalendarDateOnly,
   type GoogleCalendarEvent,
+  type GoogleCalendarListEntry,
 } from "../../entities/calendar/googleCalendar";
 import {
+  loadMessagingWorkspaceState,
+  type MessagingWorkspaceConversationRecord,
+} from "../../entities/messages/api";
+import {
   getGoogleCalendarSessionSnapshot,
+  formatGoogleCalendarSelectionSummary,
   googleCalendarSessionTokenIsUsable,
   saveGoogleCalendarEventCache,
+  saveGoogleCalendarSelectedCalendars,
   subscribeGoogleCalendarSession,
+  type GoogleCalendarSelection,
   type GoogleCalendarSessionSnapshot,
 } from "../../entities/calendar/googleCalendarSession";
 import {
@@ -109,6 +120,7 @@ import type {
   AssetRecord,
   DeliveryRecord,
   LocationRecord,
+  MarketNewsHeadlineRecord,
   PriceIndexRecord,
   SpatialFeatureRecord,
   ViewKey,
@@ -169,16 +181,25 @@ import {
 import { shouldAutoEnsurePromptHomeData } from "./promptHomeAutoLoad";
 import { PromptHomeCommunicationCard } from "./PromptHomeCommunicationCard";
 import { PromptHomeDocumentUploadCard } from "./PromptHomeDocumentUploadCard";
+import { buildSlackMessagingInboxMessages } from "../messages/messagingInboxData";
 import { getPromptHomeNextClockTickDelay } from "./promptHomeClock";
 import {
   PROMPT_HOME_CARD_VISIBILITY_OPTIONS,
+  type PromptHomeCardSizeAxis,
+  type PromptHomeCardSizeState,
   type PromptHomeCardKey,
   usePersistentPromptHomeCardVisibility,
 } from "./promptHomeCardVisibility";
 import {
+  getPromptHomeCardInstanceId,
   getPromptHomeCardLabel,
+  PROMPT_HOME_CARD_MAX_COLLAPSED_ROW_SPAN,
+  PROMPT_HOME_CARD_MAX_EXPANDED_ROW_SPAN,
+  PROMPT_HOME_CARD_MAX_HORIZONTAL_SPAN,
+  PROMPT_HOME_CARD_MIN_SPAN,
   type PromptHomeTemplateCard,
 } from "./promptHomeCards";
+import { shouldSubmitPromptHomeComposerKey } from "./promptHomeComposerKeybindings";
 import {
   mergePromptHomeClassNames,
   PromptHomeCardDragHandleProvider,
@@ -272,26 +293,6 @@ type PromptHomeMessage = {
   activityLabel?: string;
 };
 
-type PromptHomeComposerKeyEvent = {
-  key: string;
-  ctrlKey?: boolean;
-  shiftKey?: boolean;
-  nativeEvent?: {
-    isComposing?: boolean;
-  };
-};
-
-export function shouldSubmitPromptHomeComposerKey(
-  event: PromptHomeComposerKeyEvent,
-): boolean {
-  return (
-    event.key === "Enter" &&
-    !event.ctrlKey &&
-    !event.shiftKey &&
-    !event.nativeEvent?.isComposing
-  );
-}
-
 type PromptHomeAssistantActivity = {
   id: string;
   label: string;
@@ -303,7 +304,11 @@ type PromptHomeSortableListeners = ReturnType<typeof useSortable>["listeners"];
 
 const PROMPT_HOME_PROMPT_CARD_PANEL_ID = "prompt-home-prompt-card-panel";
 const PROMPT_HOME_CARD_FILTER_PANEL_ID = "prompt-home-card-filter-panel";
+const PROMPT_HOME_CARD_DELETE_DROP_TARGET_ID =
+  "prompt-home-card-delete-drop-target";
 const PROMPT_HOME_TIMEFRAME_PANEL_ID = "prompt-home-timeframe-panel";
+const PROMPT_HOME_EXCHANGES_PANEL_ID = "prompt-home-exchanges-panel";
+const PROMPT_HOME_CALENDAR_PANEL_ID = "prompt-home-calendar-panel";
 const PROMPT_HOME_DAY_PANEL_ID = "prompt-home-day-panel";
 const PROMPT_HOME_WEEK_PANEL_ID = "prompt-home-week-panel";
 const PROMPT_HOME_MONTH_PANEL_ID = "prompt-home-month-panel";
@@ -314,7 +319,6 @@ const PROMPT_HOME_INITIAL_WEATHER_OVERLAY_VISIBILITY: WeatherOverlayVisibilitySt
   ...createDefaultWeatherOverlayVisibilityState(),
   radar: true,
 };
-const PROMPT_HOME_TRADING_HOURS_PANEL_ID = "prompt-home-trading-hours-panel";
 const PROMPT_HOME_DAY_CALENDAR_MARKER_LIMIT = 3;
 const PROMPT_HOME_WEEK_CALENDAR_MARKER_LIMIT = 7;
 const PROMPT_HOME_MONTH_CALENDAR_MARKER_LIMIT = 6;
@@ -329,6 +333,14 @@ const PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING = 7;
 const PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING = 22;
 const PROMPT_HOME_DAY_METER_TICKS = [0, 6, 12, 18, 24];
 const PROMPT_HOME_PRICE_REFRESH_INTERVAL_MS = 60_000;
+const PROMPT_HOME_PRESET_OPTIONS = [
+  "Energy",
+  "Agriculture",
+  "Metals",
+  "Chemicals",
+  "Waste & Recyclables",
+  "Other",
+] as const;
 const PROMPT_HOME_PRICE_SORT_HEADERS: {
   field: PromptHomePriceSortField;
   label: string;
@@ -415,7 +427,7 @@ function buildPromptHomeCardDragHandleProps({
     ref: setActivatorNodeRef,
     className: "prompt-home-card-header-drag-handle",
     "data-home-card-drag-handle": "true",
-    "aria-label": `Drag ${cardLabel} card by its header`,
+    "aria-label": `Drag ${cardLabel} app by its header`,
   };
 }
 
@@ -423,39 +435,132 @@ function promptHomeCardLabel(cardKey: PromptHomeCardKey): string {
   return getPromptHomeCardLabel(cardKey);
 }
 
-function PromptHomeCardSlot({
-  cardKey,
-  orderIndex,
+function promptHomeSafeDomIdPart(value: string): string {
+  return value.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "app";
+}
+
+function promptHomeInstanceScopedId(
+  baseId: string,
+  instanceId: string,
+  baseInstanceId: string,
+): string {
+  return instanceId === baseInstanceId
+    ? baseId
+    : `${baseId}-${promptHomeSafeDomIdPart(instanceId)}`;
+}
+
+function promptHomeInstanceStorageKey(
+  baseKey: string,
+  instanceId: string,
+  baseInstanceId: string,
+): string {
+  return instanceId === baseInstanceId
+    ? baseKey
+    : `${baseKey}.${instanceId}`;
+}
+
+type PromptHomeCardSlotStyle = CSSProperties & {
+  "--prompt-home-collapsed-column-span": number;
+  "--prompt-home-expanded-column-span": number;
+  "--prompt-home-collapsed-row-span": number;
+  "--prompt-home-expanded-row-span": number;
+};
+
+function promptHomeCardColumnSpanToGridSpan(span: number): number {
+  return Math.min(4, Math.max(1, span)) * 3;
+}
+
+function buildPromptHomeCardSlotStyle(
+  card: PromptHomeTemplateCard,
+  orderIndex: number,
+): PromptHomeCardSlotStyle {
+  return {
+    order: orderIndex,
+    "--prompt-home-collapsed-column-span": promptHomeCardColumnSpanToGridSpan(
+      card.placement.collapsedColumnSpan,
+    ),
+    "--prompt-home-expanded-column-span": promptHomeCardColumnSpanToGridSpan(
+      card.placement.expandedColumnSpan,
+    ),
+    "--prompt-home-collapsed-row-span": card.placement.collapsedRowSpan,
+    "--prompt-home-expanded-row-span": card.placement.expandedRowSpan,
+  };
+}
+
+function PromptHomeCardDeleteDropTarget({
+  active,
+  enabled,
   children,
 }: {
-  cardKey: PromptHomeCardKey;
-  orderIndex: number;
+  active: boolean;
+  enabled: boolean;
   children: ReactNode;
 }) {
-  const style: CSSProperties = {
-    order: orderIndex,
-  };
+  const { isOver, setNodeRef } = useDroppable({
+    id: PROMPT_HOME_CARD_DELETE_DROP_TARGET_ID,
+    disabled: !enabled,
+  });
+
+  return (
+    <section
+      ref={setNodeRef}
+      className={mergePromptHomeClassNames(
+        "prompt-home-card-filter",
+        enabled ? "is-card-delete-target" : "",
+        active ? "is-card-delete-active" : "",
+        isOver ? "is-card-delete-over" : "",
+      )}
+      aria-label="Home apps. Drop a Home app here to delete it."
+      data-home-card-delete-target={enabled ? "true" : "false"}
+    >
+      {children}
+    </section>
+  );
+}
+
+function PromptHomeCardSlot({
+  card,
+  orderIndex,
+  actions,
+  children,
+}: {
+  card: PromptHomeTemplateCard;
+  orderIndex: number;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  const cardKey = card.cardId;
+  const instanceId = getPromptHomeCardInstanceId(card);
+  const style = buildPromptHomeCardSlotStyle(card, orderIndex);
 
   return (
     <div
       style={style}
       className={`prompt-home-card-slot prompt-home-card-slot-${cardKey}`}
       data-home-card-key={cardKey}
+      data-home-card-instance-id={instanceId}
     >
-      <div className="prompt-home-card-slot-inner">{children}</div>
+      <div className="prompt-home-card-slot-inner">
+        {actions}
+        {children}
+      </div>
     </div>
   );
 }
 
 function SortablePromptHomeCardSlot({
-  cardKey,
+  card,
   orderIndex,
+  actions,
   children,
 }: {
-  cardKey: PromptHomeCardKey;
+  card: PromptHomeTemplateCard;
   orderIndex: number;
+  actions?: ReactNode;
   children: ReactNode;
 }) {
+  const cardKey = card.cardId;
+  const instanceId = getPromptHomeCardInstanceId(card);
   const {
     attributes,
     listeners,
@@ -464,11 +569,11 @@ function SortablePromptHomeCardSlot({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: cardKey });
+  } = useSortable({ id: instanceId });
   const style: CSSProperties = {
+    ...buildPromptHomeCardSlotStyle(card, orderIndex),
     transform: CSS.Transform.toString(transform),
     transition,
-    order: orderIndex,
   };
   const dragHandleProps = buildPromptHomeCardDragHandleProps({
     attributes,
@@ -483,25 +588,345 @@ function SortablePromptHomeCardSlot({
       style={style}
       className={`prompt-home-card-slot prompt-home-card-slot-${cardKey} ${isDragging ? "is-dragging" : ""}`}
       data-home-card-key={cardKey}
+      data-home-card-instance-id={instanceId}
     >
       <PromptHomeCardDragHandleProvider value={dragHandleProps}>
-        <div className="prompt-home-card-slot-inner">{children}</div>
+        <div className="prompt-home-card-slot-inner">
+          {actions}
+          {children}
+        </div>
       </PromptHomeCardDragHandleProvider>
     </div>
   );
 }
 
+function resolvePromptHomeCardResizeState(
+  element: Element,
+): PromptHomeCardSizeState {
+  const cardSlot = element.closest(".prompt-home-card-slot-inner");
+  const cardShell = cardSlot?.querySelector<HTMLElement>(
+    [
+      ".prompt-home-timeframe-panel",
+      ".prompt-home-exchanges-card",
+      ".prompt-home-calendar-card",
+      ".prompt-home-prices-card",
+      ".prompt-home-news-card",
+      ".prompt-home-map-card",
+      ".prompt-home-document-upload-card",
+      ".prompt-home-communication-card",
+      ".prompt-home-prompt-card",
+    ].join(", "),
+  );
+
+  return cardShell?.classList.contains("is-collapsed")
+    ? "collapsed"
+    : "expanded";
+}
+
+function getPromptHomeCardResizeSpan(
+  card: PromptHomeTemplateCard,
+  state: PromptHomeCardSizeState,
+  axis: PromptHomeCardSizeAxis,
+): number {
+  if (axis === "horizontal") {
+    return card.placement.expandedColumnSpan;
+  }
+
+  return state === "collapsed"
+    ? card.placement.collapsedRowSpan
+    : card.placement.expandedRowSpan;
+}
+
+function getPromptHomeCardResizeMaxSpan(
+  state: PromptHomeCardSizeState,
+  axis: PromptHomeCardSizeAxis,
+): number {
+  if (axis === "horizontal") {
+    return PROMPT_HOME_CARD_MAX_HORIZONTAL_SPAN;
+  }
+
+  return state === "collapsed"
+    ? PROMPT_HOME_CARD_MAX_COLLAPSED_ROW_SPAN
+    : PROMPT_HOME_CARD_MAX_EXPANDED_ROW_SPAN;
+}
+
+function clampPromptHomeCardResizeSpanForState(
+  value: number,
+  state: PromptHomeCardSizeState,
+  axis: PromptHomeCardSizeAxis,
+): number {
+  return Math.min(
+    getPromptHomeCardResizeMaxSpan(state, axis),
+    Math.max(PROMPT_HOME_CARD_MIN_SPAN, value),
+  );
+}
+
+function resolvePromptHomeCardResizeStepPixels(
+  element: Element,
+  axis: PromptHomeCardSizeAxis,
+  startSpan: number,
+): number {
+  const cardSlot = element.closest(".prompt-home-card-slot-inner");
+  const rect = cardSlot?.getBoundingClientRect();
+  const dimension = axis === "horizontal" ? rect?.width : rect?.height;
+  const minimumStepPixels = axis === "horizontal" ? 96 : 72;
+
+  return Math.max(
+    minimumStepPixels,
+    (dimension ?? 0) / Math.max(1, startSpan),
+  );
+}
+
+function PromptHomeCardResizeHandle({
+  axis,
+  card,
+  disabled,
+  onResizeToSpan,
+}: {
+  axis: PromptHomeCardSizeAxis;
+  card: PromptHomeTemplateCard;
+  disabled: boolean;
+  onResizeToSpan: (
+    state: PromptHomeCardSizeState,
+    axis: PromptHomeCardSizeAxis,
+    span: number,
+  ) => void;
+}) {
+  const label = promptHomeCardLabel(card.cardId);
+  const axisLabel = axis === "horizontal" ? "width" : "height";
+  const orientation = axis === "horizontal" ? "vertical" : "horizontal";
+  const cursor = axis === "horizontal" ? "ew-resize" : "ns-resize";
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (disabled) {
+      return;
+    }
+
+    const state = resolvePromptHomeCardResizeState(event.currentTarget);
+    const currentSpan = getPromptHomeCardResizeSpan(card, state, axis);
+    let nextSpan = currentSpan;
+
+    if (axis === "horizontal") {
+      if (event.key === "ArrowRight") {
+        nextSpan = currentSpan + 1;
+      } else if (event.key === "ArrowLeft") {
+        nextSpan = currentSpan - 1;
+      }
+    } else if (event.key === "ArrowDown") {
+      nextSpan = currentSpan + 1;
+    } else if (event.key === "ArrowUp") {
+      nextSpan = currentSpan - 1;
+    }
+
+    nextSpan = clampPromptHomeCardResizeSpanForState(nextSpan, state, axis);
+    if (nextSpan === currentSpan) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    onResizeToSpan(state, axis, nextSpan);
+  };
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (disabled || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const handleElement = event.currentTarget;
+    const ownerDocument = handleElement.ownerDocument;
+    const ownerWindow = ownerDocument.defaultView;
+    if (!ownerWindow) {
+      return;
+    }
+
+    const state = resolvePromptHomeCardResizeState(handleElement);
+    const startSpan = getPromptHomeCardResizeSpan(card, state, axis);
+    const startPointerPosition =
+      axis === "horizontal" ? event.clientX : event.clientY;
+    const stepPixels = resolvePromptHomeCardResizeStepPixels(
+      handleElement,
+      axis,
+      startSpan,
+    );
+    const previousCursor = ownerDocument.body.style.cursor;
+    const previousUserSelect = ownerDocument.body.style.userSelect;
+    let lastAppliedSpan = startSpan;
+
+    ownerDocument.body.style.cursor = cursor;
+    ownerDocument.body.style.userSelect = "none";
+
+    const applyPointerPosition = (pointerPosition: number) => {
+      const pointerDelta = pointerPosition - startPointerPosition;
+      const nextSpan = clampPromptHomeCardResizeSpanForState(
+        startSpan + Math.round(pointerDelta / stepPixels),
+        state,
+        axis,
+      );
+      if (nextSpan === lastAppliedSpan) {
+        return;
+      }
+
+      lastAppliedSpan = nextSpan;
+      onResizeToSpan(state, axis, nextSpan);
+    };
+    const cleanup = () => {
+      ownerDocument.body.style.cursor = previousCursor;
+      ownerDocument.body.style.userSelect = previousUserSelect;
+      ownerWindow.removeEventListener("pointermove", handlePointerMove);
+      ownerWindow.removeEventListener("pointerup", handlePointerEnd);
+      ownerWindow.removeEventListener("pointercancel", handlePointerEnd);
+    };
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      moveEvent.preventDefault();
+      applyPointerPosition(
+        axis === "horizontal" ? moveEvent.clientX : moveEvent.clientY,
+      );
+    };
+    const handlePointerEnd = (endEvent: PointerEvent) => {
+      applyPointerPosition(
+        axis === "horizontal" ? endEvent.clientX : endEvent.clientY,
+      );
+      cleanup();
+    };
+
+    ownerWindow.addEventListener("pointermove", handlePointerMove);
+    ownerWindow.addEventListener("pointerup", handlePointerEnd);
+    ownerWindow.addEventListener("pointercancel", handlePointerEnd);
+  };
+
+  return (
+    <div
+      role="separator"
+      tabIndex={disabled ? -1 : 0}
+      className={mergePromptHomeClassNames(
+        "prompt-home-card-resize-handle",
+        `prompt-home-card-resize-handle-${axis}`,
+        disabled ? "is-disabled" : "",
+      )}
+      aria-label={`Resize ${label} app ${axisLabel}`}
+      aria-orientation={orientation}
+      aria-valuemin={PROMPT_HOME_CARD_MIN_SPAN}
+      aria-valuemax={getPromptHomeCardResizeMaxSpan("expanded", axis)}
+      aria-disabled={disabled ? true : undefined}
+      data-resize-axis={axis}
+      onKeyDown={handleKeyDown}
+      onPointerDown={handlePointerDown}
+    />
+  );
+}
+
+function PromptHomeCardSlotActions({
+  card,
+  clipboard,
+  disabled,
+  onCopy,
+  onCut,
+  onDelete,
+  onDuplicate,
+  onResizeToSpan,
+}: {
+  card: PromptHomeTemplateCard;
+  clipboard: ReturnType<typeof usePersistentPromptHomeCardVisibility>["cardClipboard"];
+  disabled: boolean;
+  onCopy: () => void;
+  onCut: () => void;
+  onDelete: () => void;
+  onDuplicate: () => void;
+  onResizeToSpan: (
+    state: PromptHomeCardSizeState,
+    axis: PromptHomeCardSizeAxis,
+    span: number,
+  ) => void;
+}) {
+  const instanceId = getPromptHomeCardInstanceId(card);
+  const label = promptHomeCardLabel(card.cardId);
+  const copyActive =
+    clipboard?.mode === "copy" && clipboard.sourceInstanceId === instanceId;
+  const cutActive =
+    clipboard?.mode === "cut" && clipboard.sourceInstanceId === instanceId;
+
+  return (
+    <>
+      <div
+        className={mergePromptHomeClassNames(
+          "prompt-home-card-slot-actions",
+          copyActive || cutActive ? "is-active" : "",
+        )}
+        aria-label={`${label} app actions`}
+      >
+        <button
+          type="button"
+          className={`prompt-home-card-slot-action ${copyActive ? "is-active" : ""}`}
+          aria-pressed={copyActive}
+          disabled={disabled}
+          onClick={onCopy}
+        >
+          Copy
+        </button>
+        <button
+          type="button"
+          className={`prompt-home-card-slot-action ${cutActive ? "is-active" : ""}`}
+          aria-pressed={cutActive}
+          disabled={disabled}
+          onClick={onCut}
+        >
+          Cut
+        </button>
+        <button
+          type="button"
+          className="prompt-home-card-slot-action"
+          disabled={disabled}
+          onClick={onDuplicate}
+        >
+          Duplicate
+        </button>
+        <button
+          type="button"
+          className="prompt-home-card-slot-action prompt-home-card-slot-delete-action"
+          disabled={disabled}
+          aria-label={`Delete ${label} app`}
+          title={`Delete ${label} app`}
+          onClick={onDelete}
+        >
+          Delete
+        </button>
+      </div>
+      <PromptHomeCardResizeHandle
+        axis="horizontal"
+        card={card}
+        disabled={disabled}
+        onResizeToSpan={onResizeToSpan}
+      />
+      <PromptHomeCardResizeHandle
+        axis="vertical"
+        card={card}
+        disabled={disabled}
+        onResizeToSpan={onResizeToSpan}
+      />
+    </>
+  );
+}
+
 function PromptHomePromptCardChrome({
+  instanceId,
   expanded,
   children,
   onToggle,
 }: {
+  instanceId: string;
   expanded: boolean;
   children: ReactNode;
   onToggle: () => void;
 }) {
   const { dragHandleAttributes, dragHandleClassName } =
     usePromptHomeCardHeaderDragProps<HTMLDivElement>();
+  const panelId = promptHomeInstanceScopedId(
+    PROMPT_HOME_PROMPT_CARD_PANEL_ID,
+    instanceId,
+    "prompt",
+  );
 
   return (
     <section
@@ -515,20 +940,21 @@ function PromptHomePromptCardChrome({
         )}
       >
         <div className="prompt-home-prompt-card-copy">
-          <span className="eyebrow">Prompt</span>
-          <strong>Ask the desk assistant</strong>
+          <span className="eyebrow prompt-home-prompt-card-title">Desk Assistant</span>
         </div>
 
         <div className="prompt-home-prompt-card-side">
           <button
             type="button"
             className="prompt-home-prompt-card-toggle"
+            aria-label={
+              expanded ? "Collapse Desk Assistant" : "Expand Desk Assistant"
+            }
             aria-expanded={expanded}
-            aria-controls={PROMPT_HOME_PROMPT_CARD_PANEL_ID}
+            aria-controls={panelId}
             onClick={onToggle}
           >
             <div className="prompt-home-prompt-card-toggle-meta">
-              <small>{expanded ? "Hide card" : "Show card"}</small>
               <span
                 className="prompt-home-support-toggle-indicator"
                 aria-hidden="true"
@@ -541,7 +967,7 @@ function PromptHomePromptCardChrome({
       </div>
 
       <div
-        id={PROMPT_HOME_PROMPT_CARD_PANEL_ID}
+        id={panelId}
         className="prompt-home-prompt-card-body"
         hidden={!expanded}
       >
@@ -661,53 +1087,19 @@ type PromptHomeExchangeSessionSegment = {
   widthPercent: number;
 };
 
-function formatPromptHomeMapSummary(params: {
-  assetLayerVisible: boolean;
-  filteredRecordCount: number;
-  shownRecordCount: number;
-  mapReadyRecordCount: number;
-  marketPriceCount?: number;
-}): string {
-  const {
-    assetLayerVisible,
-    filteredRecordCount,
-    shownRecordCount,
-    mapReadyRecordCount,
-    marketPriceCount = 0,
-  } = params;
-  const marketPriceSuffix =
-    marketPriceCount > 0
-      ? ` · ${marketPriceCount.toLocaleString()} market price${marketPriceCount === 1 ? "" : "s"}`
-      : "";
-
-  if (!assetLayerVisible) {
-    return `Assets hidden · 0 shown on map${marketPriceSuffix}`;
-  }
-
-  if (filteredRecordCount === 0) {
-    return `No asset records match the current filters${marketPriceSuffix}.`;
-  }
-
-  const filteredRecordLabel = `${filteredRecordCount.toLocaleString()} filtered`;
-  if (mapReadyRecordCount === 0) {
-    return `${filteredRecordLabel} · 0 map-ready${marketPriceSuffix}`;
-  }
-
-  const shownSummary =
-    shownRecordCount === mapReadyRecordCount
-      ? `all ${shownRecordCount.toLocaleString()} shown`
-      : `${shownRecordCount.toLocaleString()} of ${mapReadyRecordCount.toLocaleString()} shown`;
-
-  if (filteredRecordCount === mapReadyRecordCount) {
-    return `${shownSummary} on map${marketPriceSuffix}`;
-  }
-
-  return `${filteredRecordLabel} · ${shownSummary} map-ready${marketPriceSuffix}`;
-}
-
 type PromptHomeExchangeSessionLane = PromptHomeExchangeSessionDefinition & {
   displayWindowLabel: string;
   segments: PromptHomeExchangeSessionSegment[];
+};
+
+type PromptHomeAlphaVantageExchangeCoverage = {
+  key: string;
+  marketType: "Equity" | "Forex" | "Cryptocurrency";
+  region: string;
+  marketGroup: "Americas" | "Europe and Africa" | "Asia-Pacific" | "Global";
+  primaryExchanges: string[];
+  localWindowLabel: string;
+  notes?: string;
 };
 
 const PROMPT_HOME_MAJOR_EXCHANGE_SESSIONS: PromptHomeExchangeSessionDefinition[] =
@@ -780,6 +1172,143 @@ const PROMPT_HOME_MAJOR_EXCHANGE_SESSIONS: PromptHomeExchangeSessionDefinition[]
         { startHour: 8, startMinute: 45, endHour: 15, endMinute: 40 },
         { startHour: 17, startMinute: 0, endHour: 5, endMinute: 55 },
       ],
+    },
+  ];
+
+const PROMPT_HOME_ALPHA_VANTAGE_EXCHANGE_COVERAGE: PromptHomeAlphaVantageExchangeCoverage[] =
+  [
+    {
+      key: "av-us",
+      marketType: "Equity",
+      region: "United States",
+      marketGroup: "Americas",
+      primaryExchanges: ["NASDAQ", "NYSE", "AMEX", "BATS"],
+      localWindowLabel: "09:30-16:15 local",
+    },
+    {
+      key: "av-canada",
+      marketType: "Equity",
+      region: "Canada",
+      marketGroup: "Americas",
+      primaryExchanges: ["Toronto", "Toronto Ventures"],
+      localWindowLabel: "09:30-16:00 local",
+    },
+    {
+      key: "av-mexico",
+      marketType: "Equity",
+      region: "Mexico",
+      marketGroup: "Americas",
+      primaryExchanges: ["Mexico"],
+      localWindowLabel: "08:30-15:00 local",
+    },
+    {
+      key: "av-brazil",
+      marketType: "Equity",
+      region: "Brazil",
+      marketGroup: "Americas",
+      primaryExchanges: ["Sao Paolo"],
+      localWindowLabel: "10:00-17:30 local",
+    },
+    {
+      key: "av-united-kingdom",
+      marketType: "Equity",
+      region: "United Kingdom",
+      marketGroup: "Europe and Africa",
+      primaryExchanges: ["London"],
+      localWindowLabel: "08:00-16:30 local",
+    },
+    {
+      key: "av-germany",
+      marketType: "Equity",
+      region: "Germany",
+      marketGroup: "Europe and Africa",
+      primaryExchanges: ["XETRA", "Berlin", "Frankfurt", "Munich", "Stuttgart"],
+      localWindowLabel: "08:00-20:00 local",
+    },
+    {
+      key: "av-france",
+      marketType: "Equity",
+      region: "France",
+      marketGroup: "Europe and Africa",
+      primaryExchanges: ["Paris"],
+      localWindowLabel: "09:00-17:30 local",
+    },
+    {
+      key: "av-spain",
+      marketType: "Equity",
+      region: "Spain",
+      marketGroup: "Europe and Africa",
+      primaryExchanges: ["Barcelona", "Madrid"],
+      localWindowLabel: "09:00-17:30 local",
+    },
+    {
+      key: "av-portugal",
+      marketType: "Equity",
+      region: "Portugal",
+      marketGroup: "Europe and Africa",
+      primaryExchanges: ["Lisbon"],
+      localWindowLabel: "08:00-16:30 local",
+    },
+    {
+      key: "av-south-africa",
+      marketType: "Equity",
+      region: "South Africa",
+      marketGroup: "Europe and Africa",
+      primaryExchanges: ["Johannesburg"],
+      localWindowLabel: "09:00-17:00 local",
+    },
+    {
+      key: "av-japan",
+      marketType: "Equity",
+      region: "Japan",
+      marketGroup: "Asia-Pacific",
+      primaryExchanges: ["Tokyo"],
+      localWindowLabel: "09:00-15:00 local",
+      notes: "Noon trading break",
+    },
+    {
+      key: "av-china",
+      marketType: "Equity",
+      region: "Mainland China",
+      marketGroup: "Asia-Pacific",
+      primaryExchanges: ["Shanghai", "Shenzhen"],
+      localWindowLabel: "09:30-15:00 local",
+      notes: "Noon trading break",
+    },
+    {
+      key: "av-hong-kong",
+      marketType: "Equity",
+      region: "Hong Kong",
+      marketGroup: "Asia-Pacific",
+      primaryExchanges: ["Hong Kong"],
+      localWindowLabel: "09:30-16:00 local",
+      notes: "Noon trading break",
+    },
+    {
+      key: "av-india",
+      marketType: "Equity",
+      region: "India",
+      marketGroup: "Asia-Pacific",
+      primaryExchanges: ["NSE", "BSE"],
+      localWindowLabel: "09:15-15:30 local",
+    },
+    {
+      key: "av-forex-global",
+      marketType: "Forex",
+      region: "Global",
+      marketGroup: "Global",
+      primaryExchanges: ["Global"],
+      localWindowLabel: "00:00-23:59",
+      notes: "Closed Friday 16:00 EST to Sunday 17:00 EST",
+    },
+    {
+      key: "av-crypto-global",
+      marketType: "Cryptocurrency",
+      region: "Global",
+      marketGroup: "Global",
+      primaryExchanges: ["Global"],
+      localWindowLabel: "00:00-23:59",
+      notes: "Open 24 hours a day",
     },
   ];
 
@@ -1523,6 +2052,39 @@ function formatPromptHomeCalendarAgendaSummary(args: {
   return "Connect Google Calendar in Settings to overlay schedule events here.";
 }
 
+function googleCalendarSelectionSignature(
+  selections: GoogleCalendarSelection[],
+): string {
+  return selections
+    .map((selection) => `${selection.id}:${selection.summary ?? ""}`)
+    .join("|");
+}
+
+function scopeGoogleCalendarEventsForHome(args: {
+  events: GoogleCalendarEvent[];
+  calendar: GoogleCalendarSelection;
+  calendarCount: number;
+}): GoogleCalendarEvent[] {
+  if (args.calendarCount <= 1) {
+    return args.events;
+  }
+
+  return args.events.map((event) => ({
+    ...event,
+    id: `${args.calendar.id}:${event.id}`,
+  }));
+}
+
+function clearGoogleCalendarHomeEventCache(
+  selections: GoogleCalendarSelection[],
+): void {
+  saveGoogleCalendarEventCache({
+    selectedCalendarSummary: formatGoogleCalendarSelectionSummary(selections),
+    events: [],
+    cachedAt: "",
+  });
+}
+
 function windowDurationMinutes(
   window: PromptHomeExchangeSessionWindow,
 ): number {
@@ -1810,7 +2372,7 @@ function buildPromptHomeContext(args: {
   displayName: string;
 }): string {
   return [
-    "Current workspace: prompt-first operator home.",
+    "Current workspace: configurable Apps surface.",
     `Authenticated user: ${args.displayName}.`,
     `API health: ${args.health}.`,
     `Active trades: ${formatCount(args.counts.activeTrades)}.`,
@@ -2015,6 +2577,7 @@ function PromptHomeTimeMeterCard({
       <button
         type="button"
         className="prompt-home-time-meter-card-toggle"
+        aria-label={`${expanded ? "Collapse" : "Expand"} ${title}`}
         aria-expanded={expanded}
         aria-controls={panelId}
         onClick={onToggle}
@@ -2042,7 +2605,6 @@ function PromptHomeTimeMeterCard({
           </div>
           <div className="prompt-home-time-meter-card-toggle-side">
             <div className="prompt-home-time-meter-card-toggle-meta">
-              <small>{expanded ? "Hide card" : "Show card"}</small>
               <span
                 className="prompt-home-support-toggle-indicator"
                 aria-hidden="true"
@@ -2585,6 +3147,23 @@ function PromptHomePriceRow({
   );
 }
 
+function formatPromptHomePriceTickerLabel(
+  row: PromptHomePriceRowViewModel,
+): string {
+  const marketParts = [row.product, row.location].filter(
+    (part) => part && part !== "—",
+  );
+  const marketLabel =
+    marketParts.length > 0 ? marketParts.join(" ") : row.priceIndexCode;
+  const priceLabel = row.hasLatestMark
+    ? [row.price, row.unit].filter((part) => part && part !== "—").join(" ")
+    : row.price;
+  const changeLabel =
+    row.hasLatestMark && row.change !== "—" ? row.change : "";
+
+  return [marketLabel, priceLabel, changeLabel].filter(Boolean).join(" · ");
+}
+
 function SortablePromptHomePriceRow({
   row,
   onOpenPriceReport,
@@ -2659,7 +3238,6 @@ function PromptHomePricesCard({
   homeCard,
   canConfigureHomeCard,
   onHomeCardConfigurationChange,
-  onOpenPricesWorkspace,
   onOpenPriceReport,
   onOpenPriceSourcesReview,
 }: {
@@ -2674,17 +3252,42 @@ function PromptHomePricesCard({
       filters?: Record<string, unknown>;
     },
   ) => void;
-  onOpenPricesWorkspace: () => void;
   onOpenPriceReport: (row: PromptHomePriceRowViewModel) => void;
   onOpenPriceSourcesReview: () => void;
 }) {
+  const homeCardInstanceId = homeCard
+    ? getPromptHomeCardInstanceId(homeCard)
+    : "prices";
+  const pricesPanelId = promptHomeInstanceScopedId(
+    PROMPT_HOME_PRICES_PANEL_ID,
+    homeCardInstanceId,
+    "prices",
+  );
+  const pricesFilterDialogId = promptHomeInstanceScopedId(
+    "prompt-home-prices-filter-dialog",
+    homeCardInstanceId,
+    "prices-filter-dialog",
+  );
+  const pricesFilterDialogTitleId = `${pricesFilterDialogId}-title`;
+  const pricesErrorsDialogId = promptHomeInstanceScopedId(
+    "prompt-home-prices-errors-dialog",
+    homeCardInstanceId,
+    "prices-errors-dialog",
+  );
+  const pricesErrorsDialogTitleId = `${pricesErrorsDialogId}-title`;
   const pricesExpandedState = usePersistentCollapsibleCardState(
-    "prompt-home.prices-card",
+    promptHomeInstanceStorageKey(
+      "prompt-home.prices-card",
+      homeCardInstanceId,
+      "prices",
+    ),
     true,
   );
   const [priceSearchQuery, setPriceSearchQuery] = useState("");
+  const [priceFiltersOpen, setPriceFiltersOpen] = useState(false);
+  const [priceErrorsOpen, setPriceErrorsOpen] = useState(false);
   const [priceSyncing, setPriceSyncing] = useState(false);
-  const [priceSyncError, setPriceSyncError] = useState("");
+  const [priceSyncErrors, setPriceSyncErrors] = useState<string[]>([]);
   const [priceSyncSuccess, setPriceSyncSuccess] = useState("");
   const homeCardFilters = useMemo(
     () => homeCard?.filters ?? {},
@@ -2793,7 +3396,6 @@ function PromptHomePricesCard({
   );
   const {
     latestMarks,
-    loading: latestMarksLoading,
     error,
     refresh: refreshLatestMarks,
   } =
@@ -2900,35 +3502,66 @@ function PromptHomePricesCard({
   const effectivePriceQuoteTypeFilter =
     pricesViewModel.effectiveFilters.quoteType ??
     PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE;
-  const activePriceIndexCount = pricesViewModel.activePriceIndexCount;
-  const latestMarkCount = pricesViewModel.latestMarkCount;
   const hasActivePriceFilters = pricesViewModel.hasActiveFilters;
   const { dragHandleAttributes, dragHandleClassName } =
     usePromptHomeCardHeaderDragProps<HTMLDivElement>();
   const canSyncPriceSources = hasAdministrativeAccess(authSession);
   const priceSyncProviderSummary =
     formatPromptHomePriceSyncProviders(priceSyncProviders);
-  const activePriceIndexNoun =
-    activePriceIndexCount === 1 ? "index" : "indices";
-  const latestMarkNoun = latestMarkCount === 1 ? "mark" : "marks";
-  const priceToggleSummary =
-    pricesViewModel.status === "reference_loading"
-      ? "Loading price indices"
-      : priceSyncing
-        ? `Syncing ${priceSyncProviderSummary}`
-      : latestMarksLoading && activePriceIndexCount > 0
-        ? `Loading marks · ${activePriceIndexCount} active ${activePriceIndexNoun}`
-        : `${latestMarkCount} latest ${latestMarkNoun} · ${activePriceIndexCount} active ${activePriceIndexNoun}`;
   const showPriceFilters =
     pricesViewModel.status === "ready" ||
     pricesViewModel.status === "filtered_empty";
-  const priceFooterSummary = hasActivePriceFilters
-    ? `Showing ${pricesViewModel.rows.length} of ${activePriceIndexCount} active ${activePriceIndexNoun}`
-    : `${latestMarkCount} latest ${latestMarkNoun} across ${activePriceIndexCount} active ${activePriceIndexNoun}`;
+  const priceErrorMessages = useMemo(() => {
+    const messages = [
+      error ? `Latest marks: ${error}` : "",
+      ...priceSyncErrors,
+    ];
+
+    return messages.map((message) => message.trim()).filter(Boolean);
+  }, [error, priceSyncErrors]);
+  const hasPriceErrors = priceErrorMessages.length > 0;
+  useEffect(() => {
+    if (!showPriceFilters || !pricesExpandedState.expanded) {
+      setPriceFiltersOpen(false);
+    }
+  }, [pricesExpandedState.expanded, showPriceFilters]);
+  useEffect(() => {
+    if (!hasPriceErrors || !pricesExpandedState.expanded) {
+      setPriceErrorsOpen(false);
+    }
+  }, [hasPriceErrors, pricesExpandedState.expanded]);
   const priceRowIds = useMemo(
     () => pricesViewModel.rows.map((row) => row.priceIndexCode),
     [pricesViewModel.rows],
   );
+  const priceHeaderTickerTitles = useMemo(() => {
+    if (pricesViewModel.status === "reference_loading") {
+      return ["Prices loading"];
+    }
+
+    const rowTitles = pricesViewModel.rows
+      .slice(0, 6)
+      .map(formatPromptHomePriceTickerLabel)
+      .filter(Boolean);
+
+    if (rowTitles.length > 0) {
+      return rowTitles;
+    }
+
+    if (pricesViewModel.status === "filtered_empty") {
+      return ["No prices match filters"];
+    }
+
+    if (pricesViewModel.status === "no_active_indices") {
+      return ["No active prices"];
+    }
+
+    return ["Prices loading"];
+  }, [pricesViewModel.rows, pricesViewModel.status]);
+  const priceHeaderTickerItems =
+    priceHeaderTickerTitles.length > 1
+      ? [...priceHeaderTickerTitles, ...priceHeaderTickerTitles]
+      : priceHeaderTickerTitles;
   const priceRowsMovable = canConfigureHomeCard && priceRowIds.length > 1;
   const priceSyncButtonTitle = !canSyncPriceSources
     ? "Admin session required to sync price sources"
@@ -2942,18 +3575,20 @@ function PromptHomePricesCard({
     pricesViewModel.status === "reference_loading";
   const handleSyncPrices = useCallback(async () => {
     if (!authSession || !canSyncPriceSources) {
-      setPriceSyncError("Sign in as an admin to sync price sources.");
+      setPriceSyncErrors(["Sign in as an admin to sync price sources."]);
       setPriceSyncSuccess("");
       return;
     }
     if (priceSyncProviders.length === 0) {
-      setPriceSyncError("No supported price providers are available to sync.");
+      setPriceSyncErrors([
+        "No supported price providers are available to sync.",
+      ]);
       setPriceSyncSuccess("");
       return;
     }
 
     setPriceSyncing(true);
-    setPriceSyncError("");
+    setPriceSyncErrors([]);
     setPriceSyncSuccess("");
     try {
       const syncResults = await Promise.allSettled(
@@ -2993,7 +3628,7 @@ function PromptHomePricesCard({
               run.error_summary ? `: ${run.error_summary}` : ""
             }`,
         );
-        setPriceSyncError([...runMessages, ...rejectedMessages].join(" "));
+        setPriceSyncErrors([...runMessages, ...rejectedMessages]);
         if (observationCount > 0) {
           setPriceSyncSuccess(
             `Loaded ${observationCount} observation${
@@ -3010,11 +3645,11 @@ function PromptHomePricesCard({
         }.`,
       );
     } catch (nextError) {
-      setPriceSyncError(
+      setPriceSyncErrors([
         nextError instanceof Error
           ? nextError.message
           : "Failed to sync latest prices.",
-      );
+      ]);
     } finally {
       setPriceSyncing(false);
     }
@@ -3062,9 +3697,209 @@ function PromptHomePricesCard({
       pricesViewModel.allRows,
     ],
   );
+  const priceFilterControls = showPriceFilters ? (
+    <div className="prompt-home-prices-filter-bar" aria-label="Price filters">
+      <label className="prompt-home-prices-filter-field">
+        <span>Search</span>
+        <input
+          type="search"
+          value={priceSearchQuery}
+          placeholder="Code, market, commodity, type"
+          onChange={(event) => setPriceSearchQuery(event.target.value)}
+        />
+      </label>
+      <label className="prompt-home-prices-filter-field">
+        <span>Provider</span>
+        <select
+          value={effectivePriceProviderFilter}
+          disabled={!canConfigureHomeCard}
+          onChange={(event) =>
+            updatePriceCardFilters(
+              "provider",
+              event.target.value === PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER
+                ? ""
+                : event.target.value,
+            )
+          }
+        >
+          <option value={PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER}>All providers</option>
+          {pricesViewModel.providerOptions.map((provider) => (
+            <option key={provider} value={provider}>
+              {provider}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="prompt-home-prices-filter-field">
+        <span>Type</span>
+        <select
+          value={effectivePriceQuoteTypeFilter}
+          disabled={!canConfigureHomeCard}
+          onChange={(event) =>
+            updatePriceCardFilters(
+              "quote_type",
+              event.target.value === PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE
+                ? ""
+                : event.target.value,
+            )
+          }
+        >
+          <option value={PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE}>All types</option>
+          {pricesViewModel.quoteTypeOptions.map((quoteType) => (
+            <option key={quoteType} value={quoteType}>
+              {formatPromptHomePriceQuoteTypeCode(quoteType)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="prompt-home-prices-filter-field">
+        <span>Commodity</span>
+        <select
+          value={priceCommodityFilter}
+          disabled={!canConfigureHomeCard}
+          onChange={(event) =>
+            updatePriceCardFilters("commodity_code", event.target.value)
+          }
+        >
+          <option value="">All commodities</option>
+          {priceCommodityFilter &&
+          !commodityOptions.includes(priceCommodityFilter) ? (
+            <option value={priceCommodityFilter}>
+              {priceCommodityFilter} (unavailable)
+            </option>
+          ) : null}
+          {commodityOptions.map((commodityCode) => (
+            <option key={commodityCode} value={commodityCode}>
+              {commodityCode}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="prompt-home-prices-filter-field">
+        <span>Index</span>
+        <select
+          value={priceIndexCodeFilter}
+          disabled={!canConfigureHomeCard}
+          onChange={(event) =>
+            updatePriceCardFilters("price_index_code", event.target.value)
+          }
+        >
+          <option value="">All indices</option>
+          {priceIndexCodeFilter &&
+          !priceIndexOptions.some(
+            (priceIndexOption) =>
+              priceIndexOption.code === priceIndexCodeFilter,
+          ) ? (
+            <option value={priceIndexCodeFilter}>
+              {priceIndexCodeFilter} (unavailable)
+            </option>
+          ) : null}
+          {priceIndexOptions.map((priceIndexOption) => (
+            <option key={priceIndexOption.code} value={priceIndexOption.code}>
+              {priceIndexOption.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="prompt-home-prices-filter-field">
+        <span>Marks</span>
+        <div
+          className="prompt-home-prices-filter-segments"
+          role="group"
+          aria-label="Filter by mark status"
+        >
+          {[
+            ["all", "All"],
+            ["with_marks", "Marked"],
+            ["missing_marks", "Missing"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={
+                priceMarkFilter === value
+                  ? "is-active"
+                  : undefined
+              }
+              aria-pressed={priceMarkFilter === value}
+              disabled={!canConfigureHomeCard}
+              onClick={() =>
+                updatePriceCardParameters(
+                  "price_mark_status",
+                  value === "all" ? "" : value,
+                )
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  ) : null;
+  const priceHeaderActions = pricesExpandedState.expanded ? (
+    <div
+      className="prompt-home-prices-card-head-actions"
+      aria-label="Market price actions"
+    >
+      {showPriceFilters ? (
+        <button
+          type="button"
+          className={mergePromptHomeClassNames(
+            "button button-secondary prompt-home-prices-filter-button",
+            hasActivePriceFilters ? "is-active" : undefined,
+          )}
+          aria-controls={pricesFilterDialogId}
+          aria-expanded={priceFiltersOpen}
+          onClick={() => setPriceFiltersOpen(true)}
+        >
+          Filter
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="button button-secondary"
+        aria-label="Sync latest prices"
+        title={priceSyncButtonTitle}
+        onClick={() => void handleSyncPrices()}
+        disabled={priceSyncButtonDisabled}
+      >
+        {priceSyncing ? "Syncing..." : "Sync"}
+      </button>
+      <button
+        type="button"
+        className={mergePromptHomeClassNames(
+          "button button-secondary prompt-home-prices-errors-button",
+          hasPriceErrors ? "is-active" : undefined,
+        )}
+        aria-controls={pricesErrorsDialogId}
+        aria-expanded={priceErrorsOpen}
+        title={
+          hasPriceErrors
+            ? `Review ${priceErrorMessages.length} price error${
+                priceErrorMessages.length === 1 ? "" : "s"
+              }`
+            : "No price errors to review"
+        }
+        onClick={() => setPriceErrorsOpen(true)}
+        disabled={!hasPriceErrors}
+      >
+        Errors
+      </button>
+      <button
+        type="button"
+        className="button button-secondary"
+        onClick={onOpenPriceSourcesReview}
+      >
+        Sources
+      </button>
+    </div>
+  ) : null;
 
   return (
-    <article className="prompt-home-prices-card">
+    <article
+      className={`prompt-home-prices-card ${pricesExpandedState.expanded ? "is-expanded" : "is-collapsed"}`}
+    >
       <div
         {...dragHandleAttributes}
         className={mergePromptHomeClassNames(
@@ -3074,21 +3909,42 @@ function PromptHomePricesCard({
       >
         <div className="prompt-home-prices-card-copy">
           <span className="eyebrow">Prices</span>
-          <strong>Market Prices</strong>
-          <p>Market price marks</p>
+          <div
+            className={`prompt-home-prices-ticker-strip ${
+              priceHeaderTickerTitles.length > 1 ? "is-scrolling" : "is-static"
+            }`}
+            aria-label="Scrolling market prices"
+          >
+            <div className="prompt-home-prices-ticker-track">
+              {priceHeaderTickerItems.map((priceTitle, index) => (
+                <strong
+                  key={`${priceTitle}-${index}`}
+                  className="prompt-home-prices-ticker-item"
+                  aria-hidden={index >= priceHeaderTickerTitles.length}
+                >
+                  {priceTitle}
+                </strong>
+              ))}
+            </div>
+          </div>
         </div>
+        {priceHeaderActions}
         <div className="prompt-home-prices-card-toggle-side">
           <button
             type="button"
             className="prompt-home-prices-card-toggle"
+            aria-label={
+              pricesExpandedState.expanded
+                ? "Collapse Market Prices"
+                : "Expand Market Prices"
+            }
             aria-expanded={pricesExpandedState.expanded}
-            aria-controls={PROMPT_HOME_PRICES_PANEL_ID}
+            aria-controls={pricesPanelId}
             onClick={() =>
               pricesExpandedState.setExpanded((current) => !current)
             }
           >
             <div className="prompt-home-prices-card-toggle-meta">
-              <small>{priceToggleSummary}</small>
               <span
                 className="prompt-home-support-toggle-indicator"
                 aria-hidden="true"
@@ -3101,7 +3957,7 @@ function PromptHomePricesCard({
       </div>
 
       <div
-        id={PROMPT_HOME_PRICES_PANEL_ID}
+        id={pricesPanelId}
         className="prompt-home-prices-card-body"
         hidden={!pricesExpandedState.expanded}
       >
@@ -3118,164 +3974,129 @@ function PromptHomePricesCard({
           </div>
         ) : (
           <>
-            {error ? <p className="form-note form-note-error">{error}</p> : null}
-            {priceSyncError ? (
-              <p className="form-note form-note-error">{priceSyncError}</p>
-            ) : null}
             {priceSyncSuccess ? (
               <p className="form-note">{priceSyncSuccess}</p>
             ) : null}
-            {showPriceFilters ? (
-              <div className="prompt-home-prices-filter-bar" aria-label="Price filters">
-                <label className="prompt-home-prices-filter-field">
-                  <span>Search</span>
-                  <input
-                    type="search"
-                    value={priceSearchQuery}
-                    placeholder="Code, market, commodity, type"
-                    onChange={(event) => setPriceSearchQuery(event.target.value)}
-                  />
-                </label>
-                <label className="prompt-home-prices-filter-field">
-                  <span>Provider</span>
-                  <select
-                    value={effectivePriceProviderFilter}
-                    disabled={!canConfigureHomeCard}
-                    onChange={(event) =>
-                      updatePriceCardFilters(
-                        "provider",
-                        event.target.value === PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER
-                          ? ""
-                          : event.target.value,
-                      )
+            {priceErrorsOpen && hasPriceErrors ? (
+              <div
+                className="prompt-home-prices-filter-overlay"
+                role="presentation"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) {
+                    setPriceErrorsOpen(false);
+                  }
+                }}
+              >
+                <section
+                  id={pricesErrorsDialogId}
+                  className="prompt-home-prices-filter-dialog prompt-home-prices-errors-dialog"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby={pricesErrorsDialogTitleId}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setPriceErrorsOpen(false);
                     }
-                  >
-                    <option value={PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER}>All providers</option>
-                    {pricesViewModel.providerOptions.map((provider) => (
-                      <option key={provider} value={provider}>
-                        {provider}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="prompt-home-prices-filter-field">
-                  <span>Type</span>
-                  <select
-                    value={effectivePriceQuoteTypeFilter}
-                    disabled={!canConfigureHomeCard}
-                    onChange={(event) =>
-                      updatePriceCardFilters(
-                        "quote_type",
-                        event.target.value === PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE
-                          ? ""
-                          : event.target.value,
-                      )
-                    }
-                  >
-                    <option value={PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE}>All types</option>
-                    {pricesViewModel.quoteTypeOptions.map((quoteType) => (
-                      <option key={quoteType} value={quoteType}>
-                        {formatPromptHomePriceQuoteTypeCode(quoteType)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="prompt-home-prices-filter-field">
-                  <span>Commodity</span>
-                  <select
-                    value={priceCommodityFilter}
-                    disabled={!canConfigureHomeCard}
-                    onChange={(event) =>
-                      updatePriceCardFilters("commodity_code", event.target.value)
-                    }
-                  >
-                    <option value="">All commodities</option>
-                    {priceCommodityFilter &&
-                    !commodityOptions.includes(priceCommodityFilter) ? (
-                      <option value={priceCommodityFilter}>
-                        {priceCommodityFilter} (unavailable)
-                      </option>
-                    ) : null}
-                    {commodityOptions.map((commodityCode) => (
-                      <option key={commodityCode} value={commodityCode}>
-                        {commodityCode}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="prompt-home-prices-filter-field">
-                  <span>Index</span>
-                  <select
-                    value={priceIndexCodeFilter}
-                    disabled={!canConfigureHomeCard}
-                    onChange={(event) =>
-                      updatePriceCardFilters("price_index_code", event.target.value)
-                    }
-                  >
-                    <option value="">All indices</option>
-                    {priceIndexCodeFilter &&
-                    !priceIndexOptions.some(
-                      (priceIndexOption) =>
-                        priceIndexOption.code === priceIndexCodeFilter,
-                    ) ? (
-                      <option value={priceIndexCodeFilter}>
-                        {priceIndexCodeFilter} (unavailable)
-                      </option>
-                    ) : null}
-                    {priceIndexOptions.map((priceIndexOption) => (
-                      <option key={priceIndexOption.code} value={priceIndexOption.code}>
-                        {priceIndexOption.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="prompt-home-prices-filter-field">
-                  <span>Marks</span>
+                  }}
+                >
+                  <header className="prompt-home-prices-filter-dialog-head">
+                    <div>
+                      <span className="eyebrow">Prices</span>
+                      <h3 id={pricesErrorsDialogTitleId}>Errors</h3>
+                    </div>
+                    <button
+                      type="button"
+                      className="button button-ghost"
+                      onClick={() => setPriceErrorsOpen(false)}
+                    >
+                      Close
+                    </button>
+                  </header>
                   <div
-                    className="prompt-home-prices-filter-segments"
-                    role="group"
-                    aria-label="Filter by mark status"
+                    className="prompt-home-prices-errors-list"
+                    aria-label="Price errors"
                   >
-                    {[
-                      ["all", "All"],
-                      ["with_marks", "Marked"],
-                      ["missing_marks", "Missing"],
-                    ].map(([value, label]) => (
-                      <button
-                        key={value}
-                        type="button"
-                        className={
-                          priceMarkFilter === value
-                            ? "is-active"
-                            : undefined
-                        }
-                        aria-pressed={priceMarkFilter === value}
-                        disabled={!canConfigureHomeCard}
-                        onClick={() =>
-                          updatePriceCardParameters(
-                            "price_mark_status",
-                            value === "all" ? "" : value,
-                          )
-                        }
+                    {priceErrorMessages.map((message, index) => (
+                      <article
+                        key={`${message}-${index}`}
+                        className="prompt-home-prices-error-item"
                       >
-                        {label}
-                      </button>
+                        <span>Error {index + 1}</span>
+                        <p>{message}</p>
+                      </article>
                     ))}
                   </div>
-                </div>
-                {hasActivePriceFilters ? (
-                  <button
-                    type="button"
-                    className="button button-secondary prompt-home-prices-filter-clear"
-                    disabled={!canConfigureHomeCard}
-                    onClick={() => {
-                      setPriceSearchQuery("");
-                      clearPersistedPriceFilters();
-                    }}
-                  >
-                    Clear filters
-                  </button>
-                ) : null}
+                  <footer className="prompt-home-prices-filter-dialog-actions">
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      onClick={() => setPriceErrorsOpen(false)}
+                    >
+                      Done
+                    </button>
+                  </footer>
+                </section>
+              </div>
+            ) : null}
+            {priceFiltersOpen && priceFilterControls ? (
+              <div
+                className="prompt-home-prices-filter-overlay"
+                role="presentation"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) {
+                    setPriceFiltersOpen(false);
+                  }
+                }}
+              >
+                <section
+                  id={pricesFilterDialogId}
+                  className="prompt-home-prices-filter-dialog"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby={pricesFilterDialogTitleId}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setPriceFiltersOpen(false);
+                    }
+                  }}
+                >
+                  <header className="prompt-home-prices-filter-dialog-head">
+                    <div>
+                      <span className="eyebrow">Prices</span>
+                      <h3 id={pricesFilterDialogTitleId}>Filters</h3>
+                    </div>
+                    <button
+                      type="button"
+                      className="button button-ghost"
+                      onClick={() => setPriceFiltersOpen(false)}
+                    >
+                      Close
+                    </button>
+                  </header>
+                  {priceFilterControls}
+                  <footer className="prompt-home-prices-filter-dialog-actions">
+                    {hasActivePriceFilters ? (
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        disabled={!canConfigureHomeCard}
+                        onClick={() => {
+                          setPriceSearchQuery("");
+                          clearPersistedPriceFilters();
+                        }}
+                      >
+                        Clear filters
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      onClick={() => setPriceFiltersOpen(false)}
+                    >
+                      Done
+                    </button>
+                  </footer>
+                </section>
               </div>
             ) : null}
             {pricesViewModel.status === "filtered_empty" ? (
@@ -3363,36 +4184,6 @@ function PromptHomePricesCard({
             )}
           </>
         )}
-
-        <div className="prompt-home-prices-card-footer">
-          <span>{priceFooterSummary}</span>
-          <div className="prompt-home-prices-card-footer-actions">
-            <button
-              type="button"
-              className="button button-secondary"
-              aria-label="Sync latest prices"
-              title={priceSyncButtonTitle}
-              onClick={() => void handleSyncPrices()}
-              disabled={priceSyncButtonDisabled}
-            >
-              {priceSyncing ? "Syncing..." : "Sync"}
-            </button>
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={onOpenPriceSourcesReview}
-            >
-              Review Sources
-            </button>
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={onOpenPricesWorkspace}
-            >
-              Open Dashboard
-            </button>
-          </div>
-        </div>
       </div>
     </article>
   );
@@ -3418,11 +4209,33 @@ function PromptHomeNewsCard({
   ) => void;
   onOpenReportsWorkspace: () => void;
 }) {
+  const homeCardInstanceId = homeCard
+    ? getPromptHomeCardInstanceId(homeCard)
+    : "news";
+  const newsPanelId = promptHomeInstanceScopedId(
+    PROMPT_HOME_NEWS_PANEL_ID,
+    homeCardInstanceId,
+    "news",
+  );
+  const newsFilterDialogId = promptHomeInstanceScopedId(
+    "prompt-home-news-filter-dialog",
+    homeCardInstanceId,
+    "news-filter-dialog",
+  );
+  const newsFilterDialogTitleId = `${newsFilterDialogId}-title`;
   const newsExpandedState = usePersistentCollapsibleCardState(
-    "prompt-home.news-card",
+    promptHomeInstanceStorageKey(
+      "prompt-home.news-card",
+      homeCardInstanceId,
+      "news",
+    ),
     true,
   );
   const [refreshKey, setRefreshKey] = useState(0);
+  const [newsFiltersOpen, setNewsFiltersOpen] = useState(false);
+  const [newsHeaderHeadlines, setNewsHeaderHeadlines] = useState<
+    MarketNewsHeadlineRecord[]
+  >([]);
   const homeCardFilters = useMemo(
     () => homeCard?.filters ?? {},
     [homeCard],
@@ -3656,14 +4469,291 @@ function PromptHomeNewsCard({
       parameters: {},
     });
   }, [canConfigureHomeCard, onHomeCardConfigurationChange]);
+  const handleNewsHeaderHeadlinesChange = useCallback(
+    (items: MarketNewsHeadlineRecord[]) => {
+      const nextHeadlines = items.slice(0, 4);
+      setNewsHeaderHeadlines((currentHeadlines) => {
+        if (
+          currentHeadlines.length === nextHeadlines.length &&
+          currentHeadlines.every(
+            (headline, index) =>
+              headline.title === nextHeadlines[index]?.title &&
+              headline.link === nextHeadlines[index]?.link,
+          )
+        ) {
+          return currentHeadlines;
+        }
+
+        return nextHeadlines;
+      });
+    },
+    [],
+  );
+  const newsHeaderHeadlineTitles = useMemo(() => {
+    const headlineTitles = newsHeaderHeadlines
+      .map((headline) => headline.title.trim())
+      .filter(Boolean);
+
+    return headlineTitles.length > 0 ? headlineTitles : ["Headlines loading"];
+  }, [newsHeaderHeadlines]);
+  const newsHeaderTickerTitles =
+    newsHeaderHeadlineTitles.length > 1
+      ? [...newsHeaderHeadlineTitles, ...newsHeaderHeadlineTitles]
+      : newsHeaderHeadlineTitles;
   const {
     dragHandleAttributes,
     dragHandleClassName,
   } =
     usePromptHomeCardHeaderDragProps<HTMLDivElement>();
+  const newsFilterControls = (
+    <div className="prompt-home-news-filter-bar" aria-label="News filters">
+      <label className="prompt-home-prices-filter-field">
+        <span>Search</span>
+        <input
+          type="search"
+          value={newsQueryParameter}
+          placeholder="OPEC, LNG, storm impacts"
+          disabled={!canConfigureHomeCard}
+          onChange={(event) =>
+            updateNewsCardStringParameter("news_query", event.target.value)
+          }
+        />
+      </label>
+      <label className="prompt-home-prices-filter-field">
+        <span>Commodity</span>
+        <select
+          value={newsCommodityFilter}
+          disabled={!canConfigureHomeCard}
+          onChange={(event) =>
+            updateNewsCardFilters("commodity_code", event.target.value)
+          }
+        >
+          <option value="">All commodities</option>
+          {newsCommodityFilter &&
+          !newsCommodityOptions.includes(newsCommodityFilter) ? (
+            <option value={newsCommodityFilter}>
+              {newsCommodityFilter} (unavailable)
+            </option>
+          ) : null}
+          {newsCommodityOptions.map((commodityCode) => (
+            <option key={commodityCode} value={commodityCode}>
+              {commodityCode}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="prompt-home-prices-filter-field">
+        <span>Market Location</span>
+        <input
+          type="search"
+          value={newsMarketLocationFilter}
+          placeholder="Region, country, city"
+          disabled={!canConfigureHomeCard}
+          onChange={(event) =>
+            updateNewsCardFilters("market_location", event.target.value)
+          }
+        />
+      </label>
+      <label className="prompt-home-prices-filter-field">
+        <span>Index</span>
+        <select
+          value={newsPriceIndexCodeFilter}
+          disabled={!canConfigureHomeCard}
+          onChange={(event) =>
+            updateNewsCardFilters("price_index_code", event.target.value)
+          }
+        >
+          <option value="">All indices</option>
+          {newsPriceIndexCodeFilter &&
+          !newsPriceIndexOptions.some(
+            (priceIndexOption) =>
+              priceIndexOption.code === newsPriceIndexCodeFilter,
+          ) ? (
+            <option value={newsPriceIndexCodeFilter}>
+              {newsPriceIndexCodeFilter} (unavailable)
+            </option>
+          ) : null}
+          {newsPriceIndexOptions.map((priceIndexOption) => (
+            <option key={priceIndexOption.code} value={priceIndexOption.code}>
+              {priceIndexOption.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="prompt-home-prices-filter-field">
+        <span>Provider</span>
+        <select
+          value={newsProviderFilter}
+          disabled={!canConfigureHomeCard}
+          onChange={(event) =>
+            updateNewsCardFilters(
+              "provider",
+              event.target.value === PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER
+                ? ""
+                : event.target.value,
+            )
+          }
+        >
+          <option value={PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER}>All providers</option>
+          {newsProviderOptions.map((provider) => (
+            <option key={provider} value={provider}>
+              {provider}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="prompt-home-prices-filter-field">
+        <span>Type</span>
+        <select
+          value={newsQuoteTypeFilter}
+          disabled={!canConfigureHomeCard}
+          onChange={(event) =>
+            updateNewsCardFilters(
+              "quote_type",
+              event.target.value === PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE
+                ? ""
+                : event.target.value,
+            )
+          }
+        >
+          <option value={PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE}>All types</option>
+          {newsQuoteTypeOptions.map((quoteType) => (
+            <option key={quoteType} value={quoteType}>
+              {formatPromptHomePriceQuoteTypeCode(quoteType)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="prompt-home-prices-filter-field">
+        <span>Term</span>
+        <select
+          value={newsHorizonFilter}
+          disabled={!canConfigureHomeCard}
+          onChange={(event) => {
+            const nextFilter = normalizeMarketNewsHorizonFilter(
+              event.target.value,
+            );
+            updateNewsCardFilters(
+              "impact_horizon",
+              nextFilter === "all" ? "" : nextFilter,
+            );
+          }}
+        >
+          {PROMPT_HOME_NEWS_HORIZON_FILTER_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="prompt-home-prices-filter-field">
+        <span>Supply Effect</span>
+        <select
+          value={newsSupplyEffectFilter}
+          disabled={!canConfigureHomeCard}
+          onChange={(event) => {
+            const nextFilter = normalizeMarketNewsEffectFilter(
+              event.target.value,
+            );
+            updateNewsCardFilters(
+              "supply_effect",
+              nextFilter === "all" ? "" : nextFilter,
+            );
+          }}
+        >
+          {PROMPT_HOME_NEWS_EFFECT_FILTER_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.value === "all" ? "All supply effects" : option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="prompt-home-prices-filter-field">
+        <span>Demand Effect</span>
+        <select
+          value={newsDemandEffectFilter}
+          disabled={!canConfigureHomeCard}
+          onChange={(event) => {
+            const nextFilter = normalizeMarketNewsEffectFilter(
+              event.target.value,
+            );
+            updateNewsCardFilters(
+              "demand_effect",
+              nextFilter === "all" ? "" : nextFilter,
+            );
+          }}
+        >
+          {PROMPT_HOME_NEWS_EFFECT_FILTER_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.value === "all" ? "All demand effects" : option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="prompt-home-prices-filter-field">
+        <span>Lookback</span>
+        <select
+          value={String(newsLookbackDays)}
+          disabled={!canConfigureHomeCard}
+          onChange={(event) =>
+            updateNewsCardIntegerParameter(
+              "news_lookback_days",
+              Number.parseInt(event.target.value, 10),
+            )
+          }
+        >
+          {PROMPT_HOME_NEWS_LOOKBACK_DAY_OPTIONS.map((days) => (
+            <option key={days} value={days}>
+              {days}d
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="prompt-home-prices-filter-field">
+        <span>Headlines</span>
+        <select
+          value={String(newsLimit)}
+          disabled={!canConfigureHomeCard}
+          onChange={(event) =>
+            updateNewsCardIntegerParameter(
+              "news_limit",
+              Number.parseInt(event.target.value, 10),
+            )
+          }
+        >
+          {[3, 5, 8, 10].map((limit) => (
+            <option key={limit} value={limit}>
+              {limit}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+  const newsHeaderActions = newsExpandedState.expanded ? (
+    <div
+      className="prompt-home-news-card-head-actions"
+      aria-label="Market news actions"
+    >
+      <button
+        type="button"
+        className={mergePromptHomeClassNames(
+          "button button-secondary prompt-home-news-filter-button",
+          hasActiveNewsFilters ? "is-active" : undefined,
+        )}
+        aria-controls={newsFilterDialogId}
+        aria-expanded={newsFiltersOpen}
+        onClick={() => setNewsFiltersOpen(true)}
+      >
+        Filter
+      </button>
+    </div>
+  ) : null;
 
   return (
-    <article className="prompt-home-news-card">
+    <article
+      className={`prompt-home-news-card ${newsExpandedState.expanded ? "is-expanded" : "is-collapsed"}`}
+    >
       <div
         {...dragHandleAttributes}
         className={mergePromptHomeClassNames(
@@ -3673,18 +4763,38 @@ function PromptHomeNewsCard({
       >
         <div className="prompt-home-news-card-copy">
           <span className="eyebrow">News</span>
-          <strong>Market News</strong>
-          <p>Live headline context</p>
+          <div
+            className={`prompt-home-news-headline-strip ${
+              newsHeaderHeadlineTitles.length > 1 ? "is-scrolling" : "is-static"
+            }`}
+            aria-label="Scrolling market headlines"
+          >
+            <div className="prompt-home-news-headline-track">
+              {newsHeaderTickerTitles.map((headlineTitle, index) => (
+                <strong
+                  key={`${headlineTitle}-${index}`}
+                  className="prompt-home-news-headline"
+                  aria-hidden={index >= newsHeaderHeadlineTitles.length}
+                >
+                  {headlineTitle}
+                </strong>
+              ))}
+            </div>
+          </div>
         </div>
+        {newsHeaderActions}
         <div className="prompt-home-news-card-toggle-side">
           <button
             type="button"
             className="prompt-home-news-card-toggle"
             aria-expanded={newsExpandedState.expanded}
-            aria-controls={PROMPT_HOME_NEWS_PANEL_ID}
-            onClick={() =>
-              newsExpandedState.setExpanded((current) => !current)
-            }
+            aria-controls={newsPanelId}
+            onClick={() => {
+              if (newsExpandedState.expanded) {
+                setNewsFiltersOpen(false);
+              }
+              newsExpandedState.setExpanded((current) => !current);
+            }}
           >
             <div className="prompt-home-news-card-toggle-meta">
               <small>{newsToggleSummary}</small>
@@ -3700,246 +4810,71 @@ function PromptHomeNewsCard({
       </div>
 
       <div
-        id={PROMPT_HOME_NEWS_PANEL_ID}
+        id={newsPanelId}
         className="prompt-home-news-card-body"
         hidden={!newsExpandedState.expanded}
       >
         {referenceDataLoading ? (
           <p className="form-note">Loading market context for headline filters.</p>
         ) : null}
-        <div className="prompt-home-news-filter-bar" aria-label="News filters">
-          <label className="prompt-home-prices-filter-field">
-            <span>Search</span>
-            <input
-              type="search"
-              value={newsQueryParameter}
-              placeholder="OPEC, LNG, storm impacts"
-              disabled={!canConfigureHomeCard}
-              onChange={(event) =>
-                updateNewsCardStringParameter("news_query", event.target.value)
+        {newsFiltersOpen ? (
+          <div
+            className="prompt-home-prices-filter-overlay prompt-home-news-filter-overlay"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                setNewsFiltersOpen(false);
               }
-            />
-          </label>
-          <label className="prompt-home-prices-filter-field">
-            <span>Commodity</span>
-            <select
-              value={newsCommodityFilter}
-              disabled={!canConfigureHomeCard}
-              onChange={(event) =>
-                updateNewsCardFilters("commodity_code", event.target.value)
-              }
-            >
-              <option value="">All commodities</option>
-              {newsCommodityFilter &&
-              !newsCommodityOptions.includes(newsCommodityFilter) ? (
-                <option value={newsCommodityFilter}>
-                  {newsCommodityFilter} (unavailable)
-                </option>
-              ) : null}
-              {newsCommodityOptions.map((commodityCode) => (
-                <option key={commodityCode} value={commodityCode}>
-                  {commodityCode}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="prompt-home-prices-filter-field">
-            <span>Market Location</span>
-            <input
-              type="search"
-              value={newsMarketLocationFilter}
-              placeholder="Region, country, city"
-              disabled={!canConfigureHomeCard}
-              onChange={(event) =>
-                updateNewsCardFilters("market_location", event.target.value)
-              }
-            />
-          </label>
-          <label className="prompt-home-prices-filter-field">
-            <span>Index</span>
-            <select
-              value={newsPriceIndexCodeFilter}
-              disabled={!canConfigureHomeCard}
-              onChange={(event) =>
-                updateNewsCardFilters("price_index_code", event.target.value)
-              }
-            >
-              <option value="">All indices</option>
-              {newsPriceIndexCodeFilter &&
-              !newsPriceIndexOptions.some(
-                (priceIndexOption) =>
-                  priceIndexOption.code === newsPriceIndexCodeFilter,
-              ) ? (
-                <option value={newsPriceIndexCodeFilter}>
-                  {newsPriceIndexCodeFilter} (unavailable)
-                </option>
-              ) : null}
-              {newsPriceIndexOptions.map((priceIndexOption) => (
-                <option key={priceIndexOption.code} value={priceIndexOption.code}>
-                  {priceIndexOption.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="prompt-home-prices-filter-field">
-            <span>Provider</span>
-            <select
-              value={newsProviderFilter}
-              disabled={!canConfigureHomeCard}
-              onChange={(event) =>
-                updateNewsCardFilters(
-                  "provider",
-                  event.target.value === PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER
-                    ? ""
-                    : event.target.value,
-                )
-              }
-            >
-              <option value={PROMPT_HOME_PRICE_FILTER_ALL_PROVIDER}>All providers</option>
-              {newsProviderOptions.map((provider) => (
-                <option key={provider} value={provider}>
-                  {provider}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="prompt-home-prices-filter-field">
-            <span>Type</span>
-            <select
-              value={newsQuoteTypeFilter}
-              disabled={!canConfigureHomeCard}
-              onChange={(event) =>
-                updateNewsCardFilters(
-                  "quote_type",
-                  event.target.value === PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE
-                    ? ""
-                    : event.target.value,
-                )
-              }
-            >
-              <option value={PROMPT_HOME_PRICE_FILTER_ALL_QUOTE_TYPE}>All types</option>
-              {newsQuoteTypeOptions.map((quoteType) => (
-                <option key={quoteType} value={quoteType}>
-                  {formatPromptHomePriceQuoteTypeCode(quoteType)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="prompt-home-prices-filter-field">
-            <span>Term</span>
-            <select
-              value={newsHorizonFilter}
-              disabled={!canConfigureHomeCard}
-              onChange={(event) => {
-                const nextFilter = normalizeMarketNewsHorizonFilter(
-                  event.target.value,
-                );
-                updateNewsCardFilters(
-                  "impact_horizon",
-                  nextFilter === "all" ? "" : nextFilter,
-                );
+            }}
+          >
+            <section
+              id={newsFilterDialogId}
+              className="prompt-home-prices-filter-dialog prompt-home-news-filter-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={newsFilterDialogTitleId}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  setNewsFiltersOpen(false);
+                }
               }}
             >
-              {PROMPT_HOME_NEWS_HORIZON_FILTER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="prompt-home-prices-filter-field">
-            <span>Supply Effect</span>
-            <select
-              value={newsSupplyEffectFilter}
-              disabled={!canConfigureHomeCard}
-              onChange={(event) => {
-                const nextFilter = normalizeMarketNewsEffectFilter(
-                  event.target.value,
-                );
-                updateNewsCardFilters(
-                  "supply_effect",
-                  nextFilter === "all" ? "" : nextFilter,
-                );
-              }}
-            >
-              {PROMPT_HOME_NEWS_EFFECT_FILTER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.value === "all" ? "All supply effects" : option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="prompt-home-prices-filter-field">
-            <span>Demand Effect</span>
-            <select
-              value={newsDemandEffectFilter}
-              disabled={!canConfigureHomeCard}
-              onChange={(event) => {
-                const nextFilter = normalizeMarketNewsEffectFilter(
-                  event.target.value,
-                );
-                updateNewsCardFilters(
-                  "demand_effect",
-                  nextFilter === "all" ? "" : nextFilter,
-                );
-              }}
-            >
-              {PROMPT_HOME_NEWS_EFFECT_FILTER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.value === "all" ? "All demand effects" : option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="prompt-home-prices-filter-field">
-            <span>Lookback</span>
-            <select
-              value={String(newsLookbackDays)}
-              disabled={!canConfigureHomeCard}
-              onChange={(event) =>
-                updateNewsCardIntegerParameter(
-                  "news_lookback_days",
-                  Number.parseInt(event.target.value, 10),
-                )
-              }
-            >
-              {PROMPT_HOME_NEWS_LOOKBACK_DAY_OPTIONS.map((days) => (
-                <option key={days} value={days}>
-                  {days}d
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="prompt-home-prices-filter-field">
-            <span>Headlines</span>
-            <select
-              value={String(newsLimit)}
-              disabled={!canConfigureHomeCard}
-              onChange={(event) =>
-                updateNewsCardIntegerParameter(
-                  "news_limit",
-                  Number.parseInt(event.target.value, 10),
-                )
-              }
-            >
-              {[3, 5, 8, 10].map((limit) => (
-                <option key={limit} value={limit}>
-                  {limit}
-                </option>
-              ))}
-            </select>
-          </label>
-          {hasActiveNewsFilters ? (
-            <button
-              type="button"
-              className="button button-secondary prompt-home-prices-filter-clear"
-              disabled={!canConfigureHomeCard}
-              onClick={clearNewsContext}
-            >
-              Clear filters
-            </button>
-          ) : null}
-        </div>
+              <header className="prompt-home-prices-filter-dialog-head">
+                <div>
+                  <span className="eyebrow">News</span>
+                  <h3 id={newsFilterDialogTitleId}>Filters</h3>
+                </div>
+                <button
+                  type="button"
+                  className="button button-ghost"
+                  onClick={() => setNewsFiltersOpen(false)}
+                >
+                  Close
+                </button>
+              </header>
+              {newsFilterControls}
+              <footer className="prompt-home-prices-filter-dialog-actions">
+                {hasActiveNewsFilters ? (
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={!canConfigureHomeCard}
+                    onClick={clearNewsContext}
+                  >
+                    Clear filters
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => setNewsFiltersOpen(false)}
+                >
+                  Done
+                </button>
+              </footer>
+            </section>
+          </div>
+        ) : null}
 
         <MarketNewsPanel
           key={refreshKey}
@@ -3952,6 +4887,7 @@ function PromptHomeNewsCard({
           title="Latest Headlines"
           detail={newsDetail}
           filters={marketNewsTableFilters}
+          onHeadlinesChange={handleNewsHeaderHeadlinesChange}
         />
 
         <div className="prompt-home-news-card-footer">
@@ -4010,8 +4946,26 @@ function PromptHomeMapTile({
   onOpenMapWorkspace: () => void;
   initialMapAssetLayerVisible?: boolean;
 }) {
+  const homeCardInstanceId = homeCard
+    ? getPromptHomeCardInstanceId(homeCard)
+    : "map";
+  const mapPanelId = promptHomeInstanceScopedId(
+    PROMPT_HOME_MAP_PANEL_ID,
+    homeCardInstanceId,
+    "map",
+  );
+  const mapFilterDialogId = promptHomeInstanceScopedId(
+    "prompt-home-map-filter-dialog",
+    homeCardInstanceId,
+    "map-filter-dialog",
+  );
+  const mapFilterDialogTitleId = `${mapFilterDialogId}-title`;
   const mapExpandedState = usePersistentCollapsibleCardState(
-    "prompt-home.map-card",
+    promptHomeInstanceStorageKey(
+      "prompt-home.map-card",
+      homeCardInstanceId,
+      "map",
+    ),
     true,
   );
   const [selectedAssetCode, setSelectedAssetCode] = useState<string | null>(
@@ -4020,6 +4974,7 @@ function PromptHomeMapTile({
   const [selectedVesselDeliveryId, setSelectedVesselDeliveryId] = useState<
     string | null
   >(null);
+  const [mapFiltersOpen, setMapFiltersOpen] = useState(false);
   const [assetActivityVisibility, setAssetActivityVisibility] = useState<
     Record<string, boolean>
   >({});
@@ -4364,31 +5319,9 @@ function PromptHomeMapTile({
   );
   const activeServerMapScopeSummary =
     authSession && referenceDataLoaded ? serverMapScopeSummary : null;
-  const exactFilteredRecordCount =
-    activeServerMapScopeSummary?.filtered_total_count ??
-    visibleRecordCandidates.length;
   const exactFilteredMapReadyCount =
     activeServerMapScopeSummary?.filtered_map_ready_count ??
     visibleMappedRecords.length;
-  const visibleMarketPriceCount = displayedMarketPriceRecords.length;
-  const mapSummaryLabel = useMemo(
-    () =>
-      formatPromptHomeMapSummary({
-        assetLayerVisible: showAssetLayer,
-        filteredRecordCount: exactFilteredRecordCount,
-        shownRecordCount: displayedAssetMapRecords.length,
-        mapReadyRecordCount: showAssetLayer ? exactFilteredMapReadyCount : 0,
-        marketPriceCount: visibleMarketPriceCount,
-      }),
-    [
-      displayedAssetMapRecords.length,
-      exactFilteredMapReadyCount,
-      exactFilteredRecordCount,
-      visibleMarketPriceCount,
-      showAssetLayer,
-    ],
-  );
-
   const activeSelectedAssetCode = useMemo(
     () =>
       selectedAssetCode &&
@@ -4491,6 +5424,13 @@ function PromptHomeMapTile({
     activeSelectedSubdivisionCode,
   ]);
 
+  function handleToggleMapExpanded() {
+    if (mapExpandedState.expanded) {
+      setMapFiltersOpen(false);
+    }
+    mapExpandedState.setExpanded((current) => !current);
+  }
+
   function handleToggleAssetActivity(activityLabel: string) {
     setAssetActivityVisibility((currentState) => {
       const nextState = syncAssetActivityVisibilityState(currentState);
@@ -4577,7 +5517,9 @@ function PromptHomeMapTile({
     usePromptHomeCardHeaderDragProps<HTMLDivElement>();
 
   return (
-    <article className="prompt-home-map-card">
+    <article
+      className={`prompt-home-map-card ${mapExpandedState.expanded ? "is-expanded" : "is-collapsed"}`}
+    >
       <div
         {...dragHandleAttributes}
         className={mergePromptHomeClassNames(
@@ -4588,20 +5530,35 @@ function PromptHomeMapTile({
         <div className="prompt-home-map-card-copy">
           <span className="eyebrow">Map</span>
           <strong>Asset map</strong>
-          <p>{mapSummaryLabel}</p>
         </div>
+        {mapExpandedState.expanded ? (
+          <div
+            className="prompt-home-map-card-head-actions"
+            aria-label="Map actions"
+          >
+            <button
+              type="button"
+              className="button button-secondary prompt-home-map-filter-button"
+              aria-controls={mapFilterDialogId}
+              aria-expanded={mapFiltersOpen}
+              onClick={() => setMapFiltersOpen(true)}
+            >
+              Filter
+            </button>
+          </div>
+        ) : null}
         <div className="prompt-home-map-card-toggle-side">
           <button
             type="button"
             className="prompt-home-map-card-toggle"
+            aria-label={
+              mapExpandedState.expanded ? "Collapse Asset map" : "Expand Asset map"
+            }
             aria-expanded={mapExpandedState.expanded}
-            aria-controls={PROMPT_HOME_MAP_PANEL_ID}
-            onClick={() => mapExpandedState.setExpanded((current) => !current)}
+            aria-controls={mapPanelId}
+            onClick={handleToggleMapExpanded}
           >
             <div className="prompt-home-map-card-toggle-meta">
-              <small>
-                {mapExpandedState.expanded ? "Hide card" : "Show card"}
-              </small>
               <span
                 className="prompt-home-support-toggle-indicator"
                 aria-hidden="true"
@@ -4614,7 +5571,7 @@ function PromptHomeMapTile({
       </div>
 
       <div
-        id={PROMPT_HOME_MAP_PANEL_ID}
+        id={mapPanelId}
         className="prompt-home-map-card-body"
         hidden={!mapExpandedState.expanded}
       >
@@ -4639,6 +5596,11 @@ function PromptHomeMapTile({
           initialWeatherOverlayVisibility={
             PROMPT_HOME_INITIAL_WEATHER_OVERLAY_VISIBILITY
           }
+          filterMode="dialog"
+          filtersOpen={mapFiltersOpen}
+          onFiltersOpenChange={setMapFiltersOpen}
+          filterDialogId={mapFilterDialogId}
+          filterDialogTitleId={mapFilterDialogTitleId}
           onShowAssetsChange={setShowAssetLayer}
           onShowVesselsChange={setShowVesselLayer}
           onShowMarketPricesChange={setShowMarketPriceLayer}
@@ -4713,34 +5675,390 @@ function PromptHomeMapTile({
 }
 
 function PromptHomeTimeframePanel({
+  instanceId = "timeframe",
   currentTime,
   timeDisplaySettings,
   timeZoneOptions,
   onTimeZoneChange,
-  customEventsHref,
-  onOpenCustomEvents,
 }: {
+  instanceId?: string;
   currentTime: Date;
   timeDisplaySettings: TimeDisplaySettings;
   timeZoneOptions: TimeDisplayTimeZoneOption[];
   onTimeZoneChange: (nextTimeZone: string) => void;
+}) {
+  const timeframePanelId = promptHomeInstanceScopedId(
+    PROMPT_HOME_TIMEFRAME_PANEL_ID,
+    instanceId,
+    "timeframe",
+  );
+  const timeframeExpandedState = usePersistentCollapsibleCardState(
+    promptHomeInstanceStorageKey(
+      "prompt-home.timeframe-panel",
+      instanceId,
+      "timeframe",
+    ),
+    true,
+  );
+  const resolvedTimeZone = resolveTimeDisplayTimeZone(timeDisplaySettings);
+  const timeZonePreferenceLabel =
+    formatTimeDisplayTimeZonePreferenceLabel(timeDisplaySettings);
+  const zonedDateParts = getPromptHomeZonedDateParts(
+    currentTime,
+    resolvedTimeZone,
+  );
+  const currentClockLabel = formatPromptHomeClockTime(
+    currentTime,
+    resolvedTimeZone,
+  );
+  const currentMonthLabel = formatPromptHomeMonthLabel(
+    currentTime,
+    resolvedTimeZone,
+  );
+  const currentMonthDayLabel = formatPromptHomeMonthDayLabel(
+    currentTime,
+    resolvedTimeZone,
+  );
+  const currentHourEndingLabel = formatHourEndingLabel(
+    currentHourEnding(zonedDateParts),
+  );
+  const currentWeekdayLabel =
+    PROMPT_HOME_WEEKDAY_FULL_LABELS[zonedDateParts.weekdayIndex];
+  const timeframeCollapsedSummary = [
+    currentClockLabel,
+    currentHourEndingLabel,
+  ].join(" | ");
+  const { dragHandleAttributes, dragHandleClassName } =
+    usePromptHomeCardHeaderDragProps<HTMLDivElement>();
+
+  return (
+    <section
+      className={`prompt-home-timeframe-panel ${timeframeExpandedState.expanded ? "is-expanded" : "is-collapsed"}`}
+    >
+      <div
+        {...dragHandleAttributes}
+        className={mergePromptHomeClassNames(
+          "prompt-home-timeframe-panel-head",
+          dragHandleClassName,
+        )}
+      >
+        <div className="prompt-home-timeframe-panel-toggle">
+          <div className="prompt-home-timeframe-panel-copy">
+            <span className="eyebrow">Desk Time</span>
+            <strong className="prompt-home-timeframe-panel-summary">
+              {timeframeCollapsedSummary}
+            </strong>
+          </div>
+        </div>
+
+        <div className="prompt-home-timeframe-panel-side">
+          <button
+            type="button"
+            className="prompt-home-timeframe-panel-toggle-action"
+            aria-label={
+              timeframeExpandedState.expanded
+                ? "Collapse Desk Time"
+                : "Expand Desk Time"
+            }
+            aria-expanded={timeframeExpandedState.expanded}
+            aria-controls={timeframePanelId}
+            onClick={() =>
+              timeframeExpandedState.setExpanded((current) => !current)
+            }
+          >
+            <div className="prompt-home-timeframe-panel-toggle-meta">
+              <span
+                className="prompt-home-support-toggle-indicator"
+                aria-hidden="true"
+              >
+                {timeframeExpandedState.expanded ? "−" : "+"}
+              </span>
+            </div>
+          </button>
+
+          {timeframeExpandedState.expanded ? (
+            <label className="field prompt-home-timezone-field">
+              <span>Time zone</span>
+              <select
+                className="control"
+                aria-label="Preferred time zone"
+                value={timeDisplaySettings.timeZone}
+                onChange={(event) => onTimeZoneChange(event.target.value)}
+              >
+                {timeZoneOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
+      </div>
+
+      <div
+        id={timeframePanelId}
+        className="prompt-home-timeframe-panel-body"
+        hidden={!timeframeExpandedState.expanded}
+      >
+        <div className="prompt-home-desk-time-facts">
+          <div className="prompt-home-desk-time-fact">
+            <span>Clock</span>
+            <strong>{currentClockLabel}</strong>
+            <small>{timeZonePreferenceLabel}</small>
+          </div>
+          <div className="prompt-home-desk-time-fact">
+            <span>Hour ending</span>
+            <strong>{currentHourEndingLabel}</strong>
+            <small>{currentWeekdayLabel}</small>
+          </div>
+          <div className="prompt-home-desk-time-fact">
+            <span>Date</span>
+            <strong>{currentMonthDayLabel}</strong>
+            <small>{currentMonthLabel}</small>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PromptHomeExchangesPanel({
+  instanceId = "exchanges",
+  currentTime,
+  timeDisplaySettings,
+}: {
+  instanceId?: string;
+  currentTime: Date;
+  timeDisplaySettings: TimeDisplaySettings;
+}) {
+  const exchangesPanelId = promptHomeInstanceScopedId(
+    PROMPT_HOME_EXCHANGES_PANEL_ID,
+    instanceId,
+    "exchanges",
+  );
+  const exchangesExpandedState = usePersistentCollapsibleCardState(
+    promptHomeInstanceStorageKey(
+      "prompt-home.exchanges-card",
+      instanceId,
+      "exchanges",
+    ),
+    true,
+  );
+  const resolvedTimeZone = resolveTimeDisplayTimeZone(timeDisplaySettings);
+  const timeZonePreferenceLabel =
+    formatTimeDisplayTimeZonePreferenceLabel(timeDisplaySettings);
+  const exchangeSessionLanes = PROMPT_HOME_MAJOR_EXCHANGE_SESSIONS.map(
+    (session) =>
+      buildPromptHomeExchangeSessionLane(
+        session,
+        resolvedTimeZone,
+        currentTime,
+      ),
+  );
+  const alphaVantageExchangeCount =
+    PROMPT_HOME_ALPHA_VANTAGE_EXCHANGE_COVERAGE.reduce(
+      (count, coverage) => count + coverage.primaryExchanges.length,
+      0,
+    );
+  const alphaVantageMarketCount =
+    PROMPT_HOME_ALPHA_VANTAGE_EXCHANGE_COVERAGE.length;
+  const exchangesCollapsedSummary = `${exchangeSessionLanes.length} major venue sessions · ${alphaVantageExchangeCount} Alpha Vantage venues · ${timeZonePreferenceLabel}`;
+  const { dragHandleAttributes, dragHandleClassName } =
+    usePromptHomeCardHeaderDragProps<HTMLDivElement>();
+
+  return (
+    <section
+      className={`prompt-home-exchanges-card ${exchangesExpandedState.expanded ? "is-expanded" : "is-collapsed"}`}
+    >
+      <div
+        {...dragHandleAttributes}
+        className={mergePromptHomeClassNames(
+          "prompt-home-exchanges-card-head",
+          dragHandleClassName,
+        )}
+      >
+        <div className="prompt-home-exchanges-card-copy">
+          <span className="eyebrow">Exchanges</span>
+          <strong>{exchangesCollapsedSummary}</strong>
+        </div>
+
+        <div className="prompt-home-exchanges-card-side">
+          <button
+            type="button"
+            className="prompt-home-exchanges-card-toggle"
+            aria-label={
+              exchangesExpandedState.expanded
+                ? "Collapse Exchanges"
+                : "Expand Exchanges"
+            }
+            aria-expanded={exchangesExpandedState.expanded}
+            aria-controls={exchangesPanelId}
+            onClick={() =>
+              exchangesExpandedState.setExpanded((current) => !current)
+            }
+          >
+            <div className="prompt-home-exchanges-card-toggle-meta">
+              <span
+                className="prompt-home-support-toggle-indicator"
+                aria-hidden="true"
+              >
+                {exchangesExpandedState.expanded ? "−" : "+"}
+              </span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <div
+        id={exchangesPanelId}
+        className="prompt-home-exchanges-card-body"
+        hidden={!exchangesExpandedState.expanded}
+      >
+        <div className="prompt-home-session-board">
+          <p className="prompt-home-session-board-note">
+            Representative venue sessions converted into{" "}
+            {timeZonePreferenceLabel}.
+          </p>
+          <div className="prompt-home-session-lane-list">
+            {exchangeSessionLanes.map((session) => (
+              <div
+                key={session.key}
+                className={`prompt-home-session-lane is-${session.tone}`}
+              >
+                <div className="prompt-home-session-lane-copy">
+                  <strong>{session.label}</strong>
+                  <span>{session.displayWindowLabel}</span>
+                  <small>
+                    {session.detail} · {session.sourceWindowLabel}
+                  </small>
+                </div>
+                <div
+                  className="prompt-home-session-lane-track"
+                  aria-hidden="true"
+                >
+                  {session.segments.map((segment) => (
+                    <span
+                      key={segment.key}
+                      className="prompt-home-session-lane-segment"
+                      style={{
+                        left: `${segment.startPercent}%`,
+                        width: `${segment.widthPercent}%`,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <section
+            className="prompt-home-alpha-vantage-exchanges"
+            aria-label="Alpha Vantage exchange coverage"
+          >
+            <div className="prompt-home-alpha-vantage-exchanges-head">
+              <div>
+                <strong>Alpha Vantage exchange coverage</strong>
+                <span>
+                  {alphaVantageExchangeCount} primary venues across{" "}
+                  {alphaVantageMarketCount} market rows
+                </span>
+              </div>
+              <small>MARKET_STATUS coverage</small>
+            </div>
+            <div className="prompt-home-alpha-vantage-exchange-grid">
+              {PROMPT_HOME_ALPHA_VANTAGE_EXCHANGE_COVERAGE.map((coverage) => (
+                <article
+                  key={coverage.key}
+                  className="prompt-home-alpha-vantage-exchange-card"
+                >
+                  <span>
+                    {coverage.marketType} · {coverage.marketGroup}
+                  </span>
+                  <strong>{coverage.region}</strong>
+                  <p>{coverage.primaryExchanges.join(", ")}</p>
+                  <small>
+                    {coverage.localWindowLabel}
+                    {coverage.notes ? ` · ${coverage.notes}` : ""}
+                  </small>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PromptHomeCalendarPanel({
+  instanceId = "calendar",
+  currentTime,
+  timeDisplaySettings,
+  customEventsHref,
+  onOpenCustomEvents,
+}: {
+  instanceId?: string;
+  currentTime: Date;
+  timeDisplaySettings: TimeDisplaySettings;
   customEventsHref: string;
   onOpenCustomEvents?: () => void;
 }) {
+  const timeframePanelId = promptHomeInstanceScopedId(
+    PROMPT_HOME_CALENDAR_PANEL_ID,
+    instanceId,
+    "calendar",
+  );
+  const dayPanelId = promptHomeInstanceScopedId(
+    PROMPT_HOME_DAY_PANEL_ID,
+    instanceId,
+    "calendar",
+  );
+  const weekPanelId = promptHomeInstanceScopedId(
+    PROMPT_HOME_WEEK_PANEL_ID,
+    instanceId,
+    "calendar",
+  );
+  const monthPanelId = promptHomeInstanceScopedId(
+    PROMPT_HOME_MONTH_PANEL_ID,
+    instanceId,
+    "calendar",
+  );
+  const calendarSettingsDialogId = promptHomeInstanceScopedId(
+    "prompt-home-calendar-settings-dialog",
+    instanceId,
+    "calendar-settings",
+  );
+  const calendarSettingsDialogTitleId = `${calendarSettingsDialogId}-title`;
   const timeframeExpandedState = usePersistentCollapsibleCardState(
-    "prompt-home.timeframe-panel",
+    promptHomeInstanceStorageKey(
+      "prompt-home.calendar-panel",
+      instanceId,
+      "calendar",
+    ),
     true,
   );
   const dayCardExpandedState = usePersistentCollapsibleCardState(
-    "prompt-home.timeframe.day-card",
+    promptHomeInstanceStorageKey(
+      "prompt-home.calendar.day-card",
+      instanceId,
+      "calendar",
+    ),
     true,
   );
   const weekCardExpandedState = usePersistentCollapsibleCardState(
-    "prompt-home.timeframe.week-card",
+    promptHomeInstanceStorageKey(
+      "prompt-home.calendar.week-card",
+      instanceId,
+      "calendar",
+    ),
     true,
   );
   const monthCardExpandedState = usePersistentCollapsibleCardState(
-    "prompt-home.timeframe.month-card",
+    promptHomeInstanceStorageKey(
+      "prompt-home.calendar.month-card",
+      instanceId,
+      "calendar",
+    ),
     true,
   );
   const dayCalendarToggleState = usePersistentPromptHomeCalendarCardState(
@@ -4755,10 +6073,6 @@ function PromptHomeTimeframePanel({
     "month",
     true,
   );
-  const exchangeSessionsExpandedState = usePersistentCollapsibleCardState(
-    "prompt-home.timeframe.trading-hours",
-    false,
-  );
   const resolvedTimeZone = resolveTimeDisplayTimeZone(timeDisplaySettings);
   const googleCalendarSession = useSyncExternalStore(
     subscribeGoogleCalendarSession,
@@ -4767,8 +6081,12 @@ function PromptHomeTimeframePanel({
   );
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [calendarError, setCalendarError] = useState("");
-  const timeZonePreferenceLabel =
-    formatTimeDisplayTimeZonePreferenceLabel(timeDisplaySettings);
+  const [calendarSettingsOpen, setCalendarSettingsOpen] = useState(false);
+  const [availableGoogleCalendars, setAvailableGoogleCalendars] = useState<
+    GoogleCalendarListEntry[]
+  >([]);
+  const [calendarSettingsLoading, setCalendarSettingsLoading] = useState(false);
+  const [calendarSettingsError, setCalendarSettingsError] = useState("");
   const zonedDateParts = getPromptHomeZonedDateParts(
     currentTime,
     resolvedTimeZone,
@@ -4817,16 +6135,18 @@ function PromptHomeTimeframePanel({
     dayCalendarToggleState.enabled ||
     weekCalendarToggleState.enabled ||
     monthCalendarToggleState.enabled;
+  const selectedGoogleCalendars = googleCalendarSession.selectedCalendars;
+  const selectedGoogleCalendarSignature =
+    googleCalendarSelectionSignature(selectedGoogleCalendars);
+  const calendarSessionTokenIsUsable = googleCalendarSessionTokenIsUsable({
+    accessToken: googleCalendarSession.accessToken,
+    accessTokenExpiresAt: googleCalendarSession.accessTokenExpiresAt,
+  });
   const calendarSessionCanRefresh =
     hasCalendarTimelineEnabled &&
-    googleCalendarSessionTokenIsUsable({
-      accessToken: googleCalendarSession.accessToken,
-      accessTokenExpiresAt: googleCalendarSession.accessTokenExpiresAt,
-    }) &&
-    Boolean(googleCalendarSession.selectedCalendarId);
-  const timeframeCollapsedSummary = [
-    currentClockLabel,
-    currentHourEndingLabel,
+    calendarSessionTokenIsUsable &&
+    selectedGoogleCalendars.length > 0;
+  const calendarCollapsedSummary = [
     currentWeekdayLabel,
     currentSummaryMonthDayLabel,
   ].join(" | ");
@@ -4858,14 +6178,6 @@ function PromptHomeTimeframePanel({
   );
   const weekTicks = buildWeekMeterTicks();
   const monthTicks = buildMonthMeterTicks(monthDayTotal);
-  const exchangeSessionLanes = PROMPT_HOME_MAJOR_EXCHANGE_SESSIONS.map(
-    (session) =>
-      buildPromptHomeExchangeSessionLane(
-        session,
-        resolvedTimeZone,
-        currentTime,
-      ),
-  );
   const tradingWindowStartClockLabel = formatPromptHomeClockMinutes(
     PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING * 60,
   );
@@ -4892,26 +6204,37 @@ function PromptHomeTimeframePanel({
     if (
       !calendarSessionCanRefresh ||
       !googleCalendarSession.accessToken ||
-      !googleCalendarSession.selectedCalendarId
+      selectedGoogleCalendars.length === 0
     ) {
       return;
     }
 
+    const calendarsToRefresh = selectedGoogleCalendars;
     setCalendarLoading(true);
     setCalendarError("");
     try {
-      const refreshedEvents = await loadUpcomingGoogleCalendarEvents(
-        googleCalendarSession.accessToken,
-        googleCalendarSession.selectedCalendarId,
-        {
-          now: currentTime,
-          days: 31,
-          maxResults: 48,
-        },
-      );
+      const refreshedEvents = (
+        await Promise.all(
+          calendarsToRefresh.map(async (calendar) =>
+            scopeGoogleCalendarEventsForHome({
+              calendar,
+              calendarCount: calendarsToRefresh.length,
+              events: await loadUpcomingGoogleCalendarEvents(
+                googleCalendarSession.accessToken ?? "",
+                calendar.id,
+                {
+                  now: currentTime,
+                  days: 31,
+                  maxResults: 48,
+                },
+              ),
+            }),
+          ),
+        )
+      ).flat();
       saveGoogleCalendarEventCache({
         selectedCalendarSummary:
-          googleCalendarSession.selectedCalendarSummary,
+          formatGoogleCalendarSelectionSummary(calendarsToRefresh),
         events: refreshedEvents,
         cachedAt: new Date().toISOString(),
       });
@@ -4937,8 +6260,64 @@ function PromptHomeTimeframePanel({
     calendarRefreshKey,
     googleCalendarSession.accessToken,
     googleCalendarSession.accessTokenExpiresAt,
-    googleCalendarSession.selectedCalendarId,
+    selectedGoogleCalendarSignature,
   ]);
+
+  async function loadCalendarSettingsSnapshot() {
+    if (!googleCalendarSession.accessToken || !calendarSessionTokenIsUsable) {
+      setAvailableGoogleCalendars([]);
+      setCalendarSettingsError(
+        googleCalendarSession.scopeGranted
+          ? "Reconnect Google Calendar in Settings before adding calendars."
+          : "Connect Google Calendar in Settings before adding calendars.",
+      );
+      return;
+    }
+
+    setCalendarSettingsLoading(true);
+    setCalendarSettingsError("");
+    try {
+      const calendars = await loadGoogleCalendars(googleCalendarSession.accessToken);
+      setAvailableGoogleCalendars(calendars);
+    } catch (error) {
+      setCalendarSettingsError(
+        error instanceof Error
+          ? error.message
+          : "Could not load Google Calendar sources.",
+      );
+    } finally {
+      setCalendarSettingsLoading(false);
+    }
+  }
+
+  function handleOpenCalendarSettings() {
+    setCalendarSettingsOpen(true);
+    void loadCalendarSettingsSnapshot();
+  }
+
+  function handleCloseCalendarSettings() {
+    setCalendarSettingsOpen(false);
+  }
+
+  function handleAddGoogleCalendar(calendar: GoogleCalendarListEntry) {
+    const nextSelections = [
+      ...selectedGoogleCalendars,
+      {
+        id: calendar.id,
+        summary: calendar.summary,
+      },
+    ];
+    saveGoogleCalendarSelectedCalendars(nextSelections);
+    clearGoogleCalendarHomeEventCache(nextSelections);
+  }
+
+  function handleRemoveGoogleCalendar(calendarId: string) {
+    const nextSelections = selectedGoogleCalendars.filter(
+      (calendar) => calendar.id !== calendarId,
+    );
+    saveGoogleCalendarSelectedCalendars(nextSelections);
+    clearGoogleCalendarHomeEventCache(nextSelections);
+  }
 
   const calendarAgendaItems = useMemo(
     () =>
@@ -5034,7 +6413,7 @@ function PromptHomeTimeframePanel({
           monthCalendarItemsVisible.length,
         )} this month`
       : calendarAgendaSummary;
-  const dayCollapsedSummary = `${`Desk window ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)}`} · EOD ${tradingWindowEndClockLabel} local · ${exchangeSessionLanes.length} venue sessions${dayCalendarItemsVisible.length > 0 ? ` · ${formatCalendarEventCountLabel(dayCalendarItemsVisible.length)}` : dayCalendarToggleState.enabled ? "" : " · Google Calendar hidden in Settings"}`;
+  const dayCollapsedSummary = `${`Desk window ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)}`} · EOD ${tradingWindowEndClockLabel} local${dayCalendarItemsVisible.length > 0 ? ` · ${formatCalendarEventCountLabel(dayCalendarItemsVisible.length)}` : dayCalendarToggleState.enabled ? "" : " · Google Calendar hidden in Settings"}`;
   const weekCollapsedSummary = `Sunday through Saturday · Week progress ${Math.round(currentWeekPercent)}%${weekCalendarItemsVisible.length > 0 ? ` · ${formatCalendarEventCountLabel(weekCalendarItemsVisible.length)}` : weekCalendarToggleState.enabled ? "" : " · Google Calendar hidden in Settings"}`;
   const monthCollapsedSummary = `1 through EOM · ${monthDayTotal} days this month${monthCalendarItemsVisible.length > 0 ? ` · ${formatCalendarEventCountLabel(monthCalendarItemsVisible.length)}` : monthCalendarToggleState.enabled ? "" : " · Google Calendar hidden in Settings"}`;
   const dayMeterMarkers = dayCalendarToggleState.enabled
@@ -5051,39 +6430,52 @@ function PromptHomeTimeframePanel({
     : [];
   const { dragHandleAttributes, dragHandleClassName } =
     usePromptHomeCardHeaderDragProps<HTMLDivElement>();
+  const selectedGoogleCalendarIds = new Set(
+    selectedGoogleCalendars.map((calendar) => calendar.id),
+  );
+  const selectedCalendarCountLabel = `${selectedGoogleCalendars.length} ${
+    selectedGoogleCalendars.length === 1 ? "calendar" : "calendars"
+  } active`;
+  const availableCalendarCountLabel = calendarSettingsLoading
+    ? "Loading calendars"
+    : `${availableGoogleCalendars.length} available`;
 
   return (
-    <section className="prompt-home-timeframe-panel">
+    <section
+      className={`prompt-home-calendar-card ${timeframeExpandedState.expanded ? "is-expanded" : "is-collapsed"}`}
+    >
       <div
         {...dragHandleAttributes}
         className={mergePromptHomeClassNames(
-          "prompt-home-timeframe-panel-head",
+          "prompt-home-calendar-card-head",
           dragHandleClassName,
         )}
       >
-        <div className="prompt-home-timeframe-panel-toggle">
-          <div className="prompt-home-timeframe-panel-copy">
-            <span className="eyebrow">Desk Time</span>
-            <strong className="prompt-home-timeframe-panel-summary">
-              {timeframeCollapsedSummary}
+        <div className="prompt-home-calendar-card-toggle">
+          <div className="prompt-home-calendar-card-copy">
+            <span className="eyebrow">Calendar</span>
+            <strong className="prompt-home-calendar-card-summary">
+              {calendarCollapsedSummary}
             </strong>
           </div>
         </div>
 
-        <div className="prompt-home-timeframe-panel-side">
+        <div className="prompt-home-calendar-card-side">
           <button
             type="button"
-            className="prompt-home-timeframe-panel-toggle-action"
+            className="prompt-home-calendar-card-toggle-action"
+            aria-label={
+              timeframeExpandedState.expanded
+                ? "Collapse Calendar"
+                : "Expand Calendar"
+            }
             aria-expanded={timeframeExpandedState.expanded}
-            aria-controls={PROMPT_HOME_TIMEFRAME_PANEL_ID}
+            aria-controls={timeframePanelId}
             onClick={() =>
               timeframeExpandedState.setExpanded((current) => !current)
             }
           >
-            <div className="prompt-home-timeframe-panel-toggle-meta">
-              <small>
-                {timeframeExpandedState.expanded ? "Hide card" : "Show card"}
-              </small>
+            <div className="prompt-home-calendar-card-toggle-meta">
               <span
                 className="prompt-home-support-toggle-indicator"
                 aria-hidden="true"
@@ -5092,36 +6484,27 @@ function PromptHomeTimeframePanel({
               </span>
             </div>
           </button>
-
-          {timeframeExpandedState.expanded ? (
-            <label className="field prompt-home-timezone-field">
-              <span>Time zone</span>
-              <select
-                className="control"
-                aria-label="Preferred time zone"
-                value={timeDisplaySettings.timeZone}
-                onChange={(event) => onTimeZoneChange(event.target.value)}
-              >
-                {timeZoneOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
         </div>
       </div>
 
       <div
-        id={PROMPT_HOME_TIMEFRAME_PANEL_ID}
-        className="prompt-home-timeframe-panel-body"
+        id={timeframePanelId}
+        className="prompt-home-calendar-card-body"
         hidden={!timeframeExpandedState.expanded}
       >
-        <div className="prompt-home-timeframe-panel-actions">
+        <div className="prompt-home-calendar-card-actions">
+          <button
+            type="button"
+            className="button button-secondary prompt-home-calendar-card-link"
+            aria-controls={calendarSettingsDialogId}
+            aria-expanded={calendarSettingsOpen}
+            onClick={handleOpenCalendarSettings}
+          >
+            Settings
+          </button>
           <a
             href={customEventsHref}
-            className="button button-secondary prompt-home-timeframe-panel-link"
+            className="button button-secondary prompt-home-calendar-card-link"
             onClick={(event) => {
               if (!onOpenCustomEvents) {
                 return;
@@ -5133,126 +6516,203 @@ function PromptHomeTimeframePanel({
             Add Event
           </a>
         </div>
+        {calendarSettingsOpen ? (
+          <div
+            className="prompt-home-calendar-settings-overlay"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                handleCloseCalendarSettings();
+              }
+            }}
+          >
+            <section
+              id={calendarSettingsDialogId}
+              className="prompt-home-calendar-settings-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={calendarSettingsDialogTitleId}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  handleCloseCalendarSettings();
+                }
+              }}
+            >
+              <header className="prompt-home-calendar-settings-head">
+                <div>
+                  <span className="eyebrow">Calendar</span>
+                  <h3 id={calendarSettingsDialogTitleId}>Calendar Settings</h3>
+                  <p>
+                    {selectedCalendarCountLabel} · {availableCalendarCountLabel}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="button button-ghost"
+                  onClick={handleCloseCalendarSettings}
+                >
+                  Close
+                </button>
+              </header>
+
+              <div className="prompt-home-calendar-settings-body">
+                <section className="prompt-home-calendar-settings-section">
+                  <div className="prompt-home-calendar-settings-section-head">
+                    <strong>Active calendars</strong>
+                    <span>{selectedCalendarCountLabel}</span>
+                  </div>
+                  {selectedGoogleCalendars.length > 0 ? (
+                    <div className="prompt-home-calendar-source-list">
+                      {selectedGoogleCalendars.map((calendar) => (
+                        <article
+                          key={calendar.id}
+                          className="prompt-home-calendar-source-row"
+                        >
+                          <div className="prompt-home-calendar-source-copy">
+                            <strong>{calendar.summary ?? calendar.id}</strong>
+                            <span>{calendar.id}</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="button button-ghost"
+                            onClick={() => handleRemoveGoogleCalendar(calendar.id)}
+                          >
+                            Remove
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="prompt-home-calendar-settings-note">
+                      No calendars are active for Home.
+                    </p>
+                  )}
+                </section>
+
+                <section className="prompt-home-calendar-settings-section">
+                  <div className="prompt-home-calendar-settings-section-head">
+                    <strong>Available Google calendars</strong>
+                    <span>{availableCalendarCountLabel}</span>
+                  </div>
+                  {calendarSettingsError ? (
+                    <p className="prompt-home-calendar-settings-note is-error">
+                      {calendarSettingsError}
+                    </p>
+                  ) : null}
+                  {calendarSettingsLoading ? (
+                    <p className="prompt-home-calendar-settings-note">
+                      Loading calendar sources...
+                    </p>
+                  ) : availableGoogleCalendars.length > 0 ? (
+                    <div className="prompt-home-calendar-source-list">
+                      {availableGoogleCalendars.map((calendar) => {
+                        const selected = selectedGoogleCalendarIds.has(
+                          calendar.id,
+                        );
+                        return (
+                          <article
+                            key={calendar.id}
+                            className="prompt-home-calendar-source-row"
+                          >
+                            <div className="prompt-home-calendar-source-copy">
+                              <strong>
+                                {calendar.primary
+                                  ? `${calendar.summary} (Primary)`
+                                  : calendar.summary}
+                              </strong>
+                              <span>
+                                {[calendar.accessRole, calendar.timeZone]
+                                  .filter(Boolean)
+                                  .join(" · ") || calendar.id}
+                              </span>
+                            </div>
+                            {selected ? (
+                              <button
+                                type="button"
+                                className="button button-ghost"
+                                onClick={() =>
+                                  handleRemoveGoogleCalendar(calendar.id)
+                                }
+                              >
+                                Remove
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                onClick={() => handleAddGoogleCalendar(calendar)}
+                              >
+                                Add
+                              </button>
+                            )}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="prompt-home-calendar-settings-note">
+                      No Google calendars are loaded.
+                    </p>
+                  )}
+                </section>
+              </div>
+
+              <footer className="prompt-home-calendar-settings-actions">
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={handleCloseCalendarSettings}
+                >
+                  Done
+                </button>
+              </footer>
+            </section>
+          </div>
+        ) : null}
         <div className="prompt-home-timeframe-grid">
           <PromptHomeTimeMeterCard
-            panelId={PROMPT_HOME_DAY_PANEL_ID}
+            panelId={dayPanelId}
             eyebrow="Day"
             title={`${currentClockLabel} local`}
-            detail={`Hour-ending day with the desk window, desk EOD at ${tradingWindowEndClockLabel} local, and representative venue sessions marked.`}
+            detail={`Hour-ending day with the desk window and desk EOD at ${tradingWindowEndClockLabel} local.`}
             badge={currentHourEndingLabel}
-            meta={`Desk window ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)} · EOD ${tradingWindowEndClockLabel} local · ${dayCalendarToggleState.enabled ? dayCalendarItemsVisible.length > 0 ? formatCalendarEventCountLabel(dayCalendarItemsVisible.length) : "No calendar events scheduled today" : "Google Calendar hidden in Settings for this card"}`}
+            meta={`Desk window ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)} · EOD ${tradingWindowEndClockLabel} local · ${dayCalendarToggleState.enabled ? dayCalendarItemsVisible.length > 0 ? formatCalendarEventCountLabel(dayCalendarItemsVisible.length) : "No calendar events scheduled today" : "Google Calendar hidden in Settings for this app"}`}
             collapsedSummary={dayCollapsedSummary}
             ticks={dayTicks}
             markers={dayMeterMarkers}
             currentPercent={currentDayPercent}
             highlightedWindowStartPercent={tradingWindowStartPercent}
             highlightedWindowWidthPercent={tradingWindowWidthPercent}
-            ariaLabel={`Day meter in ${resolvedTimeZone}. Current local time ${currentClockLabel}, ${currentHourEndingLabel}. Desk trading hours run from ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)}, with desk EOD at ${tradingWindowEndClockLabel} local. Representative venue sessions for ICE Brent, LMEselect, LME Ring, SGX MSCI, CME WTI, EEX Power, and TOCOM Energy are also shown.`}
+            ariaLabel={`Day meter in ${resolvedTimeZone}. Current local time ${currentClockLabel}, ${currentHourEndingLabel}. Desk trading hours run from ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_START_HOUR_ENDING)} to ${formatHourEndingLabel(PROMPT_HOME_TRADING_WINDOW_END_HOUR_ENDING)}, with desk EOD at ${tradingWindowEndClockLabel} local.`}
             expanded={dayCardExpandedState.expanded}
             onToggle={() =>
               dayCardExpandedState.setExpanded((current) => !current)
             }
           >
-            <div className="prompt-home-time-details">
-              <button
-                type="button"
-                className="prompt-home-time-details-toggle"
-                aria-expanded={exchangeSessionsExpandedState.expanded}
-                aria-controls={PROMPT_HOME_TRADING_HOURS_PANEL_ID}
-                onClick={() =>
-                  exchangeSessionsExpandedState.setExpanded(
-                    (current) => !current,
-                  )
+            {dayCalendarToggleState.enabled ? (
+              <PromptHomeCalendarAgendaSection
+                sectionKey="day"
+                title="Calendar agenda"
+                summary={dayCalendarSummary}
+                items={dayCalendarAgendaItemsVisible}
+                emptyMessage={
+                  googleCalendarSession.cachedEvents.length > 0 ||
+                  googleCalendarSession.scopeGranted
+                    ? dayCalendarItemsVisible.length > 0
+                      ? "Past calendar events remain on today's timeline, but no upcoming event details are shown."
+                      : "No calendar events are scheduled on today's timeline."
+                    : calendarConnectionMessage
                 }
-              >
-                <div className="prompt-home-time-details-toggle-copy">
-                  <strong>Representative trading hours</strong>
-                  <span>
-                    {exchangeSessionLanes.length} major venue sessions available
-                  </span>
-                </div>
-                <div className="prompt-home-time-details-toggle-meta">
-                  <small>
-                    {exchangeSessionsExpandedState.expanded
-                      ? "Hide details"
-                      : "Show details"}
-                  </small>
-                  <span
-                    className="prompt-home-support-toggle-indicator"
-                    aria-hidden="true"
-                  >
-                    {exchangeSessionsExpandedState.expanded ? "−" : "+"}
-                  </span>
-                </div>
-              </button>
-
-              <div
-                id={PROMPT_HOME_TRADING_HOURS_PANEL_ID}
-                className="prompt-home-session-board"
-                hidden={!exchangeSessionsExpandedState.expanded}
-              >
-                <p className="prompt-home-session-board-note">
-                  Representative venue sessions converted into{" "}
-                  {timeZonePreferenceLabel}.
-                </p>
-                <div className="prompt-home-session-lane-list">
-                  {exchangeSessionLanes.map((session) => (
-                    <div
-                      key={session.key}
-                      className={`prompt-home-session-lane is-${session.tone}`}
-                    >
-                      <div className="prompt-home-session-lane-copy">
-                        <strong>{session.label}</strong>
-                        <span>{session.displayWindowLabel}</span>
-                        <small>
-                          {session.detail} · {session.sourceWindowLabel}
-                        </small>
-                      </div>
-                      <div
-                        className="prompt-home-session-lane-track"
-                        aria-hidden="true"
-                      >
-                        {session.segments.map((segment) => (
-                          <span
-                            key={segment.key}
-                            className="prompt-home-session-lane-segment"
-                            style={{
-                              left: `${segment.startPercent}%`,
-                              width: `${segment.widthPercent}%`,
-                            }}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {dayCalendarToggleState.enabled ? (
-                <PromptHomeCalendarAgendaSection
-                  sectionKey="day"
-                  title="Calendar agenda"
-                  summary={dayCalendarSummary}
-                  items={dayCalendarAgendaItemsVisible}
-                  emptyMessage={
-                    googleCalendarSession.cachedEvents.length > 0 ||
-                    googleCalendarSession.scopeGranted
-                      ? dayCalendarItemsVisible.length > 0
-                        ? "Past calendar events remain on today's timeline, but no upcoming event details are shown."
-                        : "No calendar events are scheduled on today's timeline."
-                      : calendarConnectionMessage
-                  }
-                />
-              ) : null}
-            </div>
+              />
+            ) : null}
           </PromptHomeTimeMeterCard>
           <PromptHomeTimeMeterCard
-            panelId={PROMPT_HOME_WEEK_PANEL_ID}
+            panelId={weekPanelId}
             eyebrow="Week"
             title={currentWeekdayLabel}
             detail="Sunday through Saturday."
             badge={currentMonthDayLabel}
-            meta={`Week progress ${Math.round(currentWeekPercent)}% · ${weekCalendarToggleState.enabled ? weekCalendarItemsVisible.length > 0 ? formatCalendarEventCountLabel(weekCalendarItemsVisible.length) : "No calendar events scheduled this week" : "Google Calendar hidden in Settings for this card"}`}
+            meta={`Week progress ${Math.round(currentWeekPercent)}% · ${weekCalendarToggleState.enabled ? weekCalendarItemsVisible.length > 0 ? formatCalendarEventCountLabel(weekCalendarItemsVisible.length) : "No calendar events scheduled this week" : "Google Calendar hidden in Settings for this app"}`}
             collapsedSummary={weekCollapsedSummary}
             ticks={weekTicks}
             markers={weekMeterMarkers}
@@ -5281,12 +6741,12 @@ function PromptHomeTimeframePanel({
             ) : null}
           </PromptHomeTimeMeterCard>
           <PromptHomeTimeMeterCard
-            panelId={PROMPT_HOME_MONTH_PANEL_ID}
+            panelId={monthPanelId}
             eyebrow="Month"
             title={currentMonthLabel}
             detail="1 through EOM."
             badge={`Day ${formatOrdinal(zonedDateParts.day)}`}
-            meta={`${monthDayTotal} days this month · ${monthCalendarToggleState.enabled ? monthCalendarItemsVisible.length > 0 ? formatCalendarEventCountLabel(monthCalendarItemsVisible.length) : "No calendar events scheduled this month" : "Google Calendar hidden in Settings for this card"}`}
+            meta={`${monthDayTotal} days this month · ${monthCalendarToggleState.enabled ? monthCalendarItemsVisible.length > 0 ? formatCalendarEventCountLabel(monthCalendarItemsVisible.length) : "No calendar events scheduled this month" : "Google Calendar hidden in Settings for this app"}`}
             collapsedSummary={monthCollapsedSummary}
             ticks={monthTicks}
             markers={monthMeterMarkers}
@@ -5385,11 +6845,21 @@ export function PromptHomeWorkspace({
   const [invoiceIssueCandidates, setInvoiceIssueCandidates] = useState<
     InvoiceIssueCandidateRecord[]
   >([]);
+  const [communicationSourceRecords, setCommunicationSourceRecords] = useState<
+    MessagingWorkspaceConversationRecord[]
+  >([]);
+  const [communicationSourceLoading, setCommunicationSourceLoading] =
+    useState(false);
+  const [communicationSourceError, setCommunicationSourceError] = useState("");
   const cardVisibilityState = usePersistentPromptHomeCardVisibility({
     apiBase: appConfig.apiBase,
     authSession,
   });
+  const communicationCardVisible =
+    cardVisibilityState.isCardVisible("communication");
   const [homeViewNameDraft, setHomeViewNameDraft] = useState("");
+  const [pasteTargetReady, setPasteTargetReady] = useState(false);
+  const [homeCardDeleteDragging, setHomeCardDeleteDragging] = useState(false);
   const homeCardSensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -5430,6 +6900,12 @@ export function PromptHomeWorkspace({
     cardVisibilityState.activeHomeViewValue,
     cardVisibilityState.canRenameActiveHomeView,
   ]);
+
+  useEffect(() => {
+    if (!cardVisibilityState.cardClipboard) {
+      setPasteTargetReady(false);
+    }
+  }, [cardVisibilityState.cardClipboard]);
 
   useEffect(() => {
     if (
@@ -5480,6 +6956,38 @@ export function PromptHomeWorkspace({
     deliveriesDataLoading,
     onEnsureDeliveriesData,
   ]);
+
+  const refreshCommunicationSourceMessages = useCallback(async () => {
+    if (!communicationCardVisible) {
+      setCommunicationSourceRecords([]);
+      setCommunicationSourceLoading(false);
+      setCommunicationSourceError("");
+      return;
+    }
+
+    setCommunicationSourceLoading(true);
+
+    try {
+      const state = await loadMessagingWorkspaceState(appConfig.apiBase, {
+        accessToken: authSession?.accessToken,
+      });
+      setCommunicationSourceRecords(state.conversations);
+      setCommunicationSourceError("");
+    } catch (error) {
+      setCommunicationSourceRecords([]);
+      setCommunicationSourceError(
+        error instanceof Error
+          ? error.message
+          : "Could not load synced message sources.",
+      );
+    } finally {
+      setCommunicationSourceLoading(false);
+    }
+  }, [authSession?.accessToken, communicationCardVisible]);
+
+  useEffect(() => {
+    void refreshCommunicationSourceMessages();
+  }, [refreshCommunicationSourceMessages]);
 
   useEffect(() => {
     let timeoutId: number | null = null;
@@ -5543,6 +7051,10 @@ export function PromptHomeWorkspace({
       promptRouteRecommendations,
       tradeAttentionCandidates,
     ],
+  );
+  const communicationSourceMessages = useMemo(
+    () => buildSlackMessagingInboxMessages(communicationSourceRecords),
+    [communicationSourceRecords],
   );
   const displayedMessages = useMemo(() => messages, [messages]);
 
@@ -6277,10 +7789,6 @@ export function PromptHomeWorkspace({
       : promptRouteRecommendationsError
         ? promptRouteRecommendationsError
         : formatPromotedRouteSummary(promotedRoutes);
-  const hiddenHomeCardCount = cardVisibilityState.hiddenCardKeys.length;
-  const visibleHomeCardCount = cardVisibilityState.visibleCardKeys.length;
-  const homeCardVisibilitySummary = `${visibleHomeCardCount.toLocaleString()} visible · ${hiddenHomeCardCount.toLocaleString()} hidden`;
-  const homeCardPersistenceSummary = `${cardVisibilityState.persistenceLabel} · ${cardVisibilityState.persistenceDetail}`;
   const homeCardPersistenceBusy =
     cardVisibilityState.persistenceStatus === "loading" ||
     cardVisibilityState.persistenceStatus === "saving";
@@ -6298,47 +7806,95 @@ export function PromptHomeWorkspace({
     cardVisibilityState.canPublishActiveHomeView && !homeCardPersistenceBusy;
   const canRetireHomeView =
     cardVisibilityState.canRetireActiveHomeView && !homeCardPersistenceBusy;
-  const visibleHomeCardKeys = cardVisibilityState.visibleCardKeys;
+  const visibleHomeCards = cardVisibilityState.visibleCards;
+  const visibleHomeCardInstanceIds =
+    cardVisibilityState.visibleCardInstanceIds;
   const canConfigureActiveHomeCards =
     cardVisibilityState.canEditCards && !homeCardPersistenceBusy;
   const homeCardsMovable =
-    cardVisibilityState.canEditCards && visibleHomeCardKeys.length > 1;
-  const homeCardOrderIndexByKey = useMemo(
+    cardVisibilityState.canEditCards && visibleHomeCardInstanceIds.length > 0;
+  const homeCardOrderIndexByInstanceId = useMemo(
     () =>
-      new Map<PromptHomeCardKey, number>(
-        visibleHomeCardKeys.map((cardKey, index) => [cardKey, index]),
+      new Map<string, number>(
+        visibleHomeCardInstanceIds.map((instanceId, index) => [
+          instanceId,
+          index,
+        ]),
       ),
-    [visibleHomeCardKeys],
+    [visibleHomeCardInstanceIds],
   );
   const handleHomeCardDragEnd = useCallback(
     (event: DragEndEvent) => {
-      const activeCardKey = String(event.active.id);
-      const overCardKey = event.over ? String(event.over.id) : null;
-      if (!overCardKey || activeCardKey === overCardKey) {
+      setHomeCardDeleteDragging(false);
+      const activeInstanceId = String(event.active.id);
+      const overInstanceId = event.over ? String(event.over.id) : null;
+      if (!overInstanceId) {
+        return;
+      }
+      if (overInstanceId === PROMPT_HOME_CARD_DELETE_DROP_TARGET_ID) {
+        setPasteTargetReady(false);
+        cardVisibilityState.deleteCardInstance(activeInstanceId);
+        return;
+      }
+      if (activeInstanceId === overInstanceId) {
         return;
       }
 
-      cardVisibilityState.moveCard(activeCardKey, overCardKey);
+      cardVisibilityState.moveCard(activeInstanceId, overInstanceId);
     },
     [cardVisibilityState],
   );
 
   function renderHomeCardSlot(
-    cardKey: PromptHomeCardKey,
+    card: PromptHomeTemplateCard,
     children: ReactNode,
   ) {
-    if (!cardVisibilityState.isCardVisible(cardKey)) {
+    if (!card.visible) {
       return null;
     }
 
-    const orderIndex = homeCardOrderIndexByKey.get(cardKey) ?? 0;
+    const instanceId = getPromptHomeCardInstanceId(card);
+    const orderIndex = homeCardOrderIndexByInstanceId.get(instanceId) ?? 0;
+    const actions = (
+      <PromptHomeCardSlotActions
+        card={card}
+        clipboard={cardVisibilityState.cardClipboard}
+        disabled={!canConfigureActiveHomeCards}
+        onCopy={() => {
+          setPasteTargetReady(false);
+          cardVisibilityState.copyCardInstance(instanceId);
+        }}
+        onCut={() => {
+          setPasteTargetReady(false);
+          cardVisibilityState.cutCardInstance(instanceId);
+        }}
+        onDelete={() => {
+          setPasteTargetReady(false);
+          cardVisibilityState.deleteCardInstance(instanceId);
+        }}
+        onDuplicate={() => {
+          setPasteTargetReady(false);
+          cardVisibilityState.duplicateCardInstance(instanceId);
+        }}
+        onResizeToSpan={(state, axis, span) => {
+          setPasteTargetReady(false);
+          cardVisibilityState.resizeCardInstanceToSpan(
+            instanceId,
+            state,
+            axis,
+            span,
+          );
+        }}
+      />
+    );
 
     if (homeCardsMovable) {
       return (
         <SortablePromptHomeCardSlot
-          key={cardKey}
-          cardKey={cardKey}
+          key={instanceId}
+          card={card}
           orderIndex={orderIndex}
+          actions={actions}
         >
           {children}
         </SortablePromptHomeCardSlot>
@@ -6347,97 +7903,733 @@ export function PromptHomeWorkspace({
 
     return (
       <PromptHomeCardSlot
-        key={cardKey}
-        cardKey={cardKey}
+        key={instanceId}
+        card={card}
         orderIndex={orderIndex}
+        actions={actions}
       >
         {children}
       </PromptHomeCardSlot>
     );
   }
 
+  function renderPromptCardContent() {
+    return (
+      <>
+        <form className="prompt-home-composer" onSubmit={handleSubmit}>
+          <label className="field prompt-home-composer-field">
+            <span>Operator prompt</span>
+            <textarea
+              ref={composerTextareaRef}
+              className="control prompt-home-textarea"
+              value={draft}
+              onChange={(event) => {
+                voiceComposer.cancelListening();
+                setDraft(event.target.value);
+                setSubmitError("");
+              }}
+              onKeyDown={handlePromptComposerKeyDown}
+              placeholder="Ask what needs attention, where to go next, or how to handle a trade, queue, exposure, invoice, or report question."
+            />
+          </label>
+
+          <div className="toolbar settings-actions prompt-home-actions">
+            <button
+              type="button"
+              className="button button-ghost"
+              onClick={() => {
+                setSubmitError("");
+                voiceComposer.toggleListening();
+              }}
+              disabled={!voiceComposer.canToggle || submitting}
+              aria-pressed={voiceComposer.listening}
+            >
+              {voiceComposer.buttonLabel}
+            </button>
+            <button
+              type="submit"
+              className="button button-primary"
+              disabled={!draft.trim() || submitting || voiceComposer.listening}
+            >
+              {submitting
+                ? "Sending..."
+                : authSession
+                  ? "Send Prompt"
+                  : "Sign In to Send Prompt"}
+            </button>
+          </div>
+
+          <div className="prompt-home-composer-preferences">
+            <label className="prompt-home-verbalize-toggle">
+              <input
+                type="checkbox"
+                checked={verbalizeResponses}
+                onChange={(event) =>
+                  setVerbalizeResponses(event.target.checked)
+                }
+              />
+              <span>Verbalize</span>
+            </label>
+            {availablePersonas.length > 0 ? (
+              <label className="field prompt-home-persona-field">
+                <span>Persona</span>
+                <select
+                  className="control"
+                  value={selectedPersona}
+                  onChange={(event) =>
+                    setSelectedPersona(event.target.value as AssistantPersona | "")
+                  }
+                >
+                  <option value="">
+                    {defaultPersonaDetails
+                      ? `User default (${defaultPersonaDetails.label})`
+                      : "User default"}
+                  </option>
+                  {availablePersonas.map((persona) => (
+                    <option key={persona.key} value={persona.key}>
+                      {persona.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
+
+          {composerNote ? (
+            <p
+              className={`form-note ${submitError || runtimeError ? "form-note-error" : ""}`}
+            >
+              {composerNote}
+            </p>
+          ) : null}
+        </form>
+
+        <section
+          className="prompt-home-promoted-routes"
+          aria-label="Promoted routes"
+        >
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Promoted Routes</span>
+              <h3>Go straight to proven destinations</h3>
+            </div>
+            <button
+              type="button"
+              className="button button-ghost"
+              onClick={() => void refreshPromptRouteRecommendations()}
+              disabled={!authSession || promptRouteRecommendationsLoading}
+            >
+              Refresh
+            </button>
+          </div>
+          <p
+            className={`form-note ${promptRouteRecommendationsError ? "form-note-error" : ""}`}
+          >
+            {promptRouteRecommendationNote}
+          </p>
+          {promotedRoutes.length > 0 ? (
+            <div className="prompt-home-destination-list">
+              {promotedRoutes.map((route) => {
+                if (route.readiness === "ready") {
+                  return (
+                    <button
+                      key={route.key}
+                      type="button"
+                      className="prompt-home-destination prompt-home-promoted-route"
+                      onClick={() =>
+                        openNavigationIntent(route.intent, {
+                          includeHandoff: route.hasFocusedHandoff,
+                          recordOutcome: route.recordOutcomeOnOpen,
+                        })
+                      }
+                    >
+                      <div className="prompt-home-destination-head">
+                        <strong>{route.displayLabel}</strong>
+                        <span
+                          className={`status-pill status-pill-${route.readinessTone}`}
+                        >
+                          {route.readinessLabel}
+                        </span>
+                      </div>
+                      <span>{route.displayDetail}</span>
+                      {route.displayFocusLabel ? (
+                        <small>{route.displayFocusLabel}</small>
+                      ) : null}
+                      {route.ageLabel ? <small>{route.ageLabel}</small> : null}
+                      <small>
+                        {formatPromotedRouteEvidence(route.recommendation)}
+                      </small>
+                    </button>
+                  );
+                }
+
+                return (
+                  <article
+                    key={route.key}
+                    className="prompt-home-destination prompt-home-promoted-route is-unavailable"
+                  >
+                    <div className="prompt-home-destination-head">
+                      <strong>{route.displayLabel}</strong>
+                      <span
+                        className={`status-pill status-pill-${route.readinessTone}`}
+                      >
+                        {route.readinessLabel}
+                      </span>
+                    </div>
+                    <span>{route.displayDetail}</span>
+                    {route.ageLabel ? <small>{route.ageLabel}</small> : null}
+                    <div className="prompt-home-destination-actions">
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={() =>
+                          openNavigationIntent(route.intent, {
+                            includeHandoff: false,
+                          })
+                        }
+                      >
+                        {promptNavigationIntentLabel(route.intent)}
+                      </button>
+                    </div>
+                    <small>
+                      {formatPromotedRouteEvidence(route.recommendation)}
+                    </small>
+                  </article>
+                );
+              })}
+            </div>
+          ) : null}
+        </section>
+
+        <section className="prompt-home-chat" aria-label="Desk Assistant thread">
+          <div className="prompt-home-chat-log" ref={promptChatLogRef}>
+            {displayedMessages.length === 0 ? (
+              <div className="empty-state prompt-home-empty">
+                <strong>No prompt yet</strong>
+                <p>
+                  Use the composer above or pick a quick prompt to start from
+                  intent instead of choosing a screen first.
+                </p>
+              </div>
+            ) : (
+              displayedMessages.map((message, index) => {
+                const renderedMessage =
+                  parseAssistantChartArtifacts(message.content);
+                const renderedParagraphs = splitAssistantMessageText(
+                  renderedMessage.text,
+                );
+                const canReadAloud =
+                  message.role === "assistant" &&
+                  voicePlayback.canPlay(renderedMessage.text);
+                const readingMessage = voicePlayback.isPlaying(message.id);
+                const authorLabel = resolvePromptMessageAuthorLabel(message);
+                const timestampLabel = formatPromptThreadTimestamp(
+                  message.recordedAt,
+                );
+                const currentDayLabel = formatPromptThreadDayLabel(
+                  message.recordedAt,
+                );
+                const previousDayLabel =
+                  index > 0
+                    ? formatPromptThreadDayLabel(
+                        displayedMessages[index - 1]?.recordedAt,
+                      )
+                    : null;
+                const showDayDivider =
+                  currentDayLabel !== null &&
+                  currentDayLabel !== previousDayLabel;
+
+                return (
+                  <div key={message.id} className="assistant-message-stack">
+                    {showDayDivider ? (
+                      <div className="assistant-message-divider">
+                        <span>{currentDayLabel}</span>
+                      </div>
+                    ) : null}
+                    <article
+                      className={`assistant-message assistant-message-${message.role}`}
+                    >
+                      <div className="assistant-message-avatar" aria-hidden="true">
+                        {resolvePromptMessageAvatarLabel(message)}
+                      </div>
+                      <div className="assistant-message-body">
+                        <div className="assistant-message-head">
+                          <div className="assistant-message-head-main">
+                            <strong>{authorLabel}</strong>
+                            {timestampLabel ? <span>{timestampLabel}</span> : null}
+                          </div>
+                          {message.provider && message.model ? (
+                            <span>
+                              {message.provider} · {message.model}
+                            </span>
+                          ) : null}
+                        </div>
+                        <PromptHomeAssistantActivityList message={message} />
+                        {renderedParagraphs.length > 0 ||
+                        renderedMessage.charts.length > 0 ? (
+                          <div className="assistant-message-bubble">
+                            {renderedParagraphs.map(
+                              (paragraph, paragraphIndex) => (
+                                <p
+                                  key={`${message.id}-paragraph-${paragraphIndex}`}
+                                >
+                                  {paragraph}
+                                </p>
+                              ),
+                            )}
+                            <AssistantChartArtifactList
+                              charts={renderedMessage.charts}
+                            />
+                          </div>
+                        ) : null}
+                        {canReadAloud ? (
+                          <div className="assistant-message-meta">
+                            <button
+                              type="button"
+                              className={`assistant-run-link ${readingMessage ? "is-selected" : ""}`}
+                              aria-pressed={readingMessage}
+                              disabled={!voicePlayback.supported}
+                              title={
+                                voicePlayback.supported
+                                  ? readingMessage
+                                    ? "Stop reading this assistant response aloud."
+                                    : "Read this assistant response aloud."
+                                  : "Read aloud is not supported in this browser."
+                              }
+                              onClick={() => {
+                                voiceComposer.cancelListening();
+                                voicePlayback.togglePlayback(
+                                  message.id,
+                                  renderedMessage.text,
+                                );
+                              }}
+                            >
+                              {resolveVoicePlaybackButtonLabel(readingMessage)}
+                            </button>
+                          </div>
+                        ) : null}
+                        {message.runId ? (
+                          <div className="assistant-message-meta">
+                            <span>Run #{message.runId}</span>
+                            <button
+                              type="button"
+                              className="assistant-run-link"
+                              onClick={() => onOpenView("assistant")}
+                            >
+                              Open diagnostics
+                            </button>
+                          </div>
+                        ) : null}
+                        {message.actionRequests &&
+                        message.actionRequests.length > 0 ? (
+                          <div className="prompt-home-action-review">
+                            <div className="feedback-banner prompt-home-action-banner">
+                              <strong>
+                                {message.actionRequests.length.toLocaleString()}{" "}
+                                governed action request
+                                {message.actionRequests.length === 1 ? "" : "s"}{" "}
+                                staged
+                              </strong>
+                              <p>
+                                Nothing changes until the typed review path
+                                approves and executes it.
+                              </p>
+                            </div>
+                            <AssistantActionRequestList
+                              actionRequests={message.actionRequests}
+                              actionRequestIdsInFlight={actionRequestIdsInFlight}
+                              formatDate={formatPromptTimestamp}
+                              onDecision={handleActionRequestDecision}
+                              onOpenRun={() => onOpenView("assistant")}
+                              showUserId
+                            />
+                            <div className="assistant-message-meta prompt-home-action-path">
+                              <span>
+                                Need the old review inbox or full run trace?
+                              </span>
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                onClick={() => onOpenView("assistant")}
+                              >
+                                Open Assistant Console
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                        {message.navigationIntents &&
+                        message.navigationIntents.length > 0 ? (
+                          <div
+                            className="prompt-home-handoff-list"
+                            aria-label="Assistant workspace handoffs"
+                          >
+                            {message.navigationIntents.map((intent) => (
+                              <div
+                                key={buildPromptNavigationIntentKey(intent)}
+                                className="prompt-home-handoff-item"
+                              >
+                                <button
+                                  type="button"
+                                  className="prompt-home-handoff"
+                                  onClick={() =>
+                                    openNavigationIntent(intent, {
+                                      includeHandoff: true,
+                                      recordOutcome: true,
+                                    })
+                                  }
+                                >
+                                  <strong>
+                                    {promptNavigationIntentLabel(intent)}
+                                  </strong>
+                                  <span>
+                                    {promptNavigationIntentDetail(intent)}
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="button button-ghost prompt-home-handoff-dismiss"
+                                  aria-label={`Dismiss ${promptNavigationIntentLabel(intent)}`}
+                                  onClick={() =>
+                                    handleDismissNavigationIntent(
+                                      message.id,
+                                      intent,
+                                    )
+                                  }
+                                >
+                                  Dismiss
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        {message.warnings && message.warnings.length > 0 ? (
+                          <div className="assistant-message-meta">
+                            {message.warnings.map((warning) => (
+                              <span key={warning}>{warning}</span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </article>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </section>
+      </>
+    );
+  }
+
+  function renderHomeCardInstance(card: PromptHomeTemplateCard) {
+    const instanceId = getPromptHomeCardInstanceId(card);
+
+    switch (card.cardId) {
+      case "timeframe":
+        return renderHomeCardSlot(card, (
+          <PromptHomeTimeframePanel
+            instanceId={instanceId}
+            currentTime={currentTime}
+            timeDisplaySettings={timeDisplaySettings}
+            timeZoneOptions={timeZoneOptions}
+            onTimeZoneChange={(nextTimeZone) => {
+              const savedSettings = saveTimeDisplaySettingsSnapshot({
+                ...timeDisplaySettings,
+                timeZone: nextTimeZone,
+              });
+              setTimeDisplaySettings(savedSettings);
+            }}
+          />
+        ));
+      case "exchanges":
+        return renderHomeCardSlot(card, (
+          <PromptHomeExchangesPanel
+            instanceId={instanceId}
+            currentTime={currentTime}
+            timeDisplaySettings={timeDisplaySettings}
+          />
+        ));
+      case "calendar":
+        return renderHomeCardSlot(card, (
+          <PromptHomeCalendarPanel
+            instanceId={instanceId}
+            currentTime={currentTime}
+            timeDisplaySettings={timeDisplaySettings}
+            customEventsHref={customEventsHref}
+            onOpenCustomEvents={onOpenCustomEvents}
+          />
+        ));
+      case "prices":
+        return renderHomeCardSlot(card, (
+          <PromptHomePricesCard
+            authSession={authSession}
+            priceIndices={priceIndices}
+            referenceDataLoading={referenceDataLoading}
+            homeCard={card}
+            canConfigureHomeCard={canConfigureActiveHomeCards}
+            onHomeCardConfigurationChange={(patch) =>
+              cardVisibilityState.updateCardInstanceConfiguration(
+                instanceId,
+                patch,
+              )
+            }
+            onOpenPriceSourcesReview={() =>
+              onOpenView("admin", null, {
+                hash: ADMIN_PRICE_SOURCES_SECTION_ID,
+              })
+            }
+            onOpenPriceReport={(row) =>
+              onOpenView(
+                "reports",
+                buildPriceIndexBiReportHandoff({
+                  priceIndexCode: row.priceIndex.code,
+                  priceIndexName: row.priceIndex.name,
+                  product: row.product,
+                  location: row.location,
+                  source: row.source,
+                }),
+                { hash: PRICE_INDEX_BI_REPORT_ID },
+              )
+            }
+          />
+        ));
+      case "news":
+        return renderHomeCardSlot(card, (
+          <PromptHomeNewsCard
+            priceIndices={priceIndices}
+            referenceDataLoading={referenceDataLoading}
+            homeCard={card}
+            canConfigureHomeCard={canConfigureActiveHomeCards}
+            onHomeCardConfigurationChange={(patch) =>
+              cardVisibilityState.updateCardInstanceConfiguration(
+                instanceId,
+                patch,
+              )
+            }
+            onOpenReportsWorkspace={() => onOpenView("reports")}
+          />
+        ));
+      case "map":
+        return renderHomeCardSlot(card, (
+          <PromptHomeMapTile
+            authSession={authSession}
+            assets={assets}
+            deliveries={deliveries}
+            locations={locations}
+            priceIndices={priceIndices}
+            spatialFeatures={spatialFeatures}
+            referenceDataLoaded={referenceDataLoaded}
+            homeCard={card}
+            canConfigureHomeCard={canConfigureActiveHomeCards}
+            onHomeCardConfigurationChange={(patch) =>
+              cardVisibilityState.updateCardInstanceConfiguration(
+                instanceId,
+                patch,
+              )
+            }
+            onOpenMapWorkspace={() => onOpenView("map")}
+            initialMapAssetLayerVisible={initialMapAssetLayerVisible}
+          />
+        ));
+      case "documents":
+        return renderHomeCardSlot(card, (
+          <PromptHomeDocumentUploadCard
+            instanceId={instanceId}
+            authSession={authSession}
+            onOpenLibraryWorkspace={() => onOpenView("library")}
+            onSignIn={handleSignIn}
+          />
+        ));
+      case "communication":
+        return renderHomeCardSlot(card, (
+          <PromptHomeCommunicationCard
+            instanceId={instanceId}
+            authSession={authSession}
+            counts={counts}
+            sourceMessages={communicationSourceMessages}
+            sourceMessagesLoading={communicationSourceLoading}
+            sourceMessagesError={communicationSourceError}
+            onOpenMessagesWorkspace={() => onOpenView("messages")}
+            onRefreshSourceMessages={refreshCommunicationSourceMessages}
+          />
+        ));
+      case "prompt":
+        return renderHomeCardSlot(card, (
+          <PromptHomePromptCardChrome
+            instanceId={instanceId}
+            expanded={promptCardExpandedState.expanded}
+            onToggle={() =>
+              promptCardExpandedState.setExpanded((current) => !current)
+            }
+          >
+            {renderPromptCardContent()}
+          </PromptHomePromptCardChrome>
+        ));
+      default:
+        return null;
+    }
+  }
+
+  function renderPromptHomePasteTarget() {
+    const clipboard = cardVisibilityState.cardClipboard;
+    if (!clipboard) {
+      return null;
+    }
+
+    return (
+      <div
+        className={`prompt-home-paste-target ${pasteTargetReady ? "is-ready" : ""}`}
+        role="button"
+        tabIndex={0}
+        style={{ order: visibleHomeCards.length }}
+        onClick={() => setPasteTargetReady(true)}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") {
+            return;
+          }
+          event.preventDefault();
+          setPasteTargetReady(true);
+        }}
+      >
+        <div className="prompt-home-paste-target-copy">
+          <strong>{pasteTargetReady ? "Paste ready" : "Empty area"}</strong>
+          <span>
+            {clipboard.mode === "cut" ? "Move" : "Paste copy of"}{" "}
+            {clipboard.label}
+          </span>
+        </div>
+        <div className="prompt-home-paste-target-actions">
+          {pasteTargetReady ? (
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={(event) => {
+                event.stopPropagation();
+                cardVisibilityState.pasteCardFromClipboard();
+                setPasteTargetReady(false);
+              }}
+              disabled={!canConfigureActiveHomeCards}
+            >
+              Paste
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="button button-ghost"
+            onClick={(event) => {
+              event.stopPropagation();
+              cardVisibilityState.clearCardClipboard();
+              setPasteTargetReady(false);
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   function renderHomeCardGrid(children: ReactNode) {
     if (!homeCardsMovable) {
       return (
-        <div className="prompt-home-card-grid" aria-label="Home cards">
+        <div className="prompt-home-card-grid" aria-label="Home apps">
           {children}
         </div>
       );
     }
 
     return (
-      <DndContext
-        sensors={homeCardSensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleHomeCardDragEnd}
+      <SortableContext
+        items={visibleHomeCardInstanceIds}
+        strategy={rectSortingStrategy}
       >
-        <SortableContext
-          items={visibleHomeCardKeys}
-          strategy={rectSortingStrategy}
-        >
-          <div className="prompt-home-card-grid" aria-label="Movable Home cards">
-            {children}
-          </div>
-        </SortableContext>
-      </DndContext>
+        <div className="prompt-home-card-grid" aria-label="Movable Home apps">
+          {children}
+        </div>
+      </SortableContext>
     );
   }
 
-  return (
-    <div className="prompt-home">
-      <section className="prompt-home-card-filter">
-          <div className="prompt-home-card-filter-head">
-            <div className="prompt-home-card-filter-copy">
-              <span className="eyebrow">Cards</span>
-              <strong id="prompt-home-card-filter-heading">Home cards</strong>
-              <small>
-                {homeCardPersistenceSummary} · {homeCardVisibilitySummary}
-              </small>
-            </div>
-            <div className="prompt-home-card-filter-side">
-              <label className="prompt-home-view-switcher">
-                <span>View</span>
-                <select
-                  value={cardVisibilityState.activeHomeViewValue}
-                  onChange={(event) =>
-                    cardVisibilityState.selectHomeView(event.target.value)
-                  }
-                  disabled={homeCardPersistenceBusy}
-                >
-                  {cardVisibilityState.homeViewOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                      {option.kind === "system" ? " (System)" : ""}
-                      {option.kind === "shared" ? " (Shared)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                className="prompt-home-card-filter-toggle"
-                aria-expanded={cardFilterExpandedState.expanded}
-                aria-controls={PROMPT_HOME_CARD_FILTER_PANEL_ID}
-                onClick={() =>
-                  cardFilterExpandedState.setExpanded((current) => !current)
-                }
-              >
-                <div className="prompt-home-card-filter-toggle-meta">
-                  <small>
-                    {cardFilterExpandedState.expanded
-                      ? "Hide filters"
-                      : "Edit cards"}
-                  </small>
-                  <span
-                    className="prompt-home-support-toggle-indicator"
-                    aria-hidden="true"
-                  >
-                    {cardFilterExpandedState.expanded ? "−" : "+"}
-                  </span>
-                </div>
-              </button>
-            </div>
+  const homeCardsWorkspaceContent = (
+    <>
+      <PromptHomeCardDeleteDropTarget
+        active={homeCardDeleteDragging}
+        enabled={homeCardsMovable}
+      >
+        <div className="prompt-home-card-filter-head">
+          <div className="prompt-home-card-filter-copy">
+            <span className="eyebrow">Apps</span>
           </div>
+          <div className="prompt-home-card-filter-side">
+            <button
+              type="button"
+              className="button button-secondary prompt-home-undo-button"
+              onClick={cardVisibilityState.undoLastCardAction}
+              disabled={
+                homeCardPersistenceBusy ||
+                !cardVisibilityState.canUndoLastCardAction
+              }
+              title={
+                cardVisibilityState.lastCardActionLabel
+                  ? `Undo ${cardVisibilityState.lastCardActionLabel}`
+                  : "Undo the last Home app layout action"
+              }
+            >
+              Undo
+            </button>
+            <label className="prompt-home-preset-switcher">
+              <span>Presets</span>
+              <select defaultValue={PROMPT_HOME_PRESET_OPTIONS[0]}>
+                {PROMPT_HOME_PRESET_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="prompt-home-view-switcher">
+              <span>Saved Views</span>
+              <select
+                value={cardVisibilityState.activeHomeViewValue}
+                onChange={(event) =>
+                  cardVisibilityState.selectHomeView(event.target.value)
+                }
+                disabled={homeCardPersistenceBusy}
+              >
+                {cardVisibilityState.homeViewOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                    {option.kind === "system" ? " (System)" : ""}
+                    {option.kind === "shared" ? " (Shared)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="prompt-home-card-filter-toggle"
+              aria-expanded={cardFilterExpandedState.expanded}
+              aria-controls={PROMPT_HOME_CARD_FILTER_PANEL_ID}
+              onClick={() =>
+                cardFilterExpandedState.setExpanded((current) => !current)
+              }
+            >
+              <div className="prompt-home-card-filter-toggle-meta">
+                <small>
+                  {cardFilterExpandedState.expanded
+                    ? "Close app manager"
+                    : "Manage Apps"}
+                </small>
+                <span
+                  className="prompt-home-support-toggle-indicator"
+                  aria-hidden="true"
+                >
+                  {cardFilterExpandedState.expanded ? "−" : "+"}
+                </span>
+              </div>
+            </button>
+          </div>
+        </div>
 
           <div
             id={PROMPT_HOME_CARD_FILTER_PANEL_ID}
@@ -6547,7 +8739,7 @@ export function PromptHomeWorkspace({
                 <div
                   className="prompt-home-card-filter-grid"
                   role="group"
-                  aria-labelledby="prompt-home-card-filter-heading"
+                  aria-label="Apps"
                 >
                   {PROMPT_HOME_CARD_VISIBILITY_OPTIONS.map((cardOption) => {
                     const cardVisible = cardVisibilityState.isCardVisible(
@@ -6555,56 +8747,40 @@ export function PromptHomeWorkspace({
                     );
 
                     return (
-                      <label
+                      <div
                         key={cardOption.key}
                         className={`prompt-home-card-filter-choice ${cardVisible ? "is-visible" : "is-hidden"}`}
                       >
-                        <input
-                          type="checkbox"
-                          checked={cardVisible}
+                        <span className="prompt-home-card-filter-choice-copy">
+                          <strong>{cardOption.label}</strong>
+                          <small>{cardVisible ? "Added" : "Available"}</small>
+                        </span>
+                        <button
+                          type="button"
+                          className="button button-secondary prompt-home-card-filter-add-button"
                           disabled={
+                            cardVisible ||
                             homeCardPersistenceBusy ||
                             !cardVisibilityState.canEditCards
                           }
-                          onChange={(event) =>
+                          onClick={() =>
                             cardVisibilityState.setCardVisible(
                               cardOption.key,
-                              event.target.checked,
+                              true,
                             )
                           }
-                        />
-                        <span>
-                          <strong>{cardOption.label}</strong>
-                          <small>{cardVisible ? "Visible" : "Hidden"}</small>
-                        </span>
-                      </label>
+                          aria-label={`Add ${cardOption.label} to Home apps`}
+                          title={
+                            cardVisible
+                              ? `${cardOption.label} is already added`
+                              : undefined
+                          }
+                        >
+                          Add
+                        </button>
+                      </div>
                     );
                   })}
-                </div>
-                <div className="prompt-home-card-filter-actions">
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    onClick={cardVisibilityState.showAllCards}
-                    disabled={
-                      homeCardPersistenceBusy ||
-                      hiddenHomeCardCount === 0 ||
-                      !cardVisibilityState.canEditCards
-                    }
-                  >
-                    Show All
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-ghost"
-                    onClick={cardVisibilityState.resetHomeView}
-                    disabled={
-                      homeCardPersistenceBusy ||
-                      !cardVisibilityState.canResetHomeView
-                    }
-                  >
-                    Reset Home
-                  </button>
                 </div>
                 {cardVisibilityState.persistenceError ? (
                   <p className="form-note form-note-error">
@@ -6614,564 +8790,30 @@ export function PromptHomeWorkspace({
               </>
             ) : null}
           </div>
-        </section>
+        </PromptHomeCardDeleteDropTarget>
 
-        {visibleHomeCardKeys.length > 0
+        {visibleHomeCards.length > 0 || cardVisibilityState.cardClipboard
           ? renderHomeCardGrid(
               <>
-                {renderHomeCardSlot("timeframe", (
-                  <PromptHomeTimeframePanel
-                    currentTime={currentTime}
-                    timeDisplaySettings={timeDisplaySettings}
-                    timeZoneOptions={timeZoneOptions}
-                    customEventsHref={customEventsHref}
-                    onOpenCustomEvents={onOpenCustomEvents}
-                    onTimeZoneChange={(nextTimeZone) => {
-                      const savedSettings = saveTimeDisplaySettingsSnapshot({
-                        ...timeDisplaySettings,
-                        timeZone: nextTimeZone,
-                      });
-                      setTimeDisplaySettings(savedSettings);
-                    }}
-                  />
-                ))}
-                {renderHomeCardSlot("prices", (
-                  <PromptHomePricesCard
-                    authSession={authSession}
-                    priceIndices={priceIndices}
-                    referenceDataLoading={referenceDataLoading}
-                    homeCard={cardVisibilityState.getCard("prices")}
-                    canConfigureHomeCard={canConfigureActiveHomeCards}
-                    onHomeCardConfigurationChange={(patch) =>
-                      cardVisibilityState.updateCardConfiguration(
-                        "prices",
-                        patch,
-                      )
-                    }
-                    onOpenPricesWorkspace={() => onOpenView("dashboard")}
-                    onOpenPriceSourcesReview={() =>
-                      onOpenView("admin", null, {
-                        hash: ADMIN_PRICE_SOURCES_SECTION_ID,
-                      })
-                    }
-                    onOpenPriceReport={(row) =>
-                      onOpenView(
-                        "reports",
-                        buildPriceIndexBiReportHandoff({
-                          priceIndexCode: row.priceIndex.code,
-                          priceIndexName: row.priceIndex.name,
-                          product: row.product,
-                          location: row.location,
-                          source: row.source,
-                        }),
-                        { hash: PRICE_INDEX_BI_REPORT_ID },
-                      )
-                    }
-                  />
-                ))}
-                {renderHomeCardSlot("news", (
-                  <PromptHomeNewsCard
-                    priceIndices={priceIndices}
-                    referenceDataLoading={referenceDataLoading}
-                    homeCard={cardVisibilityState.getCard("news")}
-                    canConfigureHomeCard={canConfigureActiveHomeCards}
-                    onHomeCardConfigurationChange={(patch) =>
-                      cardVisibilityState.updateCardConfiguration("news", patch)
-                    }
-                    onOpenReportsWorkspace={() => onOpenView("reports")}
-                  />
-                ))}
-                {renderHomeCardSlot("map", (
-                  <PromptHomeMapTile
-                    authSession={authSession}
-                    assets={assets}
-                    deliveries={deliveries}
-                    locations={locations}
-                    priceIndices={priceIndices}
-                    spatialFeatures={spatialFeatures}
-                    referenceDataLoaded={referenceDataLoaded}
-                    homeCard={cardVisibilityState.getCard("map")}
-                    canConfigureHomeCard={canConfigureActiveHomeCards}
-                    onHomeCardConfigurationChange={(patch) =>
-                      cardVisibilityState.updateCardConfiguration("map", patch)
-                    }
-                    onOpenMapWorkspace={() => onOpenView("map")}
-                    initialMapAssetLayerVisible={initialMapAssetLayerVisible}
-                  />
-                ))}
-                {renderHomeCardSlot("documents", (
-                  <PromptHomeDocumentUploadCard
-                    authSession={authSession}
-                    onOpenLibraryWorkspace={() => onOpenView("library")}
-                    onSignIn={handleSignIn}
-                  />
-                ))}
-                {renderHomeCardSlot("communication", (
-                  <PromptHomeCommunicationCard
-                    authSession={authSession}
-                    counts={counts}
-                    onOpenMessagesWorkspace={() => onOpenView("messages")}
-                  />
-                ))}
-
-                {renderHomeCardSlot("prompt", (
-                  <PromptHomePromptCardChrome
-                    expanded={promptCardExpandedState.expanded}
-                    onToggle={() =>
-                      promptCardExpandedState.setExpanded((current) => !current)
-                    }
-                  >
-              <>
-                <form className="prompt-home-composer" onSubmit={handleSubmit}>
-                  <label className="field prompt-home-composer-field">
-                    <span>Operator prompt</span>
-                    <textarea
-                      ref={composerTextareaRef}
-                      className="control prompt-home-textarea"
-                      value={draft}
-                      onChange={(event) => {
-                        voiceComposer.cancelListening();
-                        setDraft(event.target.value);
-                        setSubmitError("");
-                      }}
-                      onKeyDown={handlePromptComposerKeyDown}
-                      placeholder="Ask what needs attention, where to go next, or how to handle a trade, queue, exposure, invoice, or report question."
-                    />
-                  </label>
-
-                  <div className="toolbar settings-actions prompt-home-actions">
-                    <button
-                      type="button"
-                      className="button button-ghost"
-                      onClick={() => {
-                        setSubmitError("");
-                        voiceComposer.toggleListening();
-                      }}
-                      disabled={!voiceComposer.canToggle || submitting}
-                      aria-pressed={voiceComposer.listening}
-                    >
-                      {voiceComposer.buttonLabel}
-                    </button>
-                    <button
-                      type="submit"
-                      className="button button-primary"
-                      disabled={
-                        !draft.trim() || submitting || voiceComposer.listening
-                      }
-                    >
-                      {submitting
-                        ? "Sending..."
-                        : authSession
-                          ? "Send Prompt"
-                          : "Sign In to Send Prompt"}
-                    </button>
-                  </div>
-
-                  <div className="prompt-home-composer-preferences">
-                    <label className="prompt-home-verbalize-toggle">
-                      <input
-                        type="checkbox"
-                        checked={verbalizeResponses}
-                        onChange={(event) =>
-                          setVerbalizeResponses(event.target.checked)
-                        }
-                      />
-                      <span>Verbalize</span>
-                    </label>
-                    {availablePersonas.length > 0 ? (
-                      <label className="field prompt-home-persona-field">
-                        <span>Persona</span>
-                        <select
-                          className="control"
-                          value={selectedPersona}
-                          onChange={(event) =>
-                            setSelectedPersona(event.target.value as AssistantPersona | "")
-                          }
-                        >
-                          <option value="">
-                            {defaultPersonaDetails
-                              ? `User default (${defaultPersonaDetails.label})`
-                              : "User default"}
-                          </option>
-                          {availablePersonas.map((persona) => (
-                            <option key={persona.key} value={persona.key}>
-                              {persona.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : null}
-                  </div>
-
-                  {composerNote ? (
-                    <p
-                      className={`form-note ${submitError || runtimeError ? "form-note-error" : ""}`}
-                    >
-                      {composerNote}
-                    </p>
-                  ) : null}
-                </form>
-
-                <section
-                  className="prompt-home-promoted-routes"
-                  aria-label="Promoted routes"
-                >
-                  <div className="section-head">
-                    <div>
-                      <span className="eyebrow">Promoted Routes</span>
-                      <h3>Go straight to proven destinations</h3>
-                    </div>
-                    <button
-                      type="button"
-                      className="button button-ghost"
-                      onClick={() => void refreshPromptRouteRecommendations()}
-                      disabled={
-                        !authSession || promptRouteRecommendationsLoading
-                      }
-                    >
-                      Refresh
-                    </button>
-                  </div>
-                  <p
-                    className={`form-note ${promptRouteRecommendationsError ? "form-note-error" : ""}`}
-                  >
-                    {promptRouteRecommendationNote}
-                  </p>
-                  {promotedRoutes.length > 0 ? (
-                    <div className="prompt-home-destination-list">
-                      {promotedRoutes.map((route) => {
-                        if (route.readiness === "ready") {
-                          return (
-                            <button
-                              key={route.key}
-                              type="button"
-                              className="prompt-home-destination prompt-home-promoted-route"
-                              onClick={() =>
-                                openNavigationIntent(route.intent, {
-                                  includeHandoff: route.hasFocusedHandoff,
-                                  recordOutcome: route.recordOutcomeOnOpen,
-                                })
-                              }
-                            >
-                              <div className="prompt-home-destination-head">
-                                <strong>{route.displayLabel}</strong>
-                                <span
-                                  className={`status-pill status-pill-${route.readinessTone}`}
-                                >
-                                  {route.readinessLabel}
-                                </span>
-                              </div>
-                              <span>{route.displayDetail}</span>
-                              {route.displayFocusLabel ? (
-                                <small>{route.displayFocusLabel}</small>
-                              ) : null}
-                              {route.ageLabel ? (
-                                <small>{route.ageLabel}</small>
-                              ) : null}
-                              <small>
-                                {formatPromotedRouteEvidence(
-                                  route.recommendation,
-                                )}
-                              </small>
-                            </button>
-                          );
-                        }
-
-                        return (
-                          <article
-                            key={route.key}
-                            className="prompt-home-destination prompt-home-promoted-route is-unavailable"
-                          >
-                            <div className="prompt-home-destination-head">
-                              <strong>{route.displayLabel}</strong>
-                              <span
-                                className={`status-pill status-pill-${route.readinessTone}`}
-                              >
-                                {route.readinessLabel}
-                              </span>
-                            </div>
-                            <span>{route.displayDetail}</span>
-                            {route.ageLabel ? (
-                              <small>{route.ageLabel}</small>
-                            ) : null}
-                            <div className="prompt-home-destination-actions">
-                              <button
-                                type="button"
-                                className="button button-secondary"
-                                onClick={() =>
-                                  openNavigationIntent(route.intent, {
-                                    includeHandoff: false,
-                                  })
-                                }
-                              >
-                                {promptNavigationIntentLabel(route.intent)}
-                              </button>
-                            </div>
-                            <small>
-                              {formatPromotedRouteEvidence(
-                                route.recommendation,
-                              )}
-                            </small>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </section>
-
-                <section className="prompt-home-chat" aria-label="Current prompt thread">
-                  <div className="section-head">
-                    <div>
-                      <span className="eyebrow">Conversation</span>
-                      <h3>Current prompt thread</h3>
-                    </div>
-                    <p>
-                      Responses can explain, route, draft, or stage governed
-                      actions. They do not directly mutate records.
-                    </p>
-                  </div>
-
-                  <div className="prompt-home-chat-log" ref={promptChatLogRef}>
-                    {displayedMessages.length === 0 ? (
-                      <div className="empty-state prompt-home-empty">
-                        <strong>No prompt yet</strong>
-                        <p>
-                          Use the composer above or pick a quick prompt to start
-                          from intent instead of choosing a screen first.
-                        </p>
-                      </div>
-                    ) : (
-                      displayedMessages.map((message, index) => {
-                        const renderedMessage =
-                          parseAssistantChartArtifacts(message.content);
-                        const renderedParagraphs = splitAssistantMessageText(
-                          renderedMessage.text,
-                        );
-                        const canReadAloud =
-                          message.role === "assistant" &&
-                          voicePlayback.canPlay(renderedMessage.text);
-                        const readingMessage = voicePlayback.isPlaying(
-                          message.id,
-                        );
-                        const authorLabel =
-                          resolvePromptMessageAuthorLabel(message);
-                        const timestampLabel = formatPromptThreadTimestamp(
-                          message.recordedAt,
-                        );
-                        const currentDayLabel = formatPromptThreadDayLabel(
-                          message.recordedAt,
-                        );
-                        const previousDayLabel =
-                          index > 0
-                            ? formatPromptThreadDayLabel(
-                                displayedMessages[index - 1]?.recordedAt,
-                              )
-                            : null;
-                        const showDayDivider =
-                          currentDayLabel !== null &&
-                          currentDayLabel !== previousDayLabel;
-
-                        return (
-                          <div key={message.id} className="assistant-message-stack">
-                            {showDayDivider ? (
-                              <div className="assistant-message-divider">
-                                <span>{currentDayLabel}</span>
-                              </div>
-                            ) : null}
-                            <article
-                              className={`assistant-message assistant-message-${message.role}`}
-                            >
-                              <div
-                                className="assistant-message-avatar"
-                                aria-hidden="true"
-                              >
-                                {resolvePromptMessageAvatarLabel(message)}
-                              </div>
-                              <div className="assistant-message-body">
-                                <div className="assistant-message-head">
-                                  <div className="assistant-message-head-main">
-                                    <strong>{authorLabel}</strong>
-                                    {timestampLabel ? (
-                                      <span>{timestampLabel}</span>
-                                    ) : null}
-                                  </div>
-                                  {message.provider && message.model ? (
-                                    <span>
-                                      {message.provider} · {message.model}
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <PromptHomeAssistantActivityList
-                                  message={message}
-                                />
-                                {renderedParagraphs.length > 0 ||
-                                renderedMessage.charts.length > 0 ? (
-                                  <div className="assistant-message-bubble">
-                                    {renderedParagraphs.map(
-                                      (paragraph, paragraphIndex) => (
-                                        <p
-                                          key={`${message.id}-paragraph-${paragraphIndex}`}
-                                        >
-                                          {paragraph}
-                                        </p>
-                                      ),
-                                    )}
-                                    <AssistantChartArtifactList
-                                      charts={renderedMessage.charts}
-                                    />
-                                  </div>
-                                ) : null}
-                                {canReadAloud ? (
-                                  <div className="assistant-message-meta">
-                                    <button
-                                      type="button"
-                                      className={`assistant-run-link ${readingMessage ? "is-selected" : ""}`}
-                                      aria-pressed={readingMessage}
-                                      disabled={!voicePlayback.supported}
-                                      title={
-                                        voicePlayback.supported
-                                          ? readingMessage
-                                            ? "Stop reading this assistant response aloud."
-                                            : "Read this assistant response aloud."
-                                          : "Read aloud is not supported in this browser."
-                                      }
-                                      onClick={() => {
-                                        voiceComposer.cancelListening();
-                                        voicePlayback.togglePlayback(
-                                          message.id,
-                                          renderedMessage.text,
-                                        );
-                                      }}
-                                    >
-                                      {resolveVoicePlaybackButtonLabel(
-                                        readingMessage,
-                                      )}
-                                    </button>
-                                  </div>
-                                ) : null}
-                                {message.runId ? (
-                                  <div className="assistant-message-meta">
-                                    <span>Run #{message.runId}</span>
-                                    <button
-                                      type="button"
-                                      className="assistant-run-link"
-                                      onClick={() => onOpenView("assistant")}
-                                    >
-                                      Open diagnostics
-                                    </button>
-                                  </div>
-                                ) : null}
-                                {message.actionRequests &&
-                                message.actionRequests.length > 0 ? (
-                                  <div className="prompt-home-action-review">
-                                    <div className="feedback-banner prompt-home-action-banner">
-                                      <strong>
-                                        {message.actionRequests.length.toLocaleString()}{" "}
-                                        governed action request
-                                        {message.actionRequests.length === 1
-                                          ? ""
-                                          : "s"}{" "}
-                                        staged
-                                      </strong>
-                                      <p>
-                                        Nothing changes until the typed review
-                                        path approves and executes it.
-                                      </p>
-                                    </div>
-                                    <AssistantActionRequestList
-                                      actionRequests={message.actionRequests}
-                                      actionRequestIdsInFlight={
-                                        actionRequestIdsInFlight
-                                      }
-                                      formatDate={formatPromptTimestamp}
-                                      onDecision={handleActionRequestDecision}
-                                      onOpenRun={() => onOpenView("assistant")}
-                                      showUserId
-                                    />
-                                    <div className="assistant-message-meta prompt-home-action-path">
-                                      <span>
-                                        Need the old review inbox or full run
-                                        trace?
-                                      </span>
-                                      <button
-                                        type="button"
-                                        className="button button-secondary"
-                                        onClick={() => onOpenView("assistant")}
-                                      >
-                                        Open Assistant Console
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : null}
-                                {message.navigationIntents &&
-                                message.navigationIntents.length > 0 ? (
-                                  <div
-                                    className="prompt-home-handoff-list"
-                                    aria-label="Assistant workspace handoffs"
-                                  >
-                                    {message.navigationIntents.map((intent) => (
-                                      <div
-                                        key={buildPromptNavigationIntentKey(
-                                          intent,
-                                        )}
-                                        className="prompt-home-handoff-item"
-                                      >
-                                        <button
-                                          type="button"
-                                          className="prompt-home-handoff"
-                                          onClick={() =>
-                                            openNavigationIntent(intent, {
-                                              includeHandoff: true,
-                                              recordOutcome: true,
-                                            })
-                                          }
-                                        >
-                                          <strong>
-                                            {promptNavigationIntentLabel(intent)}
-                                          </strong>
-                                          <span>
-                                            {promptNavigationIntentDetail(intent)}
-                                          </span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="button button-ghost prompt-home-handoff-dismiss"
-                                          aria-label={`Dismiss ${promptNavigationIntentLabel(intent)}`}
-                                          onClick={() =>
-                                            handleDismissNavigationIntent(
-                                              message.id,
-                                              intent,
-                                            )
-                                          }
-                                        >
-                                          Dismiss
-                                        </button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : null}
-                                {message.warnings &&
-                                message.warnings.length > 0 ? (
-                                  <div className="assistant-message-meta">
-                                    {message.warnings.map((warning) => (
-                                      <span key={warning}>{warning}</span>
-                                    ))}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </article>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </section>
-              </>
-                  </PromptHomePromptCardChrome>
-                ))}
+                {visibleHomeCards.map((card) => renderHomeCardInstance(card))}
+                {renderPromptHomePasteTarget()}
               </>,
             )
           : null}
+    </>
+  );
+
+  return (
+    <div className="prompt-home">
+      <DndContext
+        sensors={homeCardSensors}
+        collisionDetection={closestCenter}
+        onDragStart={() => setHomeCardDeleteDragging(true)}
+        onDragEnd={handleHomeCardDragEnd}
+        onDragCancel={() => setHomeCardDeleteDragging(false)}
+      >
+        {homeCardsWorkspaceContent}
+      </DndContext>
     </div>
   );
 }

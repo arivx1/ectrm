@@ -18,19 +18,26 @@ from apps.api.app.schemas.assistant import AssistantPersona
 HomeViewDefinitionScope = Literal["PERSONAL", "TEAM", "ORGANIZATION"]
 HomeViewSharedScope = Literal["TEAM", "ORGANIZATION"]
 HomeViewDefinitionStatus = Literal["DRAFT", "ACTIVE", "RETIRED"]
+HomeViewCardHorizontalSpan = Literal[1, 2, 3, 4]
+HomeViewCardVerticalSpan = Literal[1, 2, 3, 4, 5, 6, 7, 8]
 
 
 class HomeViewCardPlacement(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     order: int = Field(..., ge=0)
-    column_span: Literal[1, 2] = 1
-    row_span: Literal[1, 2] = 1
+    column_span: HomeViewCardHorizontalSpan = 2
+    row_span: HomeViewCardVerticalSpan = 4
+    collapsed_column_span: HomeViewCardHorizontalSpan = 2
+    collapsed_row_span: HomeViewCardVerticalSpan = 1
+    expanded_column_span: HomeViewCardHorizontalSpan = 2
+    expanded_row_span: HomeViewCardVerticalSpan = 4
 
 
 class HomeViewCardDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    instance_id: str | None = Field(default=None, min_length=1, max_length=80)
     card_id: HomeViewCardId
     kind: HomeViewCardKind | None = None
     label: str | None = None

@@ -9,6 +9,7 @@ import {
   PRIMARY_NAV_SECTIONS,
   primaryNavigationSectionLandingView,
   primaryNavigationSectionForView,
+  primaryNavigationSectionRendersNestedViews,
   shouldHandleClientSideNavigation,
   shouldHideMobileNavigation,
 } from '../src/app/navigation'
@@ -70,9 +71,13 @@ describe('mobile navigation helpers', () => {
     expect(PRIMARY_NAV_SECTIONS.length).toBeLessThanOrEqual(MAX_PRIMARY_NAV_SECTIONS)
 
     const sectionViewKeys = PRIMARY_NAV_SECTIONS.flatMap((section) => section.views.map((view) => view.key))
+    const navigableViewKeys = APP_VIEWS.map((view) => view.key).filter((viewKey) => viewKey !== 'dashboard')
 
-    expect(sectionViewKeys).toHaveLength(APP_VIEWS.length)
-    expect(new Set(sectionViewKeys)).toEqual(new Set(APP_VIEWS.map((view) => view.key)))
+    expect(sectionViewKeys).toHaveLength(navigableViewKeys.length)
+    expect(new Set(sectionViewKeys)).toEqual(new Set(navigableViewKeys))
+    expect(PRIMARY_NAV_SECTIONS.find((section) => section.key === 'overview')?.views.map((view) => view.key)).toEqual([
+      'prompt',
+    ])
   })
 
   it('defines clear start paths for each section landing', () => {
@@ -100,9 +105,19 @@ describe('mobile navigation helpers', () => {
     ])
   })
 
-  it('routes Start directly to Home instead of rendering a duplicate landing page', () => {
+  it('routes the overview section directly to Apps instead of rendering a duplicate Home landing page', () => {
     expect(primaryNavigationSectionLandingView('overview')).toBe('prompt')
     expect(primaryNavigationSectionLandingView('trading')).toBeNull()
+  })
+
+  it('renders Home as a single nav button without an Apps sub-button', () => {
+    const overviewSection = PRIMARY_NAV_SECTIONS.find((section) => section.key === 'overview')
+
+    expect(overviewSection).toBeDefined()
+    expect(primaryNavigationSectionRendersNestedViews(overviewSection!)).toBe(false)
+    expect(
+      PRIMARY_NAV_SECTIONS.filter(primaryNavigationSectionRendersNestedViews).map((section) => section.key),
+    ).toEqual(['trading', 'execution', 'intelligence', 'administration'])
   })
 
   it('maps representative workspaces into their grouped nav sections', () => {

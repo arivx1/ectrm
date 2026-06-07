@@ -144,7 +144,7 @@ describe('workspace layout presets', () => {
     const markup = renderToStaticMarkup(
       createElement(TileLayout, {
         workspaceId: 'dashboard',
-        workspaceLabel: 'Live Desk',
+        workspaceLabel: 'Home',
         authSession: null,
         tiles,
       }),

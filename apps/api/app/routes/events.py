@@ -9,25 +9,23 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.query_params import STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
-from apps.api.app.domains.trading.services import trade_event_support as support
 from apps.api.app.domains.trading.services.event_writes import (
     AppendDomainEventCommand,
     append_domain_event,
 )
-from apps.api.app.domains.trading.services.trade_commands import (
+from apps.api.app.domains.trading.services.trade_command_contracts import (
     TradeCommandValidationError,
+)
+from apps.api.app.domains.trading.services.trade_commands import (
     append_trade_write_command,
+)
+from apps.api.app.domains.trading.services.trade_event_command_adapter import (
     build_trade_write_command_from_event,
 )
 from apps.api.app.models.event import Event
 from apps.api.app.schemas.event import EventCreate, EventOut
 
 router = APIRouter(prefix="/events", tags=["events"])
-
-OPTION_LIFECYCLE_EVENT_TYPES = support.OPTION_LIFECYCLE_EVENT_TYPES
-trade_snapshot = support.trade_snapshot
-sync_positions_for_trade_change = support.sync_positions_for_trade_change
-sync_option_exposures_for_trade_change = support.sync_option_exposures_for_trade_change
 
 
 @router.post("", response_model=EventOut, status_code=201)

@@ -12,6 +12,7 @@ import {
 } from './promptHomeCardDrag.ts'
 
 type PromptHomeDocumentUploadCardProps = {
+  instanceId?: string
   authSession: StoredAuthSession | null
   onOpenLibraryWorkspace: () => void
   onSignIn: () => void
@@ -19,6 +20,30 @@ type PromptHomeDocumentUploadCardProps = {
 
 const PROMPT_HOME_DOCUMENT_UPLOAD_PANEL_ID = 'prompt-home-document-upload-panel'
 const PROMPT_HOME_DOCUMENT_HISTORY_PANEL_ID = 'prompt-home-document-history-panel'
+
+function promptHomeSafeDomIdPart(value: string): string {
+  return value.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'app'
+}
+
+function promptHomeInstanceScopedId(
+  baseId: string,
+  instanceId: string,
+  baseInstanceId: string,
+): string {
+  return instanceId === baseInstanceId
+    ? baseId
+    : `${baseId}-${promptHomeSafeDomIdPart(instanceId)}`
+}
+
+function promptHomeInstanceStorageKey(
+  baseKey: string,
+  instanceId: string,
+  baseInstanceId: string,
+): string {
+  return instanceId === baseInstanceId
+    ? baseKey
+    : `${baseKey}.${instanceId}`
+}
 
 function formatDocumentCount(count: number): string {
   return `${count} document${count === 1 ? '' : 's'}`
@@ -64,13 +89,23 @@ function revokeDocumentSourceUrlLater(sourceUrl: string): void {
 }
 
 function PromptHomeDocumentUploadCardContent({
+  instanceId = 'documents',
   authSession,
   onOpenLibraryWorkspace,
   onSignIn,
 }: PromptHomeDocumentUploadCardProps) {
+  const historyPanelId = promptHomeInstanceScopedId(
+    PROMPT_HOME_DOCUMENT_HISTORY_PANEL_ID,
+    instanceId,
+    'documents',
+  )
   const controller = useDocumentIngestionController({ authSession })
   const historyExpandedState = usePersistentCollapsibleCardState(
-    'prompt-home.document-upload-history-card',
+    promptHomeInstanceStorageKey(
+      'prompt-home.document-upload-history-card',
+      instanceId,
+      'documents',
+    ),
     false,
   )
   const [openingDocumentId, setOpeningDocumentId] = useState<string | null>(null)
@@ -191,7 +226,7 @@ function PromptHomeDocumentUploadCardContent({
               type="button"
               className="prompt-home-document-upload-history-card-toggle"
               aria-expanded={historyExpandedState.expanded}
-              aria-controls={PROMPT_HOME_DOCUMENT_HISTORY_PANEL_ID}
+              aria-controls={historyPanelId}
               onClick={() => historyExpandedState.setExpanded((current) => !current)}
             >
               <div className="prompt-home-document-upload-history-card-toggle-meta">
@@ -205,7 +240,7 @@ function PromptHomeDocumentUploadCardContent({
         </div>
 
         <div
-          id={PROMPT_HOME_DOCUMENT_HISTORY_PANEL_ID}
+          id={historyPanelId}
           className="prompt-home-document-upload-history-card-body"
           hidden={!historyExpandedState.expanded}
         >
@@ -290,12 +325,22 @@ function PromptHomeDocumentUploadCardContent({
 }
 
 export function PromptHomeDocumentUploadCard({
+  instanceId = 'documents',
   authSession,
   onOpenLibraryWorkspace,
   onSignIn,
 }: PromptHomeDocumentUploadCardProps) {
+  const uploadPanelId = promptHomeInstanceScopedId(
+    PROMPT_HOME_DOCUMENT_UPLOAD_PANEL_ID,
+    instanceId,
+    'documents',
+  )
   const expandedState = usePersistentCollapsibleCardState(
-    'prompt-home.document-upload-card',
+    promptHomeInstanceStorageKey(
+      'prompt-home.document-upload-card',
+      instanceId,
+      'documents',
+    ),
     false,
   )
   const {
@@ -304,7 +349,11 @@ export function PromptHomeDocumentUploadCard({
   } = usePromptHomeCardDragHandle<HTMLDivElement>()
 
   return (
-    <section className="prompt-home-document-upload-card">
+    <section
+      className={`prompt-home-document-upload-card ${
+        expandedState.expanded ? 'is-expanded' : 'is-collapsed'
+      }`}
+    >
       <div
         {...dragHandleAttributes}
         className={mergePromptHomeClassNames(
@@ -321,12 +370,16 @@ export function PromptHomeDocumentUploadCard({
           <button
             type="button"
             className="prompt-home-document-upload-card-toggle"
+            aria-label={
+              expandedState.expanded
+                ? 'Collapse Upload documents'
+                : 'Expand Upload documents'
+            }
             aria-expanded={expandedState.expanded}
-            aria-controls={PROMPT_HOME_DOCUMENT_UPLOAD_PANEL_ID}
+            aria-controls={uploadPanelId}
             onClick={() => expandedState.setExpanded((current) => !current)}
           >
             <div className="prompt-home-document-upload-card-toggle-meta">
-              <small>{expandedState.expanded ? 'Hide card' : 'Show card'}</small>
               <span className="prompt-home-support-toggle-indicator" aria-hidden="true">
                 {expandedState.expanded ? '−' : '+'}
               </span>
@@ -336,12 +389,13 @@ export function PromptHomeDocumentUploadCard({
       </div>
 
       <div
-        id={PROMPT_HOME_DOCUMENT_UPLOAD_PANEL_ID}
+        id={uploadPanelId}
         className="prompt-home-document-upload-card-body"
         hidden={!expandedState.expanded}
       >
         {expandedState.expanded ? (
           <PromptHomeDocumentUploadCardContent
+            instanceId={instanceId}
             authSession={authSession}
             onOpenLibraryWorkspace={onOpenLibraryWorkspace}
             onSignIn={onSignIn}

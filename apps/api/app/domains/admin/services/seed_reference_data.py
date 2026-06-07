@@ -134,6 +134,36 @@ def _open_power_price_index_row(
     }
 
 
+def _alpha_vantage_price_index_row(
+    code: str,
+    name: str,
+    commodity_code: str,
+    market: str,
+    calendar_code: str,
+    symbol: str,
+    *,
+    description: str,
+) -> dict[str, object]:
+    return {
+        "code": code,
+        "name": name,
+        "commodity_code": commodity_code,
+        "currency_code": "USD",
+        "unit_code": "SHARE",
+        "provider": "ALPHA_VANTAGE",
+        "market": market,
+        "location_code": None,
+        "calendar_code": calendar_code,
+        "series_id": symbol,
+        "dataset_code": "GLOBAL_QUOTE",
+        "frequency": "intraday",
+        "source_unit": "SHARE",
+        "source_currency_code": "USD",
+        "transform_rule": None,
+        "description": description,
+    }
+
+
 def _price_index_row_from_catalog(row: dict[str, object]) -> dict[str, object]:
     return {
         "code": row["code"],
@@ -189,6 +219,8 @@ COMMODITY_ROWS = [
     {"code": "NICKEL", "name": "Nickel", "commodity_class": "BASE_METAL", "allowed_transport_modes": ["TRUCK", "RAIL", "VESSEL", "STORAGE"], "description": "Nickel exposure used for industrial metals market references."},
     {"code": "COAL", "name": "Coal", "commodity_class": "OTHER", "allowed_transport_modes": ["RAIL", "BARGE", "VESSEL", "STORAGE"], "description": "Coal exposure used for thermal coal market references."},
     {"code": "POWER", "name": "Power", "commodity_class": "POWER", "allowed_transport_modes": ["POWER_GRID"], "description": "Power market exposure."},
+    {"code": "EQUITY", "name": "Listed Equity", "commodity_class": "SECURITY", "allowed_transport_modes": [], "description": "Listed common stock exposure used for demo market-data references."},
+    {"code": "ETF", "name": "Exchange-Traded Fund", "commodity_class": "SECURITY", "allowed_transport_modes": [], "description": "Exchange-traded fund exposure used for demo market-data references."},
     {"code": "REC", "name": "Renewable Energy Credit", "commodity_class": "ENVIRONMENTAL", "allowed_transport_modes": ["POWER_GRID"], "description": "Renewable attribute exposure."},
     {"code": "CARBON", "name": "Carbon", "commodity_class": "ENVIRONMENTAL", "allowed_transport_modes": ["STORAGE"], "description": "Carbon allowance and offset exposure."},
 ]
@@ -257,6 +289,7 @@ UNIT_ROWS = [
     {"code": "KG", "name": "Kilogram", "commodity_class": None, "dimension": "MASS", "base_unit_code": None, "conversion_factor": None, "precision": 4, "description": "Kilogram mass unit for commodity quotes."},
     {"code": "M3", "name": "Cubic Meter", "commodity_class": None, "dimension": "VOLUME", "base_unit_code": None, "conversion_factor": None, "precision": 4, "description": "Cubic meter unit for timber and bulk commodity quotes."},
     {"code": "INDEX", "name": "Index Point", "commodity_class": None, "dimension": "INDEX", "base_unit_code": None, "conversion_factor": None, "precision": 4, "description": "Dimensionless index level quote unit."},
+    {"code": "SHARE", "name": "Share", "commodity_class": "SECURITY", "dimension": "SECURITY", "base_unit_code": None, "conversion_factor": None, "precision": 4, "description": "Listed security unit for demo equity and ETF quote marks."},
     {"code": "MMBTU", "name": "Million British Thermal Units", "commodity_class": "NATURAL_GAS", "dimension": "ENERGY", "base_unit_code": None, "conversion_factor": None, "precision": 3, "description": "Gas energy unit."},
     {"code": "DTH", "name": "Dekatherm", "commodity_class": "NATURAL_GAS", "dimension": "ENERGY", "base_unit_code": "MMBTU", "conversion_factor": 1.0, "precision": 3, "description": "Gas transport unit."},
     {"code": "MWH", "name": "Megawatt Hour", "commodity_class": "POWER", "dimension": "POWER", "base_unit_code": None, "conversion_factor": None, "precision": 3, "description": "Power quantity unit."},
@@ -1730,6 +1763,46 @@ ASSET_ROWS = [
     },
 ] + build_seeded_pipeline_asset_rows()
 
+
+def _existing_client_counterparty_row(code: str, name: str, short_name: str | None = None) -> dict[str, object]:
+    return {
+        "code": code,
+        "name": name,
+        "short_name": short_name or name,
+        "legal_entity_name": name,
+        "counterparty_type": "END_USER",
+        "country_code": None,
+        "description": "Existing client base starter row.",
+    }
+
+
+EXISTING_CLIENT_COUNTERPARTY_ROWS = [
+    _existing_client_counterparty_row("HARTREE", "Hartree"),
+    _existing_client_counterparty_row("CARGILL", "Cargill"),
+    _existing_client_counterparty_row("INTERNATIONAL_MATERIALS", "International Materials"),
+    _existing_client_counterparty_row("CSC_SUGAR", "CSC Sugar"),
+    _existing_client_counterparty_row("ABERCORE", "Abercore"),
+    _existing_client_counterparty_row("CUMBERLAND", "Cumberland"),
+    _existing_client_counterparty_row("ETG", "ETG"),
+    _existing_client_counterparty_row("ASILI", "Asili"),
+    _existing_client_counterparty_row("FIBRE_TRADE", "Fibre Trade"),
+    _existing_client_counterparty_row("AMERICAN_PLANT_FOOD", "American Plant Food"),
+    _existing_client_counterparty_row("INTEROCEANIC", "Interoceanic"),
+    _existing_client_counterparty_row("CIAMSA", "CIAMSA"),
+    _existing_client_counterparty_row("CROWN_POINT", "Crown Point"),
+    _existing_client_counterparty_row("SMIRKS", "Smirks"),
+    _existing_client_counterparty_row("TELF_AG", "Telf Ag"),
+    _existing_client_counterparty_row("HOWLETT_FARMS", "Howlett Farms"),
+    _existing_client_counterparty_row("WESTFELDT_BROTHERS", "Westfeldt Brothers"),
+    _existing_client_counterparty_row("SPRING_VALLEY", "Spring Valley"),
+    _existing_client_counterparty_row("LINKONE", "LinkOne"),
+    _existing_client_counterparty_row("REDWOOD_GROUP", "Redwood Group"),
+    _existing_client_counterparty_row("RYCO_HOLDINGS", "Ryco Holdings"),
+    _existing_client_counterparty_row("SURESOURCE", "SureSource"),
+    _existing_client_counterparty_row("CEFETRA", "Cefetra"),
+]
+
+
 CURATED_COUNTERPARTY_ROWS = [
     {
         "code": "BP",
@@ -1879,6 +1952,7 @@ CURATED_COUNTERPARTY_ROWS = [
 
 COUNTERPARTY_ROWS = (
     CURATED_COUNTERPARTY_ROWS
+    + EXISTING_CLIENT_COUNTERPARTY_ROWS
     + build_real_counterparty_rows()
     + build_additional_real_counterparty_rows()
     + build_energy_real_counterparty_rows()
@@ -2672,9 +2746,43 @@ OPEN_POWER_ADDITIONAL_PRICE_INDEX_ROWS = [
     ),
 ]
 
+ALPHA_VANTAGE_DEMO_PRICE_INDEX_ROWS = [
+    _alpha_vantage_price_index_row(
+        "SPY_US_ALPHA_Q",
+        "SPDR S&P 500 ETF Demo Quote",
+        "ETF",
+        "NYSE_ARCA",
+        "NYSE",
+        "SPY",
+        description="Free-key Alpha Vantage global quote for SPY, intended for demo market screens rather than books-and-records valuation.",
+    ),
+    _alpha_vantage_price_index_row(
+        "QQQ_US_ALPHA_Q",
+        "Invesco QQQ ETF Demo Quote",
+        "ETF",
+        "NASDAQ",
+        "NASDAQ",
+        "QQQ",
+        description="Free-key Alpha Vantage global quote for QQQ, intended for demo market screens rather than books-and-records valuation.",
+    ),
+    _alpha_vantage_price_index_row(
+        "AAPL_US_ALPHA_Q",
+        "Apple Equity Demo Quote",
+        "EQUITY",
+        "NASDAQ",
+        "NASDAQ",
+        "AAPL",
+        description="Free-key Alpha Vantage global quote for AAPL, intended for demo market screens rather than books-and-records valuation.",
+    ),
+]
+
 PRICE_INDEX_ROWS.extend(
     _price_index_row_from_catalog(row)
-    for row in FRED_IMF_ADDITIONAL_PRICE_INDEX_ROWS + OPEN_POWER_ADDITIONAL_PRICE_INDEX_ROWS
+    for row in (
+        FRED_IMF_ADDITIONAL_PRICE_INDEX_ROWS
+        + OPEN_POWER_ADDITIONAL_PRICE_INDEX_ROWS
+        + ALPHA_VANTAGE_DEMO_PRICE_INDEX_ROWS
+    )
 )
 
 for _price_index_row in PRICE_INDEX_ROWS:
@@ -2711,7 +2819,11 @@ PRICE_INDEX_SOURCE_ROWS = [
 
 PRICE_INDEX_SOURCE_ROWS.extend(
     _price_index_source_row_from_catalog(row)
-    for row in FRED_IMF_ADDITIONAL_PRICE_INDEX_ROWS + OPEN_POWER_ADDITIONAL_PRICE_INDEX_ROWS
+    for row in (
+        FRED_IMF_ADDITIONAL_PRICE_INDEX_ROWS
+        + OPEN_POWER_ADDITIONAL_PRICE_INDEX_ROWS
+        + ALPHA_VANTAGE_DEMO_PRICE_INDEX_ROWS
+    )
 )
 
 

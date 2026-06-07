@@ -83,6 +83,93 @@ proposal form until a human owner approves the domain rule.
 
 ## Lessons
 
+### 2026-06-03 - Promoted Draft Outcomes Are Read-Only Promotion Evidence
+
+- Type: algorithm-added
+- Domain: pre-trade promoted-draft lifecycle metrics, reviewer reuse, and
+  trader/risk autonomy evidence
+- Applies to:
+  `apps/api/app/domains/reports/services/pretrade_promotion_outcomes.py`,
+  `apps/api/app/routes/pretrade.py`, `apps/api/app/schemas/pretrade.py`,
+  `apps/api/tests/test_pretrade_api.py`,
+  `apps/web/src/entities/pretrade/api.ts`,
+  `apps/web/src/shared/models.ts`,
+  `apps/web/src/workspaces/pretrade/PreTradeWorkspace.tsx`, and
+  `apps/web/tests/preTradeApi.test.ts`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-16.
+- Lesson: promoted netting-set, hedge-recommendation, risk-scenario, and
+  market-opportunity drafts now have deterministic read-only outcome metrics.
+  The service counts created drafts, source-evidence reuse, retired drafts,
+  rejected source reviews, booked-trade merges, and blocking missing evidence.
+  Per-draft rows preserve source promotion score, source review/run counts,
+  latest review/run ids, live source review status, linked trade id/status,
+  blocking-evidence flag, and outcome reasons.
+- Deterministic opportunity: use these metrics as the input surface for future
+  owner-approved lifecycle controls and promotion-threshold policy: minimum
+  reuse, maximum rejection or correction rate, no blocking evidence, stale-state
+  checks, audit, idempotency, and rollback or correction paths. The metrics
+  themselves should remain a read-only report until that policy exists.
+- Agent autonomy impact: agents may summarize promoted-draft outcomes, flag
+  weak evidence, and recommend which draft families need owner review. They may
+  not treat outcome counts as approval to book trades, execute hedges, change
+  price marks, alter credit/risk/policy settings, retire drafts automatically,
+  or externally commit the firm.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api` and
+  `npm --prefix apps/web run test -- preTradeApi.test.ts`.
+- Follow-up: add explicit lifecycle controls and owner-approved threshold
+  policy before considering any higher-authority offer, order, execution,
+  pricing, credit, hedge, or settlement workflow.
+
+### 2026-06-03 - Market Opportunity Promotion Creates Review Drafts Only
+
+- Type: algorithm-added
+- Domain: pre-trade market-opportunity promotion, reviewer reuse, and
+  trader/risk work objects
+- Applies to:
+  `apps/api/app/domains/reports/services/pretrade_market_opportunities.py`,
+  `apps/api/app/domains/reports/services/pretrade_governance.py`,
+  `apps/api/app/routes/pretrade.py`, `apps/api/app/schemas/pretrade.py`,
+  `apps/api/tests/test_pretrade_api.py`,
+  `apps/web/src/entities/pretrade/api.ts`,
+  `apps/web/src/shared/models.ts`, and
+  `apps/web/src/workspaces/pretrade/PreTradeWorkspace.tsx`
+- Status: implemented
+- Source:
+  [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md) TRMVP-15.
+- Lesson: a governance `MARKET_OPPORTUNITY` promotion signal may now create a
+  shared durable `REVIEW_DRAFT` market-opportunity object, but only when the
+  current signal has a linked pre-trade review, linked recommendation run, and
+  supported `MARK_GAP` or `ARBITRAGE` opportunity category. The draft preserves
+  source score, evidence counts, latest review/run ids, sample ids, rationale,
+  stop reasons, source review status/thesis/notes/owner, recommendation
+  stance/score/headline, recommendation draft, opportunity summary, optional
+  arbitrage candidate, residual exposure, input snapshots, missing evidence,
+  next actions, and reviewer focus. Creation is idempotent for the same latest
+  review/run evidence.
+- Deterministic opportunity: use this review-draft object as the owner-visible
+  intake point for market-opportunity curation, opportunity lifecycle metrics,
+  pricing-policy proposals, offer workflow design, or trade-capture handoff
+  design. Those next steps need separate domain owner approval, policy rules,
+  stale-state checks, audit, idempotency, and rollback before any price mark,
+  trade, order, hedge, credit, risk-limit, settlement, or external commitment
+  exists.
+- Agent autonomy impact: agents may summarize market-opportunity review drafts,
+  compare source evidence, and draft reviewer notes. They may not treat the
+  draft as an official price mark, accepted offer, order, booked trade, hedge
+  instruction, credit approval, policy override, risk-limit change, settlement
+  approval, or external commitment.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api`,
+  `npm --prefix apps/web run test -- preTradeApi.test.ts`,
+  `npm --prefix apps/web run build`, `npm --prefix apps/web run lint`, and
+  `npm --prefix apps/web run test:smoke -- --grep "pre-trade smoke"`.
+- Follow-up: add explicit lifecycle controls and owner-approved threshold
+  policy before considering higher-authority offer, order, execution, pricing,
+  credit, hedge, or settlement workflows.
+
 ### 2026-06-02 - Market News Uses Market-Impact Filtering
 
 - Type: algorithm-added
@@ -90,6 +177,8 @@ proposal form until a human owner approves the domain rule.
   market context
 - Applies to:
   `apps/api/app/domains/reference_data/services/external_data/market_news.py`,
+  `apps/api/app/domains/reference_data/services/external_data/market_news_ai.py`,
+  `apps/api/app/schemas/external_data.py`,
   `apps/web/src/widgets/news/MarketNewsPanel.tsx`,
   `apps/api/tests/test_market_news_service.py`, and
   `apps/web/tests/marketNewsPanel.test.ts`
@@ -123,15 +212,25 @@ proposal form until a human owner approves the domain rule.
   demand language drive the relevant axis. Production/output language such as
   `beef output hits record` is physical supply evidence and should classify as
   supply up; disease, drought, or dry-spell pressure should classify as
-  supply down.
+  supply down. If deterministic tags struggle with ambiguous headline language,
+  market news may use the configured AI tagging provider, currently OpenAI or
+  Anthropic, as an enrichment pass only after the deterministic baseline has
+  been computed. The AI request must include the baseline tags and rules, the
+  response must be parsed through typed direction/horizon/location enums plus
+  confidence bounds, and malformed or unavailable AI output must fall back to
+  deterministic tags without blocking news display. Table filters should run
+  against the final validated row tags so an AI-corrected supply, demand,
+  horizon, or location tag affects the visible filtered rows.
 - Deterministic opportunity: keep this as typed external-data filtering over
-  RSS title/source/date/link inputs. Future tuning should add approved source
-  bonuses, commodity packs, and noise rules with tests rather than asking an
-  agent to judge every headline ad hoc.
+  RSS title/source/date/link inputs. AI-assisted corrections are a supplement
+  for missing deterministic coverage and should become new deterministic source
+  bonuses, commodity packs, location rules, supply/demand patterns, or noise
+  rules when desk review shows repeated stable outcomes.
 - Agent autonomy impact: agents may summarize or explain the filtered
-  headlines, but they should not turn headline text into business records,
-  price marks, risk conclusions, or external commitments without governed
-  domain services and reviewer-visible evidence.
+  headlines and explain AI-assisted tag provenance, but they should not turn
+  headline text into business records, price marks, risk conclusions, or
+  external commitments without governed domain services and reviewer-visible
+  evidence.
 - Tests or evidence:
   `./.venv/bin/python -m unittest apps.api.tests.test_market_news_service apps.api.tests.test_external_data_api`
   and
@@ -198,8 +297,8 @@ proposal form until a human owner approves the domain rule.
   the same latest review/run evidence.
 - Deterministic opportunity: use this review-draft object as the
   owner-visible intake point for future stress-methodology review, scenario
-  library curation, risk workflow policy, exposure-limit design, or market
-  opportunity promotion. Those next steps need separate domain owner approval,
+  library curation, risk workflow policy, exposure-limit design, or review
+  outcome measurement. Those next steps need separate domain owner approval,
   policy rules, stale-state checks, audit, idempotency, and rollback before any
   risk, trade, hedge, credit, settlement, or external-commitment mutation
   exists.
@@ -213,8 +312,7 @@ proposal form until a human owner approves the domain rule.
   `npm --prefix apps/web run test -- preTradeApi.test.ts`,
   `npm --prefix apps/web run build`, `npm --prefix apps/web run lint`, and
   `npm --prefix apps/web run test:smoke -- --grep "pre-trade smoke"`.
-- Follow-up: promote the next strongest owner-approved governance signal into
-  a market-opportunity review object or add review-outcome metrics before
+- Follow-up: add review-outcome metrics across promoted drafts before
   considering any higher-authority workflow.
 
 ### 2026-06-01 - Hedge Promotion Creates Review Drafts Only
@@ -256,8 +354,7 @@ proposal form until a human owner approves the domain rule.
   `npm --prefix apps/web run test -- preTradeApi.test.ts`,
   `npm --prefix apps/web run build`, `npm --prefix apps/web run lint`, and
   `npm --prefix apps/web run test:smoke -- --grep "pre-trade smoke"`.
-- Follow-up: promote the next strongest owner-approved governance signal into
-  a first-class risk scenario or market-opportunity review object before
+- Follow-up: add review-outcome metrics across promoted drafts before
   considering execution authority.
 
 ### 2026-06-01 - Netting Promotion Creates Review Drafts Only
@@ -6521,3 +6618,236 @@ independently"`.
   missing.
 - Tests or evidence:
   `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_trade_commands_service`
+
+### 2026-06-06 - Official Marks Use Active Sources Before Valuation
+
+- Type: algorithm-added
+- Domain: market data, risk, valuation basis, official marks, and curve
+  freshness
+- Applies to: `apps/api/app/domains/risk/services/official_marks.py`,
+  `apps/api/app/domains/reports/services/pnl_history.py`, PGB-06, PGB-07, and
+  assistant explanations about gas marks
+- Status: implemented
+- Source:
+  `apps/api/app/domains/risk/services/official_marks.py`,
+  `apps/api/tests/test_official_marks_service.py`, and
+  [Premium E/CTRM Gap Bridge Work Packages](./premium-ectrm-gap-bridge-work-packages.md)
+- Lesson: raw price-index observations are not automatically official marks.
+  The v1 official-mark seam selects the latest observation on or before the
+  requested as-of date only when the price index and source mapping are active,
+  labels the result with explicit no-interpolation methodology, and reports
+  fresh, stale, or missing status before valuation uses the mark.
+- Deterministic opportunity: keep PGB-07 MTM/P&L, future valuation services,
+  reports, and assistant explanations behind this official-mark seam instead
+  of reading `PriceIndexObservation` directly. If desk review needs richer
+  approval, add persisted mark approvals as a deterministic owner-owned policy
+  layer rather than letting reports, prompts, or frontend helpers choose marks
+  ad hoc.
+- Agent autonomy impact: assistants may explain mark freshness and missing
+  source reasons, but they must not override mark source approval, interpolate,
+  or promote raw vendor observations into valuation truth without the official
+  mark service and human-approved policy.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_official_marks_service`
+
+### 2026-06-06 - P&L Uses Official Marks, Not Raw Observations
+
+- Type: algorithm-added
+- Domain: MTM, P&L, valuation evidence, market data governance, and report
+  methodology
+- Applies to: `apps/api/app/domains/reports/services/pnl_history.py`,
+  `apps/api/app/domains/risk/services/official_marks.py`, PGB-07, P&L history,
+  P&L comparison, and assistant explanations of mark-to-market results
+- Status: implemented
+- Source:
+  `apps/api/app/domains/reports/services/pnl_history.py`,
+  `apps/api/tests/test_pnl_history_report.py`,
+  `apps/api/app/domains/risk/services/official_marks.py`, and
+  [Premium E/CTRM Gap Bridge Work Packages](./premium-ectrm-gap-bridge-work-packages.md)
+- Lesson: P&L must value indexed and hybrid trades from official marks selected
+  by the risk service, not from raw vendor observations. A newer raw
+  observation is ignored unless it comes from the active approved source for
+  the price index. Valuation rows carry mark evidence so reviewers can see the
+  basis, approval status, freshness, selected observation date, source
+  provider/series, run id, staleness, and missing-mark reason.
+- Deterministic opportunity: when additional MTM engines, EOD packs, exposure
+  reports, or assistant tools need market prices, pass through the official
+  mark service or a future persisted official-mark record. Do not duplicate
+  source selection, freshness logic, interpolation behavior, or missing-mark
+  degradation inside report helpers, frontend views, prompts, or ad hoc SQL.
+- Agent autonomy impact: assistants may explain why a trade is valued, stale,
+  or excluded and may stage missing-source remediation, but they may not pick
+  alternative marks, ignore stale/missing status, interpolate, or override
+  official source governance outside an owner-approved typed service.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_official_marks_service apps.api.tests.test_pnl_history_report`
+
+### 2026-06-06 - Position As-Of Is Event Replay With Labelled Projection Fallback
+
+- Type: algorithm-added
+- Domain: position as-of, risk-factor decomposition, exposure evidence, EOD
+  reporting, credit inputs, and assistant explanations
+- Applies to: `apps/api/app/domains/risk/services/position_as_of.py`, PGB-08,
+  future position reports, credit exposure inputs, EOD packs, and assistant
+  position read tools
+- Status: implemented
+- Source:
+  `apps/api/app/domains/risk/services/position_as_of.py`,
+  `apps/api/tests/test_position_as_of_service.py`, and
+  [Premium E/CTRM Gap Bridge Work Packages](./premium-ectrm-gap-bridge-work-packages.md)
+- Lesson: position-as-of truth should replay trade lifecycle events through the
+  requested date and group active signed quantities by business risk factors.
+  Projection-only trades may be included only when they have no event history
+  and their trustworthy projection timestamp is on or before the as-of date;
+  those rows must remain labelled as `LEGACY_PROJECTION` rather than being
+  presented as replayed history.
+- Deterministic opportunity: feed future position routes, EOD packs, credit
+  utilization, exposure decomposition, and assistant read tools from this
+  position-as-of basis or an approved persisted equivalent. Add unit conversion
+  and route/report contracts as deterministic policy, not prompt instructions
+  or frontend-only grouping.
+- Agent autonomy impact: assistants may explain replayed event counts,
+  contributing trades, stale projection fallback, and risk-factor composition,
+  but they must not invent historical positions from current projections or
+  collapse away source-basis evidence when recommending credit, EOD, or risk
+  actions.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_position_as_of_service`
+
+### 2026-06-06 - Credit Limit Decisions Need Typed Policy Evidence
+
+- Type: algorithm-added
+- Domain: counterparty credit, limit utilization, trade validation, risk
+  reporting, credit exceptions, and assistant explanations
+- Applies to:
+  `apps/api/app/domains/risk/services/counterparty_credit_policy.py`,
+  `apps/api/app/domains/reports/services/counterparty_credit.py`, PGB-09,
+  trade credit workflow helpers, counterparty credit reports, and future
+  assistant credit read tools
+- Status: implemented
+- Source:
+  `apps/api/app/domains/risk/services/counterparty_credit_policy.py`,
+  `apps/api/tests/test_counterparty_credit_policy_service.py`,
+  `apps/api/app/domains/reports/services/counterparty_credit.py`, and
+  [Premium E/CTRM Gap Bridge Work Packages](./premium-ectrm-gap-bridge-work-packages.md)
+- Lesson: counterparty credit decisions should be produced as typed policy
+  evidence with a basis, current exposure, projected trade exposure,
+  utilization, status, action, stop reasons, warning reasons, freshness, and
+  override status. Reports and trade workflow helpers may adapt that result,
+  but they should not own separate credit-limit math.
+- Deterministic opportunity: wire active approved credit exceptions into the
+  typed override input, expose the policy result through report/API contracts,
+  and feed command validation from the typed service directly once compatibility
+  dict callers are retired. Limit thresholds, review freshness, breach actions,
+  and override coverage should remain owner-approved deterministic policy.
+- Agent autonomy impact: assistants may explain clear/watch/breach/stale/override
+  outcomes and stage review tasks, but they must not approve credit, change
+  limits, ignore stale review, or substitute their own exposure math outside
+  the typed policy service.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_counterparty_credit_policy_service apps.api.tests.test_counterparty_credit_api`
+
+### 2026-06-06 - Scenario Stress Is Read-Only Over Governed Risk Outputs
+
+- Type: algorithm-added
+- Domain: scenario stress, official marks, position as-of, P&L explainability,
+  risk reporting, and assistant explanations
+- Applies to: `apps/api/app/domains/risk/services/scenario_stress.py`,
+  `apps/api/app/domains/reports/services/pnl_history.py`,
+  `apps/api/app/domains/risk/services/position_as_of.py`, PGB-10, future risk
+  scenario routes, EOD packs, and assistant risk read tools
+- Status: implemented
+- Source:
+  `apps/api/app/domains/risk/services/scenario_stress.py`,
+  `apps/api/tests/test_scenario_stress_service.py`, and
+  [Premium E/CTRM Gap Bridge Work Packages](./premium-ectrm-gap-bridge-work-packages.md)
+- Lesson: scenario stress should be a read-only overlay on governed source
+  outputs. Flat-price and basis shocks use P&L valuations that already carry
+  official-mark evidence; volume and delivery-disruption shocks use
+  position-as-of rows that already carry replay or projection source basis.
+  Missing marks, unsupported valuations, missing quantities, or missing tenors
+  become explicit missing-evidence rows instead of ad hoc assumptions.
+- Deterministic opportunity: expose future scenario APIs, UI runs, EOD stress
+  packs, and assistant tools through this service or an approved persisted
+  equivalent. Scenario templates, run history, shock taxonomies, unit
+  conversion, and delivery-disruption policy should be owner-approved
+  deterministic configuration, not prompt instructions or frontend-only math.
+- Agent autonomy impact: assistants may summarize scenario deltas, missing
+  evidence, affected trades, and affected position factors. They must not use
+  scenario output as authority to execute hedges, book trades, override marks,
+  modify schedules, change credit/risk limits, or externally commit the firm.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_scenario_stress_service`
+
+### 2026-06-06 - Gas Scheduling Needs Typed Commitment And Blocker Evidence
+
+- Type: algorithm-added
+- Domain: gas scheduling, nominations, physical operations, delivery boards,
+  audit, settlement readiness, and assistant explanations
+- Applies to: `apps/api/app/domains/operations/services/gas_scheduling.py`,
+  `apps/api/app/domains/operations/services/shipments.py`, PGB-11, delivery
+  boards, future scheduling routes, actualization readiness, settlement
+  preview, and assistant operations read tools
+- Status: implemented
+- Source:
+  `apps/api/app/domains/operations/services/gas_scheduling.py`,
+  `apps/api/tests/test_gas_scheduling_service.py`,
+  `apps/api/app/domains/operations/services/shipments.py`, and
+  [Premium E/CTRM Gap Bridge Work Packages](./premium-ectrm-gap-bridge-work-packages.md)
+- Lesson: gas scheduling should be a typed operations commitment over delivery
+  obligations and pipeline detail, not freeform notes or UI-only status text.
+  The schedule basis must preserve scheduled quantity, unit, gas-day window,
+  owner, pipeline system/path, receipt and delivery locations, contract/cycle,
+  nomination reference, allowed nomination transitions, and blocking evidence.
+  Transitions to scheduled, nominated, or completed states should fail with
+  explicit blockers when required gas movement evidence is missing.
+- Deterministic opportunity: future route/UI contracts, nomination run history,
+  actualization readiness, settlement previews, and assistant tools should use
+  this scheduling service or an approved persisted equivalent. Pipeline
+  integration adapters, nomination-cycle rules, cutoffs, balancing periods, and
+  correction/rollback behavior should be owner-approved deterministic policy.
+- Agent autonomy impact: assistants may explain why a gas schedule is blocked,
+  summarize required fields, and draft operator follow-up. They must not invent
+  nomination references, submit pipeline nominations, change gas-day schedules,
+  bypass blockers, mark schedules complete, or externally commit movement
+  without typed service execution and the required human authority.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_gas_scheduling_service`
+
+### 2026-06-06 - Actualization Ledger Is Settlement Evidence Before Inventory
+
+- Type: algorithm-added
+- Domain: actualization, settlement readiness, accrual evidence, inventory
+  policy, physical gas operations, audit, and assistant explanations
+- Applies to:
+  `apps/api/app/domains/operations/services/actualization_ledger.py`,
+  `apps/api/app/domains/operations/services/actualizations.py`, PGB-12,
+  future settlement preview routes, inventory ledger work, and assistant
+  operations or settlement read tools
+- Status: implemented
+- Source:
+  `apps/api/app/domains/operations/services/actualization_ledger.py`,
+  `apps/api/tests/test_actualization_ledger_service.py`,
+  `apps/api/app/domains/operations/services/actualizations.py`, and
+  [Premium E/CTRM Gap Bridge Work Packages](./premium-ectrm-gap-bridge-work-packages.md)
+- Lesson: actualized delivered quantities should be represented as
+  deterministic ledger evidence linked to the trade and persisted delivery or
+  schedule commitment. The ledger basis must preserve actual quantity, unit,
+  actual gas day, delivery location, source evidence, nomination/schedule
+  evidence, void/correction metadata, settlement eligibility, and blockers.
+  For the first gas slice, inventory posting is explicitly deferred with
+  `ACTUALIZATION_ONLY_INVENTORY_DEFERRED`; actualization drives settlement and
+  accrual evidence but does not create inventory balances.
+- Deterministic opportunity: future settlement preview, inventory posting,
+  exception workbench, and assistant tools should consume this ledger service
+  or an approved persisted equivalent. Custody transfer, inventory ownership,
+  balance relief, gas-day cutover, and reversal rules should become
+  owner-approved deterministic policy before any service creates inventory
+  ledger entries from actuals.
+- Agent autonomy impact: assistants may explain actualization evidence,
+  missing source/location/gas-day blockers, settlement readiness, and why
+  inventory is deferred. They must not infer inventory balances, post inventory
+  movements, ignore voided actualizations, or treat source-less actuals as
+  settlement-ready outside typed service policy.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_actualization_ledger_service`

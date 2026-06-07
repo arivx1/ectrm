@@ -73,7 +73,7 @@ async def generate_assistant_agent_self_update_draft(
         stop_conditions=list(autonomy_review.stop_conditions[:MAX_SELF_UPDATE_STOP_CONDITIONS]),
     )
     source_brief = _build_self_update_brief(record, evidence=evidence, operator_brief=payload.brief if payload else None)
-    suggestion = await assistant_service.build_agent_self_update_draft_with_openai(
+    suggestion = await assistant_service.build_agent_self_update_draft(
         agent_definition=to_managed_agent(record),
         brief=source_brief,
     )

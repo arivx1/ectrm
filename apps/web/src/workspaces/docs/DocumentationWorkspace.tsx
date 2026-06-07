@@ -65,9 +65,9 @@ const QUICK_ACTIONS: Array<{
   view: Exclude<ViewKey, 'guide'>
 }> = [
   {
-    eyebrow: 'Start',
-    label: 'Open Dashboard',
-    detail: 'See the operating picture first.',
+    eyebrow: 'Home',
+    label: 'Open Home',
+    detail: 'Start with the operating brief.',
     view: 'dashboard',
   },
   {

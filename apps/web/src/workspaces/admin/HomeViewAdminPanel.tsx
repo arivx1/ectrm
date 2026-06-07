@@ -209,7 +209,7 @@ export function HomeViewAdminPanel({
                       {formatHomeViewScope(definition)} · {definition.status} · v{definition.version}
                     </p>
                     <span>
-                      {definition.cards.length} cards · updated by {definition.updated_by} · {formatDate(definition.updated_at)}
+                      {definition.cards.length} app{definition.cards.length === 1 ? '' : 's'} · updated by {definition.updated_by} · {formatDate(definition.updated_at)}
                     </span>
                     <div className="chip-row">
                       <span className="entity-chip entity-chip-soft">

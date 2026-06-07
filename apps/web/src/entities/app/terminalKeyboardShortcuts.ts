@@ -38,9 +38,9 @@ type TerminalShortcutKeyEvent = {
 export const TERMINAL_WORKSPACE_SHORTCUTS: TerminalWorkspaceShortcut[] = [
   {
     key: '1',
-    view: 'dashboard',
-    label: 'Live Desk',
-    detail: 'Open the market monitor and desk dashboard.',
+    view: 'prompt',
+    label: 'Home',
+    detail: 'Open the configurable Home apps surface.',
   },
   {
     key: '2',
@@ -100,7 +100,7 @@ export const TERMINAL_SHORTCUT_DEFINITIONS: TerminalShortcutDefinition[] = [
     category: 'Navigation',
     label: 'Switch primary workspace',
     keys: ['Alt+1...8'],
-    detail: 'Jump across Live Desk, Trades, Risk, Operations, Settlement, Reports, Reference, and Assistant.',
+    detail: 'Jump across Home, Trades, Risk, Operations, Settlement, Reports, Reference, and Assistant.',
     conflictSafe: true,
   },
   {

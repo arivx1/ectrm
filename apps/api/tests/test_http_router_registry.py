@@ -21,6 +21,8 @@ class HttpRouterRegistryTests(unittest.TestCase):
         self.assertIn(("codex", "codex-admin"), registrations)
         self.assertIn(("codex", "codex-callback"), registrations)
         self.assertIn(("wiki", "wiki"), registrations)
+        self.assertIn(("integrations", "integrations"), registrations)
+        self.assertIn(("integrations", "integrations-admin"), registrations)
 
     def test_include_http_routers_mounts_expected_paths(self) -> None:
         app = FastAPI()
@@ -58,6 +60,11 @@ class HttpRouterRegistryTests(unittest.TestCase):
         self.assertIn("/mcp/whoami", paths)
         self.assertIn("/admin/codex/tasks", paths)
         self.assertIn("/codex/tasks/{task_id}/callback", paths)
+        self.assertIn("/integrations/attio/client-enrichment", paths)
+        self.assertIn("/admin/integrations/attio/settings", paths)
+        self.assertIn("/admin/integrations/attio/test-connection", paths)
+        self.assertIn("/admin/integrations/notion/settings", paths)
+        self.assertIn("/admin/integrations/notion/test-connection", paths)
 
 
 if __name__ == "__main__":

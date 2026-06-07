@@ -2537,11 +2537,19 @@ export type PreTradeTransformationEdgeType =
 export type PreTradeNettingCandidateMatchQuality = 'EXACT' | 'PARTIAL' | 'REJECTED'
 export type PreTradeHedgeInstrumentType = 'FUTURES' | 'OPTIONS' | 'SWAP' | 'PHYSICAL_OFFSET' | 'NO_HEDGE' | 'WAIT_FOR_DATA'
 export type PreTradeMissingEvidenceSeverity = 'BLOCKING' | 'WARNING'
-export type PreTradePromotionCandidateType = 'NETTING_SET' | 'HEDGE_RECOMMENDATION' | 'RISK_SCENARIO'
+export type PreTradePromotionCandidateType = 'NETTING_SET' | 'HEDGE_RECOMMENDATION' | 'RISK_SCENARIO' | 'MARKET_OPPORTUNITY'
 export type PreTradePromotionCandidateStatus = 'WATCH' | 'CANDIDATE'
+export type PreTradePromotionOutcomeType =
+  | 'CREATED'
+  | 'REUSED'
+  | 'RETIRED'
+  | 'REJECTED'
+  | 'MERGED_INTO_BOOKED_TRADE'
+  | 'BLOCKED_BY_MISSING_EVIDENCE'
 export type PreTradeNettingSetStatus = 'REVIEW_DRAFT' | 'RETIRED'
 export type PreTradeHedgeRecommendationStatus = 'REVIEW_DRAFT' | 'RETIRED'
 export type PreTradeRiskScenarioStatus = 'REVIEW_DRAFT' | 'RETIRED'
+export type PreTradeMarketOpportunityStatus = 'REVIEW_DRAFT' | 'RETIRED'
 export type PreTradeGovernanceAuditCategory =
   | 'PENDING_REVIEW'
   | 'RISKY_RECOMMENDATION'
@@ -2642,6 +2650,57 @@ export type PreTradeReviewDriftRecord = {
   latest_recommendation_score: number | null
   current_impaired_sources: string[]
   reasons: PreTradeReviewDriftReasonRecord[]
+}
+
+export type PreTradePromotionOutcomeMetricRecord = {
+  outcome: PreTradePromotionOutcomeType
+  count: number
+}
+
+export type PreTradePromotionOutcomeByDraftTypeRecord = {
+  draft_type: PreTradePromotionCandidateType
+  label: string
+  total_count: number
+  created_count: number
+  reused_count: number
+  retired_count: number
+  rejected_count: number
+  merged_into_booked_trade_count: number
+  blocked_by_missing_evidence_count: number
+}
+
+export type PreTradePromotionOutcomeDraftRecord = {
+  draft_type: PreTradePromotionCandidateType
+  draft_id: number
+  draft_key: string
+  name: string
+  status: string
+  source_promotion_score: number
+  source_review_count: number
+  source_approved_review_count: number
+  source_booked_review_count: number
+  source_run_count: number
+  source_latest_review_id: number | null
+  source_latest_run_id: number | null
+  source_review_status: PreTradeReviewStatus | null
+  source_linked_trade_id: string | null
+  source_linked_trade_status: string | null
+  source_booked_at: string | null
+  has_blocking_missing_evidence: boolean
+  outcomes: PreTradePromotionOutcomeType[]
+  outcome_reasons: string[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+}
+
+export type PreTradePromotionOutcomeSummaryRecord = {
+  generated_at: string
+  total_draft_count: number
+  metrics: PreTradePromotionOutcomeMetricRecord[]
+  by_draft_type: PreTradePromotionOutcomeByDraftTypeRecord[]
+  drafts: PreTradePromotionOutcomeDraftRecord[]
 }
 
 export type PreTradeGovernanceSummaryRecord = {
@@ -3049,6 +3108,52 @@ export type PreTradeRiskScenarioRecord = {
   residual_exposure: PreTradeRecommendationResidualExposureRecord | null
   input_snapshots: PreTradeRecommendationSourceSnapshotRecord[]
   missing_evidence: PreTradeRecommendationMissingEvidenceRecord[]
+  reviewer_focus: string[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
+}
+
+export type PreTradeMarketOpportunityRecord = {
+  market_opportunity_id: number
+  market_opportunity_key: string
+  name: string
+  status: PreTradeMarketOpportunityStatus
+  owner: string | null
+  review_note: string | null
+  source_promotion_candidate_type: PreTradePromotionCandidateType
+  source_promotion_status: PreTradePromotionCandidateStatus
+  source_promotion_score: number
+  source_review_count: number
+  source_approved_review_count: number
+  source_booked_review_count: number
+  source_override_count: number
+  source_run_count: number
+  source_latest_review_id: number | null
+  source_latest_run_id: number | null
+  source_sample_review_ids: number[]
+  source_sample_run_ids: number[]
+  source_evidence_summary: string
+  source_promotion_rationale: string
+  source_stop_reasons: string[]
+  source_review_name: string
+  source_review_status: PreTradeReviewStatus
+  source_review_thesis: string | null
+  source_review_notes: string | null
+  source_review_owner: string | null
+  source_recommendation_stance: PreTradeRecommendationStance
+  source_recommendation_score: number
+  source_recommendation_headline: string
+  draft: PreTradeScenarioDraft
+  opportunity_summary: PreTradeRecommendationOpportunitySummaryRecord
+  arbitrage_candidate: PreTradeRecommendationArbitrageCandidateRecord | null
+  residual_exposure: PreTradeRecommendationResidualExposureRecord | null
+  input_snapshots: PreTradeRecommendationSourceSnapshotRecord[]
+  missing_evidence: PreTradeRecommendationMissingEvidenceRecord[]
+  next_actions: string[]
   reviewer_focus: string[]
   created_at: string
   created_by: string

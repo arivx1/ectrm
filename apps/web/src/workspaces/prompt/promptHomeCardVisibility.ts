@@ -19,13 +19,23 @@ import {
 } from "../../entities/home-views/api";
 import {
   isPromptHomeCardKey,
+  getPromptHomeCardLabel,
+  getPromptHomeCardInstanceId,
   normalizePromptHomeTemplateCards,
   PROMPT_HOME_CARD_KEYS,
+  PROMPT_HOME_CARD_VISIBILITY_OPTIONS,
+  PROMPT_HOME_CARD_MAX_COLLAPSED_ROW_SPAN,
+  PROMPT_HOME_CARD_MAX_EXPANDED_ROW_SPAN,
+  PROMPT_HOME_CARD_MAX_HORIZONTAL_SPAN,
+  PROMPT_HOME_CARD_MIN_SPAN,
   PROMPT_HOME_SYSTEM_TEMPLATE,
   PROMPT_HOME_SYSTEM_TEMPLATE_KEY,
   PROMPT_HOME_SYSTEM_TEMPLATE_VERSION,
   type PromptHomeCardKey,
+  type PromptHomeCardHorizontalSpan,
+  type PromptHomeCardPlacement,
   type PromptHomeTemplateCard,
+  type PromptHomeCardVerticalSpan,
 } from "./promptHomeCards";
 
 export { PROMPT_HOME_CARD_VISIBILITY_OPTIONS, type PromptHomeCardKey } from "./promptHomeCards";
@@ -34,12 +44,15 @@ export const PROMPT_HOME_CARD_VISIBILITY_STORAGE_KEY =
   "ectrm.prompt-home.card-visibility";
 export const PROMPT_HOME_CARD_ORDER_STORAGE_KEY =
   "ectrm.prompt-home.card-order";
+export const PROMPT_HOME_TEMPLATE_CARDS_STORAGE_KEY =
+  "ectrm.prompt-home.cards.v2";
 
 const PROMPT_HOME_CARD_VISIBILITY_STORAGE_EVENT =
   "ectrm:prompt-home-card-visibility-change";
 const PROMPT_HOME_CARD_ORDER_STORAGE_EVENT =
   "ectrm:prompt-home-card-order-change";
-const PROMPT_HOME_CARD_KEY_SEPARATOR = "\u001f";
+const PROMPT_HOME_TEMPLATE_CARDS_STORAGE_EVENT =
+  "ectrm:prompt-home-cards-change";
 export const PROMPT_HOME_DEFAULT_PERSONAL_VIEW_NAME = "My Home";
 export const PROMPT_HOME_PERSONAL_VIEW_MIGRATION_STORAGE_KEY_PREFIX =
   "ectrm.prompt-home.default-view-migrated";
@@ -84,6 +97,26 @@ type UsePersistentPromptHomeCardVisibilityOptions = {
 export type PromptHomeCardConfigurationPatch = {
   parameters?: Record<string, unknown>;
   filters?: Record<string, unknown>;
+};
+
+export type PromptHomeCardClipboard = {
+  mode: "copy" | "cut";
+  sourceInstanceId: string;
+  cardId: PromptHomeCardKey;
+  label: string;
+};
+
+export type PromptHomeCardSizeState = "collapsed" | "expanded";
+export type PromptHomeCardSizeAxis = "horizontal" | "vertical";
+export type PromptHomeCardSizeDirection = "decrease" | "increase";
+
+type PromptHomeCardClipboardState = PromptHomeCardClipboard & {
+  card: PromptHomeTemplateCard;
+};
+
+type PromptHomeCardUndoState = {
+  label: string;
+  cards: PromptHomeTemplateCard[];
 };
 
 function uniquePromptHomeCardKeys(candidate: unknown): PromptHomeCardKey[] {
@@ -172,12 +205,58 @@ export function getPromptHomeCardOrderSnapshot(): PromptHomeCardKey[] {
   }
 }
 
+function promptHomeTemplateCardsToStorageCards(
+  cards: readonly PromptHomeTemplateCard[],
+): Array<Record<string, unknown>> {
+  return normalizePromptHomeTemplateCards(cards).map((card) => ({
+    instanceId: getPromptHomeCardInstanceId(card),
+    cardId: card.cardId,
+    visible: card.visible,
+    placement: {
+      order: card.placement.order,
+      columnSpan: card.placement.columnSpan,
+      rowSpan: card.placement.rowSpan,
+      collapsedColumnSpan: card.placement.collapsedColumnSpan,
+      collapsedRowSpan: card.placement.collapsedRowSpan,
+      expandedColumnSpan: card.placement.expandedColumnSpan,
+      expandedRowSpan: card.placement.expandedRowSpan,
+    },
+    parameters: { ...card.parameters },
+    filters: { ...card.filters },
+    dataBindings: [...card.dataBindings],
+  }));
+}
+
+function getPromptHomeTemplateCardsSnapshot(): PromptHomeTemplateCard[] {
+  if (typeof window === "undefined") {
+    return normalizePromptHomeTemplateCards(PROMPT_HOME_SYSTEM_TEMPLATE.cards);
+  }
+
+  const storedValue = window.localStorage.getItem(
+    PROMPT_HOME_TEMPLATE_CARDS_STORAGE_KEY,
+  );
+  if (storedValue) {
+    try {
+      return normalizePromptHomeTemplateCards(JSON.parse(storedValue));
+    } catch {
+      // Fall through to the legacy split order/visibility preferences.
+    }
+  }
+
+  return buildPromptHomeCardsFromOrderAndHidden(
+    getPromptHomeCardOrderSnapshot(),
+    getPromptHomeHiddenCardKeysSnapshot(),
+  );
+}
+
 function promptHomeLocalPreferencesExist(): boolean {
   if (typeof window === "undefined") {
     return false;
   }
 
   return (
+    window.localStorage.getItem(PROMPT_HOME_TEMPLATE_CARDS_STORAGE_KEY) !==
+      null ||
     window.localStorage.getItem(PROMPT_HOME_CARD_VISIBILITY_STORAGE_KEY) !==
       null ||
     window.localStorage.getItem(PROMPT_HOME_CARD_ORDER_STORAGE_KEY) !== null
@@ -261,34 +340,36 @@ function saveActiveHomeViewValue(userId: string, value: string): void {
   }
 }
 
-function getPromptHomeHiddenCardKeySnapshotValue(): string {
-  return getPromptHomeHiddenCardKeysSnapshot().join(
-    PROMPT_HOME_CARD_KEY_SEPARATOR,
-  );
-}
-
-function getPromptHomeCardOrderSnapshotValue(): string {
-  return getPromptHomeCardOrderSnapshot().join(
-    PROMPT_HOME_CARD_KEY_SEPARATOR,
+function getPromptHomeTemplateCardsSnapshotValue(): string {
+  return JSON.stringify(
+    promptHomeTemplateCardsToStorageCards(getPromptHomeTemplateCardsSnapshot()),
   );
 }
 
 function clonePromptHomeTemplateCard(
   card: PromptHomeTemplateCard,
   args: {
+    instanceId?: string;
     order: number;
     visible: boolean;
+    placement?: PromptHomeCardPlacement;
     parameters?: Record<string, unknown>;
     filters?: Record<string, unknown>;
   },
 ): PromptHomeTemplateCard {
+  const placement = args.placement ?? card.placement;
   return {
+    instanceId: args.instanceId ?? getPromptHomeCardInstanceId(card),
     cardId: card.cardId,
     visible: args.visible,
     placement: {
       order: args.order,
-      columnSpan: card.placement.columnSpan,
-      rowSpan: card.placement.rowSpan,
+      columnSpan: placement.columnSpan,
+      rowSpan: placement.rowSpan,
+      collapsedColumnSpan: placement.collapsedColumnSpan,
+      collapsedRowSpan: placement.collapsedRowSpan,
+      expandedColumnSpan: placement.expandedColumnSpan,
+      expandedRowSpan: placement.expandedRowSpan,
     },
     parameters: args.parameters ? { ...args.parameters } : { ...card.parameters },
     filters: args.filters ? { ...args.filters } : { ...card.filters },
@@ -324,10 +405,7 @@ export function buildPromptHomeCardsFromOrderAndHidden(
 }
 
 export function buildPromptHomeCardsFromLocalPreferences(): PromptHomeTemplateCard[] {
-  return buildPromptHomeCardsFromOrderAndHidden(
-    getPromptHomeCardOrderSnapshot(),
-    getPromptHomeHiddenCardKeysSnapshot(),
-  );
+  return getPromptHomeTemplateCardsSnapshot();
 }
 
 export function promptHomeTemplateCardsToOrderAndHidden(
@@ -337,18 +415,44 @@ export function promptHomeTemplateCardsToOrderAndHidden(
   hidden: PromptHomeCardKey[];
 } {
   const normalizedCards = normalizePromptHomeTemplateCards(cards);
+  const orderedCardKeys: PromptHomeCardKey[] = [];
 
   return {
-    order: normalizedCards.map((card) => card.cardId),
-    hidden: normalizedCards
-      .filter((card) => !card.visible)
-      .map((card) => card.cardId),
+    order: normalizedCards.reduce<PromptHomeCardKey[]>((order, card) => {
+      if (!orderedCardKeys.includes(card.cardId)) {
+        orderedCardKeys.push(card.cardId);
+        order.push(card.cardId);
+      }
+      return order;
+    }, []),
+    hidden: PROMPT_HOME_CARD_KEYS.filter((cardKey) =>
+      normalizedCards
+        .filter((card) => card.cardId === cardKey)
+        .every((card) => !card.visible),
+    ),
   };
 }
 
 function savePromptHomeTemplateCardsToLocalStorage(
   cards: readonly PromptHomeTemplateCard[],
 ): void {
+  const normalizedCards = normalizePromptHomeTemplateCards(cards);
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(
+        PROMPT_HOME_TEMPLATE_CARDS_STORAGE_KEY,
+        JSON.stringify({
+          cards: promptHomeTemplateCardsToStorageCards(normalizedCards),
+        }),
+      );
+      if (typeof window.dispatchEvent === "function") {
+        window.dispatchEvent(new Event(PROMPT_HOME_TEMPLATE_CARDS_STORAGE_EVENT));
+      }
+    } catch {
+      // Keep the legacy preference write below as a small fallback.
+    }
+  }
+
   const { hidden, order } = promptHomeTemplateCardsToOrderAndHidden(cards);
   savePromptHomeCardOrder(order);
   savePromptHomeHiddenCardKeys(hidden);
@@ -512,7 +616,7 @@ export function savePromptHomeCardOrder(
   return orderedKeys;
 }
 
-function subscribeToPromptHomeCardVisibility(
+function subscribeToPromptHomeTemplateCards(
   onStoreChange: () => void,
 ): () => void {
   if (
@@ -528,46 +632,8 @@ function subscribeToPromptHomeCardVisibility(
       const storageEvent = event as StorageEvent;
       if (
         typeof storageEvent.key === "string" &&
-        storageEvent.key !== PROMPT_HOME_CARD_VISIBILITY_STORAGE_KEY
-      ) {
-        return;
-      }
-    }
-
-    onStoreChange();
-  };
-
-  window.addEventListener(
-    PROMPT_HOME_CARD_VISIBILITY_STORAGE_EVENT,
-    handleStoreEvent,
-  );
-  window.addEventListener("storage", handleStoreEvent);
-
-  return () => {
-    window.removeEventListener(
-      PROMPT_HOME_CARD_VISIBILITY_STORAGE_EVENT,
-      handleStoreEvent,
-    );
-    window.removeEventListener("storage", handleStoreEvent);
-  };
-}
-
-function subscribeToPromptHomeCardOrder(
-  onStoreChange: () => void,
-): () => void {
-  if (
-    typeof window === "undefined" ||
-    typeof window.addEventListener !== "function" ||
-    typeof window.removeEventListener !== "function"
-  ) {
-    return () => undefined;
-  }
-
-  const handleStoreEvent = (event: Event) => {
-    if (event.type === "storage") {
-      const storageEvent = event as StorageEvent;
-      if (
-        typeof storageEvent.key === "string" &&
+        storageEvent.key !== PROMPT_HOME_TEMPLATE_CARDS_STORAGE_KEY &&
+        storageEvent.key !== PROMPT_HOME_CARD_VISIBILITY_STORAGE_KEY &&
         storageEvent.key !== PROMPT_HOME_CARD_ORDER_STORAGE_KEY
       ) {
         return;
@@ -577,10 +643,26 @@ function subscribeToPromptHomeCardOrder(
     onStoreChange();
   };
 
+  window.addEventListener(
+    PROMPT_HOME_TEMPLATE_CARDS_STORAGE_EVENT,
+    handleStoreEvent,
+  );
+  window.addEventListener(
+    PROMPT_HOME_CARD_VISIBILITY_STORAGE_EVENT,
+    handleStoreEvent,
+  );
   window.addEventListener(PROMPT_HOME_CARD_ORDER_STORAGE_EVENT, handleStoreEvent);
   window.addEventListener("storage", handleStoreEvent);
 
   return () => {
+    window.removeEventListener(
+      PROMPT_HOME_TEMPLATE_CARDS_STORAGE_EVENT,
+      handleStoreEvent,
+    );
+    window.removeEventListener(
+      PROMPT_HOME_CARD_VISIBILITY_STORAGE_EVENT,
+      handleStoreEvent,
+    );
     window.removeEventListener(
       PROMPT_HOME_CARD_ORDER_STORAGE_EVENT,
       handleStoreEvent,
@@ -589,39 +671,298 @@ function subscribeToPromptHomeCardOrder(
   };
 }
 
-function movePromptHomeCardOrder(
-  currentOrder: PromptHomeCardKey[],
-  hiddenKeys: PromptHomeCardKey[],
-  activeCardKey: string,
-  overCardKey: string,
-): PromptHomeCardKey[] {
-  const hiddenKeySet = new Set(hiddenKeys);
-  const visibleOrder = currentOrder.filter(
-    (cardKey) => !hiddenKeySet.has(cardKey),
+function reindexPromptHomeCards(
+  cards: readonly PromptHomeTemplateCard[],
+): PromptHomeTemplateCard[] {
+  return normalizePromptHomeTemplateCards(cards).map((card, index) =>
+    clonePromptHomeTemplateCard(card, {
+      order: index,
+      visible: card.visible,
+    }),
   );
-  const oldIndex = visibleOrder.indexOf(activeCardKey as PromptHomeCardKey);
-  const newIndex = visibleOrder.indexOf(overCardKey as PromptHomeCardKey);
-  if (oldIndex === -1 || newIndex === -1) {
-    return currentOrder;
+}
+
+function clonePromptHomeCardsSnapshot(
+  cards: readonly PromptHomeTemplateCard[],
+): PromptHomeTemplateCard[] {
+  return cards.map((card, index) =>
+    clonePromptHomeTemplateCard(card, {
+      order: index,
+      visible: card.visible,
+    }),
+  );
+}
+
+function findPromptHomeCardByInstanceId(
+  cards: readonly PromptHomeTemplateCard[],
+  instanceId: string,
+): PromptHomeTemplateCard | null {
+  return (
+    cards.find((card) => getPromptHomeCardInstanceId(card) === instanceId) ??
+    null
+  );
+}
+
+function resolvePromptHomeCardInstanceId(
+  cards: readonly PromptHomeTemplateCard[],
+  instanceIdOrCardKey: string,
+): string | null {
+  if (
+    cards.some((card) => getPromptHomeCardInstanceId(card) === instanceIdOrCardKey)
+  ) {
+    return instanceIdOrCardKey;
   }
 
-  const nextVisibleOrder = [...visibleOrder];
-  const [movedCardKey] = nextVisibleOrder.splice(oldIndex, 1);
-  if (!movedCardKey) {
-    return currentOrder;
-  }
-  nextVisibleOrder.splice(newIndex, 0, movedCardKey);
+  return (
+    cards.find((card) => card.cardId === instanceIdOrCardKey)?.instanceId ??
+    null
+  );
+}
 
-  let visibleIndex = 0;
-  return currentOrder.map((cardKey) => {
-    if (hiddenKeySet.has(cardKey)) {
-      return cardKey;
+function createPromptHomeCopyInstanceId(
+  cards: readonly PromptHomeTemplateCard[],
+  cardKey: PromptHomeCardKey,
+): string {
+  const usedInstanceIds = new Set(
+    cards.map((card) => getPromptHomeCardInstanceId(card)),
+  );
+  let copyIndex =
+    cards.filter((card) => card.cardId === cardKey).length + 1;
+
+  while (copyIndex < 10_000) {
+    const candidate = `${cardKey}-copy-${copyIndex}`;
+    if (!usedInstanceIds.has(candidate)) {
+      return candidate;
     }
+    copyIndex += 1;
+  }
 
-    const nextCardKey = nextVisibleOrder[visibleIndex];
-    visibleIndex += 1;
-    return nextCardKey ?? cardKey;
-  });
+  return `${cardKey}-copy-${Date.now().toString(36)}`;
+}
+
+function insertPromptHomeCardAfterInstance(
+  cards: readonly PromptHomeTemplateCard[],
+  sourceInstanceId: string,
+  card: PromptHomeTemplateCard,
+): PromptHomeTemplateCard[] {
+  const nextCards = clonePromptHomeCardsSnapshot(cards);
+  const sourceIndex = nextCards.findIndex(
+    (candidate) => getPromptHomeCardInstanceId(candidate) === sourceInstanceId,
+  );
+  const insertIndex = sourceIndex === -1 ? nextCards.length : sourceIndex + 1;
+  nextCards.splice(insertIndex, 0, card);
+  return reindexPromptHomeCards(nextCards);
+}
+
+function insertPromptHomeCardAtEnd(
+  cards: readonly PromptHomeTemplateCard[],
+  card: PromptHomeTemplateCard,
+): PromptHomeTemplateCard[] {
+  const nextCards = clonePromptHomeCardsSnapshot(cards);
+  let lastVisibleIndex = -1;
+  for (let index = nextCards.length - 1; index >= 0; index -= 1) {
+    if (nextCards[index]?.visible) {
+      lastVisibleIndex = index;
+      break;
+    }
+  }
+  nextCards.splice(lastVisibleIndex === -1 ? 0 : lastVisibleIndex + 1, 0, card);
+  return reindexPromptHomeCards(nextCards);
+}
+
+function movePromptHomeCardInstance(
+  cards: readonly PromptHomeTemplateCard[],
+  activeInstanceId: string,
+  overInstanceId: string,
+): PromptHomeTemplateCard[] {
+  const normalizedCards = clonePromptHomeCardsSnapshot(cards);
+  const activeCard = findPromptHomeCardByInstanceId(
+    normalizedCards,
+    activeInstanceId,
+  );
+  const overCard = findPromptHomeCardByInstanceId(normalizedCards, overInstanceId);
+  if (!activeCard || !overCard || activeInstanceId === overInstanceId) {
+    return normalizedCards;
+  }
+
+  const activeIndex = normalizedCards.findIndex(
+    (card) => getPromptHomeCardInstanceId(card) === activeInstanceId,
+  );
+  const overIndex = normalizedCards.findIndex(
+    (card) => getPromptHomeCardInstanceId(card) === overInstanceId,
+  );
+  if (activeIndex === -1 || overIndex === -1) {
+    return normalizedCards;
+  }
+
+  const nextCards = [...normalizedCards];
+  const [removedCard] = nextCards.splice(activeIndex, 1);
+  if (!removedCard) {
+    return normalizedCards;
+  }
+
+  const nextOverIndex = nextCards.findIndex(
+    (card) => getPromptHomeCardInstanceId(card) === overInstanceId,
+  );
+  nextCards.splice(nextOverIndex === -1 ? overIndex : nextOverIndex, 0, removedCard);
+  return reindexPromptHomeCards(nextCards);
+}
+
+export function deletePromptHomeCardInstance(
+  cards: readonly PromptHomeTemplateCard[],
+  instanceId: string,
+): PromptHomeTemplateCard[] {
+  const normalizedCards = clonePromptHomeCardsSnapshot(cards);
+  const sourceCard = findPromptHomeCardByInstanceId(normalizedCards, instanceId);
+  if (!sourceCard) {
+    return normalizedCards;
+  }
+
+  const sameKindCount = normalizedCards.filter(
+    (card) => card.cardId === sourceCard.cardId,
+  ).length;
+  if (sameKindCount > 1) {
+    return reindexPromptHomeCards(
+      normalizedCards.filter(
+        (card) => getPromptHomeCardInstanceId(card) !== instanceId,
+      ),
+    );
+  }
+
+  return reindexPromptHomeCards(
+    normalizedCards.map((card, index) =>
+      clonePromptHomeTemplateCard(card, {
+        order: index,
+        visible:
+          getPromptHomeCardInstanceId(card) === instanceId
+            ? false
+            : card.visible,
+      }),
+    ),
+  );
+}
+
+function shiftPromptHomeCardHorizontalSpan(
+  value: PromptHomeCardHorizontalSpan,
+  direction: PromptHomeCardSizeDirection,
+): PromptHomeCardHorizontalSpan {
+  const nextValue = value + (direction === "increase" ? 1 : -1);
+  if (nextValue <= PROMPT_HOME_CARD_MIN_SPAN) {
+    return PROMPT_HOME_CARD_MIN_SPAN;
+  }
+  if (nextValue >= PROMPT_HOME_CARD_MAX_HORIZONTAL_SPAN) {
+    return PROMPT_HOME_CARD_MAX_HORIZONTAL_SPAN;
+  }
+  return nextValue as PromptHomeCardHorizontalSpan;
+}
+
+function shiftPromptHomeCardVerticalSpan(
+  value: PromptHomeCardVerticalSpan,
+  direction: PromptHomeCardSizeDirection,
+  maxSpan: number,
+): PromptHomeCardVerticalSpan {
+  const nextValue = value + (direction === "increase" ? 1 : -1);
+  if (nextValue <= PROMPT_HOME_CARD_MIN_SPAN) {
+    return PROMPT_HOME_CARD_MIN_SPAN;
+  }
+  if (nextValue >= maxSpan) {
+    return maxSpan as PromptHomeCardVerticalSpan;
+  }
+  return nextValue as PromptHomeCardVerticalSpan;
+}
+
+function normalizePromptHomeCardHorizontalSpan(
+  value: number,
+): PromptHomeCardHorizontalSpan {
+  const roundedValue = Math.round(value);
+  if (roundedValue <= PROMPT_HOME_CARD_MIN_SPAN) {
+    return PROMPT_HOME_CARD_MIN_SPAN;
+  }
+  if (roundedValue >= PROMPT_HOME_CARD_MAX_HORIZONTAL_SPAN) {
+    return PROMPT_HOME_CARD_MAX_HORIZONTAL_SPAN;
+  }
+  return roundedValue as PromptHomeCardHorizontalSpan;
+}
+
+function normalizePromptHomeCardVerticalSpan(
+  value: number,
+  maxSpan: number,
+): PromptHomeCardVerticalSpan {
+  const roundedValue = Math.round(value);
+  if (roundedValue <= PROMPT_HOME_CARD_MIN_SPAN) {
+    return PROMPT_HOME_CARD_MIN_SPAN;
+  }
+  if (roundedValue >= maxSpan) {
+    return maxSpan as PromptHomeCardVerticalSpan;
+  }
+  return roundedValue as PromptHomeCardVerticalSpan;
+}
+
+export function resizePromptHomeCardPlacement(
+  placement: PromptHomeCardPlacement,
+  state: PromptHomeCardSizeState,
+  axis: PromptHomeCardSizeAxis,
+  direction: PromptHomeCardSizeDirection,
+): PromptHomeCardPlacement {
+  const nextPlacement = { ...placement };
+
+  if (axis === "horizontal") {
+    const nextColumnSpan = shiftPromptHomeCardHorizontalSpan(
+      placement.expandedColumnSpan,
+      direction,
+    );
+    nextPlacement.collapsedColumnSpan = nextColumnSpan;
+    nextPlacement.expandedColumnSpan = nextColumnSpan;
+  } else if (state === "collapsed") {
+    nextPlacement.collapsedRowSpan = shiftPromptHomeCardVerticalSpan(
+      placement.collapsedRowSpan,
+      direction,
+      PROMPT_HOME_CARD_MAX_COLLAPSED_ROW_SPAN,
+    );
+  } else {
+    nextPlacement.expandedRowSpan = shiftPromptHomeCardVerticalSpan(
+      placement.expandedRowSpan,
+      direction,
+      PROMPT_HOME_CARD_MAX_EXPANDED_ROW_SPAN,
+    );
+  }
+
+  return {
+    ...nextPlacement,
+    columnSpan: nextPlacement.expandedColumnSpan,
+    rowSpan: nextPlacement.expandedRowSpan,
+  };
+}
+
+export function resizePromptHomeCardPlacementToSpan(
+  placement: PromptHomeCardPlacement,
+  state: PromptHomeCardSizeState,
+  axis: PromptHomeCardSizeAxis,
+  span: number,
+): PromptHomeCardPlacement {
+  const nextPlacement = { ...placement };
+
+  if (axis === "horizontal") {
+    const nextColumnSpan = normalizePromptHomeCardHorizontalSpan(span);
+    nextPlacement.collapsedColumnSpan = nextColumnSpan;
+    nextPlacement.expandedColumnSpan = nextColumnSpan;
+  } else if (state === "collapsed") {
+    nextPlacement.collapsedRowSpan = normalizePromptHomeCardVerticalSpan(
+      span,
+      PROMPT_HOME_CARD_MAX_COLLAPSED_ROW_SPAN,
+    );
+  } else {
+    nextPlacement.expandedRowSpan = normalizePromptHomeCardVerticalSpan(
+      span,
+      PROMPT_HOME_CARD_MAX_EXPANDED_ROW_SPAN,
+    );
+  }
+
+  return {
+    ...nextPlacement,
+    columnSpan: nextPlacement.expandedColumnSpan,
+    rowSpan: nextPlacement.expandedRowSpan,
+  };
 }
 
 export function usePersistentPromptHomeCardVisibility(
@@ -645,15 +986,44 @@ export function usePersistentPromptHomeCardVisibility(
   publishActiveHomeView: (name?: string) => void;
   retireActiveHomeView: () => void;
   getCard: (cardKey: PromptHomeCardKey) => PromptHomeTemplateCard | null;
+  getCardByInstanceId: (instanceId: string) => PromptHomeTemplateCard | null;
   updateCardConfiguration: (
     cardKey: PromptHomeCardKey,
     patch: PromptHomeCardConfigurationPatch,
   ) => void;
+  updateCardInstanceConfiguration: (
+    instanceId: string,
+    patch: PromptHomeCardConfigurationPatch,
+  ) => void;
   hiddenCardKeys: PromptHomeCardKey[];
   visibleCardKeys: PromptHomeCardKey[];
+  visibleCards: PromptHomeTemplateCard[];
+  visibleCardInstanceIds: string[];
   isCardVisible: (cardKey: PromptHomeCardKey) => boolean;
   setCardVisible: (cardKey: PromptHomeCardKey, visible: boolean) => void;
   moveCard: (activeCardKey: string, overCardKey: string) => void;
+  resizeCardInstance: (
+    instanceId: string,
+    state: PromptHomeCardSizeState,
+    axis: PromptHomeCardSizeAxis,
+    direction: PromptHomeCardSizeDirection,
+  ) => void;
+  resizeCardInstanceToSpan: (
+    instanceId: string,
+    state: PromptHomeCardSizeState,
+    axis: PromptHomeCardSizeAxis,
+    span: number,
+  ) => void;
+  deleteCardInstance: (instanceId: string) => void;
+  cardClipboard: PromptHomeCardClipboard | null;
+  copyCardInstance: (instanceId: string) => void;
+  cutCardInstance: (instanceId: string) => void;
+  duplicateCardInstance: (instanceId: string) => void;
+  pasteCardFromClipboard: () => void;
+  clearCardClipboard: () => void;
+  canUndoLastCardAction: boolean;
+  lastCardActionLabel: string;
+  undoLastCardAction: () => void;
   showAllCards: () => void;
   resetHomeView: () => void;
   persistenceStatus: PromptHomeCardPersistenceStatus;
@@ -678,39 +1048,29 @@ export function usePersistentPromptHomeCardVisibility(
       fallback: false,
       error: "",
     });
-  const hiddenCardKeySnapshot = useSyncExternalStore(
-    subscribeToPromptHomeCardVisibility,
-    getPromptHomeHiddenCardKeySnapshotValue,
-    () => "",
-  );
-  const cardOrderSnapshot = useSyncExternalStore(
-    subscribeToPromptHomeCardOrder,
-    getPromptHomeCardOrderSnapshotValue,
-    () => PROMPT_HOME_CARD_KEYS.join(PROMPT_HOME_CARD_KEY_SEPARATOR),
-  );
-  const localHiddenCardKeys = useMemo(
+  const [cardClipboardState, setCardClipboardState] =
+    useState<PromptHomeCardClipboardState | null>(null);
+  const [lastUndoState, setLastUndoState] =
+    useState<PromptHomeCardUndoState | null>(null);
+  const localTemplateCardSnapshot = useSyncExternalStore(
+    subscribeToPromptHomeTemplateCards,
+    getPromptHomeTemplateCardsSnapshotValue,
     () =>
-      hiddenCardKeySnapshot
-        ? normalizePromptHomeHiddenCardKeys(
-            hiddenCardKeySnapshot.split(PROMPT_HOME_CARD_KEY_SEPARATOR),
-          )
-        : [],
-    [hiddenCardKeySnapshot],
-  );
-  const localOrderedCardKeys = useMemo(
-    () =>
-      normalizePromptHomeCardOrder(
-        cardOrderSnapshot.split(PROMPT_HOME_CARD_KEY_SEPARATOR),
+      JSON.stringify(
+        promptHomeTemplateCardsToStorageCards(PROMPT_HOME_SYSTEM_TEMPLATE.cards),
       ),
-    [cardOrderSnapshot],
   );
   const localCards = useMemo(
-    () =>
-      buildPromptHomeCardsFromOrderAndHidden(
-        localOrderedCardKeys,
-        localHiddenCardKeys,
-      ),
-    [localHiddenCardKeys, localOrderedCardKeys],
+    () => {
+      try {
+        return normalizePromptHomeTemplateCards(
+          JSON.parse(localTemplateCardSnapshot),
+        );
+      } catch {
+        return normalizePromptHomeTemplateCards(PROMPT_HOME_SYSTEM_TEMPLATE.cards);
+      }
+    },
+    [localTemplateCardSnapshot],
   );
 
   useEffect(() => {
@@ -849,21 +1209,28 @@ export function usePersistentPromptHomeCardVisibility(
   );
   const hiddenCardKeys = useMemo(
     () =>
-      cards.filter((card) => !card.visible).map((card) => card.cardId),
-    [cards],
-  );
-  const orderedCardKeys = useMemo(
-    () => cards.map((card) => card.cardId),
+      PROMPT_HOME_CARD_KEYS.filter((cardKey) =>
+        cards
+          .filter((card) => card.cardId === cardKey)
+          .every((card) => !card.visible),
+      ),
     [cards],
   );
   const hiddenCardKeySet = useMemo(
     () => new Set<PromptHomeCardKey>(hiddenCardKeys),
     [hiddenCardKeys],
   );
+  const visibleCards = useMemo(
+    () => cards.filter((card) => card.visible),
+    [cards],
+  );
   const visibleCardKeys = useMemo(
-    () =>
-      orderedCardKeys.filter((cardKey) => !hiddenCardKeySet.has(cardKey)),
-    [hiddenCardKeySet, orderedCardKeys],
+    () => visibleCards.map((card) => card.cardId),
+    [visibleCards],
+  );
+  const visibleCardInstanceIds = useMemo(
+    () => visibleCards.map((card) => getPromptHomeCardInstanceId(card)),
+    [visibleCards],
   );
   const isCardVisible = useCallback(
     (cardKey: PromptHomeCardKey) => !hiddenCardKeySet.has(cardKey),
@@ -911,6 +1278,12 @@ export function usePersistentPromptHomeCardVisibility(
     activeHomeViewDefinition
       ? activeHomeViewDefinition.can_edit
       : !activeHomeViewIsSystem;
+
+  useEffect(() => {
+    setCardClipboardState(null);
+    setLastUndoState(null);
+  }, [activeHomeViewValue]);
+
   const homeViewOptions = useMemo<PromptHomeViewOption[]>(() => {
     if (!accessToken || personalHomeViewState.fallback) {
       return [
@@ -990,23 +1363,32 @@ export function usePersistentPromptHomeCardVisibility(
     ],
   );
   const persistCards = useCallback(
-    (nextCards: readonly PromptHomeTemplateCard[]) => {
+    (
+      nextCards: readonly PromptHomeTemplateCard[],
+      options: { undoLabel?: string } = {},
+    ) => {
       if (activeHomeViewIsSystem) {
         setPersonalHomeViewState((current) => ({
           ...current,
-          error: "System Home is immutable. Save it as a personal view before editing cards.",
+          error: "System Home is immutable. Save it as a personal view before managing apps.",
         }));
         return;
       }
       if (activeHomeViewDefinition && !activeHomeViewDefinition.can_edit) {
         setPersonalHomeViewState((current) => ({
           ...current,
-          error: "Shared Home views are read-only. Duplicate it before editing cards.",
+          error: "Shared Home views are read-only. Duplicate it before managing apps.",
         }));
         return;
       }
 
       const normalizedCards = normalizePromptHomeTemplateCards(nextCards);
+      if (options.undoLabel) {
+        setLastUndoState({
+          label: options.undoLabel,
+          cards: clonePromptHomeCardsSnapshot(cards),
+        });
+      }
       savePromptHomeTemplateCardsToLocalStorage(normalizedCards);
 
       const definitionId = activeHomeViewDefinition?.definition_id;
@@ -1080,6 +1462,7 @@ export function usePersistentPromptHomeCardVisibility(
       activeHomeViewDefinition,
       activeHomeViewIsSystem,
       apiBase,
+      cards,
       personalHomeViewState.definitions,
       personalHomeViewState.fallback,
       personalHomeViewState.systemCards,
@@ -1098,13 +1481,24 @@ export function usePersistentPromptHomeCardVisibility(
             visible: card.cardId === cardKey ? visible : card.visible,
           }),
         ),
+        {
+          undoLabel: visible
+            ? `Enable ${PROMPT_HOME_CARD_VISIBILITY_OPTIONS.find((option) => option.key === cardKey)?.label ?? cardKey}`
+            : `Disable ${PROMPT_HOME_CARD_VISIBILITY_OPTIONS.find((option) => option.key === cardKey)?.label ?? cardKey}`,
+        },
       );
     },
     [cards, persistCards],
   );
   const getCard = useCallback(
     (cardKey: PromptHomeCardKey) =>
-      cards.find((card) => card.cardId === cardKey) ?? null,
+      cards.find((card) => card.cardId === cardKey && card.visible) ??
+      cards.find((card) => card.cardId === cardKey) ??
+      null,
+    [cards],
+  );
+  const getCardByInstanceId = useCallback(
+    (instanceId: string) => findPromptHomeCardByInstanceId(cards, instanceId),
     [cards],
   );
   const updateCardConfiguration = useCallback(
@@ -1127,19 +1521,321 @@ export function usePersistentPromptHomeCardVisibility(
     },
     [cards, persistCards],
   );
-  const moveCard = useCallback((activeCardKey: string, overCardKey: string) => {
-    const { hidden, order } = promptHomeTemplateCardsToOrderAndHidden(cards);
-    const nextOrder = movePromptHomeCardOrder(
-      order,
-      hidden,
-      activeCardKey,
-      overCardKey,
-    );
+  const updateCardInstanceConfiguration = useCallback(
+    (instanceId: string, patch: PromptHomeCardConfigurationPatch) => {
+      const resolvedInstanceId = resolvePromptHomeCardInstanceId(
+        cards,
+        instanceId,
+      );
+      if (!resolvedInstanceId) {
+        return;
+      }
 
-    if (nextOrder.some((cardKey, index) => cardKey !== order[index])) {
-      persistCards(buildPromptHomeCardsFromOrderAndHidden(nextOrder, hidden, cards));
+      persistCards(
+        cards.map((card, index) => {
+          const cardInstanceId = getPromptHomeCardInstanceId(card);
+          return clonePromptHomeTemplateCard(card, {
+            order: index,
+            visible: card.visible,
+            parameters:
+              cardInstanceId === resolvedInstanceId
+                ? patch.parameters
+                : card.parameters,
+            filters:
+              cardInstanceId === resolvedInstanceId
+                ? patch.filters
+                : card.filters,
+          });
+        }),
+      );
+    },
+    [cards, persistCards],
+  );
+  const moveCard = useCallback((activeCardKey: string, overCardKey: string) => {
+    const activeInstanceId = resolvePromptHomeCardInstanceId(
+      cards,
+      activeCardKey,
+    );
+    const overInstanceId = resolvePromptHomeCardInstanceId(cards, overCardKey);
+    if (!activeInstanceId || !overInstanceId) {
+      return;
+    }
+
+    const nextCards = movePromptHomeCardInstance(
+      cards,
+      activeInstanceId,
+      overInstanceId,
+    );
+    if (
+      nextCards.some(
+        (card, index) =>
+          getPromptHomeCardInstanceId(card) !==
+          getPromptHomeCardInstanceId(cards[index] ?? card),
+      )
+    ) {
+      persistCards(nextCards, { undoLabel: "Reorder apps" });
     }
   }, [cards, persistCards]);
+  const resizeCardInstance = useCallback(
+    (
+      instanceId: string,
+      state: PromptHomeCardSizeState,
+      axis: PromptHomeCardSizeAxis,
+      direction: PromptHomeCardSizeDirection,
+    ) => {
+      const resolvedInstanceId = resolvePromptHomeCardInstanceId(cards, instanceId);
+      if (!resolvedInstanceId) {
+        return;
+      }
+      const sourceCard = findPromptHomeCardByInstanceId(cards, resolvedInstanceId);
+      if (!sourceCard) {
+        return;
+      }
+
+      const resizedPlacement = resizePromptHomeCardPlacement(
+        sourceCard.placement,
+        state,
+        axis,
+        direction,
+      );
+      if (JSON.stringify(resizedPlacement) === JSON.stringify(sourceCard.placement)) {
+        return;
+      }
+
+      const nextCards = cards.map((card, index) => {
+        const cardInstanceId = getPromptHomeCardInstanceId(card);
+        if (cardInstanceId !== resolvedInstanceId) {
+          return clonePromptHomeTemplateCard(card, {
+            order: index,
+            visible: card.visible,
+          });
+        }
+
+        return clonePromptHomeTemplateCard(card, {
+          order: index,
+          visible: card.visible,
+          placement: resizedPlacement,
+        });
+      });
+
+      persistCards(nextCards, {
+        undoLabel: `Resize ${getPromptHomeCardLabel(sourceCard.cardId)}`,
+      });
+    },
+    [cards, persistCards],
+  );
+  const resizeCardInstanceToSpan = useCallback(
+    (
+      instanceId: string,
+      state: PromptHomeCardSizeState,
+      axis: PromptHomeCardSizeAxis,
+      span: number,
+    ) => {
+      const resolvedInstanceId = resolvePromptHomeCardInstanceId(cards, instanceId);
+      if (!resolvedInstanceId) {
+        return;
+      }
+      const sourceCard = findPromptHomeCardByInstanceId(cards, resolvedInstanceId);
+      if (!sourceCard) {
+        return;
+      }
+
+      const resizedPlacement = resizePromptHomeCardPlacementToSpan(
+        sourceCard.placement,
+        state,
+        axis,
+        span,
+      );
+      if (JSON.stringify(resizedPlacement) === JSON.stringify(sourceCard.placement)) {
+        return;
+      }
+
+      const nextCards = cards.map((card, index) => {
+        const cardInstanceId = getPromptHomeCardInstanceId(card);
+        if (cardInstanceId !== resolvedInstanceId) {
+          return clonePromptHomeTemplateCard(card, {
+            order: index,
+            visible: card.visible,
+          });
+        }
+
+        return clonePromptHomeTemplateCard(card, {
+          order: index,
+          visible: card.visible,
+          placement: resizedPlacement,
+        });
+      });
+
+      persistCards(nextCards, {
+        undoLabel: `Resize ${getPromptHomeCardLabel(sourceCard.cardId)}`,
+      });
+    },
+    [cards, persistCards],
+  );
+  const deleteCardInstance = useCallback((instanceId: string) => {
+    const resolvedInstanceId = resolvePromptHomeCardInstanceId(cards, instanceId);
+    if (!resolvedInstanceId) {
+      return;
+    }
+    const card = findPromptHomeCardByInstanceId(cards, resolvedInstanceId);
+    if (!card) {
+      return;
+    }
+
+    const nextCards = deletePromptHomeCardInstance(cards, resolvedInstanceId);
+    if (
+      JSON.stringify(promptHomeTemplateCardsToStorageCards(nextCards)) ===
+      JSON.stringify(promptHomeTemplateCardsToStorageCards(cards))
+    ) {
+      return;
+    }
+
+    persistCards(nextCards, {
+      undoLabel: `Delete ${getPromptHomeCardLabel(card.cardId)}`,
+    });
+    setCardClipboardState((current) =>
+      current?.sourceInstanceId === resolvedInstanceId ? null : current,
+    );
+  }, [cards, persistCards]);
+  const cardClipboard = useMemo<PromptHomeCardClipboard | null>(
+    () =>
+      cardClipboardState
+        ? {
+            mode: cardClipboardState.mode,
+            sourceInstanceId: cardClipboardState.sourceInstanceId,
+            cardId: cardClipboardState.cardId,
+            label: cardClipboardState.label,
+          }
+        : null,
+    [cardClipboardState],
+  );
+  const copyCardInstance = useCallback((instanceId: string) => {
+    const resolvedInstanceId = resolvePromptHomeCardInstanceId(cards, instanceId);
+    if (!resolvedInstanceId) {
+      return;
+    }
+    const card = findPromptHomeCardByInstanceId(cards, resolvedInstanceId);
+    if (!card) {
+      return;
+    }
+
+    setCardClipboardState({
+      mode: "copy",
+      sourceInstanceId: resolvedInstanceId,
+      cardId: card.cardId,
+      label: getPromptHomeCardLabel(card.cardId),
+      card: clonePromptHomeTemplateCard(card, {
+        order: card.placement.order,
+        visible: true,
+      }),
+    });
+  }, [cards]);
+  const cutCardInstance = useCallback((instanceId: string) => {
+    const resolvedInstanceId = resolvePromptHomeCardInstanceId(cards, instanceId);
+    if (!resolvedInstanceId) {
+      return;
+    }
+    const card = findPromptHomeCardByInstanceId(cards, resolvedInstanceId);
+    if (!card) {
+      return;
+    }
+
+    setCardClipboardState({
+      mode: "cut",
+      sourceInstanceId: resolvedInstanceId,
+      cardId: card.cardId,
+      label: getPromptHomeCardLabel(card.cardId),
+      card: clonePromptHomeTemplateCard(card, {
+        order: card.placement.order,
+        visible: true,
+      }),
+    });
+    persistCards(
+      cards.map((candidate, index) =>
+        clonePromptHomeTemplateCard(candidate, {
+          order: index,
+          visible:
+            getPromptHomeCardInstanceId(candidate) === resolvedInstanceId
+              ? false
+              : candidate.visible,
+        }),
+      ),
+      { undoLabel: `Cut ${getPromptHomeCardLabel(card.cardId)}` },
+    );
+  }, [cards, persistCards]);
+  const duplicateCardInstance = useCallback((instanceId: string) => {
+    const resolvedInstanceId = resolvePromptHomeCardInstanceId(cards, instanceId);
+    if (!resolvedInstanceId) {
+      return;
+    }
+    const card = findPromptHomeCardByInstanceId(cards, resolvedInstanceId);
+    if (!card) {
+      return;
+    }
+
+    const nextInstanceId = createPromptHomeCopyInstanceId(cards, card.cardId);
+    const copiedCard = clonePromptHomeTemplateCard(card, {
+      instanceId: nextInstanceId,
+      order: card.placement.order + 1,
+      visible: true,
+    });
+    persistCards(
+      insertPromptHomeCardAfterInstance(cards, resolvedInstanceId, copiedCard),
+      { undoLabel: `Duplicate ${getPromptHomeCardLabel(card.cardId)}` },
+    );
+    setCardClipboardState(null);
+  }, [cards, persistCards]);
+  const pasteCardFromClipboard = useCallback(() => {
+    if (!cardClipboardState) {
+      return;
+    }
+
+    if (cardClipboardState.mode === "copy") {
+      const nextInstanceId = createPromptHomeCopyInstanceId(
+        cards,
+        cardClipboardState.cardId,
+      );
+      const copiedCard = clonePromptHomeTemplateCard(cardClipboardState.card, {
+        instanceId: nextInstanceId,
+        order: cards.length,
+        visible: true,
+      });
+      persistCards(insertPromptHomeCardAtEnd(cards, copiedCard), {
+        undoLabel: `Paste ${cardClipboardState.label}`,
+      });
+      return;
+    }
+
+    const sourceCard =
+      findPromptHomeCardByInstanceId(cards, cardClipboardState.sourceInstanceId) ??
+      cardClipboardState.card;
+    const visibleSourceCard = clonePromptHomeTemplateCard(sourceCard, {
+      order: cards.length,
+      visible: true,
+    });
+    const cardsWithoutSource = cards.filter(
+      (card) =>
+        getPromptHomeCardInstanceId(card) !==
+        cardClipboardState.sourceInstanceId,
+    );
+    persistCards(insertPromptHomeCardAtEnd(cardsWithoutSource, visibleSourceCard), {
+      undoLabel: `Paste ${cardClipboardState.label}`,
+    });
+    setCardClipboardState(null);
+  }, [cardClipboardState, cards, persistCards]);
+  const clearCardClipboard = useCallback(() => {
+    setCardClipboardState(null);
+  }, []);
+  const undoLastCardAction = useCallback(() => {
+    if (!lastUndoState) {
+      return;
+    }
+
+    const previousCards = lastUndoState.cards;
+    setLastUndoState(null);
+    setCardClipboardState(null);
+    persistCards(previousCards);
+  }, [lastUndoState, persistCards]);
   const showAllCards = useCallback(() => {
     persistCards(
       cards.map((card, index) =>
@@ -1148,10 +1844,15 @@ export function usePersistentPromptHomeCardVisibility(
           visible: true,
         }),
       ),
+      { undoLabel: "Enable all apps" },
     );
   }, [cards, persistCards]);
   const resetHomeView = useCallback(() => {
     const definitionId = activeHomeViewDefinition?.definition_id;
+    setLastUndoState({
+      label: "Reset Home",
+      cards: clonePromptHomeCardsSnapshot(cards),
+    });
     if (
       !apiBase ||
       !accessToken ||
@@ -1216,6 +1917,7 @@ export function usePersistentPromptHomeCardVisibility(
     accessToken,
     activeHomeViewDefinition?.definition_id,
     apiBase,
+    cards,
     personalHomeViewState.definitions,
     personalHomeViewState.fallback,
     personalHomeViewState.systemCards,
@@ -1616,12 +2318,28 @@ export function usePersistentPromptHomeCardVisibility(
     publishActiveHomeView,
     retireActiveHomeView,
     getCard,
+    getCardByInstanceId,
     updateCardConfiguration,
+    updateCardInstanceConfiguration,
     hiddenCardKeys,
     visibleCardKeys,
+    visibleCards,
+    visibleCardInstanceIds,
     isCardVisible,
     setCardVisible,
     moveCard,
+    resizeCardInstance,
+    resizeCardInstanceToSpan,
+    deleteCardInstance,
+    cardClipboard,
+    copyCardInstance,
+    cutCardInstance,
+    duplicateCardInstance,
+    pasteCardFromClipboard,
+    clearCardClipboard,
+    canUndoLastCardAction: Boolean(lastUndoState),
+    lastCardActionLabel: lastUndoState?.label ?? "",
+    undoLastCardAction,
     showAllCards,
     resetHomeView,
     persistenceStatus,

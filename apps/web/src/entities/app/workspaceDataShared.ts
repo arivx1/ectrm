@@ -8,6 +8,7 @@ export type ExternalDataSyncProvider =
   | 'EIA'
   | 'EIA_FUNDAMENTALS'
   | 'FRED'
+  | 'ALPHA_VANTAGE'
   | 'BLS_PPI'
   | 'WORLD_BANK'
   | 'USDA_NASS'

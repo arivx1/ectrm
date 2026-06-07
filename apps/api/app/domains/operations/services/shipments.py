@@ -30,6 +30,12 @@ from apps.api.app.domains.operations.services.actualizations import (
     list_trade_actualizations_by_delivery_id,
 )
 from apps.api.app.domains.operations.services.audit_events import append_trade_audit_event
+from apps.api.app.domains.operations.services.gas_scheduling import (
+    GasScheduleEvidence,
+)
+from apps.api.app.domains.operations.services.gas_scheduling import (
+    build_gas_schedule_blockers,
+)
 from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceDescriptor,
 )
@@ -1594,9 +1600,11 @@ def _build_blockers(
     location_code: str | None,
     delivery_start: date | None,
     delivery_end: date | None,
+    operations_owner: str | None,
     execution_status: str,
     credit_hold_reason: str | None,
     logistics_detail: DeliveryLogisticsDetail | None,
+    pipeline_detail: DeliveryPipelineDetail | None,
     rail_detail: DeliveryRailDetail | None,
     rail_route: ReferenceRailRoute | None,
     rail_line: ReferenceRailLine | None,
@@ -1646,6 +1654,42 @@ def _build_blockers(
 
     if classification.mode_family == DeliveryModeFamily.POWER_SCHEDULE and not (trade.price_unit_code or "").strip():
         blockers.append("Price unit is missing for scheduled power delivery.")
+    if classification.mode_family == DeliveryModeFamily.NETWORK_FLOW:
+        blockers.extend(
+            blocker.message
+            for blocker in build_gas_schedule_blockers(
+                GasScheduleEvidence(
+                    delivery_id="",
+                    trade_id=trade.trade_id,
+                    trade_nature=trade.trade_nature,
+                    trade_status=trade.status,
+                    confirmation_status=trade.confirmation_status,
+                    nomination_status=trade.nomination_status,
+                    mode_family=classification.mode_family.value,
+                    transport_mode=classification.transport_mode.value,
+                    scheduled_quantity=Decimal(str(volume)) if volume is not None else None,
+                    quantity_unit_code=unit_of_measure,
+                    gas_day_start=delivery_start,
+                    gas_day_end=delivery_end,
+                    owner=operations_owner,
+                    pipeline_system=pipeline_detail.pipeline_system if pipeline_detail is not None else None,
+                    pipeline_path=pipeline_detail.pipeline_path if pipeline_detail is not None else None,
+                    receipt_location_code=(
+                        pipeline_detail.receipt_location_code if pipeline_detail is not None else None
+                    ),
+                    delivery_location_code=(
+                        pipeline_detail.delivery_location_code if pipeline_detail is not None else None
+                    ),
+                    contract_number=pipeline_detail.contract_number if pipeline_detail is not None else None,
+                    cycle_code=pipeline_detail.cycle_code if pipeline_detail is not None else None,
+                    nomination_reference=(
+                        pipeline_detail.nomination_reference if pipeline_detail is not None else None
+                    ),
+                ),
+                target_status=trade.nomination_status,
+                include_common_fields=False,
+            )
+        )
     if classification.mode_family == DeliveryModeFamily.LOGISTICS and classification.transport_mode == TransportMode.UNSPECIFIED:
         blockers.append("Explicit transport mode is missing for discrete logistics delivery.")
     if classification.mode_family == DeliveryModeFamily.LOGISTICS and classification.transport_mode == TransportMode.RAIL:
@@ -1978,9 +2022,11 @@ def _build_delivery_obligation(
         location_code=location_code,
         delivery_start=delivery_start,
         delivery_end=delivery_end,
+        operations_owner=operations_owner,
         execution_status=execution_status,
         credit_hold_reason=credit_hold_reason,
         logistics_detail=logistics_detail,
+        pipeline_detail=pipeline_detail,
         rail_detail=rail_detail,
         rail_route=rail_route,
         rail_line=rail_line,

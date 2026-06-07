@@ -6,13 +6,13 @@ export const MAX_PRIMARY_NAV_SECTIONS = 5
 const PRIMARY_NAV_SECTION_DEFINITIONS = [
   {
     key: 'overview',
-    label: 'Start',
-    kicker: 'Start here',
-    heroTitle: 'Start',
+    label: 'Home',
+    kicker: 'Brief',
+    heroTitle: 'Home',
     heroBody: '',
     landingBody: '',
     landingViewKey: 'prompt',
-    viewKeys: ['prompt', 'dashboard'],
+    viewKeys: ['prompt'],
     startPaths: [],
   },
   {
@@ -274,6 +274,16 @@ export function primaryNavigationSectionByKey(sectionKey: PrimaryNavigationSecti
 
 export function primaryNavigationSectionLandingView(sectionKey: PrimaryNavigationSectionKey): ViewKey | null {
   return primaryNavigationSectionByKey(sectionKey).landingViewKey
+}
+
+export function primaryNavigationSectionRendersNestedViews(
+  section: Pick<PrimaryNavigationSection, 'landingViewKey' | 'views'>,
+): boolean {
+  return !(
+    section.landingViewKey !== null &&
+    section.views.length === 1 &&
+    section.views[0]?.key === section.landingViewKey
+  )
 }
 
 export function primaryNavigationSectionForView(view: ViewKey): PrimaryNavigationSection {

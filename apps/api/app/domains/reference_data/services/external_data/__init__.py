@@ -1,5 +1,8 @@
 """External market-data services."""
 
+from apps.api.app.domains.reference_data.services.external_data.alpha_vantage_sync import (
+    sync_alpha_vantage_prices,
+)
 from apps.api.app.domains.reference_data.services.external_data.bls_sync import sync_bls_ppi_series
 from apps.api.app.domains.reference_data.services.external_data.caiso_sync import sync_caiso_series
 from apps.api.app.domains.reference_data.services.external_data.cftc_sync import sync_cftc_series
@@ -25,6 +28,7 @@ from apps.api.app.domains.reference_data.services.external_data.usda_nass_sync i
 from apps.api.app.domains.reference_data.services.external_data.world_bank_sync import sync_world_bank_series
 
 __all__ = [
+    "sync_alpha_vantage_prices",
     "sync_bls_ppi_series",
     "sync_caiso_series",
     "sync_cftc_series",

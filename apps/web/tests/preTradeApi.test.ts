@@ -21,10 +21,13 @@ import {
   createPreTradeReviewItem,
   createPreTradeScenario,
   loadPreTradeHedgeRecommendations,
+  loadPreTradeMarketOpportunities,
   loadPreTradeNettingSets,
+  loadPreTradePromotionOutcomes,
   loadPreTradeReviewDrift,
   loadPreTradeRiskScenarios,
   promotePreTradeHedgeRecommendationFromGovernance,
+  promotePreTradeMarketOpportunityFromGovernance,
   promotePreTradeNettingSetFromGovernance,
   promotePreTradeRiskScenarioFromGovernance,
 } from '../src/entities/pretrade/api.ts'
@@ -523,4 +526,140 @@ test('risk-scenario promotion endpoints use the governance contract', async () =
     review_note: 'Owner review requested.',
   })
   assert.equal(new Headers((postInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer token-123')
+})
+
+test('market-opportunity promotion endpoints use the governance contract', async () => {
+  fetchJsonMock.mockResolvedValueOnce([])
+  postJsonMock.mockResolvedValueOnce({
+    market_opportunity_id: 13,
+    market_opportunity_key: 'market-opportunity-13',
+    name: 'GAS_PHYS HENRY_HUB Mark Gap market opportunity review draft',
+    status: 'REVIEW_DRAFT',
+    owner: 'desk.lead',
+    review_note: 'Owner review requested.',
+    source_promotion_candidate_type: 'MARKET_OPPORTUNITY',
+    source_promotion_status: 'WATCH',
+    source_promotion_score: 58,
+    source_review_count: 1,
+    source_approved_review_count: 1,
+    source_booked_review_count: 0,
+    source_override_count: 0,
+    source_run_count: 1,
+    source_latest_review_id: 22,
+    source_latest_run_id: 44,
+    source_sample_review_ids: [22],
+    source_sample_run_ids: [44],
+    source_evidence_summary: '1 review, 1 approved, 0 booked, 0 overrides, 1 recommendation run.',
+    source_promotion_rationale: 'Reviewer activity reused market opportunity evidence.',
+    source_stop_reasons: ['No booked trade has reused this pattern yet.'],
+    source_review_name: 'Market opportunity mark-gap review',
+    source_review_status: 'APPROVED',
+    source_review_thesis: 'Target economics are far from the captured mark.',
+    source_review_notes: 'Review before pursuing.',
+    source_review_owner: 'desk.lead',
+    source_recommendation_stance: 'PROCEED_WITH_CARE',
+    source_recommendation_score: 88,
+    source_recommendation_headline: 'Proceed, but keep the desk close to pricing and risk drift.',
+    draft,
+    opportunity_summary: {
+      category: 'MARK_GAP',
+      title: 'Pricing gap review',
+      detail: 'Target economics are 14.8% away from the captured mark.',
+      driver_keys: ['pricing'],
+      source_refs: [],
+    },
+    arbitrage_candidate: null,
+    residual_exposure: null,
+    input_snapshots: [],
+    missing_evidence: [],
+    next_actions: ['Re-check mark freshness before pursuing.'],
+    reviewer_focus: ['Confirm target economics against the latest mark.'],
+    created_at: '2026-04-24T18:00:00Z',
+    created_by: 'trader_two',
+    updated_at: '2026-04-24T18:00:00Z',
+    updated_by: 'trader_two',
+    version: 1,
+    can_edit: true,
+  })
+
+  await loadPreTradeMarketOpportunities('http://api.test', 'token-123')
+  await promotePreTradeMarketOpportunityFromGovernance('http://api.test', 'token-123', {
+    owner: 'desk.lead',
+    review_note: 'Owner review requested.',
+  })
+
+  const [getUrl, getInit] = fetchJsonMock.mock.calls[0]
+  assert.equal(getUrl, 'http://api.test/pretrade/market-opportunities')
+  assert.equal(new Headers((getInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer token-123')
+  assert.equal((getInit as RequestInit | undefined)?.cache, 'no-store')
+
+  const [postUrl, body, postInit] = postJsonMock.mock.calls[0]
+  assert.equal(postUrl, 'http://api.test/pretrade/market-opportunities/from-promotion')
+  assert.deepEqual(body, {
+    owner: 'desk.lead',
+    review_note: 'Owner review requested.',
+  })
+  assert.equal(new Headers((postInit as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer token-123')
+})
+
+test('promotion outcome summary endpoint uses the governance contract', async () => {
+  fetchJsonMock.mockResolvedValueOnce({
+    generated_at: '2026-04-24T18:00:00Z',
+    total_draft_count: 1,
+    metrics: [
+      { outcome: 'CREATED', count: 1 },
+      { outcome: 'REUSED', count: 1 },
+      { outcome: 'RETIRED', count: 0 },
+      { outcome: 'REJECTED', count: 0 },
+      { outcome: 'MERGED_INTO_BOOKED_TRADE', count: 1 },
+      { outcome: 'BLOCKED_BY_MISSING_EVIDENCE', count: 0 },
+    ],
+    by_draft_type: [
+      {
+        draft_type: 'HEDGE_RECOMMENDATION',
+        label: 'Hedge Recommendation',
+        total_count: 1,
+        created_count: 1,
+        reused_count: 1,
+        retired_count: 0,
+        rejected_count: 0,
+        merged_into_booked_trade_count: 1,
+        blocked_by_missing_evidence_count: 0,
+      },
+    ],
+    drafts: [
+      {
+        draft_type: 'HEDGE_RECOMMENDATION',
+        draft_id: 15,
+        draft_key: 'hedge-draft-15',
+        name: 'Booked hedge recommendation draft',
+        status: 'REVIEW_DRAFT',
+        source_promotion_score: 82,
+        source_review_count: 2,
+        source_approved_review_count: 2,
+        source_booked_review_count: 1,
+        source_run_count: 2,
+        source_latest_review_id: 22,
+        source_latest_run_id: 44,
+        source_review_status: 'APPROVED',
+        source_linked_trade_id: 'TRD-21001',
+        source_linked_trade_status: 'ACTIVE',
+        source_booked_at: '2026-04-24T18:00:00Z',
+        has_blocking_missing_evidence: false,
+        outcomes: ['CREATED', 'REUSED', 'MERGED_INTO_BOOKED_TRADE'],
+        outcome_reasons: ['Draft was created from a governance promotion signal.'],
+        created_at: '2026-04-24T18:00:00Z',
+        created_by: 'trader_two',
+        updated_at: '2026-04-24T18:00:00Z',
+        updated_by: 'trader_two',
+      },
+    ],
+  })
+
+  await loadPreTradePromotionOutcomes('http://api.test', 'token-123')
+
+  const [url, init] = fetchJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/pretrade/promotion-outcomes')
+  assert.equal(new Headers((init as RequestInit | undefined)?.headers).get('Authorization'), 'Bearer token-123')
+  assert.equal((init as RequestInit | undefined)?.cache, 'no-store')
 })

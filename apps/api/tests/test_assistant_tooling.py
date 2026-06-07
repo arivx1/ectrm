@@ -2316,12 +2316,12 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
                 {"scope": "SHARED", "include_cards": False},
             )
 
-        self.assertEqual(cards_result.output["card_count"], 7)
+        self.assertEqual(cards_result.output["card_count"], 9)
         self.assertIn("prices", cards_trace.output_preview["card_ids"])
         self.assertIn("news", cards_trace.output_preview["card_ids"])
         self.assertEqual(template_result.output["template_key"], "system_home")
         self.assertTrue(template_result.output["immutable"])
-        self.assertEqual(template_trace.output_preview["card_count"], 7)
+        self.assertEqual(template_trace.output_preview["card_count"], 9)
 
         price_options = options_result.output["cards"][0]
         filters_by_field = {field["field"]: field for field in price_options["filters"]}

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from sqlalchemy import create_engine
@@ -31,6 +32,8 @@ from apps.api.app.routes.external_data import (
     list_price_index_observations,
     list_external_data_runs,
     list_price_sources_for_review,
+    tag_market_news_headlines,
+    trigger_alpha_vantage_sync,
     trigger_bls_ppi_sync,
     trigger_caiso_sync,
     trigger_kalshi_sync,
@@ -50,6 +53,7 @@ from apps.api.app.schemas.external_data import (
     EIASyncRequest,
     ExternalSeriesDefinitionUpsertRequest,
     ExternalSeriesSyncRequest,
+    MarketNewsTaggingRequest,
 )
 from apps.api.app.domains.reference_data.services.external_data.market_news import MarketNewsClientError
 
@@ -479,6 +483,69 @@ class ExternalDataApiTests(unittest.TestCase):
 
         self.assertEqual(getattr(raised.exception, "status_code", None), 502)
         self.assertEqual(getattr(raised.exception, "detail", None), "feed unavailable")
+
+    @patch("apps.api.app.routes.external_data.build_market_news_ai_tags", new_callable=AsyncMock)
+    def test_tag_market_news_headlines_returns_ai_enrichment(
+        self,
+        mock_build_market_news_ai_tags,
+    ) -> None:
+        request = MarketNewsTaggingRequest.model_validate(
+            {
+                "commodity": "BEEF",
+                "items": [
+                    {
+                        "id": "headline-0",
+                        "title": "Beef output breaks all-time high in U.S.",
+                        "source": "Market Wire",
+                        "published_at": None,
+                        "deterministic": {
+                            "supply": {"direction": "neutral", "horizon": "near_term"},
+                            "demand": {"direction": "neutral", "horizon": "near_term"},
+                            "market_location": {"label": "United States", "scope": "country"},
+                        },
+                    }
+                ],
+            }
+        )
+        mock_build_market_news_ai_tags.return_value = {
+            "generated_at": datetime(2026, 5, 25, 12, 0, tzinfo=timezone.utc),
+            "provider": "openai",
+            "model": "gpt-5-mini",
+            "items": [
+                {
+                    "id": "headline-0",
+                    "supply": {
+                        "direction": "up",
+                        "horizon": "immediate",
+                        "confidence": 0.91,
+                        "rationale": "Record output signals supply up.",
+                        "source": "ai",
+                    },
+                    "demand": {
+                        "direction": "neutral",
+                        "horizon": "near_term",
+                        "confidence": 0.8,
+                        "rationale": "No demand driver.",
+                        "source": "ai",
+                    },
+                    "market_location": {
+                        "label": "United States",
+                        "scope": "country",
+                        "confidence": 0.9,
+                        "rationale": "The headline names U.S.",
+                        "source": "ai",
+                    },
+                }
+            ],
+            "warnings": [],
+        }
+
+        payload = asyncio.run(tag_market_news_headlines(request))
+
+        mock_build_market_news_ai_tags.assert_awaited_once_with(request)
+        self.assertEqual(payload.provider, "openai")
+        self.assertEqual(payload.items[0].supply.direction, "up")
+        self.assertEqual(payload.items[0].market_location.label, "United States")
 
     def test_list_latest_price_index_observations_returns_latest_row_per_requested_code(self) -> None:
         self._seed_rows()
@@ -932,10 +999,11 @@ class ExternalDataApiTests(unittest.TestCase):
             payload = get_external_data_sync_status(db=session)
 
         providers = {row.provider: row for row in payload.providers}
-        self.assertEqual(payload.provider_count, 13)
+        self.assertEqual(payload.provider_count, 14)
         self.assertEqual(providers["EIA"].health_status, "healthy")
         self.assertEqual(providers["EIA_FUNDAMENTALS"].health_status, "healthy")
         self.assertEqual(providers["FRED"].health_status, "healthy")
+        self.assertEqual(providers["ALPHA_VANTAGE"].health_status, "unknown")
         self.assertEqual(providers["BLS_PPI"].health_status, "unknown")
         self.assertEqual(providers["WORLD_BANK"].health_status, "unknown")
         self.assertEqual(providers["USDA_NASS"].health_status, "unknown")
@@ -952,6 +1020,12 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(providers["EIA"].source_endpoint, "https://api.eia.gov/v2")
         self.assertEqual(providers["EIA"].sync_job_name, "sync_eia_price_data")
         self.assertEqual(providers["EIA"].default_lookback_days, 30)
+        self.assertEqual(providers["ALPHA_VANTAGE"].ingestion_method, "Alpha Vantage API pull")
+        self.assertEqual(
+            providers["ALPHA_VANTAGE"].ingestion_mode,
+            "Admin manual sync or opt-in scheduler due check",
+        )
+        self.assertIsNone(providers["ALPHA_VANTAGE"].default_lookback_days)
         self.assertEqual(providers["CAISO"].ingestion_method, "CAISO OASIS API pull")
         self.assertIsNone(providers["CAISO"].default_lookback_days)
         self.assertFalse(providers["CAISO"].due_for_sync)
@@ -1036,6 +1110,27 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(payload.id, 2)
         self.assertEqual(payload.status, "SUCCEEDED")
         sync_mock.assert_called_once()
+
+    def test_trigger_alpha_vantage_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch(
+                "apps.api.app.routes.external_data.sync_alpha_vantage_prices",
+                return_value=expected_run,
+            ) as sync_mock:
+                payload = trigger_alpha_vantage_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="SPY_US_ALPHA_Q",
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+        self.assertEqual(sync_mock.call_args.kwargs["price_index_code"], "SPY_US_ALPHA_Q")
 
     def test_trigger_bls_ppi_sync_returns_run_payload(self) -> None:
         self._seed_rows()

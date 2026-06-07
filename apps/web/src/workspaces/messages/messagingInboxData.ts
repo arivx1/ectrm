@@ -4,10 +4,12 @@ import type {
   MessagingWorkspaceMessageRecord,
   MessagingWorkspacePostSource,
   MessagingWorkspaceSourceProvider,
+  MessagingWorkspaceTimelineItemRecord,
 } from '../../entities/messages/api'
 
 export type MessagingInboxMessageType =
   | 'Email'
+  | 'Slack'
   | 'To-Do'
   | 'Issue'
   | 'App Message'
@@ -130,6 +132,17 @@ export type MessagingWorkspacePost = {
   pinnedAt?: string | null
 }
 
+type SlackMessagingInboxCandidate = {
+  conversation: MessagingWorkspaceConversationRecord
+  message: MessagingWorkspaceTimelineItemRecord
+  body: string[]
+  preview: string
+  authorName: string
+  createdAtMs: number
+}
+
+const DEFAULT_HOME_SLACK_MESSAGE_LIMIT = 4
+
 function formatMessageTimestamp(value: string): string {
   return new Intl.DateTimeFormat('en-US', {
     hour: 'numeric',
@@ -222,6 +235,46 @@ function buildMessagePreview(item: MessagingWorkspaceTimelineMessage): string {
   }
 
   return (item.body[0] ?? '').replace(/@\[(.+?)\]/g, '@$1')
+}
+
+function normalizeInboxMessageText(value: string): string {
+  return value.replace(/@\[(.+?)\]/g, '@$1').replace(/\s+/g, ' ').trim()
+}
+
+function isSlackMessagingConversation(
+  conversation: MessagingWorkspaceConversationRecord,
+): boolean {
+  return (
+    conversation.source_provider === 'slack' ||
+    conversation.conversation_id.startsWith('slack-')
+  )
+}
+
+function buildSlackInboxCandidate(
+  conversation: MessagingWorkspaceConversationRecord,
+  message: MessagingWorkspaceTimelineItemRecord,
+): SlackMessagingInboxCandidate | null {
+  if (message.kind !== 'message' || message.deleted_at) {
+    return null
+  }
+
+  const body = message.body
+    .map(normalizeInboxMessageText)
+    .filter((paragraph) => paragraph.length > 0)
+  if (body.length === 0) {
+    return null
+  }
+
+  const createdAtMs = Date.parse(message.created_at)
+
+  return {
+    conversation,
+    message,
+    body,
+    preview: normalizeInboxMessageText(body.join(' ')),
+    authorName: message.author?.name?.trim() || 'Slack',
+    createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : 0,
+  }
 }
 
 function normalizeTimelineMessage(
@@ -607,6 +660,65 @@ export function buildMessagingWorkspaceChannelsFromRecords(
         },
       ),
     )
+}
+
+export function buildSlackMessagingInboxMessages(
+  records: MessagingWorkspaceConversationRecord[],
+  options: { limit?: number } = {},
+): MessagingInboxMessage[] {
+  const normalizedLimit =
+    typeof options.limit === 'number' && Number.isFinite(options.limit)
+      ? Math.max(0, Math.trunc(options.limit))
+      : DEFAULT_HOME_SLACK_MESSAGE_LIMIT
+  if (normalizedLimit <= 0) {
+    return []
+  }
+
+  const candidates = records.flatMap<SlackMessagingInboxCandidate>((conversation) => {
+    if (!isSlackMessagingConversation(conversation)) {
+      return []
+    }
+
+    return conversation.timeline.flatMap((message) => {
+      const candidate = buildSlackInboxCandidate(conversation, message)
+      return candidate ? [candidate] : []
+    })
+  })
+
+  return candidates
+    .sort((left, right) => {
+      const createdDelta = right.createdAtMs - left.createdAtMs
+      return createdDelta !== 0
+        ? createdDelta
+        : left.message.id.localeCompare(right.message.id)
+    })
+    .slice(0, normalizedLimit)
+    .map((candidate) => {
+      const lane = candidate.conversation.label || '#slack'
+      const unread = candidate.conversation.unread_count > 0
+      const timestamp =
+        candidate.createdAtMs > 0
+          ? formatMessageTimestamp(candidate.message.created_at)
+          : candidate.conversation.latest_activity_at
+            ? formatMessageTimestamp(candidate.conversation.latest_activity_at)
+            : ''
+
+      return {
+        id: `slack-home-${candidate.conversation.conversation_id}-${candidate.message.id}`,
+        type: 'Slack',
+        lane,
+        sender: candidate.authorName,
+        subject: `${candidate.authorName} posted in ${lane}`,
+        preview: candidate.preview,
+        body: candidate.body,
+        meta: `Slack · ${lane}`,
+        status: unread ? 'Unread' : 'Synced',
+        timestamp,
+        unread,
+        replyHint:
+          'Reply from Messages so the local record and Slack thread stay together.',
+      }
+    })
 }
 
 export function buildMessagingWorkspaceChannels(

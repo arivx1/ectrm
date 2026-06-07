@@ -3,6 +3,12 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import { logoutCurrentSession, updateCurrentUserProfile } from '../../entities/auth/api'
 import { loadPublicRuntimeSettings, type PublicRuntimeSettings } from '../../entities/app/api'
 import {
+  getAnthropicIntegrationApiKey,
+  loadAnthropicIntegrationSettings,
+  type AnthropicApiKeyLookup,
+  type AnthropicRuntimeSettings,
+} from '../../entities/app/adminApi'
+import {
   clearAssistantResponseSettingsSnapshot,
   formatMessagingAgentBrevityPreference,
   getAssistantResponseSettingsSnapshot,
@@ -139,12 +145,12 @@ const WORKSPACE_MODE_OPTIONS: Array<{
   {
     value: 'default',
     label: 'Guided workspace',
-    detail: 'Keep Prompt Home and the broader onboarding shell as the default signed-in path.',
+    detail: 'Use the standard shell around the Home brief and Apps workspace.',
   },
   {
     value: 'terminal',
-    label: 'Market terminal',
-    detail: 'Prefer the live desk, a denser shell, and less signed-in onboarding chrome.',
+    label: 'Dense workspace',
+    detail: 'Use the denser shell treatment while keeping Home as the signed-in landing page.',
   },
 ]
 
@@ -173,7 +179,7 @@ function formatModeLabel(value: ColorModePreference | ResolvedColorMode): string
 }
 
 function formatWorkspaceModeLabel(value: WorkspaceModePreference): string {
-  return value === 'terminal' ? 'Market terminal' : 'Guided workspace'
+  return value === 'terminal' ? 'Dense workspace' : 'Guided workspace'
 }
 
 function formatVisibilityModeLabel(value: TradeCaptureVisibilityMode): string {
@@ -289,6 +295,43 @@ function formatDatabaseType(value: string | null | undefined): string {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1)
 }
 
+function hasAdminIntegrationAccess(authSession: StoredAuthSession | null): boolean {
+  const role = authSession?.user.role?.trim().toUpperCase()
+  return role === 'OPS_ADMIN' || role === 'ADMIN'
+}
+
+function formatAnthropicAdminSummary(
+  settings: AnthropicRuntimeSettings | null,
+  loading: boolean,
+  error: string,
+): string {
+  if (loading) {
+    return 'Loading Anthropic admin status'
+  }
+  if (settings?.configured) {
+    return `Configured · ${settings.tracked_api_key_id ?? 'key id hidden'}`
+  }
+  if (settings?.enabled) {
+    return `Partial · ${settings.missing_configuration.join(', ') || 'missing setup'}`
+  }
+  return error || 'Not enabled'
+}
+
+function formatApiKeyStatus(value: AnthropicApiKeyLookup | null): string {
+  return value ? value.api_key.status.toUpperCase() : 'Not checked'
+}
+
+function formatDateTime(value: string | null | undefined, fallback: string): string {
+  if (!value) {
+    return fallback
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return date.toLocaleString()
+}
+
 export function SettingsWorkspace({
   health,
   authSession,
@@ -326,7 +369,13 @@ export function SettingsWorkspace({
   const [serverSettings, setServerSettings] = useState<PublicRuntimeSettings | null>(null)
   const [serverSettingsError, setServerSettingsError] = useState('')
   const [serverSettingsLoading, setServerSettingsLoading] = useState(true)
+  const [anthropicSettings, setAnthropicSettings] = useState<AnthropicRuntimeSettings | null>(null)
+  const [anthropicApiKeyLookup, setAnthropicApiKeyLookup] = useState<AnthropicApiKeyLookup | null>(null)
+  const [anthropicSettingsLoading, setAnthropicSettingsLoading] = useState(false)
+  const [anthropicLookupLoading, setAnthropicLookupLoading] = useState(false)
+  const [anthropicError, setAnthropicError] = useState('')
   const [timeZoneOptions] = useState(() => listTimeDisplayTimeZoneOptions())
+  const adminIntegrationAccess = hasAdminIntegrationAccess(authSession)
 
   useEffect(() => {
     let cancelled = false
@@ -356,6 +405,46 @@ export function SettingsWorkspace({
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadAnthropicSettings() {
+      if (!adminIntegrationAccess || !authSession) {
+        setAnthropicSettings(null)
+        setAnthropicApiKeyLookup(null)
+        setAnthropicError('')
+        setAnthropicSettingsLoading(false)
+        return
+      }
+
+      setAnthropicSettingsLoading(true)
+      setAnthropicError('')
+      try {
+        const payload = await loadAnthropicIntegrationSettings(appConfig.apiBase, authSession.accessToken)
+        if (!cancelled) {
+          setAnthropicSettings(payload)
+          setAnthropicApiKeyLookup(null)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAnthropicSettings(null)
+          setAnthropicApiKeyLookup(null)
+          setAnthropicError(error instanceof Error ? error.message : 'Could not load Anthropic admin settings.')
+        }
+      } finally {
+        if (!cancelled) {
+          setAnthropicSettingsLoading(false)
+        }
+      }
+    }
+
+    void loadAnthropicSettings()
+
+    return () => {
+      cancelled = true
+    }
+  }, [adminIntegrationAccess, authSession])
 
   useEffect(() => {
     setAppearanceForm(appearanceSettings)
@@ -398,6 +487,25 @@ export function SettingsWorkspace({
 
     return () => window.cancelAnimationFrame(frameId)
   }, [])
+
+  async function handleInspectAnthropicApiKey() {
+    if (!authSession || !adminIntegrationAccess) {
+      setAnthropicError('Sign in with an administrative session before checking Anthropic.')
+      return
+    }
+
+    setAnthropicLookupLoading(true)
+    setAnthropicError('')
+    try {
+      const payload = await getAnthropicIntegrationApiKey(appConfig.apiBase, authSession.accessToken)
+      setAnthropicApiKeyLookup(payload)
+    } catch (error) {
+      setAnthropicApiKeyLookup(null)
+      setAnthropicError(error instanceof Error ? error.message : 'Could not inspect the Anthropic API key.')
+    } finally {
+      setAnthropicLookupLoading(false)
+    }
+  }
 
   async function handleLogout() {
     setAuthAction('logout')
@@ -556,8 +664,8 @@ export function SettingsWorkspace({
       tone: 'success',
       message:
         savedSettings.workspaceMode === 'terminal'
-          ? 'Appearance saved locally for this browser. Market terminal mode now uses the denser shell and makes the live desk the default signed-in root landing.'
-          : 'Appearance saved locally for this browser. Guided workspace mode keeps Prompt Home as the default signed-in root landing.',
+          ? 'Appearance saved locally for this browser. Dense workspace mode keeps Home as the signed-in root landing.'
+          : 'Appearance saved locally for this browser. Guided workspace mode keeps Home as the signed-in root landing.',
     })
   }
 
@@ -695,6 +803,11 @@ export function SettingsWorkspace({
     : serverSettings
       ? `${serverSettings.app_version} · ${serverSettings.assistant.effective_default_provider ?? 'No assistant provider'} · ${formatProjectionMonitoringEmailStatusLabel(serverSettings.projection_monitoring_email)} email`
       : serverSettingsError || 'Public API settings are unavailable'
+  const anthropicAdminSummary = formatAnthropicAdminSummary(
+    anthropicSettings,
+    anthropicSettingsLoading,
+    anthropicError,
+  )
   const quickReadSummary =
     health === 'ok'
       ? runtimeOverrideCount > 0
@@ -1030,8 +1143,8 @@ export function SettingsWorkspace({
               <strong>{formatWorkspaceModeLabel(appearanceSettings.workspaceMode)}</strong>
               <p>
                 {appearanceSettings.workspaceMode === 'terminal'
-                  ? 'Signed-in root opens the live desk and hides the signed-in Start Here overlay.'
-                  : 'Signed-in root stays prompt-first and keeps the broader onboarding shell available.'}
+                  ? 'Signed-in root opens Home with the denser shell treatment.'
+                  : 'Signed-in root opens Home with the standard shell treatment.'}
               </p>
             </article>
             <article className="settings-summary-card">
@@ -1054,7 +1167,7 @@ export function SettingsWorkspace({
                 <span className="eyebrow">Workspace shell</span>
                 <h3>Landing and density mode</h3>
               </div>
-              <p>Choose whether this browser should open into the guided prompt flow or a denser monitor-first shell.</p>
+              <p>Choose the shell density for this browser. Home remains the signed-in landing page.</p>
             </div>
 
             <div className="appearance-mode-options" aria-label="Workspace mode preference">
@@ -2408,6 +2521,84 @@ export function SettingsWorkspace({
                   ))}
                 </div>
               </div>
+
+              {adminIntegrationAccess ? (
+                <div className="settings-chip-block">
+                  <div className="section-head">
+                    <div>
+                      <span className="eyebrow">Provider Admin</span>
+                      <h3>Anthropic API Key</h3>
+                    </div>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => void handleInspectAnthropicApiKey()}
+                      disabled={anthropicLookupLoading || anthropicSettingsLoading || !anthropicSettings?.configured}
+                    >
+                      {anthropicLookupLoading ? 'Checking...' : 'Inspect Key'}
+                    </button>
+                  </div>
+
+                  <div className="settings-summary-grid">
+                    <article className="settings-summary-card">
+                      <span>Admin lookup</span>
+                      <strong>
+                        {anthropicSettingsLoading
+                          ? 'Loading'
+                          : anthropicSettings?.configured
+                            ? 'Configured'
+                            : anthropicSettings?.enabled
+                              ? 'Partial'
+                              : 'Disabled'}
+                      </strong>
+                      <p>{anthropicAdminSummary}</p>
+                    </article>
+                    <article className="settings-summary-card">
+                      <span>Key status</span>
+                      <strong>{formatApiKeyStatus(anthropicApiKeyLookup)}</strong>
+                      <p>
+                        {anthropicApiKeyLookup
+                          ? `${anthropicApiKeyLookup.api_key.name} · ${anthropicApiKeyLookup.api_key.partial_key_hint}`
+                          : 'Run the lookup to fetch redacted key metadata from Anthropic.'}
+                      </p>
+                    </article>
+                    <article className="settings-summary-card">
+                      <span>Workspace</span>
+                      <strong>{anthropicApiKeyLookup?.api_key.workspace_id ?? 'Not checked'}</strong>
+                      <p>
+                        {anthropicApiKeyLookup
+                          ? `Created by ${anthropicApiKeyLookup.api_key.created_by.type} ${anthropicApiKeyLookup.api_key.created_by.id}.`
+                          : `Version ${anthropicSettings?.api_version ?? '2023-06-01'} · ${anthropicSettings?.base_url ?? 'https://api.anthropic.com'}`}
+                      </p>
+                    </article>
+                    <article className="settings-summary-card">
+                      <span>Expires</span>
+                      <strong>{formatDateTime(anthropicApiKeyLookup?.api_key.expires_at, 'Never or not checked')}</strong>
+                      <p>
+                        Created {formatDateTime(anthropicApiKeyLookup?.api_key.created_at, 'after a successful lookup')}.
+                      </p>
+                    </article>
+                  </div>
+
+                  {anthropicError ? (
+                    <div className="feedback-banner feedback-banner-error">{anthropicError}</div>
+                  ) : null}
+                  {anthropicSettings?.missing_configuration.length ? (
+                    <div className="chip-row">
+                      {anthropicSettings.missing_configuration.map((item) => (
+                        <span key={item} className="entity-chip">
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {anthropicApiKeyLookup?.warnings.length ? (
+                    <div className="feedback-banner">
+                      {anthropicApiKeyLookup.warnings.join(' ')}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </>
           ) : (
             <div className="empty-state">

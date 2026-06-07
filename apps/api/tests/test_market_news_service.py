@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import patch
 
 import httpx
 
+from apps.api.app.config import settings
 from apps.api.app.domains.reference_data.services.external_data.market_news import (
     MarketNewsClient,
     MarketNewsClientError,
 )
+from apps.api.app.domains.reference_data.services.external_data.market_news_ai import (
+    build_market_news_ai_tags,
+)
+from apps.api.app.schemas.external_data import MarketNewsTaggingRequest
 
 
 def _response(url: str, status_code: int, body: str) -> httpx.Response:
@@ -32,6 +38,29 @@ class _FakeHttpxClient:
 
     def get(self, url: str, **kwargs: object) -> httpx.Response:
         self.request_url = url
+        if isinstance(self.response_or_exception, Exception):
+            raise self.response_or_exception
+        return self.response_or_exception
+
+
+class _FakeAsyncHttpxClient:
+    def __init__(self, response_or_exception: httpx.Response | Exception) -> None:
+        self.response_or_exception = response_or_exception
+        self.request_url: str | None = None
+        self.request_headers: dict[str, object] | None = None
+        self.request_json: dict[str, object] | None = None
+
+    async def __aenter__(self) -> "_FakeAsyncHttpxClient":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    async def post(self, url: str, **kwargs: object) -> httpx.Response:
+        self.request_url = url
+        headers = kwargs.get("headers")
+        self.request_headers = dict(headers) if isinstance(headers, dict) else None
+        self.request_json = kwargs.get("json") if isinstance(kwargs.get("json"), dict) else None
         if isinstance(self.response_or_exception, Exception):
             raise self.response_or_exception
         return self.response_or_exception
@@ -214,3 +243,170 @@ class MarketNewsClientTests(unittest.TestCase):
         ):
             with self.assertRaises(MarketNewsClientError):
                 MarketNewsClient().fetch_headlines(query="oil")
+
+
+class MarketNewsAiTaggingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_build_market_news_ai_tags_validates_openai_output(self) -> None:
+        body = {
+            "output_text": json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": "headline-0",
+                            "supply": {
+                                "direction": "up",
+                                "horizon": "immediate",
+                                "confidence": 1.2,
+                                "rationale": "Record output signals more physical supply.",
+                            },
+                            "demand": {
+                                "direction": "neutral",
+                                "horizon": "near_term",
+                                "confidence": 0.81,
+                                "rationale": "No demand driver is named.",
+                            },
+                            "market_location": {
+                                "label": "United States",
+                                "scope": "country",
+                                "confidence": 0.91,
+                                "rationale": "The headline explicitly says U.S.",
+                            },
+                        }
+                    ]
+                }
+            )
+        }
+        fake_client = _FakeAsyncHttpxClient(
+            httpx.Response(
+                200,
+                json=body,
+                request=httpx.Request("POST", "https://api.openai.test/v1/responses"),
+            )
+        )
+        request = _market_news_tagging_request()
+
+        with (
+            patch.object(settings, "OPENAI_API_KEY", "test-key"),
+            patch.object(settings, "OPENAI_BASE_URL", "https://api.openai.test/v1"),
+            patch.object(settings, "OPENAI_MODEL", "gpt-5-mini"),
+            patch.object(settings, "MARKET_NEWS_AI_TAGGING_PROVIDER", "openai"),
+            patch.object(settings, "MARKET_NEWS_AI_TAGGING_MODEL", ""),
+            patch(
+                "apps.api.app.domains.reference_data.services.external_data.market_news_ai.httpx.AsyncClient",
+                return_value=fake_client,
+            ),
+        ):
+            payload = await build_market_news_ai_tags(request)
+
+        self.assertEqual(payload["provider"], "openai")
+        self.assertEqual(payload["model"], "gpt-5-mini")
+        self.assertEqual(payload["items"][0]["supply"]["direction"], "up")
+        self.assertEqual(payload["items"][0]["supply"]["confidence"], 1.0)
+        self.assertEqual(payload["items"][0]["market_location"]["label"], "United States")
+        self.assertEqual(payload["warnings"], [])
+        assert fake_client.request_json is not None
+        sent_input = fake_client.request_json["input"]
+        self.assertIn("deterministic", sent_input[0]["content"])
+
+    async def test_build_market_news_ai_tags_can_use_anthropic_provider(self) -> None:
+        body = {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {
+                            "items": [
+                                {
+                                    "id": "headline-0",
+                                    "supply": {
+                                        "direction": "down",
+                                        "horizon": "near_term",
+                                        "confidence": 0.87,
+                                        "rationale": "Disease pressure reduces available cattle supply.",
+                                    },
+                                    "demand": {
+                                        "direction": "neutral",
+                                        "horizon": "near_term",
+                                        "confidence": 0.72,
+                                        "rationale": "The headline does not name consumption or buying.",
+                                    },
+                                    "market_location": {
+                                        "label": "United States",
+                                        "scope": "country",
+                                        "confidence": 0.91,
+                                        "rationale": "The headline explicitly says U.S.",
+                                    },
+                                }
+                            ]
+                        }
+                    ),
+                }
+            ]
+        }
+        fake_client = _FakeAsyncHttpxClient(
+            httpx.Response(
+                200,
+                json=body,
+                request=httpx.Request("POST", "https://api.anthropic.test/v1/messages"),
+            )
+        )
+        request = _market_news_tagging_request()
+
+        with (
+            patch.object(settings, "ANTHROPIC_API_KEY", "anthropic-test-key"),
+            patch.object(settings, "ANTHROPIC_BASE_URL", "https://api.anthropic.test"),
+            patch.object(settings, "ANTHROPIC_MODEL", "claude-sonnet-4-0"),
+            patch.object(settings, "MARKET_NEWS_AI_TAGGING_PROVIDER", "anthropic"),
+            patch.object(settings, "MARKET_NEWS_AI_TAGGING_MODEL", ""),
+            patch(
+                "apps.api.app.domains.reference_data.services.external_data.market_news_ai.httpx.AsyncClient",
+                return_value=fake_client,
+            ),
+        ):
+            payload = await build_market_news_ai_tags(request)
+
+        self.assertEqual(payload["provider"], "anthropic")
+        self.assertEqual(payload["model"], "claude-sonnet-4-0")
+        self.assertEqual(payload["items"][0]["supply"]["direction"], "down")
+        self.assertEqual(payload["items"][0]["market_location"]["label"], "United States")
+        self.assertEqual(payload["warnings"], [])
+        self.assertEqual(fake_client.request_url, "https://api.anthropic.test/v1/messages")
+        assert fake_client.request_headers is not None
+        self.assertEqual(fake_client.request_headers["x-api-key"], "anthropic-test-key")
+        self.assertEqual(fake_client.request_headers["anthropic-version"], "2023-06-01")
+        assert fake_client.request_json is not None
+        self.assertEqual(fake_client.request_json["model"], "claude-sonnet-4-0")
+        sent_messages = fake_client.request_json["messages"]
+        sent_text = sent_messages[0]["content"][0]["text"]
+        self.assertIn("deterministic", sent_text)
+
+    async def test_build_market_news_ai_tags_falls_back_when_openai_is_not_configured(self) -> None:
+        with (
+            patch.object(settings, "MARKET_NEWS_AI_TAGGING_PROVIDER", "openai"),
+            patch.object(settings, "OPENAI_API_KEY", ""),
+        ):
+            payload = await build_market_news_ai_tags(_market_news_tagging_request())
+
+        self.assertEqual(payload["items"], [])
+        self.assertIn("OPENAI_API_KEY", payload["warnings"][0])
+
+
+def _market_news_tagging_request() -> MarketNewsTaggingRequest:
+    return MarketNewsTaggingRequest.model_validate(
+        {
+            "commodity": "BEEF",
+            "items": [
+                {
+                    "id": "headline-0",
+                    "title": "Beef output breaks all-time high in U.S.",
+                    "source": "Market Wire",
+                    "published_at": None,
+                    "deterministic": {
+                        "supply": {"direction": "neutral", "horizon": "near_term"},
+                        "demand": {"direction": "neutral", "horizon": "near_term"},
+                        "market_location": {"label": "United States", "scope": "country"},
+                    },
+                }
+            ],
+        }
+    )

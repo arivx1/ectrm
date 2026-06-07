@@ -112,6 +112,11 @@ class Settings(BaseSettings):
     MCP_OAUTH_AUTHORIZATION_CODE_TTL_SECONDS: int = Field(default=600, ge=60, le=3600)
     MARKET_NEWS_RSS_BASE_URL: str = "https://news.google.com/rss/search"
     MARKET_NEWS_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
+    MARKET_NEWS_AI_TAGGING_ENABLED: bool = True
+    MARKET_NEWS_AI_TAGGING_PROVIDER: str = "openai"
+    MARKET_NEWS_AI_TAGGING_MODEL: str = ""
+    MARKET_NEWS_AI_TAGGING_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    MARKET_NEWS_AI_TAGGING_MAX_OUTPUT_TOKENS: int = Field(default=1400, ge=256, le=4096)
     ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION: int = Field(default=100_000, ge=0, le=100_000_000)
     CODEX_TASKS_ENABLED: bool = False
     CODEX_GITHUB_REPOSITORY: str = ""
@@ -134,6 +139,13 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
     ANTHROPIC_MODEL: str = "claude-sonnet-4-5"
+    ANTHROPIC_AGENT_BUILDER_MODEL: str = ""
+    ANTHROPIC_ADMIN_ENABLED: bool = False
+    ANTHROPIC_ADMIN_API_KEY: str = ""
+    ANTHROPIC_ADMIN_API_KEY_ID: str = ""
+    ANTHROPIC_ADMIN_BASE_URL: str = "https://api.anthropic.com"
+    ANTHROPIC_ADMIN_API_VERSION: str = "2023-06-01"
+    ANTHROPIC_ADMIN_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
     GOOGLE_API_KEY: str = ""
     GOOGLE_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
     GOOGLE_MODEL: str = "gemini-2.5-flash"
@@ -154,6 +166,19 @@ class Settings(BaseSettings):
     SLACK_MESSAGING_HISTORY_LIMIT: int = Field(default=20, ge=1, le=200)
     SLACK_MESSAGING_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
     SLACK_API_BASE_URL: str = "https://slack.com/api"
+    ATTIO_ENABLED: bool = False
+    ATTIO_ACCESS_TOKEN: str = ""
+    ATTIO_API_KEY: str = ""
+    ATTIO_BASE_URL: str = "https://api.attio.com/v2"
+    ATTIO_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    ATTIO_OBJECT_LIMIT: int = Field(default=25, ge=1, le=100)
+    NOTION_ENABLED: bool = False
+    NOTION_ACCESS_TOKEN: str = ""
+    NOTION_API_KEY: str = ""
+    NOTION_BASE_URL: str = "https://api.notion.com/v1"
+    NOTION_VERSION: str = "2026-03-11"
+    NOTION_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    NOTION_SEARCH_LIMIT: int = Field(default=10, ge=1, le=100)
     EIA_API_KEY: str = ""
     EIA_BASE_URL: str = "https://api.eia.gov/v2"
     EIA_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
@@ -170,6 +195,11 @@ class Settings(BaseSettings):
     FRED_SYNC_INTERVAL_MINUTES: int = Field(default=60, ge=5, le=10080)
     FRED_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=365, ge=1, le=3650)
     FRED_SYNC_SUCCESS_SLA_HOURS: int = Field(default=48, ge=1, le=336)
+    ALPHA_VANTAGE_API_KEY: str = ""
+    ALPHA_VANTAGE_BASE_URL: str = "https://www.alphavantage.co/query"
+    ALPHA_VANTAGE_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    ALPHA_VANTAGE_SYNC_INTERVAL_MINUTES: int = Field(default=15, ge=5, le=10080)
+    ALPHA_VANTAGE_SYNC_SUCCESS_SLA_HOURS: int = Field(default=24, ge=1, le=336)
     BLS_API_KEY: str = ""
     BLS_BASE_URL: str = "https://api.bls.gov/publicAPI/v2"
     BLS_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)

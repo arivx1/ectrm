@@ -268,7 +268,7 @@ class AdminSeedApiTests(unittest.TestCase):
             )
 
             self.assertEqual(payload.total_records, sum(payload.entity_counts.values()))
-            self.assertEqual(payload.entity_counts["commodities"], 62)
+            self.assertEqual(payload.entity_counts["commodities"], 64)
             self.assertEqual(payload.entity_counts["locations"], 552)
             self.assertEqual(payload.entity_counts["rail_lines"], 5)
             self.assertEqual(payload.entity_counts["rail_routes"], 6)
@@ -277,12 +277,12 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(payload.entity_counts["pipeline_details"], 10)
             self.assertEqual(payload.entity_counts["pipeline_points"], 33)
             self.assertEqual(payload.entity_counts["pipeline_paths"], 12)
-            self.assertEqual(payload.entity_counts["counterparties"], 1516)
+            self.assertEqual(payload.entity_counts["counterparties"], 1539)
             self.assertEqual(payload.entity_counts["calendars"], 73)
             self.assertGreaterEqual(payload.entity_counts["calendar_overlays"], 20)
             self.assertGreaterEqual(payload.entity_counts["calendar_rules"], 130)
-            self.assertEqual(len(PRICE_INDEX_ROWS), 101)
-            self.assertEqual(len(PRICE_INDEX_SOURCE_ROWS), 101)
+            self.assertEqual(len(PRICE_INDEX_ROWS), 104)
+            self.assertEqual(len(PRICE_INDEX_SOURCE_ROWS), 104)
             self.assertEqual(payload.entity_counts["price_indices"], len(PRICE_INDEX_ROWS))
             self.assertEqual(payload.entity_counts["price_index_sources"], len(PRICE_INDEX_SOURCE_ROWS))
             price_index_codes = {
@@ -642,22 +642,45 @@ class AdminSeedApiTests(unittest.TestCase):
                         "AA",
                         "AAL",
                         "AAMI",
+                        "ABERCORE",
+                        "AMERICAN_PLANT_FOOD",
+                        "ASILI",
                         "BP",
+                        "CARGILL",
+                        "CEFETRA",
                         "CHEVRON",
+                        "CIAMSA",
                         "2222_SR",
                         "0857_HK",
                         "COP",
                         "CONSTELLATION",
+                        "CSC_SUGAR",
+                        "CROWN_POINT",
+                        "CUMBERLAND",
                         "DUK",
                         "ENB",
                         "ENR_F",
+                        "ETG",
+                        "FIBRE_TRADE",
+                        "HARTREE",
+                        "HOWLETT_FARMS",
+                        "INTERNATIONAL_MATERIALS",
+                        "INTEROCEANIC",
                         "ENGIE",
                         "JPM",
+                        "LINKONE",
                         "MERCURIA",
                         "PBR",
+                        "REDWOOD_GROUP",
                         "RWE",
+                        "RYCO_HOLDINGS",
+                        "SMIRKS",
+                        "SPRING_VALLEY",
+                        "SURESOURCE",
+                        "TELF_AG",
                         "TRAFIGURA",
                         "VALERO",
+                        "WESTFELDT_BROTHERS",
                     }
                 )
             )
@@ -672,6 +695,8 @@ class AdminSeedApiTests(unittest.TestCase):
             siemens_energy = session.get(ReferenceCounterparty, "ENR_F")
             engie = session.get(ReferenceCounterparty, "ENGIE")
             jpm = session.get(ReferenceCounterparty, "JPM")
+            hartree = session.get(ReferenceCounterparty, "HARTREE")
+            telf_ag = session.get(ReferenceCounterparty, "TELF_AG")
             self.assertIsNotNone(alcoa)
             self.assertIsNotNone(american_airlines)
             self.assertIsNotNone(acadian)
@@ -683,6 +708,8 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertIsNotNone(siemens_energy)
             self.assertIsNotNone(engie)
             self.assertIsNotNone(jpm)
+            self.assertIsNotNone(hartree)
+            self.assertIsNotNone(telf_ag)
             assert alcoa is not None
             assert american_airlines is not None
             assert acadian is not None
@@ -694,10 +721,16 @@ class AdminSeedApiTests(unittest.TestCase):
             assert siemens_energy is not None
             assert engie is not None
             assert jpm is not None
+            assert hartree is not None
+            assert telf_ag is not None
             self.assertEqual(alcoa.counterparty_type, "END_USER")
             self.assertEqual(american_airlines.counterparty_type, "END_USER")
             self.assertEqual(acadian.counterparty_type, "BROKER")
             self.assertEqual(apple.counterparty_type, "END_USER")
+            self.assertEqual(hartree.name, "Hartree")
+            self.assertEqual(hartree.counterparty_type, "END_USER")
+            self.assertEqual(telf_ag.name, "Telf Ag")
+            self.assertEqual(telf_ag.description, "Existing client base starter row.")
             self.assertEqual(saudi_aramco.counterparty_type, "MAJOR")
             self.assertEqual(saudi_aramco.country_code, "SA")
             self.assertEqual(petrochina.counterparty_type, "MAJOR")

@@ -82,7 +82,7 @@ describe('terminal workspace sets', () => {
 
     expect(markup).toContain('Workspace Set')
     expect(markup).toContain('Trader Morning')
-    expect(markup).toContain('Market Overview')
+    expect(markup).toContain('Home')
     expect(markup).toContain('Pop Out')
     expect(markup).toContain('Browser window placement stays manual')
   })
