@@ -47,6 +47,7 @@ class HttpAuthPolicyTests(unittest.TestCase):
 
     def test_configured_workspace_reads_require_authentication(self) -> None:
         self.assertTrue(requires_authenticated_read("GET", "/trades"))
+        self.assertTrue(requires_authenticated_read("GET", "/integrations/nexus/contacts"))
         self.assertTrue(requires_authenticated_read("GET", "/reports/overview"))
         self.assertFalse(requires_authenticated_read("GET", "/health"))
         self.assertFalse(requires_authenticated_read("POST", "/trades"))

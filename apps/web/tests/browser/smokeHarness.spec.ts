@@ -236,8 +236,14 @@ test("home smoke boots against the seeded browser harness", async ({
     await expect(persistentTopbar.getByText("Apps", { exact: true })).toBeVisible();
     await expect(persistentTopbar.getByText("Tokens Today")).toBeVisible();
     await expect(persistentTopbar.getByText("4,200", { exact: true })).toBeVisible();
-    await expect(persistentTopbar.getByText("DB Size")).toBeVisible();
+    await expect(persistentTopbar.getByText("DB Client")).toBeVisible();
+    await expect(persistentTopbar.getByText("DB Server")).toBeVisible();
     await expect(persistentTopbar.getByText("1 KB", { exact: true })).toBeVisible();
+    await expect(persistentTopbar.getByText("0 B", { exact: true })).toBeVisible();
+    await expect(persistentTopbar.getByText("Data Out")).toBeVisible();
+    await expect(persistentTopbar.getByText("Data In")).toBeVisible();
+    await expect(persistentTopbar.locator(".workspace-topbar-data-metric-data-out strong")).toContainText("/s");
+    await expect(persistentTopbar.locator(".workspace-topbar-data-metric-data-in strong")).toContainText("/s");
     await expect(profileAvatarButton(page)).toBeVisible();
     const persistentTopbarSearchTrigger = persistentTopbar.locator(
       ".terminal-command-trigger",
@@ -290,14 +296,100 @@ test("home smoke boots against the seeded browser harness", async ({
     await expect(persistentBackButton).toHaveAttribute("aria-label", "Go back to Strata");
     await expectLocatorStableX(persistentTopbarSearchTrigger, stableTopbarSearchX);
     await expect(page.locator(".nexus-crm-workspace").getByRole("heading", { name: "CRM" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Clients" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "Opportunities" })).toHaveAttribute("aria-selected", "false");
+    await expect(page.getByRole("tab", { name: "Disqualified" })).toHaveAttribute("aria-selected", "false");
+    await expect(page.getByRole("tab", { name: "Lost" })).toHaveAttribute("aria-selected", "false");
+    await expect(page.getByRole("tab", { name: "On Hold" })).toHaveAttribute("aria-selected", "false");
+    await expect(page.getByRole("tab", { name: "TAM" })).toHaveAttribute("aria-selected", "false");
+    await expect(page.getByRole("tab", { name: "Companies" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "Contacts" })).toHaveAttribute("aria-selected", "false");
     const nexusCrmSheet = page.locator(".nexus-crm-workspace .data-sheet-table");
     const nexusCrmDataRows = nexusCrmSheet.locator("tbody tr:not(.nexus-client-entry-row)");
     const nexusClientEntryRow = page.locator(".nexus-crm-workspace .nexus-client-entry-row");
     await expect(
       nexusCrmDataRows.first().getByRole("button", { name: "Client: Abercore" }),
     ).toBeVisible();
+    await page.getByRole("button", { name: "Sync Attio" }).click();
+    await expect(
+      page.getByText("Attio sync prepared 2 proposed CRM changes for review.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    const attioSyncReview = page.getByRole("dialog", { name: "Proposed CRM Changes" });
+    await expect(attioSyncReview).toBeVisible();
+    await expect(attioSyncReview.getByText("Hartree Partners", { exact: true })).toBeVisible();
+    await expect(attioSyncReview.getByText("Ionex Minerals", { exact: true })).toBeVisible();
+    const ionexSyncReviewRow = attioSyncReview.locator("li").filter({ hasText: "Ionex Minerals" });
+    await expect(ionexSyncReviewRow).toContainText("Disqualification reason Outside ICP");
+    await expect(attioSyncReview.getByText("Client", { exact: true })).toBeVisible();
+    await expect(attioSyncReview.getByRole("button", { name: "Reject All" })).toBeInViewport();
+    await expect(attioSyncReview.getByRole("button", { name: "Accept All Changes" })).toBeInViewport();
+    const hartreeBackgroundEnrichment = page.waitForResponse((response) => {
+      const request = response.request();
+      return (
+        request.method() === "POST" &&
+        response.url().includes("/integrations/attio/client-enrichment") &&
+        (request.postData() ?? "").includes("Hartree Partners")
+      );
+    });
+    await attioSyncReview.getByRole("button", { name: "Accept All Changes" }).click();
+    await expect(page.getByText("Accepted Attio sync: 0 existing updates and 2 new companies.", { exact: true })).toBeVisible();
+    await hartreeBackgroundEnrichment;
+    await expect(attioSyncReview).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Clients" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "Companies" })).toHaveAttribute("aria-selected", "true");
+    await expect(nexusCrmSheet.getByRole("button", { name: "Type Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Closed ARR Sort" })).toBeVisible();
+    await expect(nexusCrmSheet.getByRole("button", { name: "Open ARR Sort" })).toBeVisible();
+    await expect(nexusCrmSheet.getByRole("button", { name: "Closed Deals Sort" })).toBeVisible();
+    await expect(nexusCrmSheet.getByRole("button", { name: "Open Deals Sort" })).toBeVisible();
+    await expect(nexusCrmSheet.getByRole("button", { name: "Disqualified Deals Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Lost Deals Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "On Hold Deals Sort" })).toHaveCount(0);
+    const nexusClientColumnHeader = nexusCrmSheet.locator("thead tr").first().locator("th").nth(1);
+    const clientResizeHandle = nexusCrmSheet.getByRole("separator", { name: "Resize Client column" });
+    await expect(clientResizeHandle).toBeVisible();
+    const clientColumnBeforeResize = await nexusClientColumnHeader.boundingBox();
+    const clientResizeHandleBox = await clientResizeHandle.boundingBox();
+    if (!clientColumnBeforeResize || !clientResizeHandleBox) {
+      throw new Error("Nexus CRM client column resize geometry was not available");
+    }
+    await page.mouse.move(
+      clientResizeHandleBox.x + clientResizeHandleBox.width / 2,
+      clientResizeHandleBox.y + clientResizeHandleBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      clientResizeHandleBox.x + clientResizeHandleBox.width / 2 + 90,
+      clientResizeHandleBox.y + clientResizeHandleBox.height / 2,
+    );
+    await page.mouse.up();
+    const clientColumnAfterResize = await nexusClientColumnHeader.boundingBox();
+    expect(clientColumnAfterResize?.width ?? 0).toBeGreaterThan(clientColumnBeforeResize.width + 40);
+    await nexusCrmSheet.getByLabel("Filter Client").fill("Hartree Partners");
+    await expect(nexusCrmDataRows).toHaveCount(1);
+    const hartreeSyncedClientRow = nexusCrmDataRows.first();
+    await expect(hartreeSyncedClientRow.getByRole("button", { name: "Client: Hartree Partners" })).toBeVisible();
+    await expect(hartreeSyncedClientRow.getByLabel("Closed ARR: Hartree Partners")).toHaveValue("$240,000");
+    await expect(hartreeSyncedClientRow.getByLabel("Open ARR: Hartree Partners")).toHaveValue("");
+    await expect(hartreeSyncedClientRow.getByLabel("Closed Deals: Hartree Partners")).toHaveValue("2");
+    await expect(hartreeSyncedClientRow.getByLabel("Open Deals: Hartree Partners")).toHaveValue("");
+    await page.locator(".nexus-crm-workspace").getByRole("button", { name: "Reset Table" }).click();
+    await page.getByRole("tab", { name: "Opportunities" }).click();
+    await expect(page.getByRole("tab", { name: "Opportunities" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "Companies" })).toHaveAttribute("aria-selected", "true");
+    await expect(nexusCrmSheet.getByRole("button", { name: "Type Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Owner Sort" })).toBeVisible();
+    await expect(nexusCrmSheet.getByRole("button", { name: "Deal Status Sort" })).toBeVisible();
+    await expect(nexusCrmSheet.getByRole("button", { name: "Disqualified Deals Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Lost Deals Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "On Hold Deals Sort" })).toHaveCount(0);
+    await expect(nexusClientEntryRow.getByLabel("New type")).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: /^Client:/ })).toHaveCount(0);
     await nexusClientEntryRow.getByLabel("New client").fill("Blue Ridge Trading");
-    await nexusClientEntryRow.getByLabel("New relationship").fill("Prospect");
+    await nexusClientEntryRow.getByLabel("New owner").fill("Morgan");
+    await nexusClientEntryRow.getByLabel("New deal status").fill("Evaluation (SQO)");
     await nexusClientEntryRow.getByLabel("New next action").fill("Send onboarding packet");
     await nexusClientEntryRow.getByRole("button", { name: "Add" }).click();
     await expect(
@@ -307,9 +399,111 @@ test("home smoke boots against the seeded browser harness", async ({
     await expect(nexusCrmDataRows).toHaveCount(1);
     const blueRidgeCrmRow = nexusCrmDataRows.filter({ hasText: "Blue Ridge Trading" });
     await expect(blueRidgeCrmRow.getByRole("button", { name: "Client: Blue Ridge Trading" })).toBeVisible();
-    await expect(blueRidgeCrmRow.getByText("Prospect", { exact: true })).toBeVisible();
+    await expect(blueRidgeCrmRow.getByLabel("Owner: Blue Ridge Trading")).toHaveValue("Morgan");
+    await expect(blueRidgeCrmRow.getByLabel("Deal Status: Blue Ridge Trading")).toHaveValue("Evaluation (SQO)");
     await expect(blueRidgeCrmRow.getByText("Send onboarding packet", { exact: true })).toBeVisible();
     await page.locator(".nexus-crm-workspace").getByRole("button", { name: "Reset Table" }).click();
+    await page.getByRole("tab", { name: "Disqualified" }).click();
+    await expect(page.getByRole("tab", { name: "Disqualified" })).toHaveAttribute("aria-selected", "true");
+    await expect(nexusCrmSheet.getByRole("button", { name: "Type Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Owner Sort" })).toBeVisible();
+    await expect(nexusCrmSheet.getByRole("button", { name: "Disqualified Deals Sort" })).toBeVisible();
+    await expect(nexusCrmSheet.getByRole("button", { name: "Lost Deals Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "On Hold Deals Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Disqualification Reason Sort" })).toBeVisible();
+    await expect(nexusCrmSheet.getByRole("button", { name: "Lost Reason Sort" })).toHaveCount(0);
+    await expect(nexusClientEntryRow.getByLabel("New deal status")).toHaveValue("Disqualified");
+    await expect(nexusCrmDataRows).toHaveCount(1);
+    const ionexCrmRow = nexusCrmDataRows.filter({ hasText: "Ionex Minerals" });
+    await expect(ionexCrmRow.getByRole("button", { name: "Client: Ionex Minerals" })).toBeVisible();
+    await expect(ionexCrmRow.getByLabel("Disqualification Reason: Ionex Minerals")).toHaveValue("Outside ICP");
+    await nexusClientEntryRow.getByLabel("New client").fill("Cinder Materials");
+    await nexusClientEntryRow.getByLabel("New owner").fill("Avery");
+    await nexusClientEntryRow.getByLabel("New disqualification reason").fill("Outside ICP");
+    await nexusClientEntryRow.getByRole("button", { name: "Add" }).click();
+    await expect(nexusCrmDataRows).toHaveCount(2);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Client: Cinder Materials" })).toBeVisible();
+    const cinderCrmRow = nexusCrmDataRows.filter({ hasText: "Cinder Materials" });
+    await expect(cinderCrmRow.getByLabel("Deal Status: Cinder Materials")).toHaveValue("Disqualified");
+    await expect(cinderCrmRow.getByLabel("Disqualified Deals: Cinder Materials")).toHaveValue("1");
+    await expect(cinderCrmRow.getByLabel("Disqualification Reason: Cinder Materials")).toHaveValue(
+      "Outside ICP",
+    );
+    await page.getByRole("tab", { name: "Lost" }).click();
+    await expect(page.getByRole("tab", { name: "Lost" })).toHaveAttribute("aria-selected", "true");
+    await expect(nexusCrmSheet.getByRole("button", { name: "Disqualified Deals Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Lost Deals Sort" })).toBeVisible();
+    await expect(nexusCrmSheet.getByRole("button", { name: "On Hold Deals Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Disqualification Reason Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Lost Reason Sort" })).toBeVisible();
+    await expect(nexusClientEntryRow.getByLabel("New deal status")).toHaveValue("Lost");
+    await expect(nexusCrmSheet.getByRole("button", { name: /^Client:/ })).toHaveCount(0);
+    await nexusClientEntryRow.getByLabel("New client").fill("Delta Alloy");
+    await nexusClientEntryRow.getByLabel("New owner").fill("Jordan");
+    await nexusClientEntryRow.getByLabel("New lost reason").fill("No budget");
+    await nexusClientEntryRow.getByRole("button", { name: "Add" }).click();
+    await nexusCrmSheet.getByLabel("Filter Client").fill("Delta Alloy");
+    await expect(nexusCrmDataRows).toHaveCount(1);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Client: Delta Alloy" })).toBeVisible();
+    await expect(nexusCrmDataRows.first().getByLabel("Deal Status: Delta Alloy")).toHaveValue("Lost");
+    await expect(nexusCrmDataRows.first().getByLabel("Lost Deals: Delta Alloy")).toHaveValue("1");
+    await expect(nexusCrmDataRows.first().getByLabel("Lost Reason: Delta Alloy")).toHaveValue("No budget");
+    await page.locator(".nexus-crm-workspace").getByRole("button", { name: "Reset Table" }).click();
+    await page.getByRole("tab", { name: "On Hold" }).click();
+    await expect(page.getByRole("tab", { name: "On Hold" })).toHaveAttribute("aria-selected", "true");
+    await expect(nexusCrmSheet.getByRole("button", { name: "Disqualified Deals Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Lost Deals Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "On Hold Deals Sort" })).toBeVisible();
+    await expect(nexusCrmSheet.getByRole("button", { name: "Disqualification Reason Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Lost Reason Sort" })).toHaveCount(0);
+    await expect(nexusClientEntryRow.getByLabel("New deal status")).toHaveValue("On Hold");
+    await nexusClientEntryRow.getByLabel("New client").fill("Fallow Trading");
+    await nexusClientEntryRow.getByLabel("New owner").fill("Taylor");
+    await nexusClientEntryRow.getByRole("button", { name: "Add" }).click();
+    await expect(nexusCrmDataRows).toHaveCount(1);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Client: Fallow Trading" })).toBeVisible();
+    await expect(nexusCrmDataRows.first().getByLabel("Deal Status: Fallow Trading")).toHaveValue("On Hold");
+    await expect(nexusCrmDataRows.first().getByLabel("On Hold Deals: Fallow Trading")).toHaveValue("1");
+    await page.getByRole("tab", { name: "Clients" }).click();
+    await expect(page.getByRole("tab", { name: "Clients" })).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("tab", { name: "TAM" }).click();
+    await expect(page.getByRole("tab", { name: "TAM" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("button", { name: "Import CSV/XLS" })).toBeVisible();
+    await expect(nexusCrmSheet.getByRole("button", { name: "Type Sort" })).toHaveCount(0);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Contact Count Sort" })).toBeVisible();
+    await expect(nexusClientEntryRow.getByLabel("New type")).toHaveCount(0);
+    const tamImportCsv = [
+      "Company,Next Action",
+      "Hartree Partners,Skip existing client",
+      ...Array.from({ length: 54 }, (_value, index) => {
+        const rowNumber = String(index + 1).padStart(2, "0");
+        return `Paged TAM Company ${rowNumber},Qualify fit ${rowNumber}`;
+      }),
+      "Acme Smelter,Qualify fit",
+    ].join("\n");
+    await page.locator('input[aria-label="Import TAM companies"]').setInputFiles({
+      name: "tam-import.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(tamImportCsv),
+    });
+    await expect(
+      page.getByText("Imported 55 TAM companies from tam-import.csv. Skipped 1 row.", { exact: true }),
+    ).toBeVisible();
+    const nexusCrmStatus = page.locator(".nexus-crm-workspace .data-sheet-status");
+    await expect(nexusCrmStatus).toContainText("Showing 1-50 of 55 rows");
+    await expect(nexusCrmStatus).toContainText("Page 1 of 2");
+    await expect(nexusCrmDataRows).toHaveCount(50);
+    await nexusCrmStatus.getByRole("button", { name: "Next" }).click();
+    await expect(nexusCrmStatus).toContainText("Showing 51-55 of 55 rows");
+    await expect(nexusCrmDataRows).toHaveCount(5);
+    await nexusCrmSheet.getByLabel("Filter Client").fill("Acme Smelter");
+    await expect(nexusCrmDataRows).toHaveCount(1);
+    const importedTamRow = nexusCrmDataRows.filter({ hasText: "Acme Smelter" });
+    await expect(importedTamRow.getByRole("button", { name: "Client: Acme Smelter" })).toBeVisible();
+    await expect(importedTamRow.getByText("Qualify fit", { exact: true })).toBeVisible();
+    await page.locator(".nexus-crm-workspace").getByRole("button", { name: "Reset Table" }).click();
+    await page.getByRole("tab", { name: "Clients" }).click();
+    await expect(page.getByRole("tab", { name: "Clients" })).toHaveAttribute("aria-selected", "true");
     await nexusCrmSheet.getByRole("button", { name: "Client Sort" }).click();
     await expect(
       nexusCrmDataRows.first().getByRole("button", { name: "Client: Abercore" }),
@@ -318,24 +512,87 @@ test("home smoke boots against the seeded browser harness", async ({
     await expect(
       nexusCrmDataRows.first().getByRole("button", { name: "Client: Westfeldt Brothers" }),
     ).toBeVisible();
-    await nexusCrmSheet.getByLabel("Filter Client").fill("hartree");
+    await nexusCrmSheet.getByLabel("Filter Client").fill("Hartree Partners");
     await expect(nexusCrmDataRows).toHaveCount(1);
-    await expect(nexusCrmSheet.getByRole("button", { name: "Client: Hartree" })).toBeVisible();
-    await nexusCrmSheet.getByRole("button", { name: "Client: Hartree" }).click();
+    await expect(nexusCrmSheet.getByRole("button", { name: "Client: Hartree Partners" })).toBeVisible();
+    await nexusCrmSheet.getByRole("button", { name: "Client: Hartree Partners" }).click();
     const nexusClientWorkspace = page.locator(".nexus-client-workspace");
-    await expect(persistentTopbar.getByText("Hartree", { exact: true })).toBeVisible();
+    await expect(persistentTopbar.getByText("Hartree Partners", { exact: true })).toBeVisible();
     await expect(persistentBackButton).toBeEnabled();
     await expect(persistentBackButton).toHaveAttribute("aria-label", "Go back to CRM");
     await expectLocatorStableX(persistentTopbarSearchTrigger, stableTopbarSearchX);
-    await expect(nexusClientWorkspace.getByRole("heading", { name: "Hartree" })).toBeVisible();
-    await expect(nexusClientWorkspace.getByText("Hartree Partners", { exact: true })).toBeVisible();
-    await expect(nexusClientWorkspace.getByText("hartreepartners.com", { exact: true })).toBeVisible();
-    await expect(nexusClientWorkspace.getByText("Alex Hartree", { exact: true })).toBeVisible();
-    await expect(nexusClientWorkspace.getByText("Hartree Partners (Expansion)", { exact: true })).toBeVisible();
-    await nexusClientWorkspace.getByLabel("Add contact").fill("Jane Hartree");
+    await expect(nexusClientWorkspace.getByRole("heading", { name: "Hartree Partners" })).toBeVisible();
+    const nexusAttioSection = nexusClientWorkspace.locator(".nexus-attio-section");
+    const nexusContactSection = nexusClientWorkspace.locator(".nexus-client-contacts");
+    const nexusGrainSection = nexusClientWorkspace.locator(".nexus-grain-section");
+    const nexusLinearSection = nexusClientWorkspace.locator(".nexus-linear-section");
+    await expect(nexusAttioSection.getByText("Hartree Partners", { exact: true })).toBeVisible();
+    await expect(nexusAttioSection.getByText("hartreepartners.com", { exact: true })).toBeVisible();
+    await expect(nexusAttioSection.getByText("Alex Hartree", { exact: true })).toBeVisible();
+    await expect(nexusAttioSection.getByText("Hartree Partners (Expansion)", { exact: true })).toBeVisible();
+    await expect(nexusClientWorkspace.getByRole("link", { name: "Hartree client playbook" })).toHaveAttribute(
+      "href",
+      "https://www.notion.so/hartree-client-playbook",
+    );
+    await expect(
+      nexusClientWorkspace.getByText("96% confidence - page title starts with client name - Last edited Jun 6, 2026", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(nexusGrainSection.getByRole("link", { name: "Hartree weekly call" })).toHaveAttribute(
+      "href",
+      "https://grain.com/share/recording/grain-hartree-weekly",
+    );
+    await expect(nexusGrainSection.getByText("Jun 6, 2026 - 30m - 2 participants - zoom", { exact: true })).toBeVisible();
+    await expect(nexusLinearSection.getByRole("link", { name: "NEX-42 - Hartree risk workflow follow-up" })).toHaveAttribute(
+      "href",
+      "https://linear.app/nexus/issue/NEX-42/hartree-risk-workflow-follow-up",
+    );
+    await expect(
+      nexusLinearSection.getByText("In Progress (started) - NEX - Assigned to Morgan Ops - Priority High - Client Integrations", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(nexusLinearSection.getByText("Labels client, hartree", { exact: true })).toBeVisible();
+    await nexusClientWorkspace.getByLabel("Notion link title").fill("Hartree risk notes");
+    await nexusClientWorkspace.getByLabel("Notion page URL").fill("notion.so/hartree-risk-notes");
+    await nexusClientWorkspace.getByRole("button", { name: "Add Notion Link" }).click();
+    await expect(nexusClientWorkspace.getByRole("link", { name: "Hartree risk notes" })).toHaveAttribute(
+      "href",
+      "https://notion.so/hartree-risk-notes",
+    );
+    await nexusClientWorkspace.getByLabel("Grain link title").fill("Hartree kickoff replay");
+    await nexusClientWorkspace.getByLabel("Grain recording URL").fill("grain.com/share/recording/hartree-kickoff");
+    await nexusClientWorkspace.getByRole("button", { name: "Add Grain Link" }).click();
+    await expect(nexusGrainSection.getByRole("link", { name: "Hartree kickoff replay" })).toHaveAttribute(
+      "href",
+      "https://grain.com/share/recording/hartree-kickoff",
+    );
+    await expect(nexusContactSection.getByText("1 contact", { exact: true })).toBeVisible();
+    await expect(nexusContactSection.getByText("Alex Hartree", { exact: true })).toBeVisible();
+    await expect(nexusContactSection.getByText("Commercial lead - alex.hartree@example.com", { exact: true })).toBeVisible();
     await nexusClientWorkspace.getByRole("button", { name: "Add Contact" }).click();
-    await expect(nexusClientWorkspace.getByText("1 contact", { exact: true })).toBeVisible();
-    await expect(nexusClientWorkspace.getByText("Jane Hartree", { exact: true })).toBeVisible();
+    const addContactDialog = page.getByRole("dialog", { name: "Add Contact" });
+    await expect(addContactDialog).toBeVisible();
+    await expect(addContactDialog.getByText("Hartree Partners", { exact: true })).toBeVisible();
+    await addContactDialog.getByLabel("First Name").fill("Jane");
+    await addContactDialog.getByLabel("Last Name").fill("Hartree");
+    await addContactDialog.getByLabel("Role", { exact: true }).fill("Head of Origination");
+    await addContactDialog.getByLabel("Time at Role").fill("3 years");
+    await addContactDialog.getByLabel("Previous Role").fill("Commodity research lead");
+    await addContactDialog.getByLabel("University", { exact: true }).fill("Tulane University");
+    await addContactDialog.getByLabel("University 2").fill("University of Chicago");
+    await addContactDialog.getByLabel("Location").fill("New Orleans, LA");
+    await addContactDialog.getByRole("button", { name: "Save Contact" }).click();
+    await expect(addContactDialog).toHaveCount(0);
+    await expect(nexusContactSection.getByText("2 contacts", { exact: true })).toBeVisible();
+    await expect(nexusContactSection.getByText("Jane Hartree", { exact: true })).toBeVisible();
+    await expect(
+      nexusContactSection.getByText(
+        "Head of Origination - 3 years - Previous Commodity research lead - Tulane University - University of Chicago - New Orleans, LA",
+        { exact: true },
+      ),
+    ).toBeVisible();
     await nexusClientWorkspace.getByLabel("Add to-do").fill("Call Hartree about June positions");
     await nexusClientWorkspace.getByRole("button", { name: "Add To-Do" }).click();
     await expect(
@@ -344,9 +601,28 @@ test("home smoke boots against the seeded browser harness", async ({
     await persistentBackButton.click();
     await expect(persistentTopbar.getByText("CRM", { exact: true })).toBeVisible();
     const hartreeCrmRow = page.locator(".nexus-crm-workspace .data-sheet-table tbody tr").filter({ hasText: "Hartree" });
-    await expect(hartreeCrmRow.getByRole("button", { name: "Client: Hartree" })).toBeVisible();
-    await expect(hartreeCrmRow.getByText("1 contact", { exact: true })).toBeVisible();
+    await expect(hartreeCrmRow.getByRole("button", { name: "Client: Hartree Partners" })).toBeVisible();
+    await expect(hartreeCrmRow.getByText("2 contacts", { exact: true })).toBeVisible();
     await expect(hartreeCrmRow.getByText("1 open", { exact: true })).toBeVisible();
+    await page.getByRole("tab", { name: "Contacts" }).click();
+    await expect(page.getByRole("tab", { name: "Contacts" })).toHaveAttribute("aria-selected", "true");
+    const nexusContactSheet = page.locator(".nexus-contact-base .data-sheet-table");
+    const nexusContactRows = nexusContactSheet.locator("tbody tr");
+    await expect(nexusContactSheet.getByRole("separator", { name: "Resize Company column" })).toBeVisible();
+    await expect(nexusContactSheet.getByRole("button", { name: "Role Sort", exact: true })).toBeVisible();
+    await expect(nexusContactSheet.getByRole("button", { name: "Location Sort" })).toBeVisible();
+    await expect(nexusContactSheet.getByRole("button", { name: "Contact: Alex Hartree" })).toBeVisible();
+    await expect(nexusContactSheet.getByRole("button", { name: "Contact: Jane Hartree" })).toBeVisible();
+    await nexusContactSheet.getByLabel("Filter Company").fill("Hartree");
+    await expect(nexusContactRows).toHaveCount(2);
+    const janeContactRow = nexusContactRows.filter({ hasText: "Jane Hartree" });
+    await expect(janeContactRow.getByText("Head of Origination", { exact: true })).toBeVisible();
+    await expect(janeContactRow.getByText("3 years", { exact: true })).toBeVisible();
+    await expect(janeContactRow.getByText("Commodity research lead", { exact: true })).toBeVisible();
+    await expect(janeContactRow.getByText("Tulane University", { exact: true })).toBeVisible();
+    await expect(janeContactRow.getByText("University of Chicago", { exact: true })).toBeVisible();
+    await expect(janeContactRow.getByText("New Orleans, LA", { exact: true })).toBeVisible();
+    await page.locator(".nexus-crm-workspace").getByRole("button", { name: "Reset Table" }).click();
     await page.getByRole("button", { name: "Work To-Do", exact: true }).click();
     const nexusTodoWorkspace = page.locator(".nexus-todo-workspace");
     await expect(persistentTopbar.getByText("To-Do", { exact: true })).toBeVisible();
@@ -361,7 +637,7 @@ test("home smoke boots against the seeded browser harness", async ({
       nexusTodoWorkspace
         .locator(".nexus-todo-list-global li")
         .filter({ hasText: "Call Hartree about June positions" })
-        .getByText("Hartree", { exact: true }),
+        .getByText("Hartree Partners", { exact: true }),
     ).toBeVisible();
     await nexusTodoWorkspace.getByLabel("New to-do").fill("Review freight docs");
     await nexusTodoWorkspace.getByRole("button", { name: "Add To-Do" }).click();
@@ -383,17 +659,18 @@ test("home smoke boots against the seeded browser harness", async ({
     await expect(nexusToolsSheet.getByRole("button", { name: "Application Sort" })).toBeVisible();
     await expect(nexusToolsSheet.getByRole("button", { name: "Browser Sort" })).toBeVisible();
     await expect(nexusToolsSheet.getByRole("button", { name: "API Sort" })).toBeVisible();
+    await expect(nexusToolsSheet.getByRole("separator", { name: "Resize Tool column" })).toBeVisible();
     await nexusToolEntryRow.getByLabel("New tool", { exact: true }).fill("Nexus Handbook");
     await expect(nexusToolEntryRow.getByRole("button", { name: "Add" })).toBeEnabled();
     await nexusToolEntryRow.getByRole("button", { name: "Add" }).click();
     await expect(nexusToolDataRows).toHaveCount(1);
-    await expect(nexusToolsSheet.getByRole("button", { name: "Tool: Nexus Handbook" })).toBeVisible();
-    await expect(nexusToolsSheet.getByText("No link added", { exact: true })).toBeVisible();
+    await expect(nexusToolsSheet.getByRole("textbox", { name: "Tool: Nexus Handbook" })).toBeVisible();
+    await expect(nexusToolsSheet.getByRole("textbox", { name: "Link: Nexus Handbook" })).toHaveValue("");
     await expect(
       nexusToolDataRows
-        .filter({ hasText: "Nexus Handbook" })
-        .getByRole("button", { name: "Access Method: Nexus Handbook" }),
-    ).toContainText("FALSE");
+        .filter({ has: page.getByRole("textbox", { name: "Tool: Nexus Handbook" }) })
+        .getByRole("checkbox", { name: "Access Method: Nexus Handbook" }),
+    ).not.toBeChecked();
     await nexusToolEntryRow.getByLabel("New tool", { exact: true }).fill("Nexus Portal");
     await nexusToolEntryRow.getByLabel("New tool link", { exact: true }).fill("example.com/nexus");
     await nexusToolEntryRow.getByLabel("New tool access method", { exact: true }).check();
@@ -401,27 +678,63 @@ test("home smoke boots against the seeded browser harness", async ({
     await nexusToolEntryRow.getByLabel("New tool API", { exact: true }).check();
     await nexusToolEntryRow.getByRole("button", { name: "Add" }).click();
     await expect(nexusToolDataRows).toHaveCount(2);
-    await expect(nexusToolsSheet.getByRole("button", { name: "Tool: Nexus Portal" })).toBeVisible();
-    await expect(nexusToolsSheet.getByText("https://example.com/nexus", { exact: true })).toBeVisible();
-    const nexusPortalRow = nexusToolDataRows.filter({ hasText: "Nexus Portal" });
-    await expect(nexusPortalRow.getByRole("button", { name: "Access Method: Nexus Portal" })).toContainText("TRUE");
-    await expect(nexusPortalRow.getByRole("button", { name: "Application: Nexus Portal" })).toContainText("FALSE");
-    await expect(nexusPortalRow.getByRole("button", { name: "Browser: Nexus Portal" })).toContainText("TRUE");
-    await expect(nexusPortalRow.getByRole("button", { name: "API: Nexus Portal" })).toContainText("TRUE");
-    await nexusToolDataRows
-      .filter({ hasText: "Nexus Portal" })
-      .getByRole("button", { name: "Tool: Nexus Portal" })
-      .dblclick();
-    const nexusPortalMenu = page.getByRole("menu", { name: "Options for Nexus Portal" });
-    await expect(nexusPortalMenu.getByRole("menuitem", { name: "Open" })).toBeVisible();
-    await expect(nexusPortalMenu.getByRole("menuitem", { name: "Delete" })).toBeVisible();
+    await expect(nexusToolsSheet.getByRole("textbox", { name: "Tool: Nexus Portal" })).toBeVisible();
+    await expect(nexusToolsSheet.getByRole("textbox", { name: "Link: Nexus Portal" })).toHaveValue("https://example.com/nexus");
+    const nexusPortalRow = nexusToolDataRows.filter({
+      has: page.getByRole("textbox", { name: "Tool: Nexus Portal" }),
+    });
+    await expect(nexusPortalRow.getByRole("checkbox", { name: "Access Method: Nexus Portal" })).toBeChecked();
+    await expect(nexusPortalRow.getByRole("checkbox", { name: "Application: Nexus Portal" })).not.toBeChecked();
+    await expect(nexusPortalRow.getByRole("checkbox", { name: "Browser: Nexus Portal" })).toBeChecked();
+    await expect(nexusPortalRow.getByRole("checkbox", { name: "API: Nexus Portal" })).toBeChecked();
+    await nexusPortalRow.getByRole("textbox", { name: "Tool: Nexus Portal" }).fill("Nexus Control Room");
+    const nexusControlRoomRow = nexusToolDataRows.filter({
+      has: page.getByRole("textbox", { name: "Tool: Nexus Control Room" }),
+    });
+    await nexusControlRoomRow.getByRole("textbox", { name: "Link: Nexus Control Room" }).fill("control.example.com");
+    await nexusControlRoomRow.getByRole("textbox", { name: "Link: Nexus Control Room" }).press("Tab");
+    await expect(nexusControlRoomRow.getByRole("textbox", { name: "Link: Nexus Control Room" })).toHaveValue(
+      "https://control.example.com",
+    );
+    await nexusControlRoomRow.getByRole("checkbox", { name: "Application: Nexus Control Room" }).check();
+    await nexusControlRoomRow.getByRole("checkbox", { name: "Browser: Nexus Control Room" }).uncheck();
+    await expect(nexusControlRoomRow.getByRole("checkbox", { name: "Access Method: Nexus Control Room" })).toBeChecked();
+    await expect(nexusControlRoomRow.getByRole("checkbox", { name: "Application: Nexus Control Room" })).toBeChecked();
+    await expect(nexusControlRoomRow.getByRole("checkbox", { name: "Browser: Nexus Control Room" })).not.toBeChecked();
+    await expect(nexusControlRoomRow.getByRole("checkbox", { name: "API: Nexus Control Room" })).toBeChecked();
+    await nexusControlRoomRow.getByRole("button", { name: "ID: Nexus Control Room" }).dblclick();
+    const nexusControlRoomMenu = page.getByRole("menu", { name: "Options for Nexus Control Room" });
+    await expect(nexusControlRoomMenu.getByRole("menuitem", { name: "Open" })).toBeVisible();
+    await expect(nexusControlRoomMenu.getByRole("menuitem", { name: "Delete" })).toBeVisible();
     await page.keyboard.press("Escape");
     await nexusToolDataRows
-      .filter({ hasText: "Nexus Handbook" })
-      .getByRole("button", { name: "Tool: Nexus Handbook" })
+      .filter({ has: page.getByRole("textbox", { name: "Tool: Nexus Handbook" }) })
+      .getByRole("button", { name: "ID: Nexus Handbook" })
       .dblclick();
     await page.getByRole("menuitem", { name: "Delete" }).click();
-    await expect(nexusToolsSheet.getByRole("button", { name: "Tool: Nexus Handbook" })).toHaveCount(0);
+    await expect(nexusToolsSheet.getByRole("textbox", { name: "Tool: Nexus Handbook" })).toHaveCount(0);
+    await expect(nexusToolDataRows).toHaveCount(1);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.locator(".start-here-dialog")).toHaveCount(0);
+    await expect(page.getByRole("radio", { name: "Strata" })).toHaveAttribute("aria-checked", "true");
+    await page.getByRole("radio", { name: "Nexus" }).click();
+    await expect(persistentTopbar.getByText("CRM", { exact: true })).toBeVisible();
+    await nexusCrmSheet.getByLabel("Filter Client").fill("Hartree Partners");
+    await expect(nexusCrmDataRows).toHaveCount(1);
+    await expect(nexusCrmSheet.getByRole("button", { name: "Client: Hartree Partners" })).toBeVisible();
+    await expect(nexusCrmDataRows.filter({ hasText: "Hartree" }).getByText("2 contacts", { exact: true })).toBeVisible();
+    await page.locator(".nexus-crm-workspace").getByRole("button", { name: "Reset Table" }).click();
+    await page.getByRole("button", { name: "Tools", exact: true }).click();
+    await expect(persistentTopbar.getByText("Tools", { exact: true })).toBeVisible();
+    await expect(nexusToolsSheet.getByRole("textbox", { name: "Tool: Nexus Control Room" })).toBeVisible();
+    await expect(nexusToolsSheet.getByRole("textbox", { name: "Link: Nexus Control Room" })).toHaveValue(
+      "https://control.example.com",
+    );
+    const restoredNexusToolRow = nexusToolDataRows.filter({
+      has: page.getByRole("textbox", { name: "Tool: Nexus Control Room" }),
+    });
+    await expect(restoredNexusToolRow.getByRole("checkbox", { name: "Application: Nexus Control Room" })).toBeChecked();
+    await expect(restoredNexusToolRow.getByRole("checkbox", { name: "Browser: Nexus Control Room" })).not.toBeChecked();
     await expect(nexusToolDataRows).toHaveCount(1);
     await persistentBackButton.click();
     await expect(persistentTopbar.getByText("CRM", { exact: true })).toBeVisible();
@@ -460,6 +773,83 @@ test("home smoke boots against the seeded browser harness", async ({
     await expect(shortcutsDialog.getByText("Home", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(shortcutsDialog).toBeHidden();
+
+    assertNoHarnessRequestFailures(harness);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("nexus tools grid edits and persists saved tool values", async ({
+  page,
+}) => {
+  const harness = await startSmokeHarness();
+
+  try {
+    await seedSignedInSession(page, harness);
+    await page.goto(`${harness.origin}/?view=dashboard`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await expect(page.locator(".start-here-dialog")).toHaveCount(0);
+    await page.getByRole("radio", { name: "Nexus" }).click();
+    await page.getByRole("button", { name: "Tools", exact: true }).click();
+
+    const nexusToolsWorkspace = page.locator(".nexus-tools-workspace");
+    const nexusToolsSheet = nexusToolsWorkspace.locator(".data-sheet-table");
+    const nexusToolEntryRow = nexusToolsWorkspace.locator(".nexus-tool-entry-row");
+    const nexusToolDataRows = nexusToolsSheet.locator("tbody tr:not(.nexus-tool-entry-row)");
+
+    await expect(nexusToolsWorkspace.getByRole("heading", { name: "Tools", exact: true })).toBeVisible();
+    await nexusToolEntryRow.getByLabel("New tool", { exact: true }).fill("Nexus Portal");
+    await nexusToolEntryRow.getByLabel("New tool link", { exact: true }).fill("portal.example.com");
+    await nexusToolEntryRow.getByLabel("New tool access method", { exact: true }).check();
+    await nexusToolEntryRow.getByRole("button", { name: "Add" }).click();
+
+    await expect(nexusToolDataRows).toHaveCount(1);
+    const nexusPortalRow = nexusToolDataRows.filter({
+      has: page.getByRole("textbox", { name: "Tool: Nexus Portal" }),
+    });
+    await expect(nexusPortalRow.getByRole("textbox", { name: "Link: Nexus Portal" })).toHaveValue(
+      "https://portal.example.com",
+    );
+    await expect(nexusPortalRow.getByRole("checkbox", { name: "Access Method: Nexus Portal" })).toBeChecked();
+    await expect(nexusPortalRow.getByRole("checkbox", { name: "Application: Nexus Portal" })).not.toBeChecked();
+
+    await nexusPortalRow.getByRole("textbox", { name: "Tool: Nexus Portal" }).fill("Nexus Admin Portal");
+    const nexusAdminPortalRow = nexusToolDataRows.filter({
+      has: page.getByRole("textbox", { name: "Tool: Nexus Admin Portal" }),
+    });
+    await nexusAdminPortalRow.getByRole("textbox", { name: "Link: Nexus Admin Portal" }).fill("admin.example.com");
+    await nexusAdminPortalRow.getByRole("textbox", { name: "Link: Nexus Admin Portal" }).press("Tab");
+    await nexusAdminPortalRow.getByRole("checkbox", { name: "Access Method: Nexus Admin Portal" }).uncheck();
+    await nexusAdminPortalRow.getByRole("checkbox", { name: "Application: Nexus Admin Portal" }).check();
+    await nexusAdminPortalRow.getByRole("checkbox", { name: "Browser: Nexus Admin Portal" }).check();
+    await nexusAdminPortalRow.getByRole("checkbox", { name: "API: Nexus Admin Portal" }).check();
+
+    await expect(nexusAdminPortalRow.getByRole("textbox", { name: "Link: Nexus Admin Portal" })).toHaveValue(
+      "https://admin.example.com",
+    );
+    await expect(nexusAdminPortalRow.getByRole("checkbox", { name: "Access Method: Nexus Admin Portal" })).not.toBeChecked();
+    await expect(nexusAdminPortalRow.getByRole("checkbox", { name: "Application: Nexus Admin Portal" })).toBeChecked();
+    await expect(nexusAdminPortalRow.getByRole("checkbox", { name: "Browser: Nexus Admin Portal" })).toBeChecked();
+    await expect(nexusAdminPortalRow.getByRole("checkbox", { name: "API: Nexus Admin Portal" })).toBeChecked();
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByRole("radio", { name: "Nexus" }).click();
+    await page.getByRole("button", { name: "Tools", exact: true }).click();
+
+    const restoredNexusToolRow = nexusToolDataRows.filter({
+      has: page.getByRole("textbox", { name: "Tool: Nexus Admin Portal" }),
+    });
+    await expect(restoredNexusToolRow).toHaveCount(1);
+    await expect(restoredNexusToolRow.getByRole("textbox", { name: "Link: Nexus Admin Portal" })).toHaveValue(
+      "https://admin.example.com",
+    );
+    await expect(restoredNexusToolRow.getByRole("checkbox", { name: "Access Method: Nexus Admin Portal" })).not.toBeChecked();
+    await expect(restoredNexusToolRow.getByRole("checkbox", { name: "Application: Nexus Admin Portal" })).toBeChecked();
+    await expect(restoredNexusToolRow.getByRole("checkbox", { name: "Browser: Nexus Admin Portal" })).toBeChecked();
+    await expect(restoredNexusToolRow.getByRole("checkbox", { name: "API: Nexus Admin Portal" })).toBeChecked();
 
     assertNoHarnessRequestFailures(harness);
   } finally {

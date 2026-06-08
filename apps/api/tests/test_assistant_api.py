@@ -448,6 +448,8 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("enlist_managed_agent", trade_ops["default_tools"])
         self.assertIn("list_gmail_inbox_messages", trade_ops["default_tools"])
         self.assertIn("get_gmail_inbox_message", trade_ops["default_tools"])
+        self.assertIn("list_slack_messaging_conversations", trade_ops["default_tools"])
+        self.assertIn("get_slack_messaging_conversation", trade_ops["default_tools"])
         self.assertEqual(
             trade_ops["maximum_action_types"],
             [
@@ -476,10 +478,14 @@ class AssistantApiTests(unittest.TestCase):
         document_agent = next(row for row in payload if row["role_key"] == "document-agent")
         self.assertIn("list_gmail_inbox_messages", document_agent["default_tools"])
         self.assertIn("get_gmail_inbox_message", document_agent["default_tools"])
+        self.assertIn("list_slack_messaging_conversations", document_agent["default_tools"])
+        self.assertIn("get_slack_messaging_conversation", document_agent["default_tools"])
 
         movement_controller = next(row for row in payload if row["role_key"] == "movement-controller-agent")
         self.assertIn("list_gmail_inbox_messages", movement_controller["default_tools"])
         self.assertIn("get_gmail_inbox_message", movement_controller["default_tools"])
+        self.assertIn("list_slack_messaging_conversations", movement_controller["default_tools"])
+        self.assertIn("get_slack_messaging_conversation", movement_controller["default_tools"])
 
         pre_trade = next(row for row in payload if row["role_key"] == "pre-trade-structuring-agent")
         self.assertEqual(pre_trade["catalog_status"], "PHASE_1")
@@ -647,10 +653,16 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(profiles["movement-controller-agent"]["parent_agent_id"], "trade-ops-copilot")
         self.assertIn("list_gmail_inbox_messages", profiles["trade-ops-copilot"]["allowed_tools"])
         self.assertIn("get_gmail_inbox_message", profiles["trade-ops-copilot"]["allowed_tools"])
+        self.assertIn("list_slack_messaging_conversations", profiles["trade-ops-copilot"]["allowed_tools"])
+        self.assertIn("get_slack_messaging_conversation", profiles["trade-ops-copilot"]["allowed_tools"])
         self.assertIn("list_gmail_inbox_messages", profiles["movement-controller-agent"]["allowed_tools"])
         self.assertIn("get_gmail_inbox_message", profiles["movement-controller-agent"]["allowed_tools"])
+        self.assertIn("list_slack_messaging_conversations", profiles["movement-controller-agent"]["allowed_tools"])
+        self.assertIn("get_slack_messaging_conversation", profiles["movement-controller-agent"]["allowed_tools"])
         self.assertIn("list_gmail_inbox_messages", profiles["document-agent"]["allowed_tools"])
         self.assertIn("get_gmail_inbox_message", profiles["document-agent"]["allowed_tools"])
+        self.assertIn("list_slack_messaging_conversations", profiles["document-agent"]["allowed_tools"])
+        self.assertIn("get_slack_messaging_conversation", profiles["document-agent"]["allowed_tools"])
 
     def test_action_handler_registry_covers_all_published_action_types(self) -> None:
         self.assertEqual(set(ACTION_SPECS), set(ALL_ASSISTANT_ACTION_TYPES))

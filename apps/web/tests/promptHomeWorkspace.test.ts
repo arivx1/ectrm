@@ -1711,14 +1711,19 @@ test("prompt home topbar token badge renders a loading state before budgets reso
   assert.match(markup, /href="\/\?view=token-analysis#assistant-token-tracker"/);
 });
 
-test("workspace topbar database size badge renders a loading state before settings resolve", () => {
+test("workspace topbar data metrics render loading and placeholder states before settings resolve", () => {
   const markup = renderToStaticMarkup(
     createElement(WorkspaceTopbarDatabaseSizeBadge),
   );
 
-  assert.match(markup, /DB Size/);
+  assert.match(markup, /DB Client/);
+  assert.match(markup, /DB Server/);
+  assert.match(markup, /Data Out/);
+  assert.match(markup, /Data In/);
   assert.match(markup, /Loading\.\.\./);
-  assert.match(markup, /Checking database size\./);
+  assert.match(markup, /Checking database size on client\./);
+  assert.match(markup, /0 B/);
+  assert.match(markup, /0 B\/s/);
 });
 
 test("prompt home shows prompt thread messages in chronological order", () => {

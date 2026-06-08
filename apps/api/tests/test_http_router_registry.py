@@ -61,10 +61,22 @@ class HttpRouterRegistryTests(unittest.TestCase):
         self.assertIn("/admin/codex/tasks", paths)
         self.assertIn("/codex/tasks/{task_id}/callback", paths)
         self.assertIn("/integrations/attio/client-enrichment", paths)
+        self.assertIn("/integrations/attio/client-sync", paths)
+        self.assertIn("/integrations/notion/client-pages", paths)
+        self.assertIn("/integrations/grain/client-recordings", paths)
+        self.assertIn("/integrations/nexus/contacts", paths)
+        self.assertIn("/integrations/nexus/contacts/import-attio", paths)
+        self.assertIn("/integrations/nexus/contacts/{contact_id}", paths)
         self.assertIn("/admin/integrations/attio/settings", paths)
         self.assertIn("/admin/integrations/attio/test-connection", paths)
         self.assertIn("/admin/integrations/notion/settings", paths)
         self.assertIn("/admin/integrations/notion/test-connection", paths)
+        self.assertIn("/admin/integrations/grain/settings", paths)
+        self.assertIn("/admin/integrations/grain/test-connection", paths)
+        self.assertIn("/admin/integrations/gmail/settings", paths)
+        self.assertIn("/admin/integrations/gmail/test-connection", paths)
+        self.assertIn("/admin/integrations/slack/settings", paths)
+        self.assertIn("/admin/integrations/slack/test-connection", paths)
 
 
 if __name__ == "__main__":

@@ -259,6 +259,29 @@ type SmokeAssistantPromptNavigationOutcomeRow = {
   created_at: string
   updated_at: string
 }
+type SmokeNexusContactRecord = {
+  contact_id: string
+  client_name: string
+  name: string
+  title: string | null
+  first_name: string | null
+  last_name: string | null
+  role: string | null
+  time_at_role: string | null
+  previous_role: string | null
+  university: string | null
+  university_2: string | null
+  location: string | null
+  email: string | null
+  phone: string | null
+  web_url: string | null
+  source: 'manual' | 'attio'
+  external_provider: string | null
+  external_record_id: string | null
+  created_at: string
+  updated_at: string
+  version: number
+}
 
 type MockApiServer = {
   baseUrl: string
@@ -291,6 +314,20 @@ const webRoot = fileURLToPath(new URL('../../..', import.meta.url))
 
 function normalizeOptionalText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function buildNexusContactKeyPart(value: string, maxLength: number): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  const truncated = normalized.slice(0, maxLength).replace(/^-+|-+$/g, '')
+  return truncated || 'contact'
+}
+
+function buildNexusAttioContactId(clientName: string, recordId: string): string {
+  return `nexus-attio-contact-${buildNexusContactKeyPart(clientName, 32)}-${buildNexusContactKeyPart(recordId, 36)}`
 }
 
 function normalizeOptionalNumber(value: unknown): number | null {
@@ -1413,6 +1450,8 @@ async function startMockApiServer(
   const preTradeHedgeRecommendationRows: PreTradeHedgeRecommendationRecord[] = []
   const preTradeRiskScenarioRows: PreTradeRiskScenarioRecord[] = []
   const preTradeMarketOpportunityRows: PreTradeMarketOpportunityRecord[] = []
+  const nexusContactRows: SmokeNexusContactRecord[] = []
+  let nexusContactSequence = 0
   const truckMovementSummaries: DeliveryTruckMovementSummaryRecord[] = smokeTruckMovementSummaries.map((movement) => ({
     ...movement,
     tracking_health: movement.tracking_health ? { ...movement.tracking_health } : movement.tracking_health,
@@ -2560,6 +2599,14 @@ async function startMockApiServer(
       !(method === 'POST' && url.pathname === '/assistant/prompt-navigation-outcomes') &&
       !(method === 'POST' && /\/assistant\/runs\/\d+\/prompt-navigation-outcomes$/.test(url.pathname)) &&
       !(method === 'POST' && url.pathname === '/integrations/attio/client-enrichment') &&
+      !(method === 'POST' && url.pathname === '/integrations/attio/client-sync') &&
+      !(method === 'POST' && url.pathname === '/integrations/notion/client-pages') &&
+      !(method === 'POST' && url.pathname === '/integrations/grain/client-recordings') &&
+      !(method === 'POST' && url.pathname === '/integrations/linear/client-issues') &&
+      !(method === 'POST' && url.pathname === '/integrations/nexus/client-engagements') &&
+      !(method === 'POST' && url.pathname === '/integrations/nexus/contacts') &&
+      !(method === 'POST' && url.pathname === '/integrations/nexus/contacts/import-attio') &&
+      !(method === 'DELETE' && /^\/integrations\/nexus\/contacts\/[^/]+$/.test(url.pathname)) &&
       !(method === 'POST' && url.pathname === '/market-data/news/headlines/tagging') &&
       !(method === 'POST' && url.pathname === '/pretrade/recommendations/draft-analysis') &&
       !(method === 'PUT' && url.pathname.startsWith('/layout-definitions/'))
@@ -2762,6 +2809,180 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/integrations/nexus/contacts' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      writeJson(response, nexusContactRows)
+      return
+    }
+
+    if (url.pathname === '/integrations/nexus/contacts' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const body = await readJsonBody(request)
+      const payload = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {}
+      const clientName = normalizeOptionalText(payload.client_name) ?? 'Unknown'
+      const name = normalizeOptionalText(payload.name) ?? 'Unnamed contact'
+      const now = new Date().toISOString()
+      const record: SmokeNexusContactRecord = {
+        contact_id: `nexus-contact-smoke-${++nexusContactSequence}`,
+        client_name: clientName,
+        name,
+        title: normalizeOptionalText(payload.title),
+        first_name: normalizeOptionalText(payload.first_name),
+        last_name: normalizeOptionalText(payload.last_name),
+        role: normalizeOptionalText(payload.role),
+        time_at_role: normalizeOptionalText(payload.time_at_role),
+        previous_role: normalizeOptionalText(payload.previous_role),
+        university: normalizeOptionalText(payload.university),
+        university_2: normalizeOptionalText(payload.university_2),
+        location: normalizeOptionalText(payload.location),
+        email: normalizeOptionalText(payload.email),
+        phone: normalizeOptionalText(payload.phone),
+        web_url: normalizeOptionalText(payload.web_url),
+        source: 'manual',
+        external_provider: null,
+        external_record_id: null,
+        created_at: now,
+        updated_at: now,
+        version: 1,
+      }
+      nexusContactRows.push(record)
+      writeJson(response, record, 201)
+      return
+    }
+
+    if (url.pathname === '/integrations/nexus/contacts/import-attio' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const body = await readJsonBody(request)
+      const payload = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {}
+      const clientName = normalizeOptionalText(payload.client_name) ?? 'Unknown'
+      const contacts = Array.isArray(payload.contacts) ? payload.contacts : []
+      const importedContacts = contacts
+        .map((contactPayload): SmokeNexusContactRecord | null => {
+          const contact =
+            contactPayload && typeof contactPayload === 'object' && !Array.isArray(contactPayload)
+              ? (contactPayload as Record<string, unknown>)
+              : {}
+          const recordId = normalizeOptionalText(contact.record_id)
+          const name = normalizeOptionalText(contact.name)
+          if (!recordId || !name) {
+            return null
+          }
+
+          const now = new Date().toISOString()
+          const existing = nexusContactRows.find(
+            (candidate) => candidate.external_provider === 'attio' && candidate.external_record_id === recordId,
+          )
+          if (existing) {
+            existing.client_name = clientName
+            existing.name = name
+            existing.title = normalizeOptionalText(contact.title)
+            existing.first_name = null
+            existing.last_name = null
+            existing.role = normalizeOptionalText(contact.title)
+            existing.time_at_role = null
+            existing.previous_role = null
+            existing.university = null
+            existing.university_2 = null
+            existing.location = null
+            existing.email = normalizeOptionalText(contact.email)
+            existing.phone = normalizeOptionalText(contact.phone)
+            existing.web_url = normalizeOptionalText(contact.web_url)
+            existing.updated_at = now
+            existing.version += 1
+            return existing
+          }
+
+          const record: SmokeNexusContactRecord = {
+            contact_id: buildNexusAttioContactId(clientName, recordId),
+            client_name: clientName,
+            name,
+            title: normalizeOptionalText(contact.title),
+            first_name: null,
+            last_name: null,
+            role: normalizeOptionalText(contact.title),
+            time_at_role: null,
+            previous_role: null,
+            university: null,
+            university_2: null,
+            location: null,
+            email: normalizeOptionalText(contact.email),
+            phone: normalizeOptionalText(contact.phone),
+            web_url: normalizeOptionalText(contact.web_url),
+            source: 'attio',
+            external_provider: 'attio',
+            external_record_id: recordId,
+            created_at: now,
+            updated_at: now,
+            version: 1,
+          }
+          nexusContactRows.push(record)
+          return record
+        })
+        .filter((contact): contact is SmokeNexusContactRecord => contact !== null)
+      writeJson(response, importedContacts)
+      return
+    }
+
+    if (url.pathname === '/integrations/nexus/client-engagements' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const body = await readJsonBody(request)
+      const payload = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {}
+      const clientName = normalizeOptionalText(payload.client_name) ?? ''
+      const normalizedClientName = clientName.trim().toLowerCase()
+      const isHartree = normalizedClientName === 'hartree' || normalizedClientName === 'hartree partners'
+      writeJson(response, {
+        client_name: clientName,
+        lookback_days: typeof payload.lookback_days === 'number' ? payload.lookback_days : 30,
+        requested_limit: typeof payload.limit === 'number' ? payload.limit : 12,
+        matched_count: isHartree ? 1 : 0,
+        returned_count: isHartree ? 1 : 0,
+        source_counts: isHartree ? { gmail: 1 } : {},
+        gmail_query: isHartree ? 'newer_than:30d ("Hartree Partners" OR from:hartreepartners.com)' : null,
+        items: isHartree
+          ? [
+              {
+                provider: 'gmail',
+                source_surface: 'gmail_api',
+                external_id: 'gmail-hartree-engagement',
+                title: 'Hartree Partners nomination window',
+                snippet: 'Hartree Partners asked whether the nomination window can move.',
+                occurred_at: '2026-06-06T15:00:00Z',
+                author: 'Jane Scheduler <ops@hartreepartners.com>',
+                matched_basis: ['client name', 'domain'],
+                conversation_id: null,
+                url: null,
+                metadata: { thread_id: 'gmail-thread-hartree' },
+              },
+            ]
+          : [],
+        warnings: [],
+        read_only: true,
+      })
+      return
+    }
+
+    const nexusContactDeleteMatch = url.pathname.match(/^\/integrations\/nexus\/contacts\/([^/]+)$/)
+    if (nexusContactDeleteMatch && method === 'DELETE') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const contactId = decodeURIComponent(nexusContactDeleteMatch[1])
+      const contactIndex = nexusContactRows.findIndex((contact) => contact.contact_id === contactId)
+      if (contactIndex >= 0) {
+        nexusContactRows.splice(contactIndex, 1)
+      }
+      writeNoContent(response)
+      return
+    }
+
     if (url.pathname === '/integrations/attio/client-enrichment' && method === 'POST') {
       if (!requireAuthorization(request, response, sessionExpired)) {
         return
@@ -2771,7 +2992,8 @@ async function startMockApiServer(
         body && typeof body === 'object' && typeof (body as { client_name?: unknown }).client_name === 'string'
           ? (body as { client_name: string }).client_name
           : ''
-      if (clientName.trim().toLowerCase() !== 'hartree') {
+      const normalizedClientName = clientName.trim().toLowerCase()
+      if (normalizedClientName !== 'hartree' && normalizedClientName !== 'hartree partners') {
         writeJson(response, {
           provider: 'attio_rest_api',
           configured: true,
@@ -2789,9 +3011,9 @@ async function startMockApiServer(
       writeJson(response, {
         provider: 'attio_rest_api',
         configured: true,
-        client_name: 'Hartree',
+        client_name: clientName,
         matched: true,
-        match_basis: 'search',
+        match_basis: normalizedClientName === 'hartree partners' ? 'exact_name' : 'search',
         company: {
           object_slug: 'companies',
           record_id: 'company-hartree',
@@ -2818,10 +3040,269 @@ async function startMockApiServer(
             stage: 'Won',
             value: null,
             close_date: '2025-05-20',
+            disqualification_reason: null,
             web_url: 'https://app.attio.com/deal-hartree-1',
           },
         ],
         required_scopes: ['object_configuration:read', 'record_permission:read'],
+        warnings: [],
+      })
+      return
+    }
+
+    if (url.pathname === '/integrations/attio/client-sync' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const body = await readJsonBody(request)
+      const payload = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {}
+      const requestedClientNames = Array.isArray(payload.client_names)
+        ? payload.client_names.filter((clientName): clientName is string => typeof clientName === 'string')
+        : []
+      if (requestedClientNames.length > 0) {
+        writeJson(response, {
+          provider: 'attio_rest_api',
+          configured: true,
+          object_slug: 'companies',
+          requested_limit: requestedClientNames.length,
+          scanned_record_count: requestedClientNames.length,
+          skipped_record_count: 0,
+          returned_client_count: 0,
+          clients: [],
+          required_scopes: ['object_configuration:read', 'record_permission:read'],
+          warnings: [],
+        })
+        return
+      }
+      writeJson(response, {
+        provider: 'attio_rest_api',
+        configured: true,
+        object_slug: 'companies',
+        requested_limit: 200,
+        scanned_record_count: 4,
+        skipped_record_count: 0,
+          returned_client_count: 2,
+          clients: [
+            {
+              object_slug: 'companies',
+            record_id: 'company-hartree',
+            name: 'Hartree Partners',
+            type: 'Client',
+            relationship: 'Client',
+            deal_count: 3,
+            closed_deal_count: 2,
+            open_deal_count: 0,
+            deal_statuses: ['Won', 'Closed Lost'],
+              disqualified_deal_count: 0,
+              lost_deal_count: 1,
+              on_hold_deal_count: 0,
+              disqualification_reason: null,
+              total_arr: '$240,000',
+              closed_arr: '$240,000',
+              open_arr: null,
+              web_url: 'https://app.attio.com/company-hartree',
+              domains: ['hartreepartners.com'],
+              description: 'Global energy and commodities firm.',
+              status: 'Customer',
+            },
+            {
+              object_slug: 'companies',
+              record_id: 'company-ionex',
+              name: 'Ionex Minerals',
+              type: 'Other',
+              relationship: 'Other',
+              deal_count: 1,
+              closed_deal_count: 0,
+              open_deal_count: 0,
+              deal_statuses: ['Disqualified'],
+              disqualified_deal_count: 1,
+              lost_deal_count: 0,
+              on_hold_deal_count: 0,
+              disqualification_reason: 'Outside ICP',
+              total_arr: null,
+              closed_arr: null,
+              open_arr: null,
+              web_url: 'https://app.attio.com/company-ionex',
+              domains: ['ionex.example'],
+              description: 'Disqualified prospect from Attio.',
+              status: 'Disqualified',
+            },
+          ],
+        required_scopes: ['object_configuration:read', 'record_permission:read'],
+        warnings: [],
+      })
+      return
+    }
+
+    if (url.pathname === '/integrations/notion/client-pages' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const body = await readJsonBody(request)
+      const clientName =
+        body && typeof body === 'object' && typeof (body as { client_name?: unknown }).client_name === 'string'
+          ? (body as { client_name: string }).client_name
+          : ''
+      const normalizedClientName = clientName.trim().toLowerCase()
+      if (normalizedClientName !== 'hartree' && normalizedClientName !== 'hartree partners') {
+        writeJson(response, {
+          provider: 'notion_api',
+          configured: true,
+          client_name: clientName,
+          query: clientName,
+          matched: false,
+          confidence_threshold: 0.6,
+          candidate_page_count: 0,
+          rejected_page_count: 0,
+          returned_page_count: 0,
+          has_more: false,
+          pages: [],
+          required_capabilities: ['Notion API read/search access'],
+          warnings: ['No shared Notion pages matched this client.'],
+        })
+        return
+      }
+      writeJson(response, {
+        provider: 'notion_api',
+        configured: true,
+        client_name: clientName,
+        query: clientName,
+        matched: true,
+        confidence_threshold: 0.6,
+        candidate_page_count: 1,
+        rejected_page_count: 0,
+        returned_page_count: 1,
+        has_more: false,
+        pages: [
+          {
+            object: 'page',
+            page_id: 'notion-hartree-playbook',
+            title: 'Hartree client playbook',
+            url: 'https://www.notion.so/hartree-client-playbook',
+            created_time: '2026-06-06T12:00:00Z',
+            last_edited_time: '2026-06-06T12:30:00Z',
+            parent_type: 'workspace',
+            relevance_confidence: 0.96,
+            relevance_basis: ['page title starts with client name'],
+          },
+        ],
+        required_capabilities: ['Notion API read/search access'],
+        warnings: [],
+      })
+      return
+    }
+
+    if (url.pathname === '/integrations/grain/client-recordings' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const body = await readJsonBody(request)
+      const clientName =
+        body && typeof body === 'object' && typeof (body as { client_name?: unknown }).client_name === 'string'
+          ? (body as { client_name: string }).client_name
+          : ''
+      const normalizedClientName = clientName.trim().toLowerCase()
+      if (normalizedClientName !== 'hartree' && normalizedClientName !== 'hartree partners') {
+        writeJson(response, {
+          provider: 'grain_api',
+          configured: true,
+          client_name: clientName,
+          query: clientName,
+          matched: false,
+          recording_count: 0,
+          returned_recording_count: 0,
+          cursor: null,
+          recordings: [],
+          required_capabilities: ['Grain recordings read access'],
+          warnings: [`No Grain recordings matched '${clientName}'.`],
+        })
+        return
+      }
+      writeJson(response, {
+        provider: 'grain_api',
+        configured: true,
+        client_name: clientName,
+        query: clientName,
+        matched: true,
+        recording_count: 1,
+        returned_recording_count: 1,
+        cursor: null,
+        recordings: [
+          {
+            id: 'grain-hartree-weekly',
+            title: 'Hartree weekly call',
+            url: 'https://grain.com/share/recording/grain-hartree-weekly',
+            source: 'zoom',
+            media_type: 'video',
+            start_time: '2026-06-06T12:00:00Z',
+            end_time: '2026-06-06T12:30:00Z',
+            duration_seconds: 1800,
+            participant_count: 2,
+          },
+        ],
+        required_capabilities: ['Grain recordings read access'],
+        warnings: [],
+      })
+      return
+    }
+
+    if (url.pathname === '/integrations/linear/client-issues' && method === 'POST') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      const body = await readJsonBody(request)
+      const clientName =
+        body && typeof body === 'object' && typeof (body as { client_name?: unknown }).client_name === 'string'
+          ? (body as { client_name: string }).client_name
+          : ''
+      const normalizedClientName = clientName.trim().toLowerCase()
+      if (normalizedClientName !== 'hartree' && normalizedClientName !== 'hartree partners') {
+        writeJson(response, {
+          provider: 'linear_api',
+          configured: true,
+          client_name: clientName,
+          query: clientName,
+          matched: false,
+          issue_count: 0,
+          returned_issue_count: 0,
+          issues: [],
+          required_capabilities: ['Linear issue read access'],
+          warnings: [`No Linear issues matched '${clientName}'.`],
+        })
+        return
+      }
+      writeJson(response, {
+        provider: 'linear_api',
+        configured: true,
+        client_name: clientName,
+        query: clientName,
+        matched: true,
+        issue_count: 1,
+        returned_issue_count: 1,
+        issues: [
+          {
+            id: 'linear-issue-hartree-risk',
+            identifier: 'NEX-42',
+            title: 'Hartree risk workflow follow-up',
+            url: 'https://linear.app/nexus/issue/NEX-42/hartree-risk-workflow-follow-up',
+            description: 'Follow up with Hartree on risk workflow rollout.',
+            priority: 2,
+            priority_label: 'High',
+            state_name: 'In Progress',
+            state_type: 'started',
+            team_key: 'NEX',
+            team_name: 'Nexus',
+            assignee_name: 'Morgan Ops',
+            assignee_email: 'morgan@example.com',
+            project_name: 'Client Integrations',
+            project_url: 'https://linear.app/nexus/project/client-integrations',
+            label_names: ['client', 'hartree'],
+            created_at: '2026-06-05T12:00:00Z',
+            updated_at: '2026-06-06T13:00:00Z',
+            due_date: '2026-06-15',
+          },
+        ],
+        required_capabilities: ['Linear issue read access'],
         warnings: [],
       })
       return

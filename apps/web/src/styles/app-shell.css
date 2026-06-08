@@ -503,7 +503,7 @@
 }
 
 .workspace-topbar-token,
-.workspace-topbar-db-size {
+.workspace-topbar-data-metric {
   display: grid;
   align-content: center;
   box-sizing: border-box;
@@ -541,7 +541,21 @@
 }
 
 .workspace-topbar-db-size {
-  width: 6.4rem;
+  display: grid;
+  grid-template-columns:
+    minmax(4.8rem, 0.96fr)
+    minmax(3.7rem, 0.74fr)
+    repeat(2, minmax(5.25rem, 1.05fr));
+  align-items: stretch;
+  gap: 0.35rem;
+  height: var(--workspace-topbar-control-height, 3.5rem);
+  min-width: min(100%, 20.05rem);
+  min-height: var(--workspace-topbar-control-height, 3.5rem);
+}
+
+.workspace-topbar-data-metric {
+  min-width: 0;
+  width: 100%;
 }
 
 .workspace-topbar-token-label,
@@ -555,7 +569,7 @@
 }
 
 .workspace-topbar-token strong,
-.workspace-topbar-db-size strong {
+.workspace-topbar-data-metric strong {
   min-width: 0;
   overflow: hidden;
   font-size: 0.98rem;
@@ -564,8 +578,18 @@
   white-space: nowrap;
 }
 
+.workspace-topbar-data-metric-data-out strong,
+.workspace-topbar-data-metric-data-in strong {
+  overflow: visible;
+  font-size: 0.88rem;
+  line-height: 1;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .workspace-topbar-token small,
-.workspace-topbar-db-size small {
+.workspace-topbar-data-metric small {
   display: none;
   color: var(--color-copy-muted, #66717c);
   line-height: 1.4;
@@ -613,6 +637,74 @@
   letter-spacing: 0;
 }
 
+.nexus-crm-heading-row {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.nexus-crm-heading-row > div:first-child {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.nexus-crm-heading-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.nexus-attio-sync-button {
+  min-height: 2.45rem;
+  white-space: nowrap;
+}
+
+.nexus-crm-subview-tabs {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0.28rem;
+  padding: 0.22rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  border-radius: 0.64rem;
+  background: rgba(255, 255, 255, 0.46);
+}
+
+.nexus-crm-detail-tabs {
+  justify-self: start;
+  margin-top: 0.1rem;
+  background: rgba(248, 251, 252, 0.82);
+}
+
+.nexus-crm-subview-tab {
+  min-height: 2rem;
+  padding: 0 0.8rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: #53606f;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.nexus-crm-subview-tab:hover,
+.nexus-crm-subview-tab:focus-visible {
+  color: #13293d;
+  outline: none;
+}
+
+.nexus-crm-subview-tab.is-active {
+  background: rgba(18, 126, 108, 0.12);
+  color: #0f685a;
+  box-shadow: inset 0 0 0 1px rgba(18, 126, 108, 0.18);
+}
+
 .nexus-client-base {
   display: grid;
   gap: 0.8rem;
@@ -621,9 +713,282 @@
   border-top: 1px solid rgba(18, 42, 56, 0.08);
 }
 
+.nexus-sync-status {
+  padding: 0.62rem 0.75rem;
+  border: 1px solid rgba(18, 124, 108, 0.16);
+  border-radius: 0.58rem;
+  background: rgba(18, 124, 108, 0.08);
+  color: #0f685a;
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.nexus-sync-review-overlay,
+.nexus-contact-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1.2rem;
+  background: rgba(12, 24, 35, 0.34);
+  backdrop-filter: blur(10px);
+}
+
+.nexus-contact-dialog {
+  display: grid;
+  gap: 1rem;
+  width: min(42rem, 100%);
+  max-height: min(44rem, calc(100dvh - 2.4rem));
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.12);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 70px rgba(12, 24, 35, 0.24);
+}
+
+.nexus-sync-review-dialog {
+  display: grid;
+  gap: 1rem;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  width: min(48rem, 100%);
+  max-height: min(42rem, calc(100dvh - 2.4rem));
+  overflow: hidden;
+  padding: 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.12);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 70px rgba(12, 24, 35, 0.24);
+}
+
+.nexus-sync-review-head,
+.nexus-contact-dialog-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.nexus-sync-review-head h3,
+.nexus-contact-dialog-head h3 {
+  margin: 0.18rem 0 0;
+  color: #13293d;
+  font-size: 1.35rem;
+  line-height: 1.15;
+}
+
+.nexus-contact-dialog-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.78rem;
+}
+
+.nexus-contact-dialog-field {
+  display: grid;
+  gap: 0.34rem;
+  min-width: 0;
+}
+
+.nexus-contact-dialog-field-wide,
+.nexus-contact-dialog-actions {
+  grid-column: 1 / -1;
+}
+
+.nexus-contact-dialog-field span {
+  color: #66717c;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.nexus-contact-dialog-field input,
+.nexus-contact-dialog-field-readonly strong {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 2.9rem;
+  padding: 0.7rem 0.82rem;
+  border: 1px solid rgba(18, 42, 56, 0.12);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.72);
+  color: #13293d;
+  font: inherit;
+}
+
+.nexus-contact-dialog-field input:focus {
+  border-color: rgba(18, 124, 108, 0.28);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(18, 124, 108, 0.12);
+}
+
+.nexus-contact-dialog-field-readonly strong {
+  display: flex;
+  align-items: center;
+  background: rgba(18, 126, 108, 0.08);
+  color: #13293d;
+  font-weight: 900;
+}
+
+.nexus-contact-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 0.55rem;
+  padding-top: 0.25rem;
+}
+
+.nexus-sync-review-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 5.4rem;
+  padding: 0.32rem 0.58rem;
+  border-radius: 0.5rem;
+  background: rgba(18, 126, 108, 0.1);
+  color: #0f685a;
+  font-size: 0.82rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.nexus-sync-review-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.nexus-sync-review-meta span {
+  padding: 0.22rem 0.46rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  border-radius: 999px;
+  color: #53606f;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.nexus-sync-review-body {
+  display: grid;
+  gap: 1rem;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.nexus-sync-review-section {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.nexus-sync-review-section h4 {
+  margin: 0;
+  color: #13293d;
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.nexus-sync-review-list,
+.nexus-sync-review-warning-list {
+  display: grid;
+  gap: 0.42rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nexus-sync-review-row {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem 0.8rem;
+  padding: 0.62rem 0.72rem;
+  border: 1px solid rgba(18, 42, 56, 0.09);
+  border-radius: 0.5rem;
+  background: rgba(248, 251, 252, 0.88);
+}
+
+.nexus-sync-review-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #13293d;
+}
+
+.nexus-sync-review-row span {
+  color: #53606f;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.nexus-sync-review-row small {
+  grid-column: 1 / -1;
+  color: #6d7886;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.nexus-sync-review-warning-list li {
+  padding: 0.55rem 0.68rem;
+  border: 1px solid rgba(176, 100, 36, 0.18);
+  border-radius: 0.5rem;
+  background: rgba(176, 100, 36, 0.08);
+  color: #7d4d22;
+  font-size: 0.84rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.nexus-sync-review-actions {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 0.55rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+  background: rgba(255, 255, 255, 0.96);
+}
+
 .nexus-client-name {
   color: #13293d;
   font-weight: 800;
+}
+
+.nexus-contact-name,
+.nexus-contact-company,
+.nexus-contact-email {
+  overflow-wrap: anywhere;
+}
+
+.nexus-contact-name {
+  color: #13293d;
+  font-weight: 800;
+}
+
+.nexus-contact-company {
+  color: #53606f;
+  font-weight: 800;
+}
+
+.nexus-contact-source {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.8rem;
+  padding: 0.14rem 0.42rem;
+  border-radius: 999px;
+  background: rgba(18, 126, 108, 0.1);
+  color: #0f685a;
+  font-size: 0.76rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.nexus-muted-cell {
+  color: #7b8794;
+  font-weight: 700;
 }
 
 .nexus-section-head {
@@ -744,6 +1109,27 @@
   grid-template-columns: minmax(0, 1fr) minmax(10rem, 16rem) auto;
 }
 
+.nexus-contact-form-copy {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.nexus-contact-form-copy span {
+  color: #66717c;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.nexus-contact-form-copy strong {
+  color: #13293d;
+  font-size: 0.96rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
 .nexus-contact-field,
 .nexus-todo-field,
 .nexus-tool-field {
@@ -765,7 +1151,8 @@
 .nexus-contact-field input,
 .nexus-todo-field input,
 .nexus-todo-field select,
-.nexus-tool-field input {
+.nexus-tool-field input,
+.nexus-client-link-field input {
   width: 100%;
   box-sizing: border-box;
   min-height: 2.9rem;
@@ -780,7 +1167,8 @@
 .nexus-contact-field input:focus,
 .nexus-todo-field input:focus,
 .nexus-todo-field select:focus,
-.nexus-tool-field input:focus {
+.nexus-tool-field input:focus,
+.nexus-client-link-field input:focus {
   border-color: rgba(18, 124, 108, 0.28);
   outline: none;
   box-shadow: 0 0 0 3px rgba(18, 124, 108, 0.12);
@@ -947,10 +1335,396 @@
   color: #9a4338;
 }
 
+.nexus-contact-error-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.62rem 0.75rem;
+  border: 1px solid rgba(154, 67, 56, 0.18);
+  border-radius: 0.58rem;
+  background: rgba(154, 67, 56, 0.08);
+  color: #9a4338;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.nexus-contact-error-bar span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.nexus-contact-error-bar .button {
+  flex: 0 0 auto;
+  min-height: 1.85rem;
+  padding: 0 0.7rem;
+}
+
 .nexus-attio-warning {
   font-size: 0.82rem;
   font-weight: 700;
   line-height: 1.4;
+}
+
+.nexus-notion-section,
+.nexus-grain-section,
+.nexus-engagement-section,
+.nexus-linear-section {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  padding-top: 0.9rem;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.nexus-notion-head > div:first-child,
+.nexus-grain-head > div:first-child,
+.nexus-engagement-head > div:first-child,
+.nexus-linear-head > div:first-child {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.nexus-notion-count,
+.nexus-grain-count,
+.nexus-engagement-count,
+.nexus-linear-count {
+  flex: 0 0 auto;
+  color: #127c6c;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.nexus-linear-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: end;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.nexus-section-head .nexus-engagement-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: end;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.nexus-engagement-actions .nexus-engagement-action-button {
+  flex: 0 0 auto;
+  min-height: 1.95rem;
+  padding: 0.36rem 0.62rem;
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.nexus-engagement-collapse-button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #103045;
+  cursor: pointer;
+}
+
+.nexus-engagement-collapse-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.nexus-engagement-collapse-button:focus-visible {
+  outline: 2px solid rgba(18, 124, 108, 0.3);
+  outline-offset: 3px;
+}
+
+.nexus-engagement-toggle-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.nexus-engagement-body {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.nexus-engagement-body[hidden] {
+  display: none;
+}
+
+.nexus-engagement-summary {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.7rem 0.78rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  border-radius: 0.58rem;
+  background: rgba(20, 124, 108, 0.08);
+}
+
+.nexus-engagement-summary-title {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.nexus-engagement-summary-title strong {
+  color: #13293d;
+  font-weight: 850;
+}
+
+.nexus-engagement-summary-title span {
+  color: #66717c;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.nexus-engagement-summary ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #253746;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.nexus-engagement-query {
+  min-width: 0;
+  padding: 0.46rem 0.58rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.5rem;
+  background: rgba(248, 251, 252, 0.78);
+  color: #5f6b77;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.nexus-notion-list,
+.nexus-grain-list,
+.nexus-engagement-list,
+.nexus-linear-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nexus-notion-list li,
+.nexus-grain-list li,
+.nexus-engagement-list li,
+.nexus-linear-list li {
+  display: grid;
+  min-width: 0;
+  min-height: 3rem;
+  padding: 0.62rem 0.72rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.nexus-notion-list li > div,
+.nexus-grain-list li > div,
+.nexus-engagement-list li > div,
+.nexus-linear-list li > div {
+  display: grid;
+  gap: 0.14rem;
+  min-width: 0;
+}
+
+.nexus-notion-list strong,
+.nexus-notion-list a,
+.nexus-grain-list strong,
+.nexus-grain-list a,
+.nexus-engagement-list strong,
+.nexus-engagement-list a,
+.nexus-linear-list strong,
+.nexus-linear-list a {
+  color: #13293d;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.nexus-notion-list a:hover,
+.nexus-notion-list a:focus-visible,
+.nexus-grain-list a:hover,
+.nexus-grain-list a:focus-visible,
+.nexus-engagement-list a:hover,
+.nexus-engagement-list a:focus-visible,
+.nexus-linear-list a:hover,
+.nexus-linear-list a:focus-visible {
+  color: #0f685a;
+  text-decoration: underline;
+}
+
+.nexus-notion-list span,
+.nexus-grain-list span,
+.nexus-engagement-list span,
+.nexus-linear-list span {
+  color: #66717c;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.nexus-notion-empty,
+.nexus-grain-empty,
+.nexus-engagement-empty,
+.nexus-linear-empty {
+  min-height: 5.2rem;
+  display: grid;
+  place-items: center;
+  padding: 0.85rem;
+  border: 1px dashed rgba(18, 42, 56, 0.14);
+  border-radius: 0.58rem;
+  color: #66717c;
+  font-weight: 700;
+  text-align: center;
+}
+
+.nexus-notion-error,
+.nexus-notion-warning,
+.nexus-grain-error,
+.nexus-grain-warning,
+.nexus-engagement-error,
+.nexus-engagement-warning,
+.nexus-linear-error,
+.nexus-linear-warning {
+  color: #9a4338;
+}
+
+.nexus-notion-warning,
+.nexus-grain-warning,
+.nexus-engagement-warning,
+.nexus-linear-warning {
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.nexus-client-link-manager {
+  display: grid;
+  gap: 0.62rem;
+  min-width: 0;
+}
+
+.nexus-client-link-form {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.78fr) minmax(12rem, 1.22fr) auto;
+  align-items: end;
+  gap: 0.58rem;
+  min-width: 0;
+}
+
+.nexus-client-link-form .button {
+  min-height: 2.9rem;
+  white-space: nowrap;
+}
+
+.nexus-client-link-field {
+  display: grid;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.nexus-client-link-field span {
+  color: #66717c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.nexus-client-link-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nexus-client-link-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: 2.9rem;
+  padding: 0.58rem 0.68rem;
+  border: 1px solid rgba(18, 124, 108, 0.14);
+  border-radius: 0.5rem;
+  background: rgba(18, 124, 108, 0.06);
+}
+
+.nexus-client-link-list li > div {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.nexus-client-link-list a {
+  color: #13293d;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.nexus-client-link-list a:hover,
+.nexus-client-link-list a:focus-visible {
+  color: #0f685a;
+  text-decoration: underline;
+}
+
+.nexus-client-link-list span,
+.nexus-client-link-empty {
+  color: #66717c;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.nexus-client-link-empty {
+  min-height: 2.7rem;
+  display: grid;
+  place-items: center;
+  padding: 0.62rem 0.72rem;
+  border: 1px dashed rgba(18, 42, 56, 0.12);
+  border-radius: 0.5rem;
+  text-align: center;
+}
+
+.nexus-client-link-remove {
+  flex: 0 0 auto;
+  min-height: 2rem;
+  padding: 0 0.68rem;
 }
 
 .nexus-contact-list,
@@ -988,9 +1762,19 @@
 }
 
 .nexus-contact-list strong,
+.nexus-contact-list a,
 .nexus-todo-list strong,
 .nexus-tool-list strong {
+  color: inherit;
+  font-weight: 800;
   line-height: 1.25;
+  text-decoration: none;
+}
+
+.nexus-contact-list a:hover,
+.nexus-contact-list a:focus-visible {
+  color: #0f685a;
+  outline: none;
 }
 
 .nexus-contact-list span,
@@ -1085,9 +1869,101 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .nexus-crm-heading-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nexus-crm-heading-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nexus-engagement-head {
+    align-items: center;
+    flex-direction: row;
+    gap: 0.55rem;
+  }
+
+  .nexus-engagement-head > div:first-child {
+    min-width: 0;
+  }
+
+  .nexus-section-head .nexus-engagement-actions {
+    flex-wrap: nowrap;
+    justify-content: end;
+    gap: 0.34rem;
+  }
+
+  .nexus-engagement-count {
+    font-size: 0.72rem;
+  }
+
+  .nexus-engagement-actions .nexus-engagement-action-button {
+    min-height: 1.82rem;
+    padding: 0.3rem 0.48rem;
+    font-size: 0.7rem;
+  }
+
+  .nexus-engagement-collapse-button {
+    width: 1.85rem;
+    height: 1.85rem;
+  }
+
+  .nexus-engagement-toggle-indicator {
+    width: 1.85rem;
+    height: 1.85rem;
+    font-size: 1rem;
+  }
+
   .nexus-todo-form-global,
-  .nexus-tool-form {
+  .nexus-tool-form,
+  .nexus-client-link-form {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nexus-client-link-list li {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nexus-client-link-remove {
+    align-self: start;
+  }
+
+  .nexus-sync-review-overlay,
+  .nexus-contact-dialog-overlay {
+    align-items: stretch;
+    padding: 0.75rem;
+  }
+
+  .nexus-sync-review-dialog,
+  .nexus-contact-dialog {
+    max-height: calc(100dvh - 1.5rem);
+  }
+
+  .nexus-sync-review-head,
+  .nexus-contact-dialog-head,
+  .nexus-sync-review-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nexus-contact-dialog-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nexus-sync-review-count,
+  .nexus-sync-review-actions .button {
+    width: 100%;
+  }
+
+  .nexus-sync-review-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nexus-sync-review-row span {
+    white-space: normal;
   }
 }
 
@@ -1843,43 +2719,101 @@
   color: var(--terminal-text);
 }
 
+.app-shell-terminal-mode .nexus-crm-subview-tabs {
+  border-color: rgba(126, 154, 184, 0.18);
+  background: rgba(8, 15, 24, 0.72);
+}
+
+.app-shell-terminal-mode .nexus-sync-status {
+  border-color: rgba(61, 214, 160, 0.2);
+  background: rgba(61, 214, 160, 0.08);
+  color: var(--terminal-accent);
+}
+
+.app-shell-terminal-mode .nexus-crm-subview-tab {
+  color: var(--terminal-muted);
+}
+
+.app-shell-terminal-mode .nexus-crm-subview-tab:hover,
+.app-shell-terminal-mode .nexus-crm-subview-tab:focus-visible,
+.app-shell-terminal-mode .nexus-crm-subview-tab.is-active {
+  color: var(--terminal-accent);
+}
+
+.app-shell-terminal-mode .nexus-crm-subview-tab.is-active {
+  background: rgba(61, 214, 160, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(61, 214, 160, 0.22);
+}
+
 .app-shell-terminal-mode .nexus-client-base {
   border-top-color: rgba(126, 154, 184, 0.18);
 }
 
 .app-shell-terminal-mode .nexus-attio-section,
-.app-shell-terminal-mode .nexus-attio-company {
+.app-shell-terminal-mode .nexus-attio-company,
+.app-shell-terminal-mode .nexus-notion-section,
+.app-shell-terminal-mode .nexus-grain-section,
+.app-shell-terminal-mode .nexus-engagement-section,
+.app-shell-terminal-mode .nexus-linear-section {
   border-color: rgba(126, 154, 184, 0.18);
 }
 
 .app-shell-terminal-mode .nexus-client-name,
 .app-shell-terminal-mode .nexus-client-contact-count,
 .app-shell-terminal-mode .nexus-client-todo-count,
+.app-shell-terminal-mode .nexus-contact-name,
 .app-shell-terminal-mode .nexus-tool-name,
 .app-shell-terminal-mode .nexus-attio-company-title strong,
 .app-shell-terminal-mode .nexus-attio-list strong,
 .app-shell-terminal-mode .nexus-attio-list a,
+.app-shell-terminal-mode .nexus-notion-list strong,
+.app-shell-terminal-mode .nexus-notion-list a,
+.app-shell-terminal-mode .nexus-grain-list strong,
+.app-shell-terminal-mode .nexus-grain-list a,
+.app-shell-terminal-mode .nexus-engagement-list strong,
+.app-shell-terminal-mode .nexus-engagement-list a,
+.app-shell-terminal-mode .nexus-linear-list strong,
+.app-shell-terminal-mode .nexus-linear-list a,
+.app-shell-terminal-mode .nexus-client-link-list a,
+.app-shell-terminal-mode .nexus-contact-list a,
+.app-shell-terminal-mode .nexus-contact-form-copy strong,
+.app-shell-terminal-mode .nexus-contact-dialog-head h3,
+.app-shell-terminal-mode .nexus-contact-dialog-field-readonly strong,
 .app-shell-terminal-mode .nexus-boolean-cell.is-true,
 .app-shell-terminal-mode .nexus-section-head strong,
 .app-shell-terminal-mode .nexus-contact-list li,
 .app-shell-terminal-mode .nexus-todo-list li,
 .app-shell-terminal-mode .nexus-tool-list li,
-.app-shell-terminal-mode .nexus-attio-list li {
+.app-shell-terminal-mode .nexus-attio-list li,
+.app-shell-terminal-mode .nexus-notion-list li,
+.app-shell-terminal-mode .nexus-grain-list li,
+.app-shell-terminal-mode .nexus-engagement-list li,
+.app-shell-terminal-mode .nexus-linear-list li,
+.app-shell-terminal-mode .nexus-client-link-list li {
   color: var(--terminal-text);
 }
 
 .app-shell-terminal-mode .nexus-contact-list li,
 .app-shell-terminal-mode .nexus-todo-list li,
 .app-shell-terminal-mode .nexus-tool-list li,
-.app-shell-terminal-mode .nexus-attio-list li {
+.app-shell-terminal-mode .nexus-attio-list li,
+.app-shell-terminal-mode .nexus-notion-list li,
+.app-shell-terminal-mode .nexus-grain-list li,
+.app-shell-terminal-mode .nexus-engagement-list li,
+.app-shell-terminal-mode .nexus-linear-list li,
+.app-shell-terminal-mode .nexus-client-link-list li {
   border-color: rgba(126, 154, 184, 0.18);
   background: rgba(13, 24, 37, 0.72);
 }
 
 .app-shell-terminal-mode .nexus-client-status,
 .app-shell-terminal-mode .nexus-client-next-action,
+.app-shell-terminal-mode .nexus-contact-company,
+.app-shell-terminal-mode .nexus-contact-form-copy span,
 .app-shell-terminal-mode .nexus-contact-field span,
+.app-shell-terminal-mode .nexus-contact-dialog-field span,
 .app-shell-terminal-mode .nexus-contact-list span,
+.app-shell-terminal-mode .nexus-muted-cell,
 .app-shell-terminal-mode .nexus-todo-field span,
 .app-shell-terminal-mode .nexus-todo-list span,
 .app-shell-terminal-mode .nexus-tool-field span,
@@ -1887,14 +2821,70 @@
 .app-shell-terminal-mode .nexus-boolean-cell,
 .app-shell-terminal-mode .nexus-tool-entry-boolean,
 .app-shell-terminal-mode .nexus-tool-list span,
+.app-shell-terminal-mode .nexus-client-link-field span,
+.app-shell-terminal-mode .nexus-client-link-list span,
+.app-shell-terminal-mode .nexus-client-link-empty,
 .app-shell-terminal-mode .nexus-attio-company p,
-.app-shell-terminal-mode .nexus-attio-list span {
+.app-shell-terminal-mode .nexus-attio-list span,
+.app-shell-terminal-mode .nexus-notion-list span,
+.app-shell-terminal-mode .nexus-grain-list span,
+.app-shell-terminal-mode .nexus-engagement-list span,
+.app-shell-terminal-mode .nexus-linear-list span {
+  color: var(--terminal-muted);
+}
+
+.app-shell-terminal-mode .nexus-engagement-query {
+  border-color: rgba(126, 154, 184, 0.16);
+  background: rgba(8, 15, 24, 0.72);
+  color: var(--terminal-muted);
+}
+
+.app-shell-terminal-mode .nexus-engagement-collapse-button {
+  color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .nexus-engagement-collapse-button:focus-visible {
+  outline-color: rgba(61, 214, 160, 0.34);
+}
+
+.app-shell-terminal-mode .nexus-engagement-toggle-indicator {
+  border-color: rgba(126, 154, 184, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.app-shell-terminal-mode .nexus-engagement-summary {
+  border-color: rgba(61, 214, 160, 0.2);
+  background: rgba(61, 214, 160, 0.08);
+}
+
+.app-shell-terminal-mode .nexus-engagement-summary-title strong,
+.app-shell-terminal-mode .nexus-engagement-summary ul {
+  color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .nexus-engagement-summary-title span {
   color: var(--terminal-muted);
 }
 
 .app-shell-terminal-mode .nexus-attio-company-title span,
 .app-shell-terminal-mode .nexus-attio-list a:hover,
-.app-shell-terminal-mode .nexus-attio-list a:focus-visible {
+.app-shell-terminal-mode .nexus-attio-list a:focus-visible,
+.app-shell-terminal-mode .nexus-notion-count,
+.app-shell-terminal-mode .nexus-grain-count,
+.app-shell-terminal-mode .nexus-engagement-count,
+.app-shell-terminal-mode .nexus-linear-count,
+.app-shell-terminal-mode .nexus-notion-list a:hover,
+.app-shell-terminal-mode .nexus-grain-list a:hover,
+.app-shell-terminal-mode .nexus-engagement-list a:hover,
+.app-shell-terminal-mode .nexus-linear-list a:hover,
+.app-shell-terminal-mode .nexus-grain-list a:focus-visible,
+.app-shell-terminal-mode .nexus-engagement-list a:focus-visible,
+.app-shell-terminal-mode .nexus-linear-list a:focus-visible,
+.app-shell-terminal-mode .nexus-client-link-list a:hover,
+.app-shell-terminal-mode .nexus-client-link-list a:focus-visible,
+.app-shell-terminal-mode .nexus-contact-list a:hover,
+.app-shell-terminal-mode .nexus-contact-list a:focus-visible,
+.app-shell-terminal-mode .nexus-notion-list a:focus-visible {
   color: var(--terminal-accent);
 }
 
@@ -1914,18 +2904,36 @@
   background: rgba(61, 214, 160, 0.12);
 }
 
+.app-shell-terminal-mode .nexus-contact-source {
+  background: rgba(61, 214, 160, 0.12);
+  color: var(--terminal-accent);
+}
+
 .app-shell-terminal-mode .nexus-tool-entry-boolean input {
   accent-color: var(--terminal-accent);
 }
 
 .app-shell-terminal-mode .nexus-client-entry-input,
 .app-shell-terminal-mode .nexus-contact-field input,
+.app-shell-terminal-mode .nexus-contact-dialog-field input,
+.app-shell-terminal-mode .nexus-contact-dialog-field-readonly strong,
 .app-shell-terminal-mode .nexus-todo-field input,
 .app-shell-terminal-mode .nexus-todo-field select,
-.app-shell-terminal-mode .nexus-tool-field input {
+.app-shell-terminal-mode .nexus-tool-field input,
+.app-shell-terminal-mode .nexus-client-link-field input {
   border-color: rgba(126, 154, 184, 0.18);
   background: rgba(8, 15, 24, 0.86);
   color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .nexus-contact-dialog {
+  border-color: rgba(126, 154, 184, 0.2);
+  background: rgba(13, 24, 37, 0.96);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+}
+
+.app-shell-terminal-mode .nexus-contact-dialog-field-readonly strong {
+  background: rgba(61, 214, 160, 0.1);
 }
 
 .app-shell-terminal-mode .nexus-client-entry-row {
@@ -1939,14 +2947,33 @@
 .app-shell-terminal-mode .nexus-contact-empty,
 .app-shell-terminal-mode .nexus-todo-empty,
 .app-shell-terminal-mode .nexus-tool-empty,
-.app-shell-terminal-mode .nexus-attio-empty {
+.app-shell-terminal-mode .nexus-attio-empty,
+.app-shell-terminal-mode .nexus-notion-empty,
+.app-shell-terminal-mode .nexus-grain-empty,
+.app-shell-terminal-mode .nexus-engagement-empty,
+.app-shell-terminal-mode .nexus-linear-empty,
+.app-shell-terminal-mode .nexus-client-link-empty {
   border-color: rgba(126, 154, 184, 0.22);
   color: var(--terminal-muted);
 }
 
 .app-shell-terminal-mode .nexus-attio-error,
-.app-shell-terminal-mode .nexus-attio-warning {
+.app-shell-terminal-mode .nexus-attio-warning,
+.app-shell-terminal-mode .nexus-contact-error-bar,
+.app-shell-terminal-mode .nexus-notion-error,
+.app-shell-terminal-mode .nexus-notion-warning,
+.app-shell-terminal-mode .nexus-grain-error,
+.app-shell-terminal-mode .nexus-grain-warning,
+.app-shell-terminal-mode .nexus-engagement-error,
+.app-shell-terminal-mode .nexus-engagement-warning,
+.app-shell-terminal-mode .nexus-linear-error,
+.app-shell-terminal-mode .nexus-linear-warning {
   color: #ffb199;
+}
+
+.app-shell-terminal-mode .nexus-contact-error-bar {
+  border-color: rgba(255, 177, 153, 0.2);
+  background: rgba(255, 177, 153, 0.08);
 }
 
 .app-shell-terminal-mode .main-stage {
@@ -1975,7 +3002,7 @@
 }
 
 .app-shell-terminal-mode .workspace-topbar-token,
-.app-shell-terminal-mode .workspace-topbar-db-size {
+.app-shell-terminal-mode .workspace-topbar-data-metric {
   padding: 0.32rem 0.58rem;
 }
 

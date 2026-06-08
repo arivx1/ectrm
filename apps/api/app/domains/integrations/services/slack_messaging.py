@@ -25,6 +25,21 @@ from apps.api.app.schemas.messaging import (
     MessagingSlackSyncResultOut,
     MessagingWorkspacePostCreate,
 )
+from apps.api.app.schemas.integration import (
+    SlackConversationSummaryOut,
+    SlackMessagingConnectionTestOut,
+    SlackMessagingIntegrationRuntimeSettingsOut,
+)
+
+SLACK_MESSAGING_REQUIRED_SCOPES = (
+    "conversations:read",
+    "channels:history",
+    "groups:history",
+    "im:history",
+    "mpim:history",
+    "users:read",
+    "chat:write",
+)
 
 
 class SlackMessagingIntegrationError(RuntimeError):
@@ -212,6 +227,49 @@ def build_slack_messaging_runtime_settings() -> MessagingSlackRuntimeSettingsOut
         configured_channel_count=len(config.channel_ids),
         channel_limit=config.channel_limit,
         history_limit=config.history_limit,
+    )
+
+
+def build_slack_messaging_integration_runtime_settings() -> SlackMessagingIntegrationRuntimeSettingsOut:
+    config = _slack_messaging_config()
+    configured = config.enabled and bool(config.bot_token)
+    auth_status = "configured" if configured else "partial" if config.enabled else "none"
+    missing_configuration: list[str] = []
+    if not config.enabled:
+        missing_configuration.append("SLACK_MESSAGING_ENABLED")
+    if not config.bot_token:
+        missing_configuration.append("SLACK_BOT_TOKEN")
+    return SlackMessagingIntegrationRuntimeSettingsOut(
+        enabled=config.enabled,
+        configured=configured,
+        auth_status=auth_status,
+        base_url=config.api_base_url,
+        configured_channel_count=len(config.channel_ids),
+        channel_limit=config.channel_limit,
+        history_limit=config.history_limit,
+        required_scopes=list(SLACK_MESSAGING_REQUIRED_SCOPES),
+        missing_configuration=missing_configuration,
+    )
+
+
+def run_slack_messaging_connection_test(
+    *,
+    client: SlackMessagingClient | None = None,
+) -> SlackMessagingConnectionTestOut:
+    config = _require_slack_messaging_configured()
+    slack_client = client or SlackMessagingClient(config)
+    conversations = slack_client.list_conversations()
+    returned_conversations = conversations[: config.channel_limit]
+    warnings: list[str] = []
+    if not conversations:
+        warnings.append("Slack connected successfully but returned no visible conversations.")
+    return SlackMessagingConnectionTestOut(
+        conversation_count=len(conversations),
+        returned_conversation_count=len(returned_conversations),
+        configured_channel_count=len(config.channel_ids),
+        conversations=[_slack_conversation_summary(conversation) for conversation in returned_conversations],
+        required_scopes=list(SLACK_MESSAGING_REQUIRED_SCOPES),
+        warnings=warnings,
     )
 
 
@@ -473,6 +531,19 @@ def _conversation_from_slack_payload(payload: dict[str, Any]) -> SlackConversati
         topic=_optional_text(topic.get("value")) if isinstance(topic, dict) else None,
         purpose=_optional_text(purpose.get("value")) if isinstance(purpose, dict) else None,
         member_count=int(payload["num_members"]) if isinstance(payload.get("num_members"), int) else None,
+    )
+
+
+def _slack_conversation_summary(conversation: SlackConversation) -> SlackConversationSummaryOut:
+    kind = "dm" if conversation.is_im or conversation.is_mpim else "channel"
+    label_prefix = "@" if kind == "dm" else "#"
+    return SlackConversationSummaryOut(
+        channel_id=conversation.channel_id,
+        name=conversation.name,
+        label=f"{label_prefix}{conversation.name}",
+        kind=kind,
+        is_private=conversation.is_private,
+        member_count=conversation.member_count,
     )
 
 

@@ -60,6 +60,68 @@ export type AnthropicApiKeyLookup = {
   warnings: string[]
 }
 
+export type GmailInboxIntegrationRuntimeSettings = {
+  enabled: boolean
+  configured: boolean
+  provider: 'gmail_api'
+  auth_status: IntegrationAuthStatus
+  account_email: string | null
+  query: string
+  max_messages_per_import: number
+  base_url: string
+  token_url: string
+  required_scopes: string[]
+  missing_configuration: string[]
+}
+
+export type GmailInboxConnectionTest = {
+  provider: 'gmail_api'
+  status: 'connected'
+  account_email: string | null
+  profile_email: string | null
+  messages_total: number | null
+  threads_total: number | null
+  history_id: string | null
+  query: string
+  returned_message_count: number
+  next_page_token: string | null
+  required_scopes: string[]
+  warnings: string[]
+}
+
+export type SlackMessagingIntegrationRuntimeSettings = {
+  enabled: boolean
+  configured: boolean
+  provider: 'slack_web_api'
+  auth_status: IntegrationAuthStatus
+  base_url: string
+  configured_channel_count: number
+  channel_limit: number
+  history_limit: number
+  required_scopes: string[]
+  missing_configuration: string[]
+}
+
+export type SlackConversationSummary = {
+  channel_id: string
+  name: string
+  label: string
+  kind: 'channel' | 'dm'
+  is_private: boolean
+  member_count: number | null
+}
+
+export type SlackMessagingConnectionTest = {
+  provider: 'slack_web_api'
+  status: 'connected'
+  conversation_count: number
+  returned_conversation_count: number
+  configured_channel_count: number
+  conversations: SlackConversationSummary[]
+  required_scopes: string[]
+  warnings: string[]
+}
+
 export type CodexTaskStatus = 'QUEUED' | 'DISPATCHED' | 'RUNNING' | 'COMPLETED' | 'STOPPED' | 'FAILED' | 'CANCELLED'
 export type CodexTaskRunMode = 'SINGLE_TASK' | 'LONG_RUNNING'
 
@@ -439,6 +501,54 @@ export async function getAnthropicIntegrationApiKey(
     headers: adminIntegrationHeaders(accessToken),
     cache: 'no-store',
   })
+}
+
+export async function loadGmailInboxIntegrationSettings(
+  apiBase: string,
+  accessToken?: string,
+): Promise<GmailInboxIntegrationRuntimeSettings> {
+  return fetchJson<GmailInboxIntegrationRuntimeSettings>(`${apiBase}/admin/integrations/gmail/settings`, {
+    headers: adminIntegrationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function testGmailInboxIntegrationConnection(
+  apiBase: string,
+  accessToken?: string,
+): Promise<GmailInboxConnectionTest> {
+  return postJson<GmailInboxConnectionTest>(
+    `${apiBase}/admin/integrations/gmail/test-connection`,
+    {},
+    {
+      headers: adminIntegrationHeaders(accessToken),
+      cache: 'no-store',
+    },
+  )
+}
+
+export async function loadSlackMessagingIntegrationSettings(
+  apiBase: string,
+  accessToken?: string,
+): Promise<SlackMessagingIntegrationRuntimeSettings> {
+  return fetchJson<SlackMessagingIntegrationRuntimeSettings>(`${apiBase}/admin/integrations/slack/settings`, {
+    headers: adminIntegrationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function testSlackMessagingIntegrationConnection(
+  apiBase: string,
+  accessToken?: string,
+): Promise<SlackMessagingConnectionTest> {
+  return postJson<SlackMessagingConnectionTest>(
+    `${apiBase}/admin/integrations/slack/test-connection`,
+    {},
+    {
+      headers: adminIntegrationHeaders(accessToken),
+      cache: 'no-store',
+    },
+  )
 }
 
 export async function runExternalDataSync(

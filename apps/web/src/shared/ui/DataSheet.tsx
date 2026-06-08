@@ -5,14 +5,19 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type CSSProperties,
+  type FocusEvent,
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
 
 type DataSheetInputType = 'text' | 'textarea'
 type CellFocusableElement = HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement
 type DataSheetComparable = string | number | boolean | Date | null | undefined
+const DATA_SHEET_MIN_COLUMN_WIDTH_PX = 64
+const DATA_SHEET_KEYBOARD_RESIZE_STEP_PX = 16
 export type DataSheetSortDirection = 'asc' | 'desc'
 export type DataSheetSortState = {
   columnId: string
@@ -27,15 +32,29 @@ export type DataSheetRowAction<Row> = {
   onSelect: (row: Row) => void
 }
 
-type DataSheetEditableConfig<Row> = {
-  inputType?: DataSheetInputType
-  value: (row: Row) => string
-  onChange: (row: Row, value: string) => void
-  placeholder?: string
+type DataSheetEditableBaseConfig<Row> = {
   disabled?: (row: Row) => boolean
   isDirty?: (row: Row) => boolean
   error?: (row: Row) => string | null
 }
+
+type DataSheetEditableTextConfig<Row> = DataSheetEditableBaseConfig<Row> & {
+  inputType?: DataSheetInputType
+  value: (row: Row) => string
+  onChange: (row: Row, value: string) => void
+  onBlur?: (row: Row, value: string) => void
+  placeholder?: string
+}
+
+type DataSheetEditableCheckboxConfig<Row> = DataSheetEditableBaseConfig<Row> & {
+  inputType: 'checkbox'
+  checked: (row: Row) => boolean
+  onChange: (row: Row, value: boolean) => void
+  trueLabel?: string
+  falseLabel?: string
+}
+
+type DataSheetEditableConfig<Row> = DataSheetEditableTextConfig<Row> | DataSheetEditableCheckboxConfig<Row>
 
 type DataSheetColumnBase<Row> = {
   id: string
@@ -64,6 +83,12 @@ type ActiveCell = {
   columnIndex: number
 }
 
+type ColumnResizeState = {
+  columnId: string
+  startX: number
+  startWidth: number
+}
+
 type DataSheetProps<Row> = {
   label: string
   description: string
@@ -71,6 +96,7 @@ type DataSheetProps<Row> = {
   appendRows?: ReactNode
   columns: DataSheetColumn<Row>[]
   rows: Row[]
+  pageSize?: number
   getRowId: (row: Row) => string
   getRowLabel: (row: Row) => string
   selectedRowId: string | null
@@ -78,6 +104,8 @@ type DataSheetProps<Row> = {
   emptyMessage: string
   defaultSort?: DataSheetSortState
   enableColumnControls?: boolean
+  enableColumnResize?: boolean
+  editableHelpText?: string
   rowActions?: (row: Row) => DataSheetRowAction<Row>[]
 }
 
@@ -130,6 +158,12 @@ function isEditableColumn<Row>(column: DataSheetColumn<Row>): column is Extract<
   return 'editable' in column
 }
 
+function isCheckboxEditableConfig<Row>(
+  editable: DataSheetEditableConfig<Row>,
+): editable is DataSheetEditableCheckboxConfig<Row> {
+  return editable.inputType === 'checkbox'
+}
+
 function normalizeDataSheetText(value: DataSheetComparable): string {
   if (value == null) {
     return ''
@@ -163,7 +197,11 @@ function resolveColumnFilterText<Row>(column: DataSheetColumn<Row>, row: Row, ro
   }
 
   if (isEditableColumn(column)) {
-    return column.editable.value(row)
+    return isCheckboxEditableConfig(column.editable)
+      ? column.editable.checked(row)
+        ? (column.editable.trueLabel ?? 'TRUE')
+        : (column.editable.falseLabel ?? 'FALSE')
+      : column.editable.value(row)
   }
 
   return resolveRenderedCellText(column.renderCell(row, rowIndex))
@@ -216,6 +254,32 @@ function columnIsFilterable<Row>(column: DataSheetColumn<Row>, enableColumnContr
   return enableColumnControls && column.enableFilter !== false
 }
 
+function parseColumnWidthPixels(width: string | undefined): number | null {
+  if (!width) {
+    return null
+  }
+
+  const parsedValue = Number.parseFloat(width)
+  if (!Number.isFinite(parsedValue)) {
+    return null
+  }
+
+  if (width.endsWith('px')) {
+    return parsedValue
+  }
+
+  if (width.endsWith('rem')) {
+    const rootFontSize = Number.parseFloat(
+      typeof window === 'undefined'
+        ? '16'
+        : window.getComputedStyle(document.documentElement).fontSize || '16',
+    )
+    return parsedValue * (Number.isFinite(rootFontSize) ? rootFontSize : 16)
+  }
+
+  return null
+}
+
 export function DataSheet<Row>({
   label,
   description,
@@ -223,6 +287,7 @@ export function DataSheet<Row>({
   appendRows,
   columns,
   rows,
+  pageSize,
   getRowId,
   getRowLabel,
   selectedRowId,
@@ -230,14 +295,18 @@ export function DataSheet<Row>({
   emptyMessage,
   defaultSort,
   enableColumnControls = true,
+  enableColumnResize = false,
+  editableHelpText,
   rowActions,
 }: DataSheetProps<Row>) {
   const descriptionId = useId()
   const actionMenuId = useId()
   const [sortState, setSortState] = useState<DataSheetSortState | null>(() => defaultSort ?? null)
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({})
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
+  const [columnResize, setColumnResize] = useState<ColumnResizeState | null>(null)
   const [rowActionMenu, setRowActionMenu] = useState<{ rowId: string; x: number; y: number } | null>(null)
-  const visibleRows = useMemo(() => {
+  const filteredRows = useMemo(() => {
     const normalizedFilters = Object.entries(columnFilters)
       .map(([columnId, value]) => [columnId, value.trim().toLocaleLowerCase()] as const)
       .filter(([, value]) => value.length > 0)
@@ -277,9 +346,37 @@ export function DataSheet<Row>({
 
     return sortedRows.map(({ row }) => row)
   }, [columnFilters, columns, enableColumnControls, rows, sortState])
+  const normalizedPageSize =
+    typeof pageSize === 'number' && Number.isFinite(pageSize) && pageSize > 0
+      ? Math.max(1, Math.floor(pageSize))
+      : null
+  const pageResetKey = useMemo(() => {
+    const filterKey = Object.entries(columnFilters)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([columnId, value]) => `${columnId}:${value}`)
+      .join('|')
+    const sortKey = sortState ? `${sortState.columnId}:${sortState.direction}` : 'none'
+    return `${rows.length}:${normalizedPageSize ?? 'all'}:${sortKey}:${filterKey}`
+  }, [columnFilters, normalizedPageSize, rows.length, sortState])
+  const [paginationState, setPaginationState] = useState<{ pageIndex: number; resetKey: string }>(() => ({
+    pageIndex: 0,
+    resetKey: '',
+  }))
+  const pageIndex = paginationState.resetKey === pageResetKey ? paginationState.pageIndex : 0
+  const pageCount = normalizedPageSize ? Math.max(1, Math.ceil(filteredRows.length / normalizedPageSize)) : 1
+  const currentPageIndex = normalizedPageSize ? clampIndex(pageIndex, pageCount - 1) : 0
+  const pageStartIndex = normalizedPageSize ? currentPageIndex * normalizedPageSize : 0
+  const visibleRows = useMemo(
+    () =>
+      normalizedPageSize
+        ? filteredRows.slice(pageStartIndex, pageStartIndex + normalizedPageSize)
+        : filteredRows,
+    [filteredRows, normalizedPageSize, pageStartIndex],
+  )
   const rowIds = useMemo(() => visibleRows.map((row) => getRowId(row)), [getRowId, visibleRows])
   const cellRefs = useRef(new Map<string, CellFocusableElement>())
   const rowActionMenuRef = useRef<HTMLDivElement | null>(null)
+  const columnResizeCleanupRef = useRef<(() => void) | null>(null)
   const pendingFocusRef = useRef(false)
   const [requestedActiveCell, setRequestedActiveCell] = useState<ActiveCell>(() =>
     resolveActiveCell(
@@ -359,6 +456,13 @@ export function DataSheet<Row>({
     }
   }, [rowActionMenu])
 
+  useEffect(
+    () => () => {
+      columnResizeCleanupRef.current?.()
+    },
+    [],
+  )
+
   const activeRow = activeCell.rowIndex >= 0 ? visibleRows[activeCell.rowIndex] ?? null : null
   const activeColumn = activeCell.columnIndex >= 0 ? columns[activeCell.columnIndex] ?? null : null
   const activeActionMenuRow = rowActionMenu
@@ -377,10 +481,16 @@ export function DataSheet<Row>({
   const hasColumnControls = enableColumnControls && columns.some((column) => columnIsSortable(column, true) || columnIsFilterable(column, true))
   const hasFilterRow = enableColumnControls && columns.some((column) => columnIsFilterable(column, true))
   const shouldRenderTable = rows.length > 0 || Boolean(appendRows)
-  const rowCountLabel =
-    visibleRows.length === rows.length
+  const pageStartOrdinal = visibleRows.length > 0 ? pageStartIndex + 1 : 0
+  const pageEndOrdinal = pageStartIndex + visibleRows.length
+  const shouldShowPagination = normalizedPageSize !== null && filteredRows.length > normalizedPageSize
+  const rowCountLabel = normalizedPageSize
+    ? filteredRows.length === rows.length
+      ? `Showing ${pageStartOrdinal}-${pageEndOrdinal} of ${rows.length} rows`
+      : `Showing ${pageStartOrdinal}-${pageEndOrdinal} of ${filteredRows.length} filtered rows`
+    : filteredRows.length === rows.length
       ? `${rows.length} row${rows.length === 1 ? '' : 's'}`
-      : `${visibleRows.length} of ${rows.length} rows`
+      : `${filteredRows.length} of ${rows.length} rows`
 
   function moveFocus(nextRowIndex: number, nextColumnIndex: number) {
     if (visibleRows.length === 0 || columns.length === 0) {
@@ -534,12 +644,142 @@ export function DataSheet<Row>({
     setColumnFilters({})
   }
 
+  function resolveColumnWidth(column: DataSheetColumn<Row>): number | null {
+    return columnWidths[column.id] ?? parseColumnWidthPixels(column.width)
+  }
+
+  function columnStyle(column: DataSheetColumn<Row>): CSSProperties | undefined {
+    const resizedWidth = columnWidths[column.id]
+    if (typeof resizedWidth === 'number') {
+      return { width: `${resizedWidth}px` }
+    }
+
+    return column.width ? { width: column.width } : undefined
+  }
+
+  function columnCellStyle(column: DataSheetColumn<Row>): CSSProperties | undefined {
+    const resizedWidth = columnWidths[column.id]
+    if (typeof resizedWidth !== 'number') {
+      return undefined
+    }
+
+    return {
+      width: `${resizedWidth}px`,
+      minWidth: `${resizedWidth}px`,
+      maxWidth: `${resizedWidth}px`,
+    }
+  }
+
+  function startColumnResize(column: DataSheetColumn<Row>, target: HTMLElement | null, clientX: number) {
+    if (!enableColumnResize) {
+      return
+    }
+
+    const headerCell = target?.closest('th')
+    const startWidth =
+      headerCell?.getBoundingClientRect().width ??
+      resolveColumnWidth(column) ??
+      DATA_SHEET_MIN_COLUMN_WIDTH_PX
+
+    columnResizeCleanupRef.current?.()
+
+    const resizeState = {
+      columnId: column.id,
+      startX: clientX,
+      startWidth: Math.max(DATA_SHEET_MIN_COLUMN_WIDTH_PX, startWidth),
+    }
+
+    function handleDocumentMove(pointerEvent: globalThis.PointerEvent | globalThis.MouseEvent) {
+      const width = Math.max(
+        DATA_SHEET_MIN_COLUMN_WIDTH_PX,
+        resizeState.startWidth + pointerEvent.clientX - resizeState.startX,
+      )
+      setColumnWidths((current) => ({
+        ...current,
+        [resizeState.columnId]: Math.round(width),
+      }))
+    }
+
+    function cleanupColumnResize() {
+      document.body.classList.remove('data-sheet-column-resize-active')
+      document.removeEventListener('pointermove', handleDocumentMove)
+      document.removeEventListener('mousemove', handleDocumentMove)
+      document.removeEventListener('pointerup', handleDocumentPointerUp)
+      document.removeEventListener('mouseup', handleDocumentPointerUp)
+      document.removeEventListener('pointercancel', handleDocumentPointerUp)
+      columnResizeCleanupRef.current = null
+    }
+
+    function handleDocumentPointerUp() {
+      cleanupColumnResize()
+      setColumnResize(null)
+    }
+
+    document.body.classList.add('data-sheet-column-resize-active')
+    document.addEventListener('pointermove', handleDocumentMove)
+    document.addEventListener('mousemove', handleDocumentMove)
+    document.addEventListener('pointerup', handleDocumentPointerUp)
+    document.addEventListener('mouseup', handleDocumentPointerUp)
+    document.addEventListener('pointercancel', handleDocumentPointerUp)
+    columnResizeCleanupRef.current = cleanupColumnResize
+    setColumnResize(resizeState)
+  }
+
+  function handleColumnResizePointerDown(column: DataSheetColumn<Row>, event: ReactPointerEvent<HTMLElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+    startColumnResize(column, event.currentTarget, event.clientX)
+  }
+
+  function handleColumnResizeMouseDown(column: DataSheetColumn<Row>, event: MouseEvent<HTMLElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+    startColumnResize(column, event.currentTarget, event.clientX)
+  }
+
+  function nudgeColumnWidth(column: DataSheetColumn<Row>, delta: number) {
+    if (!enableColumnResize) {
+      return
+    }
+
+    setColumnWidths((current) => {
+      const currentWidth =
+        current[column.id] ??
+        resolveColumnWidth(column) ??
+        DATA_SHEET_MIN_COLUMN_WIDTH_PX
+      return {
+        ...current,
+        [column.id]: Math.max(DATA_SHEET_MIN_COLUMN_WIDTH_PX, currentWidth + delta),
+      }
+    })
+  }
+
+  function handleColumnResizeKeyDown(column: DataSheetColumn<Row>, event: KeyboardEvent<HTMLSpanElement>) {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      nudgeColumnWidth(column, -DATA_SHEET_KEYBOARD_RESIZE_STEP_PX)
+      return
+    }
+
+    if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      nudgeColumnWidth(column, DATA_SHEET_KEYBOARD_RESIZE_STEP_PX)
+    }
+  }
+
   function sortLabelForColumn(column: DataSheetColumn<Row>): string {
     if (sortState?.columnId !== column.id) {
       return 'Sort'
     }
 
     return sortState.direction === 'asc' ? 'Asc' : 'Desc'
+  }
+
+  function goToPage(nextPageIndex: number) {
+    setPaginationState({
+      pageIndex: clampIndex(nextPageIndex, pageCount - 1),
+      resetKey: pageResetKey,
+    })
   }
 
   return (
@@ -555,6 +795,29 @@ export function DataSheet<Row>({
           <span className="entity-chip entity-chip-soft">
             {rowCountLabel} • {columns.length} column{columns.length === 1 ? '' : 's'}
           </span>
+          {shouldShowPagination ? (
+            <div className="data-sheet-pagination" role="group" aria-label={`${label} pagination`}>
+              <button
+                type="button"
+                className="button button-ghost data-sheet-pagination-button"
+                onClick={() => goToPage(currentPageIndex - 1)}
+                disabled={currentPageIndex === 0}
+              >
+                Previous
+              </button>
+              <span className="data-sheet-pagination-label">
+                Page {currentPageIndex + 1} of {pageCount}
+              </span>
+              <button
+                type="button"
+                className="button button-ghost data-sheet-pagination-button"
+                onClick={() => goToPage(currentPageIndex + 1)}
+                disabled={currentPageIndex >= pageCount - 1}
+              >
+                Next
+              </button>
+            </div>
+          ) : null}
           {hasColumnFilters ? (
             <span className="entity-chip entity-chip-soft">
               {activeFilterCount} filter{activeFilterCount === 1 ? '' : 's'}
@@ -575,10 +838,16 @@ export function DataSheet<Row>({
       {shouldRenderTable ? (
         <>
           <div className="table-shell data-sheet-table-shell">
-            <table className="data-table data-sheet-table" role="grid" aria-describedby={descriptionId}>
+            <table
+              className={`data-table data-sheet-table ${enableColumnResize ? 'data-sheet-table-resizable' : ''} ${
+                columnResize ? 'is-resizing' : ''
+              }`}
+              role="grid"
+              aria-describedby={descriptionId}
+            >
               <colgroup>
                 {columns.map((column) => (
-                  <col key={column.id} style={column.width ? { width: column.width } : undefined} />
+                  <col key={column.id} style={columnStyle(column)} />
                 ))}
               </colgroup>
               <thead>
@@ -587,6 +856,7 @@ export function DataSheet<Row>({
                     <th
                       key={column.id}
                       className={`data-sheet-column-head data-sheet-align-${column.align ?? 'start'}`}
+                      style={columnCellStyle(column)}
                       scope="col"
                       aria-sort={
                         sortState?.columnId === column.id
@@ -609,13 +879,33 @@ export function DataSheet<Row>({
                       ) : (
                         <span className="data-sheet-static-column-label">{column.label}</span>
                       )}
+                      {enableColumnResize ? (
+                        <span
+                          className={`data-sheet-column-resize-handle ${
+                            columnResize?.columnId === column.id ? 'is-active' : ''
+                          }`}
+                          role="separator"
+                          aria-label={`Resize ${column.label} column`}
+                          aria-orientation="vertical"
+                          tabIndex={0}
+                          title={`Resize ${column.label} column`}
+                          onPointerDown={(event) => handleColumnResizePointerDown(column, event)}
+                          onMouseDown={(event) => handleColumnResizeMouseDown(column, event)}
+                          onKeyDown={(event) => handleColumnResizeKeyDown(column, event)}
+                        />
+                      ) : null}
                     </th>
                   ))}
                 </tr>
                 {hasFilterRow ? (
                   <tr className="data-sheet-filter-row">
                     {columns.map((column) => (
-                      <th key={`${column.id}-filter`} className={`data-sheet-align-${column.align ?? 'start'}`} scope="col">
+                      <th
+                        key={`${column.id}-filter`}
+                        className={`data-sheet-align-${column.align ?? 'start'}`}
+                        style={columnCellStyle(column)}
+                        scope="col"
+                      >
                         {columnIsFilterable(column, enableColumnControls) ? (
                           <input
                             className="data-sheet-column-filter"
@@ -644,6 +934,7 @@ export function DataSheet<Row>({
                 {visibleRows.map((row, rowIndex) => {
                   const rowId = getRowId(row)
                   const rowSelected = rowId === selectedRowId
+                  const absoluteRowIndex = pageStartIndex + rowIndex
                   return (
                     <tr
                       key={rowId}
@@ -659,46 +950,91 @@ export function DataSheet<Row>({
                           const { editable } = column
                           const errorMessage = editable.error?.(row) ?? ''
                           const dirty = editable.isDirty?.(row) ?? false
+                          const disabled = editable.disabled?.(row) ?? false
+                          const editorClassName = `data-sheet-editor ${active ? 'is-active' : ''} ${dirty ? 'is-dirty' : ''} ${errorMessage ? 'is-error' : ''}`
+                          const metaRow = (
+                            <div className="data-sheet-cell-meta-row">
+                              {errorMessage ? (
+                                <small className="data-sheet-cell-error">{errorMessage}</small>
+                              ) : dirty ? (
+                                <small className="data-sheet-cell-meta">Staged</small>
+                              ) : (
+                                <span className="data-sheet-cell-meta-placeholder" aria-hidden="true" />
+                              )}
+                            </div>
+                          )
+
+                          if (isCheckboxEditableConfig(editable)) {
+                            const checked = editable.checked(row)
+
+                            return (
+                              <td
+                                key={column.id}
+                                className={`data-sheet-align-${column.align ?? 'start'} ${dirty ? 'data-sheet-cell-is-dirty' : ''} ${errorMessage ? 'data-sheet-cell-is-error' : ''}`}
+                                style={columnCellStyle(column)}
+                              >
+                                <div className={editorClassName}>
+                                  <label className="data-sheet-checkbox-editor">
+                                    <input
+                                      ref={(element) => registerCellRef(cellId, element)}
+                                      className="data-sheet-cell-checkbox"
+                                      type="checkbox"
+                                      checked={checked}
+                                      disabled={disabled}
+                                      tabIndex={active ? 0 : -1}
+                                      aria-label={`${column.label}: ${getRowLabel(row)}`}
+                                      onFocus={() => handleCellFocus(rowIndex, columnIndex)}
+                                      onChange={(event) => editable.onChange(row, event.target.checked)}
+                                    />
+                                    <span className={`data-sheet-checkbox-value ${checked ? 'is-checked' : ''}`}>
+                                      {checked ? (editable.trueLabel ?? 'TRUE') : (editable.falseLabel ?? 'FALSE')}
+                                    </span>
+                                  </label>
+                                  {metaRow}
+                                </div>
+                              </td>
+                            )
+                          }
+
                           const commonProps = {
                             ref: (element: HTMLInputElement | HTMLTextAreaElement | null) => registerCellRef(cellId, element),
                             className: 'data-sheet-cell-input',
                             value: editable.value(row),
                             placeholder: editable.placeholder,
-                            disabled: editable.disabled?.(row) ?? false,
+                            disabled,
                             tabIndex: active ? 0 : -1,
                             'aria-label': `${column.label}: ${getRowLabel(row)}`,
                             onFocus: () => handleCellFocus(rowIndex, columnIndex),
                             onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
                               editable.onChange(row, event.target.value),
+                            onBlur: (event: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+                              editable.onBlur?.(row, event.target.value),
                           }
 
                           return (
                             <td
                               key={column.id}
                               className={`data-sheet-align-${column.align ?? 'start'} ${dirty ? 'data-sheet-cell-is-dirty' : ''} ${errorMessage ? 'data-sheet-cell-is-error' : ''}`}
+                              style={columnCellStyle(column)}
                             >
-                              <div className={`data-sheet-editor ${active ? 'is-active' : ''} ${dirty ? 'is-dirty' : ''} ${errorMessage ? 'is-error' : ''}`}>
+                              <div className={editorClassName}>
                                 {editable.inputType === 'textarea' ? (
                                   <textarea {...commonProps} rows={2} />
                                 ) : (
                                   <input {...commonProps} type="text" />
                                 )}
-                                <div className="data-sheet-cell-meta-row">
-                                  {errorMessage ? (
-                                    <small className="data-sheet-cell-error">{errorMessage}</small>
-                                  ) : dirty ? (
-                                    <small className="data-sheet-cell-meta">Staged</small>
-                                  ) : (
-                                    <span className="data-sheet-cell-meta-placeholder" aria-hidden="true" />
-                                  )}
-                                </div>
+                                {metaRow}
                               </div>
                             </td>
                           )
                         }
 
                         return (
-                          <td key={column.id} className={`data-sheet-align-${column.align ?? 'start'}`}>
+                          <td
+                            key={column.id}
+                            className={`data-sheet-align-${column.align ?? 'start'}`}
+                            style={columnCellStyle(column)}
+                          >
                             <button
                               ref={(element) => registerCellRef(cellId, element)}
                               type="button"
@@ -707,9 +1043,10 @@ export function DataSheet<Row>({
                               aria-label={`${column.label}: ${getRowLabel(row)}`}
                               aria-selected={rowSelected}
                               onFocus={() => handleCellFocus(rowIndex, columnIndex)}
+                              onClick={() => onSelectRow(row)}
                               onKeyDown={(event) => handleReadOnlyCellKeyDown(event, rowIndex, columnIndex, row)}
                             >
-                              {column.renderCell(row, rowIndex)}
+                              {column.renderCell(row, absoluteRowIndex)}
                             </button>
                           </td>
                         )
@@ -758,7 +1095,7 @@ export function DataSheet<Row>({
             <span>{activeRow ? getRowLabel(activeRow) : 'No row selected'}</span>
             <span>
               {hasEditableColumns
-                ? 'Tab between editable cells to stage changes. Use the surrounding toolbar to apply or reset staged rows.'
+                ? (editableHelpText ?? 'Tab between editable cells to stage changes. Use the surrounding toolbar to apply or reset staged rows.')
                 : 'Arrow keys move cell focus. Enter keeps the editor synced to the active row.'}
             </span>
           </div>

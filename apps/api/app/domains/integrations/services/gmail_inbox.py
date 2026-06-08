@@ -25,9 +25,16 @@ from apps.api.app.schemas.document import (
     DocumentGmailInboxMessageSummaryOut,
     DocumentGmailInboxRuntimeSettingsOut,
 )
+from apps.api.app.schemas.integration import (
+    GmailInboxConnectionTestOut,
+    GmailInboxIntegrationRuntimeSettingsOut,
+)
 
 logger = get_logger(__name__)
 GMAIL_INBOX_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+GMAIL_INBOX_DEFAULT_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GMAIL_INBOX_DEFAULT_API_BASE_URL = "https://gmail.googleapis.com/gmail/v1"
+GMAIL_INBOX_REQUIRED_SCOPES = (GMAIL_INBOX_SCOPE,)
 GMAIL_INBOX_BROWSE_MAX_PAGE_SIZE = 50
 GMAIL_INBOX_BODY_MAX_CHARS = 12_000
 
@@ -99,12 +106,80 @@ def build_gmail_inbox_runtime_settings() -> DocumentGmailInboxRuntimeSettingsOut
     )
 
 
+def build_gmail_inbox_integration_runtime_settings() -> GmailInboxIntegrationRuntimeSettingsOut:
+    config = _gmail_inbox_config()
+    auth_status = _gmail_inbox_auth_status(config)
+    missing_configuration: list[str] = []
+    if not config.enabled:
+        missing_configuration.append("GMAIL_INBOX_ENABLED")
+    if not config.client_id:
+        missing_configuration.append("GMAIL_INBOX_CLIENT_ID")
+    if not config.refresh_token:
+        missing_configuration.append("GMAIL_INBOX_REFRESH_TOKEN")
+    return GmailInboxIntegrationRuntimeSettingsOut(
+        enabled=config.enabled,
+        configured=bool(config.enabled and auth_status == "configured"),
+        auth_status=auth_status,
+        account_email=config.account_email,
+        query=config.query,
+        max_messages_per_import=config.max_messages_per_import,
+        base_url=config.api_base_url,
+        token_url=config.token_url,
+        required_scopes=list(GMAIL_INBOX_REQUIRED_SCOPES),
+        missing_configuration=missing_configuration,
+    )
+
+
+def run_gmail_inbox_connection_test() -> GmailInboxConnectionTestOut:
+    config = _require_gmail_inbox_configured()
+    resolved_query = _resolve_gmail_query(config, None)
+    max_results = min(5, config.max_messages_per_import)
+    with httpx.Client(timeout=config.timeout_seconds) as http_client:
+        access_token = _refresh_access_token(config, http_client=http_client)
+        profile = _gmail_get_json(
+            config,
+            http_client=http_client,
+            access_token=access_token,
+            path="/users/me/profile",
+        )
+        page_payload = _list_gmail_message_page(
+            config,
+            http_client=http_client,
+            access_token=access_token,
+            query=resolved_query,
+            max_results=max_results,
+            page_token=None,
+        )
+
+    profile_email = _optional_text(profile.get("emailAddress"))
+    message_payloads = page_payload.get("messages")
+    returned_message_count = len(message_payloads) if isinstance(message_payloads, list) else 0
+    warnings: list[str] = []
+    if config.account_email and profile_email and config.account_email.lower() != profile_email.lower():
+        warnings.append("Configured Gmail account email does not match the Gmail profile returned by the API.")
+    if returned_message_count == 0:
+        warnings.append("Gmail connected successfully but returned no messages for the configured query.")
+    return GmailInboxConnectionTestOut(
+        account_email=config.account_email,
+        profile_email=profile_email,
+        messages_total=_optional_integer(profile.get("messagesTotal")),
+        threads_total=_optional_integer(profile.get("threadsTotal")),
+        history_id=_optional_text(profile.get("historyId")),
+        query=resolved_query,
+        returned_message_count=returned_message_count,
+        next_page_token=_optional_text(page_payload.get("nextPageToken")),
+        required_scopes=list(GMAIL_INBOX_REQUIRED_SCOPES),
+        warnings=warnings,
+    )
+
+
 def list_gmail_inbox_messages(
     db: Session,
     *,
     query_override: str | None = None,
     page_size: int = 20,
     page_token: str | None = None,
+    label_ids: tuple[str, ...] | None = ("INBOX",),
 ) -> DocumentGmailInboxBrowseResultOut:
     config = _require_gmail_inbox_configured()
     resolved_query = _resolve_gmail_query(config, query_override)
@@ -120,6 +195,7 @@ def list_gmail_inbox_messages(
             query=resolved_query,
             max_results=resolved_page_size,
             page_token=resolved_page_token,
+            label_ids=label_ids,
         )
         message_summaries = page_payload.get("messages")
         next_page_token = _optional_text(page_payload.get("nextPageToken"))
@@ -136,7 +212,7 @@ def list_gmail_inbox_messages(
                     access_token=access_token,
                     message_id=message_id,
                     message_format="metadata",
-                    metadata_headers=["Subject", "From"],
+                    metadata_headers=["Subject", "From", "To", "Cc", "Bcc"],
                 )
             except LookupError:
                 continue
@@ -153,6 +229,9 @@ def list_gmail_inbox_messages(
                     thread_id=_optional_text(message.get("threadId")) or _optional_text(summary.get("threadId")),
                     subject=_gmail_header_value(message.get("payload"), "subject"),
                     sender=_gmail_header_value(message.get("payload"), "from"),
+                    to_recipients=_gmail_header_value(message.get("payload"), "to"),
+                    cc_recipients=_gmail_header_value(message.get("payload"), "cc"),
+                    bcc_recipients=_gmail_header_value(message.get("payload"), "bcc"),
                     received_at=_gmail_received_at(message),
                     snippet=_optional_text(message.get("snippet")),
                     unread=_gmail_message_unread(message),
@@ -368,8 +447,8 @@ def _gmail_inbox_config() -> GmailInboxConfig:
         query=settings.GMAIL_INBOX_QUERY.strip(),
         max_messages_per_import=settings.GMAIL_INBOX_MAX_MESSAGES_PER_IMPORT,
         timeout_seconds=settings.GMAIL_INBOX_TIMEOUT_SECONDS,
-        token_url=settings.GMAIL_INBOX_TOKEN_URL.strip() or "https://oauth2.googleapis.com/token",
-        api_base_url=settings.GMAIL_INBOX_API_BASE_URL.strip() or "https://gmail.googleapis.com/gmail/v1",
+        token_url=settings.GMAIL_INBOX_TOKEN_URL.strip() or GMAIL_INBOX_DEFAULT_TOKEN_URL,
+        api_base_url=settings.GMAIL_INBOX_API_BASE_URL.strip() or GMAIL_INBOX_DEFAULT_API_BASE_URL,
     )
 
 
@@ -466,15 +545,17 @@ def _list_gmail_message_page(
     query: str,
     max_results: int,
     page_token: str | None,
+    label_ids: tuple[str, ...] | None = ("INBOX",),
 ) -> dict[str, Any]:
-    params = {
-        "labelIds": "INBOX",
-        "includeSpamTrash": "false",
-        "maxResults": str(max_results),
-        "q": query,
-    }
+    params: list[tuple[str, str]] = [
+        ("includeSpamTrash", "false"),
+        ("maxResults", str(max_results)),
+        ("q", query),
+    ]
+    if label_ids is not None:
+        params.extend(("labelIds", label_id) for label_id in label_ids)
     if page_token:
-        params["pageToken"] = page_token
+        params.append(("pageToken", page_token))
     return _gmail_get_json(
         config,
         http_client=http_client,
@@ -493,9 +574,9 @@ def _get_gmail_message(
     message_format: str,
     metadata_headers: list[str] | None = None,
 ) -> dict[str, Any]:
-    params: dict[str, str] = {"format": message_format}
+    params: list[tuple[str, str]] = [("format", message_format)]
     if metadata_headers:
-        params["metadataHeaders"] = ",".join(metadata_headers)
+        params.extend(("metadataHeaders", header_name) for header_name in metadata_headers)
     payload = _gmail_get_json(
         config,
         http_client=http_client,
@@ -534,7 +615,7 @@ def _gmail_get_json(
     http_client: httpx.Client,
     access_token: str,
     path: str,
-    params: dict[str, str] | None = None,
+    params: httpx.QueryParamTypes | None = None,
 ) -> dict[str, Any]:
     url = f"{config.api_base_url.rstrip('/')}{path}"
     started_at = perf_counter()
@@ -726,6 +807,12 @@ def _integer_value(value: object) -> int:
     if isinstance(value, str) and value.strip().isdigit():
         return max(int(value.strip()), 0)
     return 0
+
+
+def _optional_integer(value: object) -> int | None:
+    if value is None:
+        return None
+    return _integer_value(value)
 
 
 def _truncate_text(value: str | None, max_length: int) -> str | None:

@@ -535,6 +535,60 @@ class MessagingWorkspaceApiTests(unittest.TestCase):
         self.assertEqual(payload["configured_channel_count"], 1)
         self.assertNotIn("xoxb", configured_response.text)
 
+    def test_admin_slack_settings_report_configuration_without_exposing_token(self) -> None:
+        access_token = self._bootstrap_admin()
+
+        response = self.client.get(
+            "/admin/integrations/slack/settings",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["enabled"])
+        self.assertFalse(response.json()["configured"])
+        self.assertEqual(response.json()["auth_status"], "none")
+
+        settings.SLACK_MESSAGING_ENABLED = True
+        settings.SLACK_BOT_TOKEN = "xoxb-test-token"
+        settings.SLACK_MESSAGING_CHANNEL_IDS = "C123SLACK"
+
+        configured_response = self.client.get(
+            "/admin/integrations/slack/settings",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        self.assertEqual(configured_response.status_code, 200)
+        payload = configured_response.json()
+        self.assertTrue(payload["enabled"])
+        self.assertTrue(payload["configured"])
+        self.assertEqual(payload["auth_status"], "configured")
+        self.assertEqual(payload["configured_channel_count"], 1)
+        self.assertEqual(payload["required_scopes"][0], "conversations:read")
+        self.assertNotIn("xoxb", configured_response.text)
+
+    def test_admin_slack_connection_test_returns_conversation_metadata(self) -> None:
+        access_token = self._bootstrap_admin()
+        settings.SLACK_MESSAGING_ENABLED = True
+        settings.SLACK_BOT_TOKEN = "xoxb-test-token"
+        settings.SLACK_MESSAGING_CHANNEL_IDS = "C123SLACK"
+
+        with patch(
+            "apps.api.app.domains.integrations.services.slack_messaging.SlackMessagingClient",
+            _FakeSlackClient,
+        ):
+            response = self.client.post(
+                "/admin/integrations/slack/test-connection",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "connected")
+        self.assertEqual(payload["conversation_count"], 1)
+        self.assertEqual(payload["returned_conversation_count"], 1)
+        self.assertEqual(payload["configured_channel_count"], 1)
+        self.assertEqual(payload["conversations"][0]["channel_id"], "C123SLACK")
+        self.assertEqual(payload["conversations"][0]["label"], "#desk-ops")
+        self.assertNotIn("xoxb", response.text)
+
     def test_slack_sync_imports_messages_as_durable_workspace_conversations(self) -> None:
         access_token = self._bootstrap_admin()
         settings.SLACK_MESSAGING_ENABLED = True

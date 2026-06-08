@@ -80,6 +80,25 @@
   box-shadow: inset 0 0 0 1px rgba(78, 167, 255, 0.3);
 }
 
+.data-sheet-checkbox-editor {
+  color: var(--terminal-muted);
+}
+
+.data-sheet-cell-checkbox {
+  accent-color: var(--terminal-accent);
+}
+
+.data-sheet-checkbox-value {
+  border-color: rgba(126, 154, 184, 0.16);
+  background: rgba(126, 154, 184, 0.08);
+}
+
+.data-sheet-checkbox-value.is-checked {
+  border-color: rgba(61, 214, 160, 0.22);
+  background: rgba(61, 214, 160, 0.12);
+  color: var(--terminal-accent);
+}
+
 .data-sheet-row-action-menu {
   border-color: rgba(126, 154, 184, 0.2);
   background: rgba(8, 15, 24, 0.98);

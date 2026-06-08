@@ -19,6 +19,7 @@ AUTHENTICATED_READ_PATH_PREFIXES = (
     "/confirmations",
     "/deliveries",
     "/events",
+    "/integrations",
     "/operations/workspace-summary",
     "/operations/trade-attention-candidates",
     "/operations/work-items",

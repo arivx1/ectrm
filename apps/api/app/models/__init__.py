@@ -42,6 +42,7 @@ from apps.api.app.models.layout_definition import LayoutDefinition
 from apps.api.app.models.messaging_workspace_conversation import MessagingWorkspaceConversation
 from apps.api.app.models.messaging_workspace_message import MessagingWorkspaceMessage
 from apps.api.app.models.mutation_provenance import MutationProvenanceRecord
+from apps.api.app.models.nexus_contact import NexusContact
 from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.models.position import Position
 from apps.api.app.models.price_index_observation import PriceIndexObservation
@@ -86,6 +87,7 @@ from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_price_term import TradePriceTerm
+from apps.api.app.models.trade_secondary_cost_item import TradeSecondaryCostItem
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
 from apps.api.app.models.trading_source import TradingSource
 from apps.api.app.models.user_defined_event import UserDefinedEvent
@@ -145,6 +147,7 @@ __all__ = [
     "MessagingWorkspaceConversation",
     "MessagingWorkspaceMessage",
     "MutationProvenanceRecord",
+    "NexusContact",
     "OptionExposure",
     "Position",
     "PriceIndexObservation",
@@ -187,6 +190,7 @@ __all__ = [
     "TradeLeg",
     "TradePayment",
     "TradePriceTerm",
+    "TradeSecondaryCostItem",
     "TradeWorkflowItem",
     "TradingSource",
     "UserDefinedEvent",

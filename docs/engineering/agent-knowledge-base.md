@@ -6851,3 +6851,114 @@ independently"`.
   settlement-ready outside typed service policy.
 - Tests or evidence:
   `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_actualization_ledger_service`
+
+### 2026-06-07 - Secondary Costs Need Typed Lifecycle Evidence
+
+- Type: algorithm-added
+- Domain: secondary costs, freight, tariffs, storage fees, settlement preview,
+  accrual posture, physical gas operations, audit, and assistant explanations
+- Applies to:
+  `apps/api/app/domains/operations/services/secondary_costs.py`,
+  `apps/api/app/models/trade_secondary_cost_item.py`, PGB-13, future
+  settlement preview routes, cost accrual ledger work, document-derived fee
+  capture, and assistant settlement or operations read tools
+- Status: implemented
+- Source:
+  `apps/api/app/domains/operations/services/secondary_costs.py`,
+  `apps/api/tests/test_secondary_costs_service.py`,
+  `apps/api/app/models/trade_secondary_cost_item.py`, and
+  [Premium E/CTRM Gap Bridge Work Packages](./premium-ectrm-gap-bridge-work-packages.md)
+- Lesson: transport, tariff, storage, freight, and similar gas-slice costs
+  should be typed cost items with owner, charge side, quantity basis,
+  amount/currency, source evidence, optional delivery and invoice linkage, and
+  explicit lifecycle state. The cost stack basis should distinguish
+  `ESTIMATED`, `ACCRUED`, `INVOICED`, `RELIEVED`, and `VOIDED` instead of
+  hiding fees in notes or embedding them in prompt-only settlement math.
+- Deterministic opportunity: settlement preview, P&L, accrual reconciliation,
+  document extraction, and assistant tools should consume the secondary-cost
+  stack service or an approved persisted equivalent. Actual-basis costs should
+  require eligible actualization evidence; invoiced and relieved costs should
+  be excluded from new settlement-preview amounts. Decide owner-approved rules
+  before posting these costs into the existing accrual lots or a future
+  dedicated cost accrual ledger.
+- Agent autonomy impact: assistants may explain cost ownership, lifecycle
+  status, missing actualization/source blockers, and settlement inclusion or
+  exclusion. They must not invent tariffs, mark costs invoiced or relieved,
+  override actualization blockers, or treat freeform notes as fee economics
+  outside typed service policy.
+- Tests or evidence:
+  `PYTHONPATH=. ./.venv/bin/python -m unittest apps.api.tests.test_secondary_costs_service`
+
+### 2026-06-06 - Slack Assistant Reads Should Use The Messages Mirror
+
+- Type: lesson
+- Domain: assistant live tools, Slack messaging integrations, Messages
+  workspace, external communication provenance, and managed-agent tool policy
+- Applies to:
+  `apps/api/app/domains/assistant/services/tools.py`,
+  `apps/api/app/domains/assistant/services/role_archetypes.py`,
+  `apps/api/app/domains/messages/services/workspace.py`, and
+  `apps/api/app/domains/integrations/services/slack_messaging.py`
+- Status: implemented
+- Source:
+  `apps/api/app/domains/assistant/services/tools.py`,
+  `apps/api/tests/test_assistant_tooling.py`,
+  `apps/api/tests/test_assistant_api.py`, and
+  `apps/api/tests/test_admin_seed_api.py`
+- Lesson: expose Slack context to assistants through explicit read-only tools
+  over the durable Messages mirror, not through raw Slack Web API calls from
+  chat. The list/detail tools should preserve local provenance, cap returned
+  timeline content, identify the `messages_workspace_mirror` source surface,
+  and stay separate from Slack posting.
+- Deterministic opportunity: centralize external communication tool provenance
+  across Gmail and Slack so future email/chat read tools share read-only
+  markers, mirror freshness metadata, evidence badges, and stale/missing-source
+  warnings before any write-capable communication action is considered.
+- Agent autonomy impact: agents may search, summarize, and explain synced
+  Slack conversations when their allowlist includes the Slack read tools. They
+  must not send Slack messages, treat a local mirror as live Slack truth, edit
+  external messages, or create external commitments outside typed messaging
+  services and the approved authority path.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_assistant_tooling apps.api.tests.test_assistant_api apps.api.tests.test_admin_seed_api`
+  and `make api-assistant-evals`
+
+### 2026-06-07 - Nexus Company Engagement Should Stay Read-Only And Source-Surfaced
+
+- Type: lesson
+- Domain: Nexus CRM company pages, Gmail inbox integration, Slack messaging
+  mirror, and external communication provenance
+- Applies to:
+  `apps/api/app/domains/integrations/services/nexus_engagements.py`,
+  `apps/api/app/routes/integrations.py`,
+  `apps/api/app/schemas/integration.py`,
+  `apps/web/src/entities/integrations/api.ts`, and
+  `apps/web/src/App.tsx`
+- Status: implemented
+- Source:
+  `apps/api/tests/test_nexus_engagements_api.py` and
+  `apps/web/tests/integrationsApi.test.ts`
+- Lesson: Nexus client/prospect company pages can synthesize Gmail and Slack
+  context as a read-only engagement feed, but the source surfaces must remain
+  explicit. Gmail matches should run through bounded Gmail inbox searches using
+  deterministic sender/recipient terms only: company-name free text can match
+  unrelated message bodies and should not qualify an email for a company page.
+  Use company domains, known contact emails, `from`/`to`/`cc`/`bcc` operators,
+  all-mail Gmail scope for CRM engagement so sent mail is included, and curated
+  domain hints for seeded Nexus companies when local CRM identity is otherwise
+  too thin. Slack matches should read from the durable Messages mirror, not raw
+  Slack, and every item should identify `gmail_api` or
+  `messages_workspace_mirror` plus the match basis.
+- Deterministic opportunity: keep company identity construction, Gmail query
+  terms, Slack mirror matching, source counts, and warnings in typed
+  integration services. If this graduates into workflows, add typed action
+  requests or owned domain records instead of letting engagement snippets
+  mutate CRM, operations, or external communications directly.
+- Agent autonomy impact: agents and UI surfaces may summarize or route around
+  the engagement feed, but they must treat it as communication context and
+  provenance, not business truth. Sending Gmail/Slack messages or creating
+  commitments from this context still needs the appropriate human-reviewed
+  communication or governed action lane.
+- Tests or evidence:
+  `./.venv/bin/python -m unittest apps.api.tests.test_nexus_engagements_api`
+  and `npm test -- integrationsApi.test.ts`

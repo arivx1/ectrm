@@ -682,6 +682,29 @@ feed settlement and P&L instead of living in notes or assumptions.
 - distinguish estimated, accrued, invoiced, and relieved costs
 - connect cost items to trade economics, actualization, and settlement preview
 
+### Current Implementation Note
+
+- `apps/api/app/models/trade_secondary_cost_item.py` and migration
+  `b13c0d1e2f3a_create_trade_secondary_cost_items.py` add the first typed
+  fee/cost item record for transport, tariff, storage, freight, and other
+  secondary gas-slice costs. Items carry cost type, owner, charge side,
+  quantity basis, optional delivery linkage, amount/currency, source evidence,
+  invoice linkage, lifecycle timestamps, and void metadata.
+- `apps/api/app/domains/operations/services/secondary_costs.py` provides the
+  deterministic lifecycle service. Cost items are created as `ESTIMATED` or
+  `ACCRUED`, then transition through `INVOICED`, `RELIEVED`, or `VOIDED` with
+  guarded status rules and trade audit events.
+- The secondary cost stack report emits the `trade_secondary_cost_stack_v1`
+  basis, trade-economics context, actualization linkage, lifecycle amount
+  buckets, currency summaries, and settlement-preview inclusion, exclusion, or
+  blocker state. Actual-basis costs require eligible actualization evidence;
+  invoiced and relieved costs are excluded from new settlement preview.
+- Remaining bridge work: expose the cost stack through route/UI schemas, wire
+  it into the PGB-15 settlement preview engine, decide whether secondary costs
+  should post to the existing accrual lot ledger or a dedicated cost accrual
+  ledger, and add document-derived cost capture once invoice/tariff extraction
+  is ready.
+
 ### Verification
 
 - focused API tests for cost inclusion/exclusion and status transitions

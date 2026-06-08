@@ -172,6 +172,7 @@ class Settings(BaseSettings):
     ATTIO_BASE_URL: str = "https://api.attio.com/v2"
     ATTIO_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
     ATTIO_OBJECT_LIMIT: int = Field(default=25, ge=1, le=100)
+    ATTIO_CLIENT_SYNC_LIMIT: int = Field(default=200, ge=1, le=500)
     NOTION_ENABLED: bool = False
     NOTION_ACCESS_TOKEN: str = ""
     NOTION_API_KEY: str = ""
@@ -179,6 +180,20 @@ class Settings(BaseSettings):
     NOTION_VERSION: str = "2026-03-11"
     NOTION_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
     NOTION_SEARCH_LIMIT: int = Field(default=10, ge=1, le=100)
+    NOTION_CLIENT_PAGE_CONFIDENCE_THRESHOLD: float = Field(default=0.6, ge=0, le=1)
+    GRAIN_ENABLED: bool = False
+    GRAIN_ACCESS_TOKEN: str = ""
+    GRAIN_API_KEY: str = ""
+    GRAIN_BASE_URL: str = "https://api.grain.com"
+    GRAIN_PUBLIC_API_VERSION: str = "2025-10-31"
+    GRAIN_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    GRAIN_RECORDING_LIMIT: int = Field(default=10, ge=1, le=100)
+    LINEAR_ENABLED: bool = False
+    LINEAR_API_KEY: str = ""
+    LINEAR_ACCESS_TOKEN: str = ""
+    LINEAR_GRAPHQL_URL: str = "https://api.linear.app/graphql"
+    LINEAR_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    LINEAR_ISSUE_LIMIT: int = Field(default=25, ge=1, le=100)
     EIA_API_KEY: str = ""
     EIA_BASE_URL: str = "https://api.eia.gov/v2"
     EIA_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)

@@ -35,6 +35,8 @@ from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
 from apps.api.app.models.external_series_observation import ExternalSeriesObservation
 from apps.api.app.models.home_view_definition import HomeViewDefinition
+from apps.api.app.models.messaging_workspace_conversation import MessagingWorkspaceConversation
+from apps.api.app.models.messaging_workspace_message import MessagingWorkspaceMessage
 from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.models.position import Position
 from apps.api.app.models.price_index_observation import PriceIndexObservation
@@ -107,6 +109,8 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
             session.query(ExternalDataRun).delete()
             session.query(DocumentIngestionPage).delete()
             session.query(DocumentIngestion).delete()
+            session.query(MessagingWorkspaceMessage).delete()
+            session.query(MessagingWorkspaceConversation).delete()
             session.query(AssistantAgent).delete()
             session.query(DeliveryEvent).delete()
             session.query(TradeActualization).delete()
@@ -2450,6 +2454,115 @@ class AssistantToolingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("More messages are available", list_trace.summary)
         self.assertEqual(detail_trace.tool_name, "get_gmail_inbox_message")
         self.assertIn("1 importable PDF attachment", detail_trace.summary)
+
+    def test_tool_service_lists_and_loads_slack_messaging_conversations(self) -> None:
+        now = datetime(2026, 5, 19, 16, 30, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                MessagingWorkspaceConversation(
+                    conversation_id="slack-C123SLACK",
+                    section="Channels",
+                    kind="channel",
+                    label="#desk-ops",
+                    connected_workspace="Slack",
+                    assistant_workspace="operations",
+                    description="Synced from Slack through the configured Slack Web API connector.",
+                    topic="Nomination updates and desk follow-through.",
+                    composer_hint="Messages sent here post to Slack and are mirrored locally for desk context.",
+                    sort_order=50,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            session.add(
+                MessagingWorkspaceConversation(
+                    conversation_id="local-desk",
+                    section="Channels",
+                    kind="channel",
+                    label="#local-desk",
+                    connected_workspace="Operations",
+                    assistant_workspace="operations",
+                    description="Local ECTRM desk conversation.",
+                    topic="Internal-only messages.",
+                    composer_hint="Keep local follow-up here.",
+                    sort_order=60,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            session.add(
+                MessagingWorkspaceMessage(
+                    message_id="slack-C123SLACK-1770000000_000100",
+                    conversation_id="slack-C123SLACK",
+                    item_kind="MESSAGE",
+                    source="HUMAN",
+                    parent_message_id=None,
+                    thread_root_message_id="slack-C123SLACK-1770000000_000100",
+                    body="Slack nomination update imported into the ECTRM messaging center.",
+                    system_label=None,
+                    system_detail=None,
+                    author_name="Slack Operator",
+                    author_title="Slack user",
+                    author_presence="Synced from Slack",
+                    author_initials="SO",
+                    author_tone="human",
+                    reactions=[":eyes: 2"],
+                    attachment_payload=None,
+                    assistant_run_id=None,
+                    assistant_agent_id=None,
+                    assistant_agent_name=None,
+                    created_by_user_id=None,
+                    created_by_session_id=None,
+                    created_by_role=None,
+                    edited_at=None,
+                    edited_by_user_id=None,
+                    edited_by_session_id=None,
+                    edited_by_role=None,
+                    deleted_at=None,
+                    deleted_by_user_id=None,
+                    deleted_by_session_id=None,
+                    deleted_by_role=None,
+                    pinned_at=None,
+                    pinned_by_user_id=None,
+                    pinned_by_session_id=None,
+                    pinned_by_role=None,
+                    created_at=now,
+                )
+            )
+            session.commit()
+
+            service = AssistantToolService(session)
+            list_result, list_trace = service.execute_tool(
+                "list_slack_messaging_conversations",
+                {"query": "nomination", "limit": 10, "message_limit": 2},
+            )
+            detail_result, detail_trace = service.execute_tool(
+                "get_slack_messaging_conversation",
+                {"conversation_id": "slack-C123SLACK", "message_limit": 5},
+            )
+            missing_result, missing_trace = service.execute_tool(
+                "get_slack_messaging_conversation",
+                {"conversation_id": "local-desk"},
+            )
+
+        self.assertEqual(list_result.output["count"], 1)
+        self.assertEqual(list_result.output["items"][0]["conversation_id"], "slack-C123SLACK")
+        self.assertEqual(list_result.output["items"][0]["label"], "#desk-ops")
+        self.assertEqual(list_result.output["items"][0]["source_provider"], "slack")
+        self.assertEqual(list_result.output["items"][0]["message_count"], 1)
+        self.assertEqual(
+            list_result.output["items"][0]["recent_messages"][0]["body"],
+            ["Slack nomination update imported into the ECTRM messaging center."],
+        )
+        self.assertTrue(detail_result.output["found"])
+        self.assertEqual(detail_result.output["conversation"]["conversation_id"], "slack-C123SLACK")
+        self.assertEqual(detail_result.output["conversation"]["timeline_count"], 1)
+        self.assertEqual(detail_result.output["conversation"]["timeline"][0]["author"]["name"], "Slack Operator")
+        self.assertEqual(detail_result.output["conversation"]["timeline"][0]["reactions"], [":eyes: 2"])
+        self.assertFalse(missing_result.output["found"])
+        self.assertEqual(list_trace.tool_name, "list_slack_messaging_conversations")
+        self.assertEqual(detail_trace.tool_name, "get_slack_messaging_conversation")
+        self.assertIn("was not found", missing_trace.summary)
 
     def test_tool_service_loads_workspace_summary(self) -> None:
         with self.SessionLocal() as session:

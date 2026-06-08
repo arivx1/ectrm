@@ -30,7 +30,12 @@ from apps.api.app.main import app
 from apps.api.app.models import Base
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
-from apps.api.app.schemas.integration import AttioClientEnrichmentOut, AttioClientMatchedRecordOut
+from apps.api.app.schemas.integration import (
+    AttioClientEnrichmentOut,
+    AttioClientMatchedRecordOut,
+    AttioClientSyncOut,
+    AttioSyncedClientOut,
+)
 
 
 def _response(
@@ -177,6 +182,152 @@ class _FakeAttioEnrichmentClient:
         )
 
 
+class _FakeAttioSyncClient:
+    def __init__(self) -> None:
+        self.query_payloads: list[tuple[str, dict[str, object]]] = []
+        self.loaded_record_ids: list[str] = []
+
+    def query_records(self, object_slug: str, payload: dict[str, object]) -> list[dict[str, object]]:
+        self.query_payloads.append((object_slug, payload))
+        if object_slug == "deals":
+            return [
+                _record(
+                    "deal-customer",
+                    {
+                        "name": [{"value": "Hartree Partners (Expansion)"}],
+                        "stage": [{"status": {"title": "Won"}}],
+                        "value": [{"value": "$100,000"}],
+                        "associated_company": [
+                            {
+                                "target_object": "companies",
+                                "target_record_id": "company-customer",
+                            }
+                        ],
+                    },
+                    web_url="https://app.attio.com/deal-customer",
+                ),
+                _record(
+                    "deal-prospect",
+                    {
+                        "name": [{"value": "Blue Ridge Trading Pilot"}],
+                        "stage": [{"status": {"title": "Evaluation (SQO)"}}],
+                        "value": [{"value": "$50,000"}],
+                        "associated_company": [
+                            {
+                                "target_object": "companies",
+                                "target_record_id": "company-prospect",
+                            }
+                        ],
+                    },
+                    web_url="https://app.attio.com/deal-prospect",
+                ),
+                _record(
+                    "deal-customer-renewal",
+                    {
+                        "name": [{"value": "Hartree Partners Renewal"}],
+                        "stage": [{"status": {"title": "Won"}}],
+                        "value": [{"value": "$140,000"}],
+                        "associated_company": [
+                            {
+                                "target_object": "companies",
+                                "target_record_id": "company-customer",
+                            }
+                        ],
+                    },
+                    web_url="https://app.attio.com/deal-customer-renewal",
+                ),
+                _record(
+                    "deal-unassociated",
+                    {
+                        "name": [{"value": "No company attached"}],
+                    },
+                    web_url="https://app.attio.com/deal-unassociated",
+                ),
+            ]
+        return []
+
+    def get_record(self, object_slug: str, record_id: str) -> dict[str, object]:
+        self.loaded_record_ids.append(record_id)
+        if object_slug != "companies":
+            raise AttioIntegrationError(404, "Unknown Attio object")
+        if record_id == "company-customer":
+            return _record(
+                "company-customer",
+                {
+                    "name": [{"value": "Hartree Partners"}],
+                    "domains": [{"domain": "hartreepartners.com"}],
+                },
+                web_url="https://app.attio.com/company-customer",
+            )
+        if record_id == "company-prospect":
+            return _record(
+                "company-prospect",
+                {
+                    "name": [{"value": "Blue Ridge Trading"}],
+                    "domains": [{"domain": "blueridge.example"}],
+                    "description": [{"value": "Prospective commodity trading client."}],
+                },
+                web_url="https://app.attio.com/company-prospect",
+            )
+        raise AttioIntegrationError(404, "Attio company not found")
+
+
+class _FakeAttioScopedSyncClient:
+    def __init__(self) -> None:
+        self.query_payloads: list[tuple[str, dict[str, object]]] = []
+
+    def query_records(self, object_slug: str, payload: dict[str, object]) -> list[dict[str, object]]:
+        self.query_payloads.append((object_slug, payload))
+        if object_slug == "deals":
+            filter_payload = payload.get("filter")
+            associated_company = filter_payload.get("associated_company") if isinstance(filter_payload, dict) else None
+            company_record_id = (
+                associated_company.get("target_record_id") if isinstance(associated_company, dict) else None
+            )
+            if company_record_id == "company-customer":
+                return [
+                    _record(
+                        "deal-customer",
+                        {
+                            "name": [{"value": "Hartree Partners (Expansion)"}],
+                            "stage": [{"status": {"title": "Won"}}],
+                            "value": [{"value": "$120,000"}],
+                        },
+                        web_url="https://app.attio.com/deal-customer",
+                    )
+                ]
+            return []
+        if object_slug != "companies":
+            return []
+        filter_payload = payload.get("filter")
+        client_name = filter_payload.get("name") if isinstance(filter_payload, dict) else None
+        if client_name == "Hartree Partners":
+            return [
+                _record(
+                    "company-customer",
+                    {
+                        "name": [{"value": "Hartree Partners"}],
+                        "domains": [{"domain": "hartreepartners.com"}],
+                        "customer_status_1746239259": [{"status": {"title": "Customer"}}],
+                    },
+                    web_url="https://app.attio.com/company-customer",
+                )
+            ]
+        if client_name == "Active But Unclassified Co.":
+            return [
+                _record(
+                    "company-active",
+                    {
+                        "name": [{"value": "Active But Unclassified Co."}],
+                        "domains": [{"domain": "active-unclassified.example"}],
+                        "lifecycle_stage": [{"status": {"title": "Active"}}],
+                    },
+                    web_url="https://app.attio.com/company-active",
+                )
+            ]
+        return []
+
+
 class AttioClientTests(unittest.TestCase):
     def test_list_objects_sends_bearer_token_and_parses_metadata(self) -> None:
         url = "https://api.attio.com/v2/objects"
@@ -257,6 +408,7 @@ class AttioClientEnrichmentTests(unittest.TestCase):
             "ATTIO_BASE_URL": settings.ATTIO_BASE_URL,
             "ATTIO_TIMEOUT_SECONDS": settings.ATTIO_TIMEOUT_SECONDS,
             "ATTIO_OBJECT_LIMIT": settings.ATTIO_OBJECT_LIMIT,
+            "ATTIO_CLIENT_SYNC_LIMIT": settings.ATTIO_CLIENT_SYNC_LIMIT,
         }
         settings.ATTIO_ENABLED = True
         settings.ATTIO_ACCESS_TOKEN = "attio-secret-token"
@@ -264,6 +416,7 @@ class AttioClientEnrichmentTests(unittest.TestCase):
         settings.ATTIO_BASE_URL = "https://api.attio.com/v2"
         settings.ATTIO_TIMEOUT_SECONDS = 20
         settings.ATTIO_OBJECT_LIMIT = 25
+        settings.ATTIO_CLIENT_SYNC_LIMIT = 200
 
     def tearDown(self) -> None:
         for key, value in self._previous_settings.items():
@@ -298,6 +451,26 @@ class AttioClientEnrichmentTests(unittest.TestCase):
         self.assertEqual(fake_client.search_queries, ["Hartree"])
         self.assertEqual(fake_client.loaded_record_ids, ["company-123"])
 
+    def test_enrichment_ignores_attio_company_without_related_deals(self) -> None:
+        class NoDealFakeClient(_FakeAttioEnrichmentClient):
+            def query_records(self, object_slug: str, payload: dict[str, object]) -> list[dict[str, object]]:
+                if object_slug == "deals":
+                    self.query_payloads.append((object_slug, payload))
+                    return []
+                return super().query_records(object_slug, payload)
+
+        fake_client = NoDealFakeClient()
+
+        result = attio.build_attio_client_enrichment(client_name="Hartree", client=fake_client)  # type: ignore[arg-type]
+
+        self.assertFalse(result.matched)
+        self.assertEqual(result.match_basis, "exact_name")
+        self.assertIsNone(result.company)
+        self.assertEqual(result.contacts, [])
+        self.assertEqual(result.deals, [])
+        self.assertNotIn("people", [object_slug for object_slug, _payload in fake_client.query_payloads])
+        self.assertEqual(result.warnings, ["Attio company matched, but no related deal records were available."])
+
     def test_enrichment_returns_unmatched_payload_without_related_queries(self) -> None:
         class EmptyFakeClient(_FakeAttioEnrichmentClient):
             def search_records(self, *, query: str, objects: list[str], limit: int = 5) -> list[dict[str, object]]:
@@ -312,6 +485,352 @@ class AttioClientEnrichmentTests(unittest.TestCase):
         self.assertIsNone(result.company)
         self.assertEqual(result.contacts, [])
         self.assertEqual(result.deals, [])
+
+    def test_client_sync_maps_attio_companies_to_nexus_types(self) -> None:
+        fake_client = _FakeAttioSyncClient()
+
+        result = attio.build_attio_client_sync(limit=4, client=fake_client)  # type: ignore[arg-type]
+
+        self.assertEqual(
+            fake_client.query_payloads,
+            [
+                ("deals", {"limit": attio.ATTIO_CLIENT_SYNC_PAGE_SIZE, "offset": 0}),
+            ],
+        )
+        self.assertEqual(fake_client.loaded_record_ids, ["company-customer", "company-prospect"])
+        self.assertEqual(result.scanned_record_count, 4)
+        self.assertEqual(result.returned_client_count, 2)
+        self.assertEqual(result.skipped_record_count, 1)
+        self.assertEqual(result.clients[0].name, "Hartree Partners")
+        self.assertEqual(result.clients[0].type, "Client")
+        self.assertEqual(result.clients[0].relationship, "Client")
+        self.assertEqual(result.clients[0].status, "Won")
+        self.assertEqual(result.clients[0].deal_count, 2)
+        self.assertEqual(result.clients[0].closed_deal_count, 2)
+        self.assertEqual(result.clients[0].open_deal_count, 0)
+        self.assertEqual(result.clients[0].deal_statuses, ["Won"])
+        self.assertEqual(result.clients[0].disqualified_deal_count, 0)
+        self.assertEqual(result.clients[0].lost_deal_count, 0)
+        self.assertEqual(result.clients[0].on_hold_deal_count, 0)
+        self.assertIsNone(result.clients[0].disqualification_reason)
+        self.assertEqual(result.clients[0].total_arr, "$240,000")
+        self.assertEqual(result.clients[0].closed_arr, "$240,000")
+        self.assertIsNone(result.clients[0].open_arr)
+        self.assertEqual(result.clients[1].name, "Blue Ridge Trading")
+        self.assertEqual(result.clients[1].type, "Prospect")
+        self.assertEqual(result.clients[1].relationship, "Prospect")
+        self.assertEqual(result.clients[1].status, "Evaluation (SQO)")
+        self.assertEqual(result.clients[1].deal_count, 1)
+        self.assertEqual(result.clients[1].closed_deal_count, 0)
+        self.assertEqual(result.clients[1].open_deal_count, 1)
+        self.assertEqual(result.clients[1].deal_statuses, ["Evaluation (SQO)"])
+        self.assertEqual(result.clients[1].disqualified_deal_count, 0)
+        self.assertEqual(result.clients[1].lost_deal_count, 0)
+        self.assertEqual(result.clients[1].on_hold_deal_count, 0)
+        self.assertIsNone(result.clients[1].disqualification_reason)
+        self.assertEqual(result.clients[1].total_arr, "$50,000")
+        self.assertIsNone(result.clients[1].closed_arr)
+        self.assertEqual(result.clients[1].open_arr, "$50,000")
+        self.assertNotIn("domainonly.example", [client.name for client in result.clients])
+        self.assertNotIn("Active But Unclassified Co.", [client.name for client in result.clients])
+        self.assertEqual(
+            result.warnings,
+            ["Skipped 1 Attio deal records without associated company references."],
+        )
+
+    def test_client_sync_prioritizes_clients_before_prospects(self) -> None:
+        class ProspectFirstFakeClient(_FakeAttioSyncClient):
+            def query_records(self, object_slug: str, payload: dict[str, object]) -> list[dict[str, object]]:
+                self.query_payloads.append((object_slug, payload))
+                if object_slug != "deals":
+                    return []
+                return [
+                    _record(
+                        "deal-prospect",
+                        {
+                            "name": [{"value": "Blue Ridge Trading Pilot"}],
+                            "stage": [{"status": {"title": "Evaluation (SQO)"}}],
+                            "associated_company": [
+                                {
+                                    "target_object": "companies",
+                                    "target_record_id": "company-prospect",
+                                }
+                            ],
+                        },
+                    ),
+                    _record(
+                        "deal-customer",
+                        {
+                            "name": [{"value": "Hartree Partners (Expansion)"}],
+                            "stage": [{"status": {"title": "Won"}}],
+                            "associated_company": [
+                                {
+                                    "target_object": "companies",
+                                    "target_record_id": "company-customer",
+                                }
+                            ],
+                        },
+                    ),
+                ]
+
+        fake_client = ProspectFirstFakeClient()
+
+        result = attio.build_attio_client_sync(limit=2, client=fake_client)  # type: ignore[arg-type]
+
+        self.assertEqual([client.name for client in result.clients], ["Hartree Partners", "Blue Ridge Trading"])
+        self.assertEqual([client.type for client in result.clients], ["Client", "Prospect"])
+
+    def test_client_sync_returns_all_deal_statuses_for_lost_segmentation(self) -> None:
+        class LostOnlyFakeClient(_FakeAttioSyncClient):
+            def query_records(self, object_slug: str, payload: dict[str, object]) -> list[dict[str, object]]:
+                self.query_payloads.append((object_slug, payload))
+                if object_slug != "deals":
+                    return []
+                return [
+                    _record(
+                        "deal-lost-one",
+                        {
+                            "name": [{"value": "Delta Alloy Evaluation"}],
+                            "stage": [{"status": {"title": "Closed Lost"}}],
+                            "associated_company": [
+                                {
+                                    "target_object": "companies",
+                                    "target_record_id": "company-lost",
+                                }
+                            ],
+                        },
+                    ),
+                    _record(
+                        "deal-lost-two",
+                        {
+                            "name": [{"value": "Delta Alloy Renewal"}],
+                            "stage": [{"status": {"title": "Lost"}}],
+                            "associated_company": [
+                                {
+                                    "target_object": "companies",
+                                    "target_record_id": "company-lost",
+                                }
+                            ],
+                        },
+                    ),
+                ]
+
+            def get_record(self, object_slug: str, record_id: str) -> dict[str, object]:
+                self.loaded_record_ids.append(record_id)
+                if object_slug != "companies" or record_id != "company-lost":
+                    raise AttioIntegrationError(404, "Attio company not found")
+                return _record(
+                    "company-lost",
+                    {
+                        "name": [{"value": "Delta Alloy"}],
+                        "domains": [{"domain": "delta-alloy.example"}],
+                    },
+                )
+
+        fake_client = LostOnlyFakeClient()
+
+        result = attio.build_attio_client_sync(limit=2, client=fake_client)  # type: ignore[arg-type]
+
+        self.assertEqual(result.returned_client_count, 1)
+        self.assertEqual(result.clients[0].name, "Delta Alloy")
+        self.assertEqual(result.clients[0].type, "Other")
+        self.assertEqual(result.clients[0].status, "Closed Lost")
+        self.assertEqual(result.clients[0].deal_count, 2)
+        self.assertEqual(result.clients[0].closed_deal_count, 0)
+        self.assertEqual(result.clients[0].open_deal_count, 0)
+        self.assertEqual(result.clients[0].deal_statuses, ["Closed Lost", "Lost"])
+        self.assertEqual(result.clients[0].disqualified_deal_count, 0)
+        self.assertEqual(result.clients[0].lost_deal_count, 2)
+        self.assertEqual(result.clients[0].on_hold_deal_count, 0)
+
+    def test_client_sync_counts_nonexclusive_deal_categories(self) -> None:
+        class MixedDealStatusFakeClient(_FakeAttioSyncClient):
+            def query_records(self, object_slug: str, payload: dict[str, object]) -> list[dict[str, object]]:
+                self.query_payloads.append((object_slug, payload))
+                if object_slug != "deals":
+                    return []
+                return [
+                    _record(
+                        "deal-won",
+                        {
+                        "name": [{"value": "Northstar Active"}],
+                        "stage": [{"status": {"title": "Won"}}],
+                        "value": [{"value": "$1,000"}],
+                        "associated_company": [
+                                {
+                                    "target_object": "companies",
+                                    "target_record_id": "company-mixed",
+                                }
+                            ],
+                        },
+                    ),
+                    _record(
+                        "deal-lost",
+                        {
+                        "name": [{"value": "Northstar Lost"}],
+                        "stage": [{"status": {"title": "Closed Lost"}}],
+                        "value": [{"value": "$2,000"}],
+                        "associated_company": [
+                                {
+                                    "target_object": "companies",
+                                    "target_record_id": "company-mixed",
+                                }
+                            ],
+                        },
+                    ),
+                    _record(
+                        "deal-on-hold",
+                        {
+                        "name": [{"value": "Northstar Paused"}],
+                        "stage": [{"status": {"title": "On Hold"}}],
+                        "value": [{"value": "$3,000"}],
+                        "associated_company": [
+                                {
+                                    "target_object": "companies",
+                                    "target_record_id": "company-mixed",
+                                }
+                            ],
+                        },
+                    ),
+                    _record(
+                        "deal-disqualified",
+                        {
+                        "name": [{"value": "Northstar Disqualified"}],
+                        "stage": [{"status": {"title": "Disqualified"}}],
+                        "value": [{"value": "$4,000"}],
+                        "disqualification_reason": [{"option": {"title": "Outside ICP"}}],
+                            "associated_company": [
+                                {
+                                    "target_object": "companies",
+                                    "target_record_id": "company-mixed",
+                                }
+                            ],
+                        },
+                    ),
+                ]
+
+            def get_record(self, object_slug: str, record_id: str) -> dict[str, object]:
+                self.loaded_record_ids.append(record_id)
+                if object_slug != "companies" or record_id != "company-mixed":
+                    raise AttioIntegrationError(404, "Attio company not found")
+                return _record(
+                    "company-mixed",
+                    {
+                        "name": [{"value": "Northstar Commodities"}],
+                        "domains": [{"domain": "northstar.example"}],
+                    },
+                )
+
+        fake_client = MixedDealStatusFakeClient()
+
+        result = attio.build_attio_client_sync(limit=4, client=fake_client)  # type: ignore[arg-type]
+
+        self.assertEqual(result.returned_client_count, 1)
+        self.assertEqual(result.clients[0].name, "Northstar Commodities")
+        self.assertEqual(result.clients[0].type, "Client")
+        self.assertEqual(result.clients[0].deal_count, 4)
+        self.assertEqual(result.clients[0].closed_deal_count, 1)
+        self.assertEqual(result.clients[0].open_deal_count, 0)
+        self.assertEqual(result.clients[0].deal_statuses, ["Won", "Closed Lost", "On Hold", "Disqualified"])
+        self.assertEqual(result.clients[0].disqualified_deal_count, 1)
+        self.assertEqual(result.clients[0].lost_deal_count, 1)
+        self.assertEqual(result.clients[0].on_hold_deal_count, 1)
+        self.assertEqual(result.clients[0].disqualification_reason, "Outside ICP")
+        self.assertEqual(result.clients[0].total_arr, "$10,000")
+        self.assertEqual(result.clients[0].closed_arr, "$1,000")
+        self.assertIsNone(result.clients[0].open_arr)
+
+    def test_client_sync_skips_existing_nexus_client_names(self) -> None:
+        fake_client = _FakeAttioSyncClient()
+
+        result = attio.build_attio_client_sync(
+            limit=2,
+            excluded_client_names=["Hartree Partners"],
+            client=fake_client,  # type: ignore[arg-type]
+        )
+
+        self.assertEqual(result.returned_client_count, 1)
+        self.assertEqual(result.skipped_record_count, 2)
+        self.assertEqual([client.name for client in result.clients], ["Blue Ridge Trading"])
+        self.assertEqual(result.clients[0].type, "Prospect")
+        self.assertEqual(
+            result.warnings,
+            [
+                "Skipped 1 Attio deal records without associated company references.",
+                "Skipped 1 Attio companies already present in Nexus or pending propositions.",
+            ],
+        )
+
+    def test_client_sync_can_scope_queries_to_existing_nexus_client_names(self) -> None:
+        fake_client = _FakeAttioScopedSyncClient()
+
+        result = attio.build_attio_client_sync(
+            limit=10,
+            client_names=[
+                "Hartree Partners",
+                "Missing Co.",
+                "Active But Unclassified Co.",
+                "Hartree Partners",
+            ],
+            client=fake_client,  # type: ignore[arg-type]
+        )
+
+        self.assertEqual(
+            fake_client.query_payloads,
+            [
+                ("companies", {"filter": {"name": "Hartree Partners"}, "limit": 5, "offset": 0}),
+                ("companies", {"filter": {"name": "Missing Co."}, "limit": 5, "offset": 0}),
+                (
+                    "companies",
+                    {"filter": {"name": "Active But Unclassified Co."}, "limit": 5, "offset": 0},
+                ),
+                (
+                    "deals",
+                    {
+                        "filter": {
+                            "associated_company": {
+                                "target_object": "companies",
+                                "target_record_id": "company-customer",
+                            }
+                        },
+                        "limit": attio.ATTIO_CLIENT_DEAL_LIMIT,
+                        "offset": 0,
+                    },
+                ),
+                (
+                    "deals",
+                    {
+                        "filter": {
+                            "associated_company": {
+                                "target_object": "companies",
+                                "target_record_id": "company-active",
+                            }
+                        },
+                        "limit": attio.ATTIO_CLIENT_DEAL_LIMIT,
+                        "offset": 0,
+                    },
+                ),
+            ],
+        )
+        self.assertEqual(result.requested_limit, 3)
+        self.assertEqual(result.scanned_record_count, 3)
+        self.assertEqual(result.returned_client_count, 1)
+        self.assertEqual(result.skipped_record_count, 1)
+        self.assertEqual(result.clients[0].name, "Hartree Partners")
+        self.assertEqual(result.clients[0].type, "Client")
+        self.assertEqual(result.clients[0].deal_count, 1)
+        self.assertEqual(result.clients[0].closed_deal_count, 1)
+        self.assertEqual(result.clients[0].open_deal_count, 0)
+        self.assertEqual(result.clients[0].total_arr, "$120,000")
+        self.assertEqual(result.clients[0].closed_arr, "$120,000")
+        self.assertIsNone(result.clients[0].open_arr)
+        self.assertEqual(
+            result.warnings,
+            [
+                "Skipped 1 Attio company records without related deal records.",
+                "No Attio company match found for 1 existing Nexus client names.",
+            ],
+        )
 
 
 class AttioIntegrationApiTests(unittest.TestCase):
@@ -353,6 +872,7 @@ class AttioIntegrationApiTests(unittest.TestCase):
             "ATTIO_BASE_URL": settings.ATTIO_BASE_URL,
             "ATTIO_TIMEOUT_SECONDS": settings.ATTIO_TIMEOUT_SECONDS,
             "ATTIO_OBJECT_LIMIT": settings.ATTIO_OBJECT_LIMIT,
+            "ATTIO_CLIENT_SYNC_LIMIT": settings.ATTIO_CLIENT_SYNC_LIMIT,
         }
         with self.SessionLocal() as session:
             session.query(UserSession).delete()
@@ -364,6 +884,7 @@ class AttioIntegrationApiTests(unittest.TestCase):
         settings.ATTIO_BASE_URL = "https://api.attio.com/v2"
         settings.ATTIO_TIMEOUT_SECONDS = 20
         settings.ATTIO_OBJECT_LIMIT = 25
+        settings.ATTIO_CLIENT_SYNC_LIMIT = 200
 
     def tearDown(self) -> None:
         for key, value in self._previous_settings.items():
@@ -393,6 +914,7 @@ class AttioIntegrationApiTests(unittest.TestCase):
         self.assertTrue(payload["enabled"])
         self.assertTrue(payload["configured"])
         self.assertEqual(payload["auth_status"], "configured")
+        self.assertEqual(payload["client_sync_limit"], 200)
         self.assertEqual(payload["required_scopes"], ["object_configuration:read", "record_permission:read"])
         self.assertNotIn("attio-secret-token", configured_response.text)
 
@@ -449,6 +971,93 @@ class AttioIntegrationApiTests(unittest.TestCase):
         self.assertEqual(payload["match_basis"], "search")
         self.assertEqual(payload["company"]["label"], "Hartree Partners")
         self.assertEqual(payload["company"]["domains"], ["hartreepartners.com"])
+
+    def test_client_sync_route_returns_attio_company_summaries(self) -> None:
+        token = self._create_session_token()
+
+        with patch(
+            "apps.api.app.routes.integrations.build_attio_client_sync",
+            return_value=AttioClientSyncOut(
+                requested_limit=25,
+                scanned_record_count=1,
+                skipped_record_count=0,
+                returned_client_count=1,
+                clients=[
+                    AttioSyncedClientOut(
+                        record_id="company-prospect",
+                        name="Blue Ridge Trading",
+                        type="Prospect",
+                        relationship="Prospect",
+                        web_url="https://app.attio.com/company-prospect",
+                        domains=["blueridge.example"],
+                        status="Qualified Lead",
+                    )
+                ],
+                required_scopes=["object_configuration:read", "record_permission:read"],
+            ),
+        ) as sync_mock:
+            response = self.client.post(
+                "/integrations/attio/client-sync",
+                json={
+                    "limit": 25,
+                    "client_names": ["Blue Ridge Trading", "Blue Ridge Trading"],
+                    "excluded_client_names": ["Hartree Partners", "Hartree Partners"],
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        sync_mock.assert_called_once_with(
+            limit=25,
+            client_names=["Blue Ridge Trading"],
+            excluded_client_names=["Hartree Partners"],
+        )
+        payload = response.json()
+        self.assertEqual(payload["requested_limit"], 25)
+        self.assertEqual(payload["returned_client_count"], 1)
+        self.assertEqual(payload["clients"][0]["name"], "Blue Ridge Trading")
+        self.assertEqual(payload["clients"][0]["type"], "Prospect")
+        self.assertEqual(payload["clients"][0]["relationship"], "Prospect")
+        self.assertEqual(payload["clients"][0]["deal_statuses"], [])
+        self.assertEqual(payload["clients"][0]["closed_deal_count"], 0)
+        self.assertEqual(payload["clients"][0]["open_deal_count"], 0)
+        self.assertEqual(payload["clients"][0]["disqualified_deal_count"], 0)
+        self.assertEqual(payload["clients"][0]["lost_deal_count"], 0)
+        self.assertEqual(payload["clients"][0]["on_hold_deal_count"], 0)
+        self.assertIsNone(payload["clients"][0]["disqualification_reason"])
+        self.assertIsNone(payload["clients"][0]["closed_arr"])
+        self.assertIsNone(payload["clients"][0]["open_arr"])
+
+    def test_client_sync_route_accepts_large_exclusion_lists(self) -> None:
+        token = self._create_session_token()
+        excluded_client_names = [f"TAM Company {index}" for index in range(1495)]
+
+        with patch(
+            "apps.api.app.routes.integrations.build_attio_client_sync",
+            return_value=AttioClientSyncOut(
+                requested_limit=200,
+                scanned_record_count=0,
+                skipped_record_count=0,
+                returned_client_count=0,
+                clients=[],
+                required_scopes=["object_configuration:read", "record_permission:read"],
+            ),
+        ) as sync_mock:
+            response = self.client.post(
+                "/integrations/attio/client-sync",
+                json={
+                    "limit": 200,
+                    "client_names": [],
+                    "excluded_client_names": excluded_client_names,
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        sync_kwargs = sync_mock.call_args.kwargs
+        self.assertEqual(sync_kwargs["limit"], 200)
+        self.assertEqual(sync_kwargs["client_names"], [])
+        self.assertEqual(sync_kwargs["excluded_client_names"], excluded_client_names)
 
     def _create_session_token(
         self,

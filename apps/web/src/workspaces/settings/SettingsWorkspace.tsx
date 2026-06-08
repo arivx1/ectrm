@@ -5,8 +5,16 @@ import { loadPublicRuntimeSettings, type PublicRuntimeSettings } from '../../ent
 import {
   getAnthropicIntegrationApiKey,
   loadAnthropicIntegrationSettings,
+  loadGmailInboxIntegrationSettings,
+  loadSlackMessagingIntegrationSettings,
+  testGmailInboxIntegrationConnection,
+  testSlackMessagingIntegrationConnection,
   type AnthropicApiKeyLookup,
   type AnthropicRuntimeSettings,
+  type GmailInboxConnectionTest,
+  type GmailInboxIntegrationRuntimeSettings,
+  type SlackMessagingConnectionTest,
+  type SlackMessagingIntegrationRuntimeSettings,
 } from '../../entities/app/adminApi'
 import {
   clearAssistantResponseSettingsSnapshot,
@@ -92,6 +100,12 @@ type FlashMessage = {
 }
 
 type AuthAction = 'logout' | 'profile' | null
+
+type AdminConnectionRuntimeSettings = {
+  enabled: boolean
+  configured: boolean
+  missing_configuration: string[]
+}
 
 type UserProfileForm = {
   displayName: string
@@ -317,6 +331,63 @@ function formatAnthropicAdminSummary(
   return error || 'Not enabled'
 }
 
+function formatAdminConnectionStatus(
+  settings: AdminConnectionRuntimeSettings | null,
+  loading: boolean,
+  error: string,
+): string {
+  if (loading) {
+    return 'Loading'
+  }
+  if (settings?.configured) {
+    return 'Configured'
+  }
+  if (settings?.enabled) {
+    return 'Partial'
+  }
+  return error ? 'Unavailable' : 'Disabled'
+}
+
+function formatGmailConnectionSummary(
+  settings: GmailInboxIntegrationRuntimeSettings | null,
+  connectionTest: GmailInboxConnectionTest | null,
+  error: string,
+): string {
+  if (connectionTest) {
+    const identity = connectionTest.profile_email ?? connectionTest.account_email ?? 'Gmail'
+    return `${identity} · ${connectionTest.returned_message_count.toLocaleString()} message${connectionTest.returned_message_count === 1 ? '' : 's'} matched`
+  }
+  if (settings?.configured) {
+    const identity = settings.account_email ? ` for ${settings.account_email}` : ''
+    return `Ready${identity} · import limit ${settings.max_messages_per_import.toLocaleString()}`
+  }
+  if (settings?.enabled) {
+    return `Missing ${settings.missing_configuration.join(', ') || 'configuration'}`
+  }
+  return error || 'Gmail inbox import is disabled on the API.'
+}
+
+function formatSlackConnectionSummary(
+  settings: SlackMessagingIntegrationRuntimeSettings | null,
+  connectionTest: SlackMessagingConnectionTest | null,
+  error: string,
+): string {
+  if (connectionTest) {
+    return `${connectionTest.conversation_count.toLocaleString()} conversation${connectionTest.conversation_count === 1 ? '' : 's'} visible`
+  }
+  if (settings?.configured) {
+    const configuredChannels =
+      settings.configured_channel_count > 0
+        ? `${settings.configured_channel_count.toLocaleString()} pinned channel${settings.configured_channel_count === 1 ? '' : 's'}`
+        : `up to ${settings.channel_limit.toLocaleString()} discovered conversation${settings.channel_limit === 1 ? '' : 's'}`
+    return `${configuredChannels} · history limit ${settings.history_limit.toLocaleString()}`
+  }
+  if (settings?.enabled) {
+    return `Missing ${settings.missing_configuration.join(', ') || 'configuration'}`
+  }
+  return error || 'Slack messaging is disabled on the API.'
+}
+
 function formatApiKeyStatus(value: AnthropicApiKeyLookup | null): string {
   return value ? value.api_key.status.toUpperCase() : 'Not checked'
 }
@@ -374,6 +445,18 @@ export function SettingsWorkspace({
   const [anthropicSettingsLoading, setAnthropicSettingsLoading] = useState(false)
   const [anthropicLookupLoading, setAnthropicLookupLoading] = useState(false)
   const [anthropicError, setAnthropicError] = useState('')
+  const [gmailIntegrationSettings, setGmailIntegrationSettings] =
+    useState<GmailInboxIntegrationRuntimeSettings | null>(null)
+  const [gmailConnectionTest, setGmailConnectionTest] = useState<GmailInboxConnectionTest | null>(null)
+  const [gmailIntegrationLoading, setGmailIntegrationLoading] = useState(false)
+  const [gmailConnectionChecking, setGmailConnectionChecking] = useState(false)
+  const [gmailIntegrationError, setGmailIntegrationError] = useState('')
+  const [slackIntegrationSettings, setSlackIntegrationSettings] =
+    useState<SlackMessagingIntegrationRuntimeSettings | null>(null)
+  const [slackConnectionTest, setSlackConnectionTest] = useState<SlackMessagingConnectionTest | null>(null)
+  const [slackIntegrationLoading, setSlackIntegrationLoading] = useState(false)
+  const [slackConnectionChecking, setSlackConnectionChecking] = useState(false)
+  const [slackIntegrationError, setSlackIntegrationError] = useState('')
   const [timeZoneOptions] = useState(() => listTimeDisplayTimeZoneOptions())
   const adminIntegrationAccess = hasAdminIntegrationAccess(authSession)
 
@@ -447,6 +530,67 @@ export function SettingsWorkspace({
   }, [adminIntegrationAccess, authSession])
 
   useEffect(() => {
+    let cancelled = false
+
+    async function loadCommunicationIntegrationSettings() {
+      if (!adminIntegrationAccess || !authSession) {
+        setGmailIntegrationSettings(null)
+        setGmailConnectionTest(null)
+        setGmailIntegrationError('')
+        setGmailIntegrationLoading(false)
+        setSlackIntegrationSettings(null)
+        setSlackConnectionTest(null)
+        setSlackIntegrationError('')
+        setSlackIntegrationLoading(false)
+        return
+      }
+
+      setGmailIntegrationLoading(true)
+      setSlackIntegrationLoading(true)
+      setGmailIntegrationError('')
+      setSlackIntegrationError('')
+      setGmailConnectionTest(null)
+      setSlackConnectionTest(null)
+
+      const [gmailResult, slackResult] = await Promise.allSettled([
+        loadGmailInboxIntegrationSettings(appConfig.apiBase, authSession.accessToken),
+        loadSlackMessagingIntegrationSettings(appConfig.apiBase, authSession.accessToken),
+      ])
+
+      if (cancelled) {
+        return
+      }
+
+      if (gmailResult.status === 'fulfilled') {
+        setGmailIntegrationSettings(gmailResult.value)
+      } else {
+        setGmailIntegrationSettings(null)
+        setGmailIntegrationError(
+          gmailResult.reason instanceof Error ? gmailResult.reason.message : 'Could not load Gmail settings.',
+        )
+      }
+
+      if (slackResult.status === 'fulfilled') {
+        setSlackIntegrationSettings(slackResult.value)
+      } else {
+        setSlackIntegrationSettings(null)
+        setSlackIntegrationError(
+          slackResult.reason instanceof Error ? slackResult.reason.message : 'Could not load Slack settings.',
+        )
+      }
+
+      setGmailIntegrationLoading(false)
+      setSlackIntegrationLoading(false)
+    }
+
+    void loadCommunicationIntegrationSettings()
+
+    return () => {
+      cancelled = true
+    }
+  }, [adminIntegrationAccess, authSession])
+
+  useEffect(() => {
     setAppearanceForm(appearanceSettings)
   }, [appearanceSettings])
 
@@ -504,6 +648,44 @@ export function SettingsWorkspace({
       setAnthropicError(error instanceof Error ? error.message : 'Could not inspect the Anthropic API key.')
     } finally {
       setAnthropicLookupLoading(false)
+    }
+  }
+
+  async function handleTestGmailConnection() {
+    if (!authSession || !adminIntegrationAccess) {
+      setGmailIntegrationError('Sign in with an administrative session before checking Gmail.')
+      return
+    }
+
+    setGmailConnectionChecking(true)
+    setGmailIntegrationError('')
+    try {
+      const payload = await testGmailInboxIntegrationConnection(appConfig.apiBase, authSession.accessToken)
+      setGmailConnectionTest(payload)
+    } catch (error) {
+      setGmailConnectionTest(null)
+      setGmailIntegrationError(error instanceof Error ? error.message : 'Could not test the Gmail connection.')
+    } finally {
+      setGmailConnectionChecking(false)
+    }
+  }
+
+  async function handleTestSlackConnection() {
+    if (!authSession || !adminIntegrationAccess) {
+      setSlackIntegrationError('Sign in with an administrative session before checking Slack.')
+      return
+    }
+
+    setSlackConnectionChecking(true)
+    setSlackIntegrationError('')
+    try {
+      const payload = await testSlackMessagingIntegrationConnection(appConfig.apiBase, authSession.accessToken)
+      setSlackConnectionTest(payload)
+    } catch (error) {
+      setSlackConnectionTest(null)
+      setSlackIntegrationError(error instanceof Error ? error.message : 'Could not test the Slack connection.')
+    } finally {
+      setSlackConnectionChecking(false)
     }
   }
 
@@ -808,6 +990,28 @@ export function SettingsWorkspace({
     anthropicSettingsLoading,
     anthropicError,
   )
+  const gmailAdminStatus = formatAdminConnectionStatus(
+    gmailIntegrationSettings,
+    gmailIntegrationLoading,
+    gmailIntegrationError,
+  )
+  const slackAdminStatus = formatAdminConnectionStatus(
+    slackIntegrationSettings,
+    slackIntegrationLoading,
+    slackIntegrationError,
+  )
+  const gmailAdminSummary = formatGmailConnectionSummary(
+    gmailIntegrationSettings,
+    gmailConnectionTest,
+    gmailIntegrationError,
+  )
+  const slackAdminSummary = formatSlackConnectionSummary(
+    slackIntegrationSettings,
+    slackConnectionTest,
+    slackIntegrationError,
+  )
+  const gmailConnectionWarning = gmailConnectionTest?.warnings.join(' ') || ''
+  const slackConnectionWarning = slackConnectionTest?.warnings.join(' ') || ''
   const quickReadSummary =
     health === 'ok'
       ? runtimeOverrideCount > 0
@@ -2523,81 +2727,153 @@ export function SettingsWorkspace({
               </div>
 
               {adminIntegrationAccess ? (
-                <div className="settings-chip-block">
-                  <div className="section-head">
-                    <div>
-                      <span className="eyebrow">Provider Admin</span>
-                      <h3>Anthropic API Key</h3>
+                <>
+                  <div className="settings-chip-block">
+                    <div className="section-head">
+                      <div>
+                        <span className="eyebrow">Connections</span>
+                        <h3>Gmail and Slack</h3>
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      onClick={() => void handleInspectAnthropicApiKey()}
-                      disabled={anthropicLookupLoading || anthropicSettingsLoading || !anthropicSettings?.configured}
-                    >
-                      {anthropicLookupLoading ? 'Checking...' : 'Inspect Key'}
-                    </button>
+
+                    <div className="settings-summary-grid">
+                      <article className="settings-summary-card">
+                        <span>Gmail inbox</span>
+                        <strong>{gmailAdminStatus}</strong>
+                        <p>{gmailAdminSummary}</p>
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => void handleTestGmailConnection()}
+                          disabled={
+                            gmailConnectionChecking ||
+                            gmailIntegrationLoading ||
+                            !gmailIntegrationSettings?.configured
+                          }
+                        >
+                          {gmailConnectionChecking ? 'Testing...' : 'Test Connection'}
+                        </button>
+                      </article>
+                      <article className="settings-summary-card">
+                        <span>Slack messaging</span>
+                        <strong>{slackAdminStatus}</strong>
+                        <p>{slackAdminSummary}</p>
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => void handleTestSlackConnection()}
+                          disabled={
+                            slackConnectionChecking ||
+                            slackIntegrationLoading ||
+                            !slackIntegrationSettings?.configured
+                          }
+                        >
+                          {slackConnectionChecking ? 'Testing...' : 'Test Connection'}
+                        </button>
+                      </article>
+                    </div>
+
+                    {gmailIntegrationError || slackIntegrationError ? (
+                      <div className="feedback-banner feedback-banner-error">
+                        {[gmailIntegrationError, slackIntegrationError].filter(Boolean).join(' ')}
+                      </div>
+                    ) : null}
+                    {gmailConnectionWarning || slackConnectionWarning ? (
+                      <div className="feedback-banner">
+                        {[gmailConnectionWarning, slackConnectionWarning].filter(Boolean).join(' ')}
+                      </div>
+                    ) : null}
+                    {gmailIntegrationSettings?.missing_configuration.length ||
+                    slackIntegrationSettings?.missing_configuration.length ? (
+                      <div className="chip-row">
+                        {[
+                          ...(gmailIntegrationSettings?.missing_configuration ?? []),
+                          ...(slackIntegrationSettings?.missing_configuration ?? []),
+                        ].map((item) => (
+                          <span key={item} className="entity-chip">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
 
-                  <div className="settings-summary-grid">
-                    <article className="settings-summary-card">
-                      <span>Admin lookup</span>
-                      <strong>
-                        {anthropicSettingsLoading
-                          ? 'Loading'
-                          : anthropicSettings?.configured
-                            ? 'Configured'
-                            : anthropicSettings?.enabled
-                              ? 'Partial'
-                              : 'Disabled'}
-                      </strong>
-                      <p>{anthropicAdminSummary}</p>
-                    </article>
-                    <article className="settings-summary-card">
-                      <span>Key status</span>
-                      <strong>{formatApiKeyStatus(anthropicApiKeyLookup)}</strong>
-                      <p>
-                        {anthropicApiKeyLookup
-                          ? `${anthropicApiKeyLookup.api_key.name} · ${anthropicApiKeyLookup.api_key.partial_key_hint}`
-                          : 'Run the lookup to fetch redacted key metadata from Anthropic.'}
-                      </p>
-                    </article>
-                    <article className="settings-summary-card">
-                      <span>Workspace</span>
-                      <strong>{anthropicApiKeyLookup?.api_key.workspace_id ?? 'Not checked'}</strong>
-                      <p>
-                        {anthropicApiKeyLookup
-                          ? `Created by ${anthropicApiKeyLookup.api_key.created_by.type} ${anthropicApiKeyLookup.api_key.created_by.id}.`
-                          : `Version ${anthropicSettings?.api_version ?? '2023-06-01'} · ${anthropicSettings?.base_url ?? 'https://api.anthropic.com'}`}
-                      </p>
-                    </article>
-                    <article className="settings-summary-card">
-                      <span>Expires</span>
-                      <strong>{formatDateTime(anthropicApiKeyLookup?.api_key.expires_at, 'Never or not checked')}</strong>
-                      <p>
-                        Created {formatDateTime(anthropicApiKeyLookup?.api_key.created_at, 'after a successful lookup')}.
-                      </p>
-                    </article>
-                  </div>
+                  <div className="settings-chip-block">
+                    <div className="section-head">
+                      <div>
+                        <span className="eyebrow">Provider Admin</span>
+                        <h3>Anthropic API Key</h3>
+                      </div>
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={() => void handleInspectAnthropicApiKey()}
+                        disabled={anthropicLookupLoading || anthropicSettingsLoading || !anthropicSettings?.configured}
+                      >
+                        {anthropicLookupLoading ? 'Checking...' : 'Inspect Key'}
+                      </button>
+                    </div>
 
-                  {anthropicError ? (
-                    <div className="feedback-banner feedback-banner-error">{anthropicError}</div>
-                  ) : null}
-                  {anthropicSettings?.missing_configuration.length ? (
-                    <div className="chip-row">
-                      {anthropicSettings.missing_configuration.map((item) => (
-                        <span key={item} className="entity-chip">
-                          {item}
-                        </span>
-                      ))}
+                    <div className="settings-summary-grid">
+                      <article className="settings-summary-card">
+                        <span>Admin lookup</span>
+                        <strong>
+                          {anthropicSettingsLoading
+                            ? 'Loading'
+                            : anthropicSettings?.configured
+                              ? 'Configured'
+                              : anthropicSettings?.enabled
+                                ? 'Partial'
+                                : 'Disabled'}
+                        </strong>
+                        <p>{anthropicAdminSummary}</p>
+                      </article>
+                      <article className="settings-summary-card">
+                        <span>Key status</span>
+                        <strong>{formatApiKeyStatus(anthropicApiKeyLookup)}</strong>
+                        <p>
+                          {anthropicApiKeyLookup
+                            ? `${anthropicApiKeyLookup.api_key.name} · ${anthropicApiKeyLookup.api_key.partial_key_hint}`
+                            : 'Run the lookup to fetch redacted key metadata from Anthropic.'}
+                        </p>
+                      </article>
+                      <article className="settings-summary-card">
+                        <span>Workspace</span>
+                        <strong>{anthropicApiKeyLookup?.api_key.workspace_id ?? 'Not checked'}</strong>
+                        <p>
+                          {anthropicApiKeyLookup
+                            ? `Created by ${anthropicApiKeyLookup.api_key.created_by.type} ${anthropicApiKeyLookup.api_key.created_by.id}.`
+                            : `Version ${anthropicSettings?.api_version ?? '2023-06-01'} · ${anthropicSettings?.base_url ?? 'https://api.anthropic.com'}`}
+                        </p>
+                      </article>
+                      <article className="settings-summary-card">
+                        <span>Expires</span>
+                        <strong>{formatDateTime(anthropicApiKeyLookup?.api_key.expires_at, 'Never or not checked')}</strong>
+                        <p>
+                          Created {formatDateTime(anthropicApiKeyLookup?.api_key.created_at, 'after a successful lookup')}.
+                        </p>
+                      </article>
                     </div>
-                  ) : null}
-                  {anthropicApiKeyLookup?.warnings.length ? (
-                    <div className="feedback-banner">
-                      {anthropicApiKeyLookup.warnings.join(' ')}
-                    </div>
-                  ) : null}
-                </div>
+
+                    {anthropicError ? (
+                      <div className="feedback-banner feedback-banner-error">{anthropicError}</div>
+                    ) : null}
+                    {anthropicSettings?.missing_configuration.length ? (
+                      <div className="chip-row">
+                        {anthropicSettings.missing_configuration.map((item) => (
+                          <span key={item} className="entity-chip">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {anthropicApiKeyLookup?.warnings.length ? (
+                      <div className="feedback-banner">
+                        {anthropicApiKeyLookup.warnings.join(' ')}
+                      </div>
+                    ) : null}
+                  </div>
+                </>
               ) : null}
             </>
           ) : (

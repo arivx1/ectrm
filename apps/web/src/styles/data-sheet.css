@@ -45,8 +45,31 @@
   gap: 0.55rem;
 }
 
+.data-sheet-pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.data-sheet-pagination-label {
+  color: #52606d;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.data-sheet-pagination-button {
+  padding-inline: 0.6rem;
+  min-height: 2rem;
+}
+
 .data-sheet-table-shell {
   border-radius: 0.38rem;
+}
+
+.data-sheet-table-resizable {
+  table-layout: fixed;
 }
 
 .data-table {
@@ -83,7 +106,61 @@
 }
 
 .data-sheet-column-head {
+  position: sticky;
   white-space: nowrap;
+}
+
+.data-sheet-table-resizable .data-sheet-column-head {
+  padding-right: 0.84rem;
+}
+
+.data-sheet-column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: block;
+  width: 0.9rem;
+  cursor: col-resize;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.data-sheet-column-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0.32rem;
+  right: 0.25rem;
+  bottom: 0.32rem;
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(18, 42, 56, 0.12);
+  opacity: 0;
+  transition:
+    background-color 140ms ease,
+    opacity 140ms ease;
+}
+
+.data-sheet-column-resize-handle:hover::after,
+.data-sheet-column-resize-handle:focus-visible::after,
+.data-sheet-column-resize-handle.is-active::after,
+.data-sheet-table-resizable.is-resizing .data-sheet-column-resize-handle::after {
+  opacity: 1;
+}
+
+.data-sheet-column-resize-handle:focus-visible {
+  outline: none;
+}
+
+.data-sheet-column-resize-handle:focus-visible::after,
+.data-sheet-column-resize-handle.is-active::after {
+  background: rgba(18, 124, 108, 0.76);
+}
+
+.data-sheet-column-resize-active {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .data-sheet-filter-row th {
@@ -238,6 +315,49 @@
 
 .data-sheet-cell-input:focus {
   outline: none;
+}
+
+.data-sheet-checkbox-editor {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.34rem;
+  width: 100%;
+  min-height: 1.28rem;
+  color: #66717c;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.15;
+}
+
+.data-sheet-cell-checkbox {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: #127c6c;
+}
+
+.data-sheet-cell-checkbox:focus {
+  outline: none;
+}
+
+.data-sheet-checkbox-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.7rem;
+  padding: 0.12rem 0.34rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.18rem;
+  background: rgba(18, 42, 56, 0.04);
+  color: #7a8590;
+}
+
+.data-sheet-checkbox-value.is-checked {
+  border-color: rgba(18, 124, 108, 0.18);
+  background: rgba(18, 124, 108, 0.1);
+  color: #0f685a;
 }
 
 .data-sheet-cell-meta-row {

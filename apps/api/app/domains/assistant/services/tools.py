@@ -59,6 +59,9 @@ from apps.api.app.domains.integrations.services.gmail_inbox import (
 from apps.api.app.domains.integrations.services.gmail_inbox import (
     list_gmail_inbox_messages as load_gmail_inbox_messages,
 )
+from apps.api.app.domains.messages.services.workspace import (
+    list_messaging_workspace_state as load_messaging_workspace_state,
+)
 from apps.api.app.domains.operations.services import build_workspace_bootstrap_summary
 from apps.api.app.domains.operations.services.settlement_invoices import (
     count_invoice_issue_candidates as load_invoice_issue_candidate_count,
@@ -761,6 +764,29 @@ def _build_tool_output_preview(tool_name: str, output: dict[str, Any]) -> dict[s
             "shared_count": output.get("shared_count"),
             "scope_filter": output.get("scope_filter"),
             "definition_ids": [row.get("definition_id") for row in list(output.get("items") or [])[:8]],
+        }
+        return {key: value for key, value in preview.items() if value not in (None, [], "")}
+
+    if tool_name == "list_slack_messaging_conversations":
+        preview = {
+            "count": output.get("count"),
+            "query": output.get("query"),
+            "conversation_ids": [
+                row.get("conversation_id")
+                for row in list(output.get("items") or [])[:8]
+            ],
+            "labels": [row.get("label") for row in list(output.get("items") or [])[:8]],
+        }
+        return {key: value for key, value in preview.items() if value not in (None, [], "")}
+
+    if tool_name == "get_slack_messaging_conversation":
+        conversation = output.get("conversation") or {}
+        preview = {
+            "found": output.get("found"),
+            "conversation_id": output.get("conversation_id") or conversation.get("conversation_id"),
+            "label": conversation.get("label"),
+            "timeline_count": conversation.get("timeline_count"),
+            "message_count": conversation.get("message_count"),
         }
         return {key: value for key, value in preview.items() if value not in (None, [], "")}
 
@@ -2014,6 +2040,58 @@ def build_tool_definitions(*, actor_id: str | None = None) -> list[AssistantTool
                 "additionalProperties": False,
             },
             executor=_get_gmail_inbox_message,
+        ),
+        AssistantToolDefinition(
+            name="list_slack_messaging_conversations",
+            description=(
+                "Browse Slack-backed conversations mirrored into the ECTRM Messages workspace. Use this when "
+                "the user asks to review Slack activity, search synced Slack lanes, or connect Slack context "
+                "to desk work without leaving the app. This is read-only and uses the durable local mirror; it "
+                "does not call Slack live or post messages."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional case-insensitive search across Slack labels, topics, previews, and synced message bodies.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of conversations to return. Defaults to 10 and is capped at 25.",
+                    },
+                    "message_limit": {
+                        "type": "integer",
+                        "description": "Recent synced messages to include per conversation. Defaults to 3 and is capped at 25.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            executor=_list_slack_messaging_conversations,
+        ),
+        AssistantToolDefinition(
+            name="get_slack_messaging_conversation",
+            description=(
+                "Load one Slack-backed conversation from the ECTRM Messages mirror, including recent synced "
+                "timeline items, members, highlights, and local provenance. Use this after listing Slack "
+                "conversations when the user wants detailed read-only Slack context."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "conversation_id": {
+                        "type": "string",
+                        "description": "Exact Slack-backed messaging conversation id, such as slack-C123ABC.",
+                    },
+                    "message_limit": {
+                        "type": "integer",
+                        "description": "Recent synced timeline items to include. Defaults to 25 and is capped at 25.",
+                    },
+                },
+                "required": ["conversation_id"],
+                "additionalProperties": False,
+            },
+            executor=_get_slack_messaging_conversation,
         ),
         AssistantToolDefinition(
             name="list_managed_agents",
@@ -5053,6 +5131,259 @@ def _get_gmail_inbox_message(db: Session, arguments: dict[str, Any]) -> Assistan
     if message.body_truncated:
         summary += " Body text was truncated."
     return AssistantToolExecutionResult(output=payload, summary=summary, record_count=1)
+
+
+def _list_slack_messaging_conversations(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    query = _optional_text(arguments.get("query"))
+    limit = _normalize_limit(arguments.get("limit"), default=10)
+    message_limit = _normalize_limit(arguments.get("message_limit"), default=3)
+
+    conversations = _load_slack_messaging_conversations(db)
+    if query:
+        conversations = [
+            conversation
+            for conversation in conversations
+            if _slack_messaging_conversation_matches_query(conversation, query)
+        ]
+    conversations = sorted(
+        conversations,
+        key=lambda conversation: (
+            _coerce_optional_datetime(conversation.latest_activity_at) or datetime.min.replace(tzinfo=timezone.utc),
+            conversation.conversation_id,
+        ),
+        reverse=True,
+    )
+    selected = conversations[:limit]
+    items = [
+        _dump_slack_messaging_conversation_summary(conversation, message_limit=message_limit)
+        for conversation in selected
+    ]
+    payload = {
+        "count": len(items),
+        "total_matching_count": len(conversations),
+        "query": query,
+        "items": items,
+        "read_only": True,
+        "source_provider": "slack",
+        "source_surface": "messages_workspace_mirror",
+    }
+    summary = f"Loaded {len(items)} Slack-backed messaging conversation(s)."
+    if query:
+        summary += f" Query '{query}'."
+    if len(conversations) > len(items):
+        summary += " More conversations matched than were returned."
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=summary,
+        record_count=len(items),
+        evidence_items=_build_slack_messaging_conversation_evidence(
+            items,
+            total_matching_count=len(conversations),
+        ),
+    )
+
+
+def _get_slack_messaging_conversation(db: Session, arguments: dict[str, Any]) -> AssistantToolExecutionResult:
+    conversation_id = _require_text(arguments.get("conversation_id"), field_name="conversation_id")
+    message_limit = _normalize_limit(arguments.get("message_limit"), default=25)
+    conversations = _load_slack_messaging_conversations(db)
+    conversation = next(
+        (item for item in conversations if item.conversation_id == conversation_id),
+        None,
+    )
+    if conversation is None:
+        return AssistantToolExecutionResult(
+            output={
+                "found": False,
+                "conversation_id": conversation_id,
+                "read_only": True,
+                "source_provider": "slack",
+                "source_surface": "messages_workspace_mirror",
+            },
+            summary=f"Slack-backed messaging conversation {conversation_id} was not found.",
+            record_count=0,
+            evidence_items=(
+                _build_tool_evidence_item(
+                    kind="application",
+                    title="Slack messaging mirror",
+                    locator=conversation_id,
+                    summary=f"No Slack-backed mirrored conversation matched {conversation_id}.",
+                    badges=["read-only", "not found"],
+                ),
+            ),
+        )
+
+    conversation_payload = _dump_slack_messaging_conversation_detail(
+        conversation,
+        message_limit=message_limit,
+    )
+    payload = {
+        "found": True,
+        "conversation_id": conversation_id,
+        "conversation": conversation_payload,
+        "read_only": True,
+        "source_provider": "slack",
+        "source_surface": "messages_workspace_mirror",
+    }
+    timeline_count = conversation_payload["timeline_count"]
+    summary = (
+        f"Loaded Slack-backed messaging conversation {conversation.label} "
+        f"with {conversation_payload['message_count']} message(s)."
+    )
+    if conversation_payload["timeline_truncated"]:
+        summary += f" Returned the latest {message_limit} of {timeline_count} timeline item(s)."
+    return AssistantToolExecutionResult(
+        output=payload,
+        summary=summary,
+        record_count=1,
+        evidence_items=(
+            _build_tool_evidence_item(
+                kind="application",
+                title=conversation.label,
+                locator=conversation.conversation_id,
+                summary=(
+                    f"{conversation_payload['message_count']} synced Slack message(s) are available "
+                    "from the durable Messages mirror."
+                ),
+                badges=_normalize_tool_evidence_badges(["Slack", "read-only", "durable mirror"]),
+                metadata={
+                    "conversation_id": conversation.conversation_id,
+                    "source_provider": "slack",
+                    "timeline_count": timeline_count,
+                },
+            ),
+        ),
+    )
+
+
+def _load_slack_messaging_conversations(db: Session) -> list[Any]:
+    state = load_messaging_workspace_state(db)
+    return [
+        conversation
+        for conversation in state.conversations
+        if conversation.source_provider == "slack"
+    ]
+
+
+def _slack_messaging_conversation_matches_query(conversation: Any, query: str) -> bool:
+    normalized_query = query.casefold()
+    haystack: list[str] = [
+        conversation.conversation_id,
+        conversation.label,
+        conversation.connected_workspace,
+        conversation.assistant_workspace,
+        conversation.description,
+        conversation.topic,
+        conversation.preview,
+    ]
+    for item in conversation.timeline:
+        haystack.extend(
+            [
+                item.source or "",
+                item.label or "",
+                item.detail or "",
+                " ".join(item.body),
+            ]
+        )
+        if item.author is not None:
+            haystack.extend([item.author.name, item.author.title, item.author.presence])
+        if item.attachment is not None:
+            haystack.extend(
+                [
+                    item.attachment.label,
+                    item.attachment.title,
+                    item.attachment.summary,
+                    item.attachment.footnote,
+                ]
+            )
+    return any(normalized_query in text.casefold() for text in haystack if text)
+
+
+def _dump_slack_messaging_conversation_summary(conversation: Any, *, message_limit: int) -> dict[str, Any]:
+    recent_items = _latest_slack_messaging_timeline_items(conversation.timeline, limit=message_limit)
+    return {
+        "conversation_id": conversation.conversation_id,
+        "label": conversation.label,
+        "kind": conversation.kind,
+        "section": conversation.section,
+        "connected_workspace": conversation.connected_workspace,
+        "assistant_workspace": conversation.assistant_workspace,
+        "topic": conversation.topic,
+        "description": conversation.description,
+        "preview": conversation.preview,
+        "latest_activity_at": _json_default(conversation.latest_activity_at),
+        "unread_count": conversation.unread_count,
+        "message_count": _slack_messaging_message_count(conversation.timeline),
+        "timeline_count": len(conversation.timeline),
+        "recent_messages": [_dump_model(item) for item in recent_items],
+        "source_provider": conversation.source_provider,
+    }
+
+
+def _dump_slack_messaging_conversation_detail(conversation: Any, *, message_limit: int) -> dict[str, Any]:
+    timeline_items = _latest_slack_messaging_timeline_items(conversation.timeline, limit=message_limit)
+    payload = _dump_model(conversation)
+    payload["timeline"] = [_dump_model(item) for item in timeline_items]
+    payload["timeline_count"] = len(conversation.timeline)
+    payload["timeline_returned_count"] = len(timeline_items)
+    payload["timeline_truncated"] = len(conversation.timeline) > len(timeline_items)
+    payload["message_count"] = _slack_messaging_message_count(conversation.timeline)
+    payload["source_surface"] = "messages_workspace_mirror"
+    return payload
+
+
+def _latest_slack_messaging_timeline_items(timeline: list[Any], *, limit: int) -> list[Any]:
+    items = list(timeline)
+    if len(items) <= limit:
+        return items
+    return items[-limit:]
+
+
+def _slack_messaging_message_count(timeline: list[Any]) -> int:
+    return sum(1 for item in timeline if item.kind == "message" and item.deleted_at is None)
+
+
+def _build_slack_messaging_conversation_evidence(
+    items: list[dict[str, Any]],
+    *,
+    total_matching_count: int,
+) -> tuple[AssistantToolEvidenceOut, ...]:
+    evidence_items = [
+        _build_tool_evidence_item(
+            kind="application",
+            title="Slack messaging mirror",
+            summary=(
+                f"{total_matching_count} Slack-backed conversation(s) matched in the durable Messages mirror."
+            ),
+            badges=_normalize_tool_evidence_badges(["Slack", "read-only", "durable mirror"]),
+            metadata={
+                "source_provider": "slack",
+                "source_surface": "messages_workspace_mirror",
+                "conversation_ids": [row.get("conversation_id") for row in items],
+            },
+        )
+    ]
+    for item in items[:3]:
+        evidence_items.append(
+            _build_tool_evidence_item(
+                kind="application",
+                title=str(item.get("label") or item.get("conversation_id") or "Slack conversation"),
+                locator=str(item.get("conversation_id") or "") or None,
+                summary=str(item.get("preview") or item.get("topic") or "Synced Slack conversation."),
+                badges=_normalize_tool_evidence_badges(
+                    [
+                        "Slack",
+                        "read-only",
+                        f"{item.get('message_count', 0)} message(s)",
+                    ]
+                ),
+                metadata={
+                    "conversation_id": item.get("conversation_id"),
+                    "latest_activity_at": item.get("latest_activity_at"),
+                },
+            )
+        )
+    return tuple(evidence_items)
 
 
 def _get_workspace_summary(db: Session, _arguments: dict[str, Any]) -> AssistantToolExecutionResult:

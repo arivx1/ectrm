@@ -1052,6 +1052,9 @@ class DocumentGmailInboxMessageSummaryOut(BaseModel):
     thread_id: Optional[str] = None
     subject: Optional[str] = None
     sender: Optional[str] = None
+    to_recipients: Optional[str] = None
+    cc_recipients: Optional[str] = None
+    bcc_recipients: Optional[str] = None
     received_at: Optional[datetime] = None
     snippet: Optional[str] = None
     unread: bool = False

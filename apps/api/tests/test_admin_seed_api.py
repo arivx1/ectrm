@@ -167,12 +167,16 @@ class AdminSeedApiTests(unittest.TestCase):
             self.assertEqual(document_agent.status, "ACTIVE")
             self.assertIn("list_gmail_inbox_messages", document_agent.allowed_tools)
             self.assertIn("get_gmail_inbox_message", document_agent.allowed_tools)
+            self.assertIn("list_slack_messaging_conversations", document_agent.allowed_tools)
+            self.assertIn("get_slack_messaging_conversation", document_agent.allowed_tools)
             self.assertEqual(session.get(AssistantAgent, "pre-trade-structuring-agent").status, "ACTIVE")
             self.assertEqual(session.get(AssistantAgent, "market-research-agent").status, "ACTIVE")
             movement_controller = session.get(AssistantAgent, "movement-controller-agent")
             self.assertEqual(movement_controller.authority_ceiling, "EXECUTE")
             self.assertIn("list_gmail_inbox_messages", movement_controller.allowed_tools)
             self.assertIn("get_gmail_inbox_message", movement_controller.allowed_tools)
+            self.assertIn("list_slack_messaging_conversations", movement_controller.allowed_tools)
+            self.assertIn("get_slack_messaging_conversation", movement_controller.allowed_tools)
             self.assertEqual(
                 movement_controller.allowed_action_types,
                 [
@@ -186,6 +190,8 @@ class AdminSeedApiTests(unittest.TestCase):
             trade_ops = session.get(AssistantAgent, "trade-ops-copilot")
             self.assertIn("list_gmail_inbox_messages", trade_ops.allowed_tools)
             self.assertIn("get_gmail_inbox_message", trade_ops.allowed_tools)
+            self.assertIn("list_slack_messaging_conversations", trade_ops.allowed_tools)
+            self.assertIn("get_slack_messaging_conversation", trade_ops.allowed_tools)
             self.assertEqual(
                 session.get(AssistantAgent, "trade-capture-agent").allowed_action_types,
                 ["create_trade", "amend_trade", "cancel_trade"],
