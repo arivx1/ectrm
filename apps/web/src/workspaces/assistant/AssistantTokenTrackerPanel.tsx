@@ -62,7 +62,7 @@ function bucketEndDateLabel(value: string): string {
   return UTC_DAY_FORMATTER.format(date)
 }
 
-export function assistantTokenUsageBucketsForPeriod(
+function assistantTokenUsageBucketsForPeriod(
   tracker: AssistantTokenUsageTracker | null,
   period: AssistantTokenTrackerPeriod,
 ): AssistantTokenUsageBucket[] {
@@ -78,7 +78,7 @@ export function assistantTokenUsageBucketsForPeriod(
   return tracker.daily
 }
 
-export function formatAssistantTokenUsageBucketLabel(
+function formatAssistantTokenUsageBucketLabel(
   bucket: AssistantTokenUsageBucket,
   period: AssistantTokenTrackerPeriod,
 ): string {
