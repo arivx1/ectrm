@@ -7,6 +7,7 @@ type WorkspaceLocalFilterBarProps = {
   matchedCount: number
   resultLabel: string
   globalValue?: string
+  hasExternalFilter?: boolean
   note?: string
 }
 
@@ -19,12 +20,13 @@ export function WorkspaceLocalFilterBar({
   matchedCount,
   resultLabel,
   globalValue,
+  hasExternalFilter = false,
   note,
 }: WorkspaceLocalFilterBarProps) {
   const hasLocalQuery = value.trim().length > 0
   const normalizedGlobalValue = globalValue?.trim() ?? ''
   const hasGlobalQuery = normalizedGlobalValue.length > 0
-  const statusLabel = hasLocalQuery || hasGlobalQuery
+  const statusLabel = hasLocalQuery || hasGlobalQuery || hasExternalFilter
     ? `${matchedCount.toLocaleString()} of ${totalCount.toLocaleString()} ${resultLabel} match`
     : `All ${totalCount.toLocaleString()} ${resultLabel} in view`
 
@@ -43,6 +45,7 @@ export function WorkspaceLocalFilterBar({
           <span>Search current screen</span>
           <input
             className="control"
+            data-terminal-shortcut-target="local-filter"
             type="search"
             value={value}
             onChange={(event) => onChange(event.target.value)}

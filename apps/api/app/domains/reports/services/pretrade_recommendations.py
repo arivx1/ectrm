@@ -1,20 +1,43 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from decimal import Decimal
+from datetime import date, datetime, timezone
 from typing import Iterable
 
 from pydantic import ValidationError
 from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
 
-from apps.api.app.domains.reports.services.pretrade_reviews import PRETRADE_SHARED_OWNER_KEY
+from apps.api.app.domains.reference_data.services.external_data.market_context import build_market_context
+from apps.api.app.domains.reports.services.pretrade_reviews import (
+    PRETRADE_REVIEW_PRESET_KEY,
+    PRETRADE_SHARED_OWNER_KEY,
+    review_recommendation_run_id,
+)
+from apps.api.app.domains.weather.services import build_weather_intelligence_overview
+from apps.api.app.models.option_exposure import OptionExposure
+from apps.api.app.models.position import Position
+from apps.api.app.models.price_index_observation import PriceIndexObservation
 from apps.api.app.models.report_preset import ReportPreset
+from apps.api.app.models.reference_counterparty_credit_profile import ReferenceCounterpartyCreditProfile
+from apps.api.app.models.reference_counterparty_external_credit_snapshot import (
+    ReferenceCounterpartyExternalCreditSnapshot,
+)
+from apps.api.app.models.trade import Trade
 from apps.api.app.schemas.pretrade import (
+    PreTradeRecommendationDraftAnalysisOut,
+    PreTradeArbitrageCandidateStatus,
+    PreTradeArbitrageFamily,
     PreTradeRecommendationCheckOut,
     PreTradeRecommendationConfidence,
+    PreTradeRecommendationArbitrageCandidateOut,
+    PreTradeRecommendationCommodityStateOut,
     PreTradeRecommendationEvidenceRefOut,
+    PreTradeExecutablePriceBasis,
     PreTradeExposureDirection,
     PreTradeExposureEffect,
+    PreTradeHedgeInstrumentType,
     PreTradeRecommendationExplanationOut,
     PreTradeRecommendationHedgeRecommendationOut,
     PreTradeRecommendationInputDeltaOut,
@@ -34,8 +57,11 @@ from apps.api.app.schemas.pretrade import (
     PreTradeRecommendationSourceSnapshot,
     PreTradeRecommendationStance,
     PreTradeRecommendationSourceType,
+    PreTradeRecommendationTransformationEdgeOut,
     PreTradeReviewRecommendationSummary,
     PreTradeScenarioDraft,
+    PreTradeScenarioEnrichmentOut,
+    PreTradeTransformationEdgeType,
 )
 
 PRETRADE_RECOMMENDATION_RUN_PRESET_KEY = "pretrade_recommendation_run"
@@ -54,6 +80,68 @@ QUALITY_SCORE_BY_STATUS: dict[PreTradeRecommendationSourceQuality, int] = {
     "MISSING": 0,
 }
 
+ARBITRAGE_POSITIVE_THRESHOLD = 0.0
+
+EDGE_FAMILY_BY_TYPE: dict[PreTradeTransformationEdgeType, PreTradeArbitrageFamily] = {
+    "PRODUCT_CONVERSION": "PRODUCT_QUALITY",
+    "STORAGE": "TIME",
+    "TRANSPORT": "GEOGRAPHIC",
+}
+
+REQUIRED_EDGE_TYPES_BY_FAMILY: dict[PreTradeArbitrageFamily, set[PreTradeTransformationEdgeType]] = {
+    "PRODUCT_QUALITY": {"PRODUCT_CONVERSION"},
+    "TIME": {"STORAGE"},
+    "GEOGRAPHIC": {"TRANSPORT"},
+    "COMBINED": set(),
+}
+
+HEDGE_REVIEW_INSTRUMENTS: tuple[PreTradeHedgeInstrumentType, ...] = (
+    "FUTURES",
+    "SWAP",
+    "OPTIONS",
+    "PHYSICAL_OFFSET",
+    "NO_HEDGE",
+)
+
+ARBITRAGE_COST_FIELD_SPECS: tuple[tuple[PreTradeTransformationEdgeType, tuple[str, ...], str, str], ...] = (
+    (
+        "PRODUCT_CONVERSION",
+        ("conversion_cost_per_unit", "conversion_cost", "quality_conversion_cost", "product_conversion_cost"),
+        "Product or quality conversion",
+        "Product or quality conversion cost applied to bridge the buy and sell states.",
+    ),
+    (
+        "STORAGE",
+        ("storage_cost_per_unit", "storage_cost", "calendar_storage_cost"),
+        "Calendar storage",
+        "Storage cost applied to bridge the delivery timing between the buy and sell states.",
+    ),
+    (
+        "TRANSPORT",
+        ("transportation_cost_per_unit", "transportation_cost", "transport_cost", "freight_cost"),
+        "Geographic transport",
+        "Transportation cost applied to bridge the origin and destination states.",
+    ),
+    (
+        "FINANCING",
+        ("financing_cost_per_unit", "financing_cost"),
+        "Financing",
+        "Financing cost applied to carry the opportunity.",
+    ),
+    (
+        "FEES",
+        ("fees_cost_per_unit", "fees_cost", "fee_cost", "taxes_and_fees_cost"),
+        "Fees and taxes",
+        "Fees, taxes, terminal, or inspection costs applied to the bridge.",
+    ),
+    (
+        "RISK_BUFFER",
+        ("risk_buffer_per_unit", "risk_buffer", "slippage_buffer"),
+        "Risk buffer",
+        "Risk, slippage, or uncertainty buffer applied before surfacing the net opportunity.",
+    ),
+)
+
 
 @dataclass(frozen=True)
 class SourceAdapterDefinition:
@@ -66,6 +154,12 @@ class SourceAdapterDefinition:
     payload_keys: tuple[str, ...]
     missing_if_false_keys: tuple[str, ...] = ()
     provenance_dataset: str = ""
+
+
+@dataclass(frozen=True)
+class PreparedPreTradeRecommendationEvaluation:
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot]
+    recommendation: PreTradeRecommendationResultOut
 
 
 SOURCE_ADAPTERS: tuple[SourceAdapterDefinition, ...] = (
@@ -339,6 +433,516 @@ def normalize_recommendation_input_snapshots(
     return normalized
 
 
+def _to_float(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, Decimal):
+        return float(value)
+    return None
+
+
+def _observed_age_hours(observed_at: datetime | None, as_of: datetime) -> float | None:
+    if observed_at is None:
+        return None
+    if observed_at.tzinfo is None and as_of.tzinfo is not None:
+        observed_at = observed_at.replace(tzinfo=as_of.tzinfo)
+    if observed_at.tzinfo is not None and as_of.tzinfo is None:
+        as_of = as_of.replace(tzinfo=observed_at.tzinfo)
+    return max(0.0, (as_of - observed_at).total_seconds() / 3600)
+
+
+def _freshness_from_observed_at(
+    observed_at: datetime | None,
+    *,
+    as_of: datetime,
+    stale_after_hours: int,
+) -> str:
+    age_hours = _observed_age_hours(observed_at, as_of)
+    if age_hours is None:
+        return "UNKNOWN"
+    return "STALE" if age_hours > stale_after_hours else "FRESH"
+
+
+def _latest_datetime(*values: datetime | None) -> datetime | None:
+    candidates = [value for value in values if value is not None]
+    if not candidates:
+        return None
+    return max(candidates)
+
+
+def _market_freshness_issue_count(payload: dict[str, object]) -> int:
+    freshness_rows = payload.get("freshness")
+    if not isinstance(freshness_rows, list):
+        return 0
+
+    issue_count = 0
+    for row in freshness_rows:
+        if not isinstance(row, dict):
+            continue
+        health_status = str(row.get("health_status") or "").strip().upper()
+        observation_age_hours = _to_float(row.get("observation_age_hours"))
+        if health_status != "HEALTHY" or (observation_age_hours is not None and observation_age_hours > 24):
+            issue_count += 1
+    return issue_count
+
+
+def _weather_high_risk_count(payload: dict[str, object]) -> int:
+    regional_signals = payload.get("regional_signals")
+    if not isinstance(regional_signals, list):
+        return 0
+
+    high_risk_count = 0
+    for signal in regional_signals:
+        if not isinstance(signal, dict):
+            continue
+        risk_values = [
+            str(signal.get(key) or "").strip().upper()
+            for key in ("demand_risk", "supply_risk", "storm_risk")
+        ]
+        if any(value == "HIGH" for value in risk_values):
+            high_risk_count += 1
+    return high_risk_count
+
+
+def _signed_volume(trade_side: str | None, value: object) -> float | None:
+    numeric_value = _to_float(value)
+    if numeric_value is None:
+        return None
+    return -numeric_value if (trade_side or "").strip().upper() == "SELL" else numeric_value
+
+
+def _trade_text_values(trades: Iterable[Trade], field_name: str) -> list[str]:
+    values: set[str] = set()
+    for trade in trades:
+        value = getattr(trade, field_name, None)
+        if isinstance(value, str) and value.strip():
+            values.add(value.strip())
+    return sorted(values)
+
+
+def _uniform_trade_text(trades: Iterable[Trade], field_name: str) -> str | None:
+    values = _trade_text_values(trades, field_name)
+    return values[0] if len(values) == 1 else None
+
+
+def _trade_date_values(trades: Iterable[Trade], field_name: str) -> list[date]:
+    values: list[date] = []
+    for trade in trades:
+        value = getattr(trade, field_name, None)
+        if isinstance(value, date):
+            values.append(value)
+    return values
+
+
+def _format_date(value: date | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _collect_desk_context_snapshot(
+    db: Session,
+    *,
+    draft: PreTradeScenarioDraft,
+    actor_id: str | None,
+    as_of: datetime,
+) -> PreTradeRecommendationSourceSnapshot:
+    related_trades = db.execute(
+        select(Trade).where(
+            Trade.status == "ACTIVE",
+            Trade.book == draft.book,
+            Trade.commodity_class == draft.commodity_class,
+            Trade.commodity == draft.commodity,
+        )
+    ).scalars().all()
+    counterparty_trades = (
+        db.execute(
+            select(Trade).where(
+                Trade.status == "ACTIVE",
+                Trade.counterparty == draft.counterparty,
+            )
+        ).scalars().all()
+        if not _is_blank(draft.counterparty)
+        else []
+    )
+    position = db.get(Position, draft.commodity) if not _is_blank(draft.commodity) else None
+    current_counterparty_exposure = sum(
+        abs((_to_float(trade.price) or 0) * (_to_float(trade.volume) or 0))
+        for trade in counterparty_trades
+    )
+    delivery_starts = _trade_date_values(related_trades, "delivery_start")
+    delivery_ends = _trade_date_values(related_trades, "delivery_end")
+    latest_observed_at = _latest_datetime(
+        position.updated_at if position is not None else None,
+        *(trade.updated_at for trade in related_trades),
+        *(trade.updated_at for trade in counterparty_trades),
+    )
+    return PreTradeRecommendationSourceSnapshot(
+        source_key="desk-context",
+        adapter_key="desk-context",
+        adapter_label="Desk exposure context",
+        source_type="INTERNAL",
+        source_available=True,
+        captured_at=latest_observed_at,
+        freshness=_freshness_from_observed_at(latest_observed_at, as_of=as_of, stale_after_hours=24),
+        summary=(
+            f"{len(related_trades)} active trade{'s' if len(related_trades) != 1 else ''} "
+            "match the selected book and commodity."
+        ),
+        provenance=PreTradeRecommendationSourceProvenance(
+            provider="ECTRM",
+            dataset="active-trades-and-positions",
+            record_id=f"{draft.book}:{draft.commodity}",
+            observed_at=latest_observed_at,
+            ingested_at=latest_observed_at,
+            captured_by=actor_id,
+        ),
+        payload={
+            "related_active_trade_count": len(related_trades),
+            "current_net_position": _to_float(position.net_volume) if position is not None else None,
+            "current_counterparty_exposure": current_counterparty_exposure,
+            "position_book": draft.book if related_trades else None,
+            "position_commodity_class": draft.commodity_class if related_trades else None,
+            "position_commodity": draft.commodity if related_trades else None,
+            "position_unit": _uniform_trade_text(related_trades, "unit_of_measure"),
+            "position_unit_values": _trade_text_values(related_trades, "unit_of_measure"),
+            "position_location_code": _uniform_trade_text(related_trades, "location_code"),
+            "position_location_values": _trade_text_values(related_trades, "location_code"),
+            "position_delivery_start": _format_date(min(delivery_starts)) if delivery_starts else None,
+            "position_delivery_end": _format_date(max(delivery_ends)) if delivery_ends else None,
+            "position_price_index_code": _uniform_trade_text(related_trades, "price_index_code"),
+            "position_pricing_type": _uniform_trade_text(related_trades, "pricing_type"),
+        },
+    )
+
+
+def _collect_counterparty_credit_snapshot(
+    db: Session,
+    *,
+    draft: PreTradeScenarioDraft,
+    actor_id: str | None,
+    as_of: datetime,
+) -> PreTradeRecommendationSourceSnapshot:
+    profile = (
+        db.get(ReferenceCounterpartyCreditProfile, draft.counterparty)
+        if not _is_blank(draft.counterparty)
+        else None
+    )
+    external_snapshot = (
+        db.execute(
+            select(ReferenceCounterpartyExternalCreditSnapshot)
+            .where(ReferenceCounterpartyExternalCreditSnapshot.counterparty_code == draft.counterparty)
+            .order_by(
+                ReferenceCounterpartyExternalCreditSnapshot.as_of_date.desc(),
+                ReferenceCounterpartyExternalCreditSnapshot.downloaded_at.desc(),
+                ReferenceCounterpartyExternalCreditSnapshot.id.desc(),
+            )
+        ).scalars().first()
+        if not _is_blank(draft.counterparty)
+        else None
+    )
+    observed_at = _latest_datetime(
+        profile.updated_at if profile is not None else None,
+        external_snapshot.downloaded_at if external_snapshot is not None else None,
+    )
+    return PreTradeRecommendationSourceSnapshot(
+        source_key="counterparty-credit",
+        adapter_key="counterparty-credit",
+        adapter_label="Counterparty credit profile",
+        source_type="INTERNAL",
+        source_available=True,
+        captured_at=observed_at,
+        freshness=_freshness_from_observed_at(observed_at, as_of=as_of, stale_after_hours=168),
+        summary=(
+            f"Internal credit profile captured for {profile.counterparty_code}."
+            if profile is not None
+            else "No internal credit profile was captured for the selected counterparty."
+        ),
+        provenance=PreTradeRecommendationSourceProvenance(
+            provider=external_snapshot.provider if external_snapshot is not None else "ECTRM Credit",
+            dataset="counterparty-credit-profiles",
+            record_id=draft.counterparty,
+            observed_at=observed_at,
+            ingested_at=external_snapshot.downloaded_at if external_snapshot is not None else observed_at,
+            captured_by=actor_id,
+        ),
+        payload={
+            "has_credit_profile": profile is not None,
+            "credit_limit_amount": _to_float(profile.limit_amount) if profile is not None else None,
+            "breach_action": profile.breach_action if profile is not None else None,
+            "credit_rating": profile.credit_rating if profile is not None else None,
+            "external_rating_value": external_snapshot.rating_value if external_snapshot is not None else None,
+            "recommended_limit_amount": (
+                _to_float(external_snapshot.recommended_limit_amount)
+                if external_snapshot is not None
+                else None
+            ),
+        },
+    )
+
+
+def _collect_latest_mark_snapshot(
+    db: Session,
+    *,
+    draft: PreTradeScenarioDraft,
+    actor_id: str | None,
+    as_of: datetime,
+) -> PreTradeRecommendationSourceSnapshot:
+    observation = (
+        db.execute(
+            select(PriceIndexObservation)
+            .where(PriceIndexObservation.price_index_code == draft.price_index_code)
+            .order_by(
+                PriceIndexObservation.observation_date.desc(),
+                PriceIndexObservation.downloaded_at.desc(),
+                PriceIndexObservation.id.desc(),
+            )
+        ).scalars().first()
+        if not _is_blank(draft.price_index_code)
+        else None
+    )
+    observed_at = (
+        observation.source_published_at
+        if observation is not None and observation.source_published_at is not None
+        else observation.downloaded_at if observation is not None else None
+    )
+    return PreTradeRecommendationSourceSnapshot(
+        source_key="latest-mark",
+        adapter_key="latest-mark",
+        adapter_label="Latest price-index mark",
+        source_type="EXTERNAL",
+        source_available=True,
+        captured_at=observation.downloaded_at if observation is not None else None,
+        freshness=_freshness_from_observed_at(observed_at, as_of=as_of, stale_after_hours=48),
+        summary=(
+            f"{observation.price_index_code} mark captured for {observation.observation_date.isoformat()}."
+            if observation is not None
+            else "No compatible latest mark was captured for the selected price index."
+        ),
+        provenance=PreTradeRecommendationSourceProvenance(
+            provider=observation.source_provider if observation is not None else "Price index marks",
+            dataset="price-index-observations",
+            record_id=(
+                f"{observation.price_index_code}:{observation.observation_date.isoformat()}"
+                if observation is not None
+                else draft.price_index_code
+            ),
+            observed_at=observed_at,
+            ingested_at=observation.downloaded_at if observation is not None else None,
+            captured_by=actor_id,
+        ),
+        payload={
+            "latest_mark": _to_float(observation.value) if observation is not None else None,
+            "price_index_code": observation.price_index_code if observation is not None else draft.price_index_code,
+            "observation_date": (
+                observation.observation_date.isoformat()
+                if observation is not None
+                else None
+            ),
+            "source_provider": observation.source_provider if observation is not None else None,
+            "source_series_id": observation.source_series_id if observation is not None else None,
+        },
+    )
+
+
+def _collect_market_context_snapshot(
+    db: Session,
+    *,
+    draft: PreTradeScenarioDraft,
+    actor_id: str | None,
+) -> PreTradeRecommendationSourceSnapshot:
+    market_context = build_market_context(db, commodity=draft.commodity, limit=6)
+    generated_at = market_context.get("generated_at")
+    generated_at_value = generated_at if isinstance(generated_at, datetime) else None
+    issue_count = _market_freshness_issue_count(market_context)
+    fundamentals = market_context.get("fundamentals")
+    macro = market_context.get("macro")
+    fundamental_count = len(fundamentals) if isinstance(fundamentals, list) else 0
+    macro_count = len(macro) if isinstance(macro, list) else 0
+    freshness = "DEGRADED" if issue_count > 0 else "FRESH"
+    return PreTradeRecommendationSourceSnapshot(
+        source_key="market-context",
+        adapter_key="market-context",
+        adapter_label="Market context",
+        source_type="EXTERNAL",
+        source_available=True,
+        captured_at=generated_at_value,
+        freshness=freshness,  # type: ignore[arg-type]
+        summary=(
+            f"Captured {fundamental_count + macro_count} market driver row"
+            f"{'' if fundamental_count + macro_count == 1 else 's'}."
+        ),
+        provenance=PreTradeRecommendationSourceProvenance(
+            provider="ECTRM Market Context",
+            dataset="market-context",
+            record_id=draft.commodity,
+            observed_at=generated_at_value,
+            ingested_at=generated_at_value,
+            captured_by=actor_id,
+        ),
+        payload={
+            "market_freshness_issue_count": issue_count,
+            "fundamental_count": fundamental_count,
+            "macro_count": macro_count,
+            "stale_source_count": issue_count,
+        },
+    )
+
+
+def _collect_weather_intelligence_snapshot(
+    db: Session,
+    *,
+    draft: PreTradeScenarioDraft,
+    actor_id: str | None,
+    as_of: datetime,
+) -> PreTradeRecommendationSourceSnapshot:
+    weather_overview = build_weather_intelligence_overview(
+        db,
+        commodity_class=draft.commodity_class or None,
+    )
+    latest_weather_update_at = weather_overview.get("latest_weather_update_at")
+    latest_weather_update_value = (
+        latest_weather_update_at if isinstance(latest_weather_update_at, datetime) else None
+    )
+    freshness = _freshness_from_observed_at(
+        latest_weather_update_value,
+        as_of=as_of,
+        stale_after_hours=24,
+    )
+    if freshness == "UNKNOWN":
+        freshness = "FRESH"
+    live_weather_location_count = _to_float(weather_overview.get("live_weather_location_count")) or 0
+    return PreTradeRecommendationSourceSnapshot(
+        source_key="weather-intelligence",
+        adapter_key="weather-intelligence",
+        adapter_label="Weather intelligence",
+        source_type="EXTERNAL",
+        source_available=True,
+        captured_at=latest_weather_update_value,
+        freshness=freshness,  # type: ignore[arg-type]
+        summary=str(weather_overview.get("headline") or "No weather intelligence snapshot was captured."),
+        provenance=PreTradeRecommendationSourceProvenance(
+            provider="Weather Intelligence",
+            dataset="weather-intelligence",
+            record_id=draft.commodity_class,
+            observed_at=latest_weather_update_value,
+            ingested_at=latest_weather_update_value,
+            captured_by=actor_id,
+        ),
+        payload={
+            "weather_high_risk_count": _weather_high_risk_count(weather_overview),
+            "live_weather_location_count": int(live_weather_location_count),
+        },
+    )
+
+
+def _collect_option_exposure_snapshot(
+    db: Session,
+    *,
+    draft: PreTradeScenarioDraft,
+    actor_id: str | None,
+    as_of: datetime,
+) -> PreTradeRecommendationSourceSnapshot:
+    stmt = select(OptionExposure).where(
+        OptionExposure.book == draft.book,
+        OptionExposure.commodity_class == draft.commodity_class,
+        OptionExposure.commodity == draft.commodity,
+    )
+    if not _is_blank(draft.portfolio):
+        stmt = stmt.where(OptionExposure.portfolio == draft.portfolio)
+    rows = db.execute(
+        stmt.order_by(
+            OptionExposure.updated_at.desc(),
+            OptionExposure.trade_id.asc(),
+        )
+    ).scalars().all()
+    latest_updated_at = _latest_datetime(*(row.updated_at for row in rows))
+    option_delta = sum(
+        signed_volume
+        for signed_volume in (
+            _signed_volume(row.trade_side, row.underlying_equivalent_volume)
+            for row in rows
+        )
+        if signed_volume is not None
+    )
+    return PreTradeRecommendationSourceSnapshot(
+        source_key="option-exposure",
+        adapter_key="option-exposure",
+        adapter_label="Option exposure",
+        source_type="DERIVED",
+        source_available=True,
+        captured_at=latest_updated_at,
+        freshness=_freshness_from_observed_at(latest_updated_at, as_of=as_of, stale_after_hours=24),
+        summary=(
+            f"{len(rows)} option exposure row{'s' if len(rows) != 1 else ''} match the selected desk context."
+            if rows
+            else "No matching option exposure rows were found for the selected desk context."
+        ),
+        provenance=PreTradeRecommendationSourceProvenance(
+            provider="ECTRM Risk",
+            dataset="option-exposures",
+            record_id=f"{draft.book}:{draft.portfolio or 'ALL'}:{draft.commodity}",
+            observed_at=latest_updated_at,
+            ingested_at=latest_updated_at,
+            captured_by=actor_id,
+        ),
+        payload={
+            "has_option_exposure": bool(rows),
+            "option_delta": option_delta if rows else None,
+            "option_gamma": None,
+            "option_vega": None,
+            "option_trade_count": len(rows),
+        },
+    )
+
+
+def collect_live_pretrade_recommendation_input_snapshots(
+    db: Session,
+    *,
+    draft: PreTradeScenarioDraft,
+    as_of: datetime | None = None,
+    actor_id: str | None = None,
+) -> list[PreTradeRecommendationSourceSnapshot]:
+    effective_as_of = as_of or datetime.now(timezone.utc)
+    return [
+        _collect_desk_context_snapshot(
+            db,
+            draft=draft,
+            actor_id=actor_id,
+            as_of=effective_as_of,
+        ),
+        _collect_counterparty_credit_snapshot(
+            db,
+            draft=draft,
+            actor_id=actor_id,
+            as_of=effective_as_of,
+        ),
+        _collect_latest_mark_snapshot(
+            db,
+            draft=draft,
+            actor_id=actor_id,
+            as_of=effective_as_of,
+        ),
+        _collect_market_context_snapshot(
+            db,
+            draft=draft,
+            actor_id=actor_id,
+        ),
+        _collect_weather_intelligence_snapshot(
+            db,
+            draft=draft,
+            actor_id=actor_id,
+            as_of=effective_as_of,
+        ),
+        _collect_option_exposure_snapshot(
+            db,
+            draft=draft,
+            actor_id=actor_id,
+            as_of=effective_as_of,
+        ),
+    ]
+
+
 def _max_stance(
     current: PreTradeRecommendationStance,
     candidate: PreTradeRecommendationStance,
@@ -434,6 +1038,510 @@ def _evidence_refs_for_adapter_keys(
     ]
 
 
+def _payload_object(payload: dict[str, object], keys: Iterable[str]) -> object | None:
+    for key in keys:
+        value = payload.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
+def _payload_mapping(payload: dict[str, object], keys: Iterable[str]) -> dict[str, object] | None:
+    value = _payload_object(payload, keys)
+    return value if isinstance(value, dict) else None
+
+
+def _payload_items(value: object) -> list[dict[str, object]]:
+    if isinstance(value, dict):
+        return [value]
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _normalize_text(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _payload_flag(payload: dict[str, object], keys: Iterable[str]) -> bool | None:
+    value = _payload_object(payload, keys)
+    return value if isinstance(value, bool) else None
+
+
+def _normalize_price_basis(value: object, *, default: PreTradeExecutablePriceBasis) -> PreTradeExecutablePriceBasis:
+    normalized = _normalize_text(value)
+    if normalized is None:
+        return default
+    candidate = normalized.upper().replace("-", "_").replace(" ", "_")
+    if candidate in {"ASK", "BID", "LAST", "TARGET", "ASSUMPTION"}:
+        return candidate  # type: ignore[return-value]
+    return default
+
+
+def _normalize_arbitrage_family(value: object) -> PreTradeArbitrageFamily | None:
+    normalized = _normalize_text(value)
+    if normalized is None:
+        return None
+    candidate = normalized.upper().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "PRODUCT": "PRODUCT_QUALITY",
+        "QUALITY": "PRODUCT_QUALITY",
+        "PRODUCT_OR_QUALITY": "PRODUCT_QUALITY",
+        "PRODUCT_QUALITY": "PRODUCT_QUALITY",
+        "CALENDAR": "TIME",
+        "TIME": "TIME",
+        "GEOGRAPHIC": "GEOGRAPHIC",
+        "LOCATION": "GEOGRAPHIC",
+        "TRANSPORT": "GEOGRAPHIC",
+        "COMBINED": "COMBINED",
+    }
+    family = aliases.get(candidate)
+    return family if family is not None else None  # type: ignore[return-value]
+
+
+def _normalize_edge_type(value: object) -> PreTradeTransformationEdgeType | None:
+    normalized = _normalize_text(value)
+    if normalized is None:
+        return None
+    candidate = normalized.upper().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "CONVERSION": "PRODUCT_CONVERSION",
+        "PRODUCT": "PRODUCT_CONVERSION",
+        "QUALITY": "PRODUCT_CONVERSION",
+        "PRODUCT_CONVERSION": "PRODUCT_CONVERSION",
+        "QUALITY_CONVERSION": "PRODUCT_CONVERSION",
+        "STORAGE": "STORAGE",
+        "CALENDAR": "STORAGE",
+        "TRANSPORT": "TRANSPORT",
+        "TRANSPORTATION": "TRANSPORT",
+        "FREIGHT": "TRANSPORT",
+        "FINANCING": "FINANCING",
+        "FINANCE": "FINANCING",
+        "FEES": "FEES",
+        "FEE": "FEES",
+        "TAX": "FEES",
+        "RISK_BUFFER": "RISK_BUFFER",
+        "BUFFER": "RISK_BUFFER",
+        "SLIPPAGE": "RISK_BUFFER",
+    }
+    edge_type = aliases.get(candidate)
+    return edge_type if edge_type is not None else None  # type: ignore[return-value]
+
+
+def _first_number(payload: dict[str, object], keys: Iterable[str]) -> float | None:
+    for key in keys:
+        value = _to_float(payload.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _price_from_candidate(
+    *,
+    candidate_payload: dict[str, object],
+    draft: PreTradeScenarioDraft,
+    side: str,
+) -> tuple[float | None, PreTradeExecutablePriceBasis | None]:
+    if side == "BUY":
+        ask_price = _first_number(candidate_payload, ("buy_ask_price", "ask_price", "executable_buy_price"))
+        if ask_price is not None:
+            return ask_price, "ASK"
+        explicit_price = _first_number(candidate_payload, ("buy_price",))
+        if explicit_price is not None:
+            return explicit_price, _normalize_price_basis(candidate_payload.get("buy_price_basis"), default="ASSUMPTION")
+        last_price = _first_number(candidate_payload, ("buy_last_price", "last_price"))
+        if last_price is not None:
+            return last_price, "LAST"
+        if draft.trade_side == "BUY" and draft.target_price is not None:
+            return draft.target_price, "TARGET"
+        return None, None
+
+    bid_price = _first_number(candidate_payload, ("sell_bid_price", "bid_price", "executable_sell_price"))
+    if bid_price is not None:
+        return bid_price, "BID"
+    explicit_price = _first_number(candidate_payload, ("sell_price",))
+    if explicit_price is not None:
+        return explicit_price, _normalize_price_basis(candidate_payload.get("sell_price_basis"), default="ASSUMPTION")
+    last_price = _first_number(candidate_payload, ("sell_last_price", "last_price"))
+    if last_price is not None:
+        return last_price, "LAST"
+    if draft.trade_side == "SELL" and draft.target_price is not None:
+        return draft.target_price, "TARGET"
+    return None, None
+
+
+def _state_value(
+    *,
+    state_payload: dict[str, object],
+    candidate_payload: dict[str, object],
+    field_name: str,
+    prefix: str,
+    fallback: object,
+) -> object | None:
+    return (
+        state_payload.get(field_name)
+        or candidate_payload.get(f"{prefix}_{field_name}")
+        or candidate_payload.get(f"{prefix}_{field_name.replace('_code', '')}")
+        or fallback
+    )
+
+
+def _state_from_candidate_payload(
+    *,
+    candidate_payload: dict[str, object],
+    draft: PreTradeScenarioDraft,
+    key: str,
+    prefix: str,
+) -> PreTradeRecommendationCommodityStateOut:
+    state_payload = _payload_mapping(candidate_payload, (key, f"{prefix}_state")) or {}
+    return PreTradeRecommendationCommodityStateOut(
+        commodity_class=_normalize_text(
+            _state_value(
+                state_payload=state_payload,
+                candidate_payload=candidate_payload,
+                field_name="commodity_class",
+                prefix=prefix,
+                fallback=draft.commodity_class,
+            )
+        ),
+        commodity=_normalize_text(
+            _state_value(
+                state_payload=state_payload,
+                candidate_payload=candidate_payload,
+                field_name="commodity",
+                prefix=prefix,
+                fallback=draft.commodity,
+            )
+        ),
+        quality_spec=_normalize_text(
+            _state_value(
+                state_payload=state_payload,
+                candidate_payload=candidate_payload,
+                field_name="quality_spec",
+                prefix=prefix,
+                fallback=None,
+            )
+        ),
+        location_code=_normalize_text(
+            _state_value(
+                state_payload=state_payload,
+                candidate_payload=candidate_payload,
+                field_name="location_code",
+                prefix=prefix,
+                fallback=draft.location_code,
+            )
+        ),
+        delivery_start=_state_value(
+            state_payload=state_payload,
+            candidate_payload=candidate_payload,
+            field_name="delivery_start",
+            prefix=prefix,
+            fallback=draft.delivery_start,
+        ),
+        delivery_end=_state_value(
+            state_payload=state_payload,
+            candidate_payload=candidate_payload,
+            field_name="delivery_end",
+            prefix=prefix,
+            fallback=draft.delivery_end,
+        ),
+        price_index_code=_normalize_text(
+            _state_value(
+                state_payload=state_payload,
+                candidate_payload=candidate_payload,
+                field_name="price_index_code",
+                prefix=prefix,
+                fallback=draft.price_index_code,
+            )
+        ),
+        unit_of_measure=_normalize_text(
+            _state_value(
+                state_payload=state_payload,
+                candidate_payload=candidate_payload,
+                field_name="unit_of_measure",
+                prefix=prefix,
+                fallback=draft.unit_of_measure,
+            )
+        ),
+        currency_code=_normalize_text(
+            _state_value(
+                state_payload=state_payload,
+                candidate_payload=candidate_payload,
+                field_name="currency_code",
+                prefix=prefix,
+                fallback=draft.trade_currency_code,
+            )
+        ),
+    )
+
+
+def _edge_from_payload(
+    *,
+    raw_edge: dict[str, object],
+    source_refs: list[PreTradeRecommendationEvidenceRefOut],
+) -> PreTradeRecommendationTransformationEdgeOut | None:
+    edge_type = _normalize_edge_type(raw_edge.get("edge_type") or raw_edge.get("type"))
+    cost = _first_number(raw_edge, ("bridge_cost_per_unit", "cost_per_unit", "cost", "variable_cost"))
+    if edge_type is None or cost is None or cost < 0:
+        return None
+    label = _normalize_text(raw_edge.get("label")) or edge_type.replace("_", " ").title()
+    detail = _normalize_text(raw_edge.get("detail")) or f"{label} cost contributes {cost:g} per unit."
+    supported = _payload_flag(raw_edge, ("supported", "is_supported")) is not False
+    return PreTradeRecommendationTransformationEdgeOut(
+        edge_type=edge_type,
+        label=label,
+        bridge_cost_per_unit=cost,
+        supported=supported,
+        detail=detail,
+        source_refs=source_refs,
+    )
+
+
+def _arbitrage_edges_from_candidate(
+    *,
+    candidate_payload: dict[str, object],
+    source_refs: list[PreTradeRecommendationEvidenceRefOut],
+) -> list[PreTradeRecommendationTransformationEdgeOut]:
+    edges: list[PreTradeRecommendationTransformationEdgeOut] = []
+    seen_edge_types: set[PreTradeTransformationEdgeType] = set()
+    for raw_edge in _payload_items(candidate_payload.get("edges") or candidate_payload.get("path_edges")):
+        edge = _edge_from_payload(raw_edge=raw_edge, source_refs=source_refs)
+        if edge is None:
+            continue
+        edges.append(edge)
+        seen_edge_types.add(edge.edge_type)
+
+    for edge_type, keys, label, detail in ARBITRAGE_COST_FIELD_SPECS:
+        if edge_type in seen_edge_types:
+            continue
+        cost = _first_number(candidate_payload, keys)
+        if cost is None or cost < 0:
+            continue
+        edges.append(
+            PreTradeRecommendationTransformationEdgeOut(
+                edge_type=edge_type,
+                label=label,
+                bridge_cost_per_unit=cost,
+                supported=True,
+                detail=detail,
+                source_refs=source_refs,
+            )
+        )
+    return edges
+
+
+def _infer_arbitrage_family(
+    *,
+    candidate_payload: dict[str, object],
+    edges: list[PreTradeRecommendationTransformationEdgeOut],
+) -> PreTradeArbitrageFamily:
+    explicit_family = _normalize_arbitrage_family(
+        candidate_payload.get("family")
+        or candidate_payload.get("arbitrage_family")
+        or candidate_payload.get("candidate_family")
+    )
+    if explicit_family is not None:
+        return explicit_family
+
+    edge_families = {
+        EDGE_FAMILY_BY_TYPE[edge.edge_type]
+        for edge in edges
+        if edge.edge_type in EDGE_FAMILY_BY_TYPE
+    }
+    if len(edge_families) > 1:
+        return "COMBINED"
+    if len(edge_families) == 1:
+        return next(iter(edge_families))
+    return "COMBINED"
+
+
+def _arbitrage_candidate_payloads(
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
+) -> list[tuple[dict[str, object], PreTradeRecommendationSourceSnapshot]]:
+    candidates: list[tuple[dict[str, object], PreTradeRecommendationSourceSnapshot]] = []
+    candidate_keys = ("arbitrage_candidates", "arbitrage_candidate", "arbitrage")
+    for snapshot in snapshots:
+        for key in candidate_keys:
+            raw_value = snapshot.payload.get(key)
+            for item in _payload_items(raw_value):
+                candidates.append((item, snapshot))
+    return candidates
+
+
+def _status_for_arbitrage_candidate(
+    *,
+    family: PreTradeArbitrageFamily,
+    buy_price: float | None,
+    buy_price_basis: PreTradeExecutablePriceBasis | None,
+    sell_price: float | None,
+    sell_price_basis: PreTradeExecutablePriceBasis | None,
+    edges: list[PreTradeRecommendationTransformationEdgeOut],
+    candidate_payload: dict[str, object],
+) -> tuple[PreTradeArbitrageCandidateStatus, list[str], list[str]]:
+    missing_evidence: list[str] = []
+    stop_reasons: list[str] = []
+
+    if buy_price is None:
+        missing_evidence.append("Executable buy ask price is missing.")
+    elif buy_price_basis != "ASK":
+        missing_evidence.append("Buy economics did not use an executable ask price.")
+
+    if sell_price is None:
+        missing_evidence.append("Executable sell bid price is missing.")
+    elif sell_price_basis != "BID":
+        missing_evidence.append("Sell economics did not use an executable bid price.")
+
+    supported_edges = {edge.edge_type for edge in edges if edge.supported}
+    unsupported_edges = [edge for edge in edges if not edge.supported]
+    for edge in unsupported_edges:
+        stop_reasons.append(f"{edge.label} is marked unsupported.")
+
+    required_edge_types = REQUIRED_EDGE_TYPES_BY_FAMILY[family]
+    for edge_type in sorted(required_edge_types):
+        if edge_type not in supported_edges:
+            label = edge_type.replace("_", " ").title()
+            missing_evidence.append(f"{label} evidence is required for {family.replace('_', ' ').lower()} arbitrage.")
+
+    if family == "COMBINED":
+        bridge_families = {
+            EDGE_FAMILY_BY_TYPE[edge.edge_type]
+            for edge in edges
+            if edge.supported and edge.edge_type in EDGE_FAMILY_BY_TYPE
+        }
+        if len(bridge_families) < 2:
+            missing_evidence.append("Combined arbitrage requires at least two supported product, time, or geographic bridge edges.")
+
+    supported_flag = _payload_flag(candidate_payload, ("supported", "is_supported"))
+    unsupported_reason = _normalize_text(candidate_payload.get("unsupported_reason") or candidate_payload.get("stop_reason"))
+    if supported_flag is False:
+        stop_reasons.append(unsupported_reason or "The transformation mapping is marked unsupported.")
+
+    if stop_reasons:
+        return "UNSUPPORTED", missing_evidence, stop_reasons
+    if missing_evidence:
+        return "INCOMPLETE", missing_evidence, stop_reasons
+    return "SUPPORTED", missing_evidence, stop_reasons
+
+
+def _build_single_arbitrage_candidate(
+    *,
+    draft: PreTradeScenarioDraft,
+    candidate_payload: dict[str, object],
+    source_snapshot: PreTradeRecommendationSourceSnapshot,
+) -> PreTradeRecommendationArbitrageCandidateOut:
+    source_refs = [_evidence_ref(source_snapshot)]
+    buy_state = _state_from_candidate_payload(
+        candidate_payload=candidate_payload,
+        draft=draft,
+        key="buy_state",
+        prefix="buy",
+    )
+    sell_state = _state_from_candidate_payload(
+        candidate_payload=candidate_payload,
+        draft=draft,
+        key="sell_state",
+        prefix="sell",
+    )
+    edges = _arbitrage_edges_from_candidate(
+        candidate_payload=candidate_payload,
+        source_refs=source_refs,
+    )
+    family = _infer_arbitrage_family(candidate_payload=candidate_payload, edges=edges)
+    buy_price, buy_price_basis = _price_from_candidate(
+        candidate_payload=candidate_payload,
+        draft=draft,
+        side="BUY",
+    )
+    sell_price, sell_price_basis = _price_from_candidate(
+        candidate_payload=candidate_payload,
+        draft=draft,
+        side="SELL",
+    )
+    bridge_cost = sum(edge.bridge_cost_per_unit for edge in edges if edge.supported)
+    gross_spread = sell_price - buy_price if buy_price is not None and sell_price is not None else None
+    net_opportunity = gross_spread - bridge_cost if gross_spread is not None else None
+    net_opportunity_pct = (
+        _safe_divide(net_opportunity, abs(buy_price))
+        if net_opportunity is not None and buy_price is not None and buy_price != 0
+        else None
+    )
+    estimated_value = (
+        net_opportunity * draft.target_volume
+        if net_opportunity is not None and draft.target_volume is not None
+        else None
+    )
+    status, missing_evidence, stop_reasons = _status_for_arbitrage_candidate(
+        family=family,
+        buy_price=buy_price,
+        buy_price_basis=buy_price_basis,
+        sell_price=sell_price,
+        sell_price_basis=sell_price_basis,
+        edges=edges,
+        candidate_payload=candidate_payload,
+    )
+    if status == "SUPPORTED" and net_opportunity is not None and net_opportunity <= ARBITRAGE_POSITIVE_THRESHOLD:
+        stop_reasons.append("Net opportunity is not positive after bridge costs.")
+
+    return PreTradeRecommendationArbitrageCandidateOut(
+        family=family,
+        status=status,
+        buy_state=buy_state,
+        sell_state=sell_state,
+        buy_price=buy_price,
+        buy_price_basis=buy_price_basis,
+        sell_price=sell_price,
+        sell_price_basis=sell_price_basis,
+        gross_spread=gross_spread,
+        bridge_cost=bridge_cost,
+        net_opportunity=net_opportunity,
+        net_opportunity_pct=net_opportunity_pct,
+        estimated_value=estimated_value,
+        edges=edges,
+        missing_evidence=missing_evidence,
+        stop_reasons=stop_reasons,
+        source_refs=source_refs,
+    )
+
+
+def _build_arbitrage_candidate(
+    *,
+    draft: PreTradeScenarioDraft,
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
+) -> PreTradeRecommendationArbitrageCandidateOut | None:
+    candidates = [
+        _build_single_arbitrage_candidate(
+            draft=draft,
+            candidate_payload=candidate_payload,
+            source_snapshot=source_snapshot,
+        )
+        for candidate_payload, source_snapshot in _arbitrage_candidate_payloads(snapshots)
+    ]
+    if not candidates:
+        return None
+
+    def sort_key(candidate: PreTradeRecommendationArbitrageCandidateOut) -> tuple[int, float]:
+        is_positive_supported = (
+            candidate.status == "SUPPORTED"
+            and candidate.net_opportunity is not None
+            and candidate.net_opportunity > ARBITRAGE_POSITIVE_THRESHOLD
+        )
+        status_rank = 3 if is_positive_supported else 2 if candidate.status == "SUPPORTED" else 1 if candidate.status == "INCOMPLETE" else 0
+        return (status_rank, candidate.net_opportunity if candidate.net_opportunity is not None else float("-inf"))
+
+    return max(candidates, key=sort_key)
+
+
+def _format_unit_amount(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:,.4f}".rstrip("0").rstrip(".")
+
+
 def _direction(value: float | None) -> PreTradeExposureDirection:
     if value is None:
         return "UNKNOWN"
@@ -496,6 +1604,40 @@ def _build_missing_evidence(
     return missing
 
 
+def _build_arbitrage_missing_evidence(
+    arbitrage_candidate: PreTradeRecommendationArbitrageCandidateOut | None,
+) -> list[PreTradeRecommendationMissingEvidenceOut]:
+    if arbitrage_candidate is None:
+        return []
+
+    missing: list[PreTradeRecommendationMissingEvidenceOut] = []
+    for index, detail in enumerate(arbitrage_candidate.missing_evidence, start=1):
+        missing.append(
+            PreTradeRecommendationMissingEvidenceOut(
+                evidence_key=f"arbitrage-missing-{index}",
+                label="Arbitrage evidence",
+                severity="WARNING",
+                detail=detail,
+                source_refs=arbitrage_candidate.source_refs,
+            )
+        )
+    if arbitrage_candidate.status == "UNSUPPORTED":
+        missing.append(
+            PreTradeRecommendationMissingEvidenceOut(
+                evidence_key="arbitrage-unsupported-mapping",
+                label="Arbitrage mapping",
+                severity="WARNING",
+                detail=(
+                    arbitrage_candidate.stop_reasons[0]
+                    if arbitrage_candidate.stop_reasons
+                    else "The arbitrage transformation path is unsupported."
+                ),
+                source_refs=arbitrage_candidate.source_refs,
+            )
+        )
+    return missing
+
+
 def _build_residual_exposure(
     *,
     draft: PreTradeScenarioDraft,
@@ -527,10 +1669,213 @@ def _build_residual_exposure(
     )
 
 
+def _payload_for_adapter(
+    snapshots: Iterable[PreTradeRecommendationSourceSnapshot],
+    adapter_key: str,
+) -> dict[str, object]:
+    for snapshot in snapshots:
+        if (snapshot.adapter_key or snapshot.source_key) == adapter_key:
+            return snapshot.payload
+    return {}
+
+
+def _payload_text_value(payload: dict[str, object], keys: Iterable[str]) -> str | None:
+    value = _payload_object(payload, keys)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _payload_text_values(payload: dict[str, object], keys: Iterable[str]) -> list[str]:
+    value = _payload_object(payload, keys)
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
+def _payload_date_value(payload: dict[str, object], keys: Iterable[str]) -> date | None:
+    value = _payload_object(payload, keys)
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return date.fromisoformat(value.strip()[:10])
+    except ValueError:
+        return None
+
+
+def _match_key(value: str | None) -> str | None:
+    return value.strip().casefold() if value is not None and value.strip() else None
+
+
+def _same_match_value(left: str | None, right: str | None) -> bool:
+    left_key = _match_key(left)
+    right_key = _match_key(right)
+    return left_key is not None and left_key == right_key
+
+
+def _contains_match_value(values: Iterable[str], value: str | None) -> bool:
+    value_key = _match_key(value)
+    return value_key is not None and value_key in {_match_key(item) for item in values}
+
+
+def _date_window_text(start: date | None, end: date | None) -> str:
+    if start is None and end is None:
+        return "UNKNOWN"
+    if start == end or end is None:
+        return start.isoformat() if start is not None else end.isoformat()  # type: ignore[union-attr]
+    if start is None:
+        return end.isoformat()
+    return f"{start.isoformat()}..{end.isoformat()}"
+
+
+def _normalized_date_window(start: date | None, end: date | None) -> tuple[date, date] | None:
+    if start is None and end is None:
+        return None
+    if start is None:
+        start = end
+    if end is None:
+        end = start
+    assert start is not None and end is not None
+    return (end, start) if end < start else (start, end)
+
+
+def _date_windows_overlap(
+    *,
+    draft_start: date | None,
+    draft_end: date | None,
+    position_start: date | None,
+    position_end: date | None,
+) -> bool:
+    draft_window = _normalized_date_window(draft_start, draft_end)
+    position_window = _normalized_date_window(position_start, position_end)
+    if draft_window is None or position_window is None:
+        return True
+    return max(draft_window[0], position_window[0]) <= min(draft_window[1], position_window[1])
+
+
+def _netting_constraints(
+    *,
+    draft: PreTradeScenarioDraft,
+    desk_payload: dict[str, object],
+) -> list[str]:
+    constraints = [
+        f"commodity={draft.commodity}",
+        f"book={draft.book}",
+        f"unit={draft.unit_of_measure or 'UNKNOWN'}",
+        f"location={draft.location_code or 'UNKNOWN'}",
+        f"delivery={_date_window_text(draft.delivery_start, draft.delivery_end)}",
+        f"price_index={draft.price_index_code or 'UNKNOWN'}",
+    ]
+    position_book_group = _payload_text_value(desk_payload, ("position_book_group", "book_group"))
+    if position_book_group is not None:
+        constraints.append(f"book_group={position_book_group}")
+    return constraints
+
+
+def _netting_mismatch_reasons(
+    *,
+    draft: PreTradeScenarioDraft,
+    desk_payload: dict[str, object],
+) -> list[str]:
+    reasons: list[str] = []
+    position_commodity = _payload_text_value(desk_payload, ("position_commodity", "commodity"))
+    if position_commodity is not None and not _same_match_value(position_commodity, draft.commodity):
+        reasons.append(f"Commodity {position_commodity} does not match draft commodity {draft.commodity}.")
+
+    position_book = _payload_text_value(desk_payload, ("position_book", "current_book"))
+    if position_book is not None and not _same_match_value(position_book, draft.book):
+        allowed_books = _payload_text_values(desk_payload, ("allowed_books", "allowed_book_codes"))
+        position_book_group = _payload_text_value(desk_payload, ("position_book_group", "book_group"))
+        draft_book_group = _payload_text_value(desk_payload, ("draft_book_group",))
+        allowed_book_groups = _payload_text_values(
+            desk_payload,
+            ("allowed_book_groups", "allowed_book_group"),
+        )
+        has_allowed_book = _contains_match_value(allowed_books, position_book)
+        has_matching_group = (
+            position_book_group is not None
+            and (
+                _same_match_value(position_book_group, draft_book_group)
+                or _contains_match_value(allowed_book_groups, position_book_group)
+            )
+        )
+        if not has_allowed_book and not has_matching_group:
+            reasons.append(
+                f"Book {position_book} does not match draft book {draft.book} or an allowed book group."
+            )
+
+    unit_values = _payload_text_values(desk_payload, ("position_unit_values",))
+    position_unit = _payload_text_value(desk_payload, ("position_unit", "position_unit_of_measure", "unit_of_measure"))
+    if len({_match_key(item) for item in unit_values if _match_key(item) is not None}) > 1:
+        reasons.append(
+            "Active position has mixed units "
+            f"{', '.join(unit_values)}; first-pass netting requires one compatible unit."
+        )
+    elif (
+        position_unit is not None
+        and draft.unit_of_measure is not None
+        and not _same_match_value(position_unit, draft.unit_of_measure)
+    ):
+        reasons.append(f"Unit {position_unit} does not match draft unit {draft.unit_of_measure}.")
+
+    location_values = _payload_text_values(desk_payload, ("position_location_values",))
+    position_location = _payload_text_value(desk_payload, ("position_location_code", "location_code"))
+    if len({_match_key(item) for item in location_values if _match_key(item) is not None}) > 1:
+        reasons.append(
+            "Active position has mixed locations "
+            f"{', '.join(location_values)}; first-pass netting requires one compatible location."
+        )
+    elif (
+        position_location is not None
+        and draft.location_code is not None
+        and not _same_match_value(position_location, draft.location_code)
+    ):
+        reasons.append(f"Location {position_location} does not match draft location {draft.location_code}.")
+
+    position_delivery_start = _payload_date_value(desk_payload, ("position_delivery_start", "delivery_start", "tenor_start"))
+    position_delivery_end = _payload_date_value(desk_payload, ("position_delivery_end", "delivery_end", "tenor_end"))
+    if not _date_windows_overlap(
+        draft_start=draft.delivery_start,
+        draft_end=draft.delivery_end,
+        position_start=position_delivery_start,
+        position_end=position_delivery_end,
+    ):
+        reasons.append(
+            "Delivery window "
+            f"{_date_window_text(position_delivery_start, position_delivery_end)} "
+            f"does not overlap draft delivery {_date_window_text(draft.delivery_start, draft.delivery_end)}."
+        )
+
+    position_price_index = _payload_text_value(desk_payload, ("position_price_index_code", "price_index_code"))
+    if (
+        position_price_index is not None
+        and draft.price_index_code is not None
+        and not _same_match_value(position_price_index, draft.price_index_code)
+    ):
+        reasons.append(f"Price index {position_price_index} is not compatible with draft index {draft.price_index_code}.")
+
+    position_pricing_type = _payload_text_value(desk_payload, ("position_pricing_type",))
+    if (
+        position_pricing_type is not None
+        and draft.pricing_type is not None
+        and not _same_match_value(position_pricing_type, draft.pricing_type)
+    ):
+        reasons.append(f"Pricing type {position_pricing_type} does not match draft pricing type {draft.pricing_type}.")
+
+    return reasons
+
+
 def _build_netting_candidates(
     *,
     draft: PreTradeScenarioDraft,
     residual_exposure: PreTradeRecommendationResidualExposureOut,
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
 ) -> list[PreTradeRecommendationNettingCandidateOut]:
     current = residual_exposure.current_net_position
     proposed = residual_exposure.proposed_trade_delta
@@ -538,34 +1883,49 @@ def _build_netting_candidates(
     if current is None or proposed is None or residual is None:
         return []
 
-    constraints = [
-        f"commodity={draft.commodity}",
-        f"unit={draft.unit_of_measure or 'UNKNOWN'}",
-        f"location={draft.location_code or 'UNKNOWN'}",
-    ]
-    if residual_exposure.exposure_effect == "OFFSETS":
-        matched_quantity = min(abs(current), abs(proposed))
+    desk_payload = _payload_for_adapter(snapshots, "desk-context")
+    constraints = _netting_constraints(draft=draft, desk_payload=desk_payload)
+    current_abs = abs(current)
+    proposed_abs = abs(proposed)
+    gross_exposure = current_abs + proposed_abs
+    rejection_reasons = _netting_mismatch_reasons(draft=draft, desk_payload=desk_payload)
+    if current_abs == 0:
+        rejection_reasons.append("There is no open position to net against.")
+    if proposed_abs == 0:
+        rejection_reasons.append("The proposed trade has no quantity available for netting.")
+    if current * proposed >= 0 and current_abs > 0 and proposed_abs > 0:
+        rejection_reasons.append("The proposed side does not create an opposing long/short offset.")
+
+    if rejection_reasons:
         return [
             PreTradeRecommendationNettingCandidateOut(
                 candidate_id="current-position-offset",
                 label="Current net position offset",
-                match_quality="EXACT" if residual == 0 else "PARTIAL",
-                matched_quantity=matched_quantity,
-                residual_quantity=abs(residual),
+                match_quality="REJECTED",
+                gross_exposure=gross_exposure,
+                offset_quantity=0,
+                residual_exposure=gross_exposure,
+                matched_quantity=0,
+                residual_quantity=gross_exposure,
                 constraints=constraints,
+                rejection_reasons=rejection_reasons,
                 source_refs=residual_exposure.source_refs,
             )
         ]
 
+    offset_quantity = min(current_abs, proposed_abs)
+    netting_residual = max(0.0, gross_exposure - (offset_quantity * 2))
     return [
         PreTradeRecommendationNettingCandidateOut(
             candidate_id="current-position-offset",
             label="Current net position offset",
-            match_quality="REJECTED",
-            matched_quantity=0,
-            residual_quantity=abs(residual),
+            match_quality="EXACT" if netting_residual == 0 else "PARTIAL",
+            gross_exposure=gross_exposure,
+            offset_quantity=offset_quantity,
+            residual_exposure=netting_residual,
+            matched_quantity=offset_quantity,
+            residual_quantity=netting_residual,
             constraints=constraints,
-            rejection_reasons=["The proposed side does not reduce the current net position."],
             source_refs=residual_exposure.source_refs,
         )
     ]
@@ -575,6 +1935,7 @@ def _build_opportunity_summary(
     *,
     stance: PreTradeRecommendationStance,
     mark_gap_pct: float | None,
+    arbitrage_candidate: PreTradeRecommendationArbitrageCandidateOut | None,
     residual_exposure: PreTradeRecommendationResidualExposureOut,
     checks: list[PreTradeRecommendationCheckOut],
     snapshots: list[PreTradeRecommendationSourceSnapshot],
@@ -584,14 +1945,36 @@ def _build_opportunity_summary(
         category: PreTradeOpportunityCategory = "WAIT_FOR_DATA"
         title = "Wait for required evidence"
         detail = "Required context or source evidence is missing, so this should not be promoted as an opportunity yet."
+    elif (
+        arbitrage_candidate is not None
+        and arbitrage_candidate.status == "SUPPORTED"
+        and arbitrage_candidate.net_opportunity is not None
+        and arbitrage_candidate.net_opportunity > ARBITRAGE_POSITIVE_THRESHOLD
+    ):
+        category = "ARBITRAGE"
+        title = f"{arbitrage_candidate.family.replace('_', ' ').title()} arbitrage review"
+        detail = (
+            f"Gross spread is {_format_unit_amount(arbitrage_candidate.gross_spread)} per unit, "
+            f"bridge cost is {_format_unit_amount(arbitrage_candidate.bridge_cost)}, "
+            f"and net opportunity is {_format_unit_amount(arbitrage_candidate.net_opportunity)}."
+        )
+        if "arbitrage" not in attention_keys:
+            attention_keys.append("arbitrage")
     elif mark_gap_pct is not None and mark_gap_pct >= 7:
         category = "MARK_GAP"
         title = "Pricing gap review"
         detail = f"Target economics are {_format_percent(mark_gap_pct)} away from the captured mark."
     elif residual_exposure.exposure_effect == "OFFSETS":
-        category = "EXPOSURE_OFFSET"
-        title = "Exposure offset review"
-        detail = "The draft appears to reduce current net exposure and may be useful for risk reduction."
+        before_abs = abs(residual_exposure.current_net_position or 0)
+        after_abs = abs(residual_exposure.residual_after_trade or 0)
+        if before_abs > 0 and after_abs <= before_abs / 2:
+            category = "RISK_REDUCTION"
+            title = "Risk reduction review"
+            detail = "The draft appears to materially reduce current net exposure."
+        else:
+            category = "EXPOSURE_OFFSET"
+            title = "Exposure offset review"
+            detail = "The draft appears to reduce current net exposure and may be useful for risk reduction."
     elif residual_exposure.exposure_effect == "DEEPENS":
         category = "RISK_INCREASE"
         title = "Risk-increasing review"
@@ -606,10 +1989,304 @@ def _build_opportunity_summary(
         title=title,
         detail=detail,
         driver_keys=attention_keys,
-        source_refs=_evidence_refs_for_adapter_keys(
-            snapshots,
-            ("desk-context", "latest-mark", "market-context", "weather-intelligence"),
+        source_refs=(
+            arbitrage_candidate.source_refs
+            if category == "ARBITRAGE" and arbitrage_candidate is not None
+            else _evidence_refs_for_adapter_keys(
+                snapshots,
+                ("desk-context", "latest-mark", "market-context", "weather-intelligence"),
+            )
         ),
+    )
+
+
+def _snapshot_for_adapter(
+    snapshots: Iterable[PreTradeRecommendationSourceSnapshot],
+    adapter_key: str,
+) -> PreTradeRecommendationSourceSnapshot | None:
+    for snapshot in snapshots:
+        if (snapshot.adapter_key or snapshot.source_key) == adapter_key:
+            return snapshot
+    return None
+
+
+def _snapshot_quality_stop(
+    snapshot: PreTradeRecommendationSourceSnapshot | None,
+    *,
+    label: str,
+) -> str | None:
+    if snapshot is None or not snapshot.source_available:
+        return f"{label} evidence is missing."
+    if snapshot.quality_status in {"STALE", "DEGRADED", "MISSING"}:
+        return f"{label} evidence is {snapshot.quality_status.lower()}."
+    if snapshot.freshness in {"STALE", "DEGRADED", "UNKNOWN"}:
+        return f"{label} evidence freshness is {snapshot.freshness.lower()}."
+    return None
+
+
+def _normalize_hedge_instrument(value: object) -> PreTradeHedgeInstrumentType | None:
+    normalized = _normalize_text(value)
+    if normalized is None:
+        return None
+    candidate = normalized.upper().replace("-", "_").replace(" ", "_")
+    if candidate in {"FUTURES", "FUTURE"}:
+        return "FUTURES"
+    if candidate in {"SWAP", "SWAPS"}:
+        return "SWAP"
+    if candidate in {"OPTION", "OPTIONS"}:
+        return "OPTIONS"
+    if candidate in {"PHYSICAL", "PHYSICAL_OFFSET", "OFFSET"}:
+        return "PHYSICAL_OFFSET"
+    if candidate in {"NO_HEDGE", "NONE"}:
+        return "NO_HEDGE"
+    if candidate == "WAIT_FOR_DATA":
+        return "WAIT_FOR_DATA"
+    return None
+
+
+def _supported_hedge_instruments(
+    snapshots: Iterable[PreTradeRecommendationSourceSnapshot],
+) -> set[PreTradeHedgeInstrumentType]:
+    supported: set[PreTradeHedgeInstrumentType] = set()
+    keys = ("supported_hedge_instruments", "supported_instruments", "allowed_hedge_instruments")
+    for snapshot in snapshots:
+        for key in keys:
+            value = snapshot.payload.get(key)
+            values = value if isinstance(value, list) else [value]
+            for item in values:
+                instrument = _normalize_hedge_instrument(item)
+                if instrument is not None:
+                    supported.add(instrument)
+    return supported
+
+
+def _instrument_supported(
+    instrument: PreTradeHedgeInstrumentType,
+    supported_instruments: set[PreTradeHedgeInstrumentType],
+) -> bool:
+    return not supported_instruments or instrument in supported_instruments
+
+
+def _payload_boolish(
+    snapshots: Iterable[PreTradeRecommendationSourceSnapshot],
+    keys: Iterable[str],
+) -> bool | None:
+    for snapshot in snapshots:
+        for key in keys:
+            value = snapshot.payload.get(key)
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str) and value.strip():
+                normalized = value.strip().upper()
+                if normalized in {"TRUE", "YES", "Y", "AVAILABLE", "SUPPORTED", "HIGH", "MEDIUM", "OK"}:
+                    return True
+                if normalized in {"FALSE", "NO", "N", "UNAVAILABLE", "UNSUPPORTED", "NONE", "LOW", "MISSING"}:
+                    return False
+    return None
+
+
+def _instrument_liquidity_available(
+    instrument: PreTradeHedgeInstrumentType,
+    snapshots: Iterable[PreTradeRecommendationSourceSnapshot],
+) -> bool:
+    keys_by_instrument: dict[PreTradeHedgeInstrumentType, tuple[str, ...]] = {
+        "FUTURES": ("futures_liquidity_available", "futures_liquidity", "listed_futures_liquidity"),
+        "SWAP": ("swap_liquidity_available", "swap_liquidity", "otc_swap_liquidity"),
+        "OPTIONS": ("options_liquidity_available", "options_liquidity", "option_liquidity"),
+        "PHYSICAL_OFFSET": ("physical_offset_available", "physical_offset_liquidity"),
+        "NO_HEDGE": (),
+        "WAIT_FOR_DATA": (),
+    }
+    keys = keys_by_instrument[instrument]
+    if not keys:
+        return True
+    availability = _payload_boolish(snapshots, keys)
+    return True if availability is None else availability
+
+
+def _instrument_available(
+    instrument: PreTradeHedgeInstrumentType,
+    *,
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
+    supported_instruments: set[PreTradeHedgeInstrumentType],
+) -> bool:
+    return (
+        _instrument_supported(instrument, supported_instruments)
+        and _instrument_liquidity_available(instrument, snapshots)
+    )
+
+
+def _option_exposure_present(snapshots: list[PreTradeRecommendationSourceSnapshot]) -> bool:
+    has_option_exposure = _payload_bool(snapshots, ("has_option_exposure",))
+    option_delta = _payload_number(snapshots, ("option_delta", "delta"))
+    option_gamma = _payload_number(snapshots, ("option_gamma", "gamma"))
+    option_vega = _payload_number(snapshots, ("option_vega", "vega"))
+    return bool(
+        has_option_exposure
+        or (option_delta is not None and option_delta != 0)
+        or (option_gamma is not None and option_gamma != 0)
+        or (option_vega is not None and option_vega != 0)
+    )
+
+
+def _volatility_policy_stops(snapshots: list[PreTradeRecommendationSourceSnapshot]) -> list[str]:
+    stops: list[str] = []
+    option_snapshot = _snapshot_for_adapter(snapshots, "option-exposure")
+    option_stop = _snapshot_quality_stop(option_snapshot, label="Option exposure")
+    if option_stop is not None:
+        stops.append(option_stop)
+
+    volatility_available = _payload_boolish(
+        snapshots,
+        ("volatility_available", "implied_volatility_available", "volatility_surface_available"),
+    )
+    if volatility_available is False:
+        stops.append("Volatility evidence is unavailable for the option hedge decision.")
+
+    volatility_freshness = _payload_text(
+        snapshots,
+        ("volatility_freshness", "implied_volatility_freshness", "volatility_surface_freshness"),
+    )
+    if volatility_freshness is not None and volatility_freshness.strip().upper() in {"STALE", "DEGRADED", "MISSING", "UNKNOWN"}:
+        stops.append(f"Volatility evidence is {volatility_freshness.strip().lower()}.")
+    return stops
+
+
+def _hedge_policy_stops(snapshots: list[PreTradeRecommendationSourceSnapshot]) -> list[str]:
+    stops: list[str] = []
+    hedge_policy_available = _payload_boolish(
+        snapshots,
+        ("hedge_policy_available", "hedge_decision_policy_available", "hedge_policy_present"),
+    )
+    if hedge_policy_available is False:
+        stops.append("Hedge decision policy evidence is missing.")
+
+    hedge_policy_status = _payload_text(snapshots, ("hedge_policy_status", "hedge_decision_policy_status"))
+    if hedge_policy_status is not None and hedge_policy_status.strip().upper() in {"MISSING", "UNSUPPORTED", "BLOCKED"}:
+        stops.append(f"Hedge decision policy status is {hedge_policy_status.strip().lower()}.")
+
+    hedge_accounting_clear = _payload_boolish(
+        snapshots,
+        ("hedge_accounting_clear", "hedge_accounting_supported", "hedge_accounting_policy_clear"),
+    )
+    hedge_accounting_status = _payload_text(snapshots, ("hedge_accounting_status", "hedge_accounting_policy_status"))
+    if hedge_accounting_clear is False or (
+        hedge_accounting_status is not None
+        and hedge_accounting_status.strip().upper() in {"UNCLEAR", "MISSING", "UNSUPPORTED"}
+    ):
+        stops.append("Hedge-accounting implications are unclear.")
+
+    settlement_ready = _payload_boolish(snapshots, ("settlement_ready", "settlement_policy_clear"))
+    settlement_block = _payload_boolish(snapshots, ("settlement_block", "settlement_policy_block"))
+    if settlement_ready is False or settlement_block is True:
+        stops.append("Settlement constraints need review before selecting a hedge instrument.")
+
+    breach_action = _payload_text(snapshots, ("breach_action", "credit_breach_action"))
+    if breach_action is not None and breach_action.strip().upper() == "BLOCK":
+        stops.append("Credit policy blocks new activity for this counterparty.")
+    return stops
+
+
+def _curve_policy_stops(
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
+    instrument: PreTradeHedgeInstrumentType,
+) -> list[str]:
+    if instrument not in {"FUTURES", "SWAP"}:
+        return []
+    latest_mark_snapshot = _snapshot_for_adapter(snapshots, "latest-mark")
+    latest_mark_stop = _snapshot_quality_stop(latest_mark_snapshot, label="Curve or mark")
+    return [latest_mark_stop] if latest_mark_stop is not None else []
+
+
+def _basis_risk_level(
+    *,
+    draft: PreTradeScenarioDraft,
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
+) -> str:
+    explicit_basis = _payload_text(snapshots, ("basis_risk_level", "basis_risk_status", "basis_risk"))
+    if explicit_basis is not None:
+        normalized = explicit_basis.strip().upper()
+        if normalized in {"HIGH", "ELEVATED", "MATERIAL"}:
+            return "HIGH"
+        if normalized in {"LOW", "NONE", "ALIGNED"}:
+            return "LOW"
+    index_location = _payload_text(snapshots, ("price_index_location_code", "index_location_code"))
+    if draft.location_code is not None and index_location is not None and not _same_match_value(draft.location_code, index_location):
+        return "HIGH"
+    return "UNKNOWN"
+
+
+def _tenor_bucket(draft: PreTradeScenarioDraft) -> str:
+    window = _normalized_date_window(draft.delivery_start, draft.delivery_end)
+    if window is None:
+        return "UNKNOWN"
+    tenor_days = (window[1] - window[0]).days + 1
+    if tenor_days > 62:
+        return "CALENDAR"
+    return "PROMPT"
+
+
+def _best_netting_candidate(
+    netting_candidates: list[PreTradeRecommendationNettingCandidateOut],
+) -> PreTradeRecommendationNettingCandidateOut | None:
+    for candidate in netting_candidates:
+        if candidate.match_quality in {"EXACT", "PARTIAL"} and (candidate.offset_quantity or candidate.matched_quantity or 0) > 0:
+            return candidate
+    return None
+
+
+def _hedge_decision_factors(
+    *,
+    residual: float | None,
+    option_exposure_present: bool,
+    basis_risk: str,
+    tenor_bucket: str,
+    netting_candidate: PreTradeRecommendationNettingCandidateOut | None,
+) -> list[str]:
+    residual_text = "UNKNOWN" if residual is None else _format_unit_amount(residual)
+    factors = [
+        f"residual_delta={residual_text}",
+        f"optionality={'PRESENT' if option_exposure_present else 'NONE'}",
+        f"basis_risk={basis_risk}",
+        f"tenor={tenor_bucket}",
+    ]
+    if netting_candidate is not None:
+        factors.append(f"netting_candidate={netting_candidate.match_quality}")
+    return factors
+
+
+def _hedge_source_refs(
+    instrument: PreTradeHedgeInstrumentType,
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
+) -> list[PreTradeRecommendationEvidenceRefOut]:
+    adapter_keys_by_instrument: dict[PreTradeHedgeInstrumentType, tuple[str, ...]] = {
+        "FUTURES": ("desk-context", "latest-mark", "market-context"),
+        "SWAP": ("desk-context", "latest-mark", "market-context"),
+        "OPTIONS": ("desk-context", "latest-mark", "option-exposure"),
+        "PHYSICAL_OFFSET": ("desk-context",),
+        "NO_HEDGE": ("desk-context",),
+        "WAIT_FOR_DATA": ("desk-context", "latest-mark", "counterparty-credit", "option-exposure"),
+    }
+    return _evidence_refs_for_adapter_keys(snapshots, adapter_keys_by_instrument[instrument])
+
+
+def _wait_for_data_hedge_recommendation(
+    *,
+    policy_stops: list[str],
+    decision_factors: list[str],
+    snapshots: list[PreTradeRecommendationSourceSnapshot],
+    target_delta: float | None,
+    decision_key: str,
+) -> PreTradeRecommendationHedgeRecommendationOut:
+    return PreTradeRecommendationHedgeRecommendationOut(
+        instrument_type="WAIT_FOR_DATA",
+        decision_key=decision_key,
+        rationale="Do not select a hedge instrument until the decision-table stop conditions are cleared.",
+        target_delta=target_delta,
+        hedge_ratio=None,
+        decision_factors=decision_factors,
+        policy_stops=policy_stops or ["Required hedge decision evidence is unavailable."],
+        source_refs=_hedge_source_refs("WAIT_FOR_DATA", snapshots),
     )
 
 
@@ -618,92 +2295,240 @@ def _build_hedge_recommendation(
     draft: PreTradeScenarioDraft,
     stance: PreTradeRecommendationStance,
     residual_exposure: PreTradeRecommendationResidualExposureOut,
+    netting_candidates: list[PreTradeRecommendationNettingCandidateOut],
     snapshots: list[PreTradeRecommendationSourceSnapshot],
 ) -> PreTradeRecommendationHedgeRecommendationOut:
     residual = residual_exposure.residual_after_trade
-    option_delta = _payload_number(snapshots, ("option_delta", "delta"))
-    option_gamma = _payload_number(snapshots, ("option_gamma", "gamma"))
-    has_option_exposure = _payload_bool(snapshots, ("has_option_exposure",))
-    policy_stops: list[str] = []
+    option_exposure_present = _option_exposure_present(snapshots)
+    basis_risk = _basis_risk_level(draft=draft, snapshots=snapshots)
+    tenor_bucket = _tenor_bucket(draft)
+    netting_candidate = _best_netting_candidate(netting_candidates)
+    decision_factors = _hedge_decision_factors(
+        residual=residual,
+        option_exposure_present=option_exposure_present,
+        basis_risk=basis_risk,
+        tenor_bucket=tenor_bucket,
+        netting_candidate=netting_candidate,
+    )
+    supported_instruments = _supported_hedge_instruments(snapshots)
+    policy_stops = _hedge_policy_stops(snapshots)
+    target_delta = -residual if residual is not None else None
 
     if stance == "WAIT_FOR_DATA" or residual is None:
         if residual is None:
             policy_stops.append("Residual exposure is unavailable.")
-        return PreTradeRecommendationHedgeRecommendationOut(
-            instrument_type="WAIT_FOR_DATA",
-            rationale="Do not select a hedge instrument until residual exposure and required evidence are available.",
+        return _wait_for_data_hedge_recommendation(
             policy_stops=policy_stops,
-            source_refs=_evidence_refs_for_adapter_keys(snapshots, ("desk-context", "latest-mark", "option-exposure")),
+            decision_factors=decision_factors,
+            snapshots=snapshots,
+            target_delta=target_delta,
+            decision_key="wait_required_evidence",
         )
 
     if residual == 0:
         return PreTradeRecommendationHedgeRecommendationOut(
             instrument_type="NO_HEDGE",
+            decision_key="no_residual_delta",
             rationale="The draft fully offsets the current net position, so no residual hedge delta is suggested.",
             target_delta=0,
             hedge_ratio=0,
+            decision_factors=decision_factors,
+            policy_stops=[],
             source_refs=residual_exposure.source_refs,
         )
 
-    if has_option_exposure or (option_delta is not None and option_delta != 0) or (option_gamma is not None and option_gamma != 0):
+    if option_exposure_present:
+        option_stops = _volatility_policy_stops(snapshots)
+        if not _instrument_supported("OPTIONS", supported_instruments):
+            option_stops.append("Options are not supported by the captured hedge instrument policy.")
+        if not _instrument_liquidity_available("OPTIONS", snapshots):
+            option_stops.append("Options liquidity is unavailable for this hedge review.")
+        if option_stops or policy_stops:
+            return _wait_for_data_hedge_recommendation(
+                policy_stops=policy_stops + option_stops,
+                decision_factors=decision_factors,
+                snapshots=snapshots,
+                target_delta=target_delta,
+                decision_key="wait_option_evidence",
+            )
         return PreTradeRecommendationHedgeRecommendationOut(
             instrument_type="OPTIONS",
-            rationale="Review option hedges because nonlinear option exposure evidence is present.",
-            target_delta=-residual,
+            decision_key="option_sensitive_fresh_volatility",
+            rationale="Review option hedges because fresh nonlinear exposure and volatility evidence are available.",
+            target_delta=target_delta,
             hedge_ratio=1,
-            source_refs=_evidence_refs_for_adapter_keys(snapshots, ("desk-context", "option-exposure")),
+            decision_factors=decision_factors,
+            policy_stops=[],
+            source_refs=_hedge_source_refs("OPTIONS", snapshots),
         )
 
-    if draft.pricing_type.upper() == "FIXED":
+    if (
+        netting_candidate is not None
+        and residual_exposure.exposure_effect == "OFFSETS"
+        and _instrument_available(
+            "PHYSICAL_OFFSET",
+            snapshots=snapshots,
+            supported_instruments=supported_instruments,
+        )
+    ):
+        if policy_stops:
+            return _wait_for_data_hedge_recommendation(
+                policy_stops=policy_stops,
+                decision_factors=decision_factors,
+                snapshots=snapshots,
+                target_delta=target_delta,
+                decision_key="wait_physical_offset_policy",
+            )
         return PreTradeRecommendationHedgeRecommendationOut(
-            instrument_type="FUTURES",
-            rationale="Review a listed futures hedge for the remaining linear fixed-price delta.",
-            target_delta=-residual,
+            instrument_type="PHYSICAL_OFFSET",
+            decision_key="validated_physical_offset_candidate",
+            rationale="Review a physical offset because the draft has a compatible long/short netting candidate.",
+            target_delta=target_delta,
             hedge_ratio=1,
-            source_refs=_evidence_refs_for_adapter_keys(snapshots, ("desk-context", "latest-mark")),
+            decision_factors=decision_factors,
+            policy_stops=[],
+            source_refs=_hedge_source_refs("PHYSICAL_OFFSET", snapshots),
         )
 
-    return PreTradeRecommendationHedgeRecommendationOut(
-        instrument_type="SWAP",
-        rationale="Review an index-linked swap for the remaining floating-price exposure and basis profile.",
-        target_delta=-residual,
-        hedge_ratio=1,
-        source_refs=_evidence_refs_for_adapter_keys(snapshots, ("desk-context", "latest-mark")),
+    preferred_linear: PreTradeHedgeInstrumentType = (
+        "SWAP"
+        if draft.pricing_type.upper() != "FIXED" or basis_risk == "HIGH" or tenor_bucket == "CALENDAR"
+        else "FUTURES"
     )
+    fallback_linear: PreTradeHedgeInstrumentType = "FUTURES" if preferred_linear == "SWAP" else "SWAP"
+    selected_linear: PreTradeHedgeInstrumentType | None = None
+    for instrument in (preferred_linear, fallback_linear):
+        if _instrument_available(
+            instrument,
+            snapshots=snapshots,
+            supported_instruments=supported_instruments,
+        ):
+            selected_linear = instrument
+            break
+    if selected_linear is None:
+        return _wait_for_data_hedge_recommendation(
+            policy_stops=[
+                "No supported liquid futures or swap instrument is available for the residual linear exposure.",
+                *policy_stops,
+            ],
+            decision_factors=decision_factors,
+            snapshots=snapshots,
+            target_delta=target_delta,
+            decision_key="wait_linear_instrument_support",
+        )
+
+    curve_stops = _curve_policy_stops(snapshots, selected_linear)
+    if policy_stops or curve_stops:
+        return _wait_for_data_hedge_recommendation(
+            policy_stops=policy_stops + curve_stops,
+            decision_factors=decision_factors,
+            snapshots=snapshots,
+            target_delta=target_delta,
+            decision_key="wait_linear_policy_or_curve",
+        )
+
+    rationale = (
+        "Review a listed futures hedge for the remaining linear fixed-price delta."
+        if selected_linear == "FUTURES"
+        else "Review an index-linked swap for the remaining floating, tenor, or basis-sensitive exposure."
+    )
+    return PreTradeRecommendationHedgeRecommendationOut(
+        instrument_type=selected_linear,
+        decision_key=(
+            "linear_fixed_prompt_futures"
+            if selected_linear == "FUTURES"
+            else "linear_basis_or_floating_swap"
+        ),
+        rationale=rationale,
+        target_delta=target_delta,
+        hedge_ratio=1,
+        decision_factors=decision_factors,
+        policy_stops=[],
+        source_refs=_hedge_source_refs(selected_linear, snapshots),
+    )
+
+
+def _rejected_alternative_reason(
+    *,
+    alternative: PreTradeHedgeInstrumentType,
+    selected: PreTradeHedgeInstrumentType,
+    residual: float | None,
+    option_exposure_present: bool,
+    basis_risk: str,
+    tenor_bucket: str,
+    netting_candidate: PreTradeRecommendationNettingCandidateOut | None,
+    hedge_recommendation: PreTradeRecommendationHedgeRecommendationOut,
+) -> str:
+    if selected == "WAIT_FOR_DATA":
+        return "This alternative is blocked until the hedge decision-table stop conditions are cleared."
+    if alternative == "NO_HEDGE":
+        return (
+            "No-hedge was rejected because residual exposure remains after the draft."
+            if residual not in {None, 0}
+            else "No residual exposure remains after the draft."
+        )
+    if alternative == "OPTIONS":
+        return (
+            "Option hedges were rejected because no fresh nonlinear option exposure requires optionality."
+            if not option_exposure_present
+            else "Option hedges were rejected because another instrument better matches the current decision factors."
+        )
+    if alternative == "PHYSICAL_OFFSET":
+        return (
+            "Physical offset was rejected because no accepted netting candidate was available."
+            if netting_candidate is None
+            else "Physical offset was rejected because another hedge instrument better matches the residual decision factors."
+        )
+    if alternative == "FUTURES":
+        if basis_risk == "HIGH" or tenor_bucket == "CALENDAR":
+            return "Futures were rejected because basis risk or tenor makes a more tailored instrument preferable."
+        return "Futures were rejected because the selected hedge better matches the residual exposure."
+    if alternative == "SWAP":
+        return (
+            "Swap was rejected because the residual is a prompt fixed-price linear exposure with listed-futures coverage."
+            if hedge_recommendation.decision_key == "linear_fixed_prompt_futures"
+            else "Swap was rejected because the selected hedge better matches the residual exposure."
+        )
+    return "Alternative was not selected by the deterministic hedge decision table."
 
 
 def _build_rejected_alternatives(
     *,
+    draft: PreTradeScenarioDraft,
     hedge_recommendation: PreTradeRecommendationHedgeRecommendationOut,
+    residual_exposure: PreTradeRecommendationResidualExposureOut,
+    netting_candidates: list[PreTradeRecommendationNettingCandidateOut],
     snapshots: list[PreTradeRecommendationSourceSnapshot],
 ) -> list[PreTradeRecommendationRejectedAlternativeOut]:
     selected = hedge_recommendation.instrument_type
+    if selected == "NO_HEDGE":
+        return []
+
+    option_present = _option_exposure_present(snapshots)
+    basis_risk = _basis_risk_level(draft=draft, snapshots=snapshots)
+    tenor_bucket = _tenor_bucket(draft)
+    netting_candidate = _best_netting_candidate(netting_candidates)
     rejected: list[PreTradeRecommendationRejectedAlternativeOut] = []
-    if selected not in {"OPTIONS", "WAIT_FOR_DATA"}:
+    for alternative in HEDGE_REVIEW_INSTRUMENTS:
+        if alternative == selected:
+            continue
         rejected.append(
             PreTradeRecommendationRejectedAlternativeOut(
-                alternative="OPTIONS",
-                reason="No fresh option exposure evidence requires an option hedge in this draft.",
-                source_refs=_evidence_refs_for_adapter_keys(snapshots, ("option-exposure",)),
+                alternative=alternative,
+                reason=_rejected_alternative_reason(
+                    alternative=alternative,
+                    selected=selected,
+                    residual=residual_exposure.residual_after_trade,
+                    option_exposure_present=option_present,
+                    basis_risk=basis_risk,
+                    tenor_bucket=tenor_bucket,
+                    netting_candidate=netting_candidate,
+                    hedge_recommendation=hedge_recommendation,
+                ),
+                source_refs=_hedge_source_refs(alternative, snapshots),
             )
         )
-    if selected not in {"FUTURES", "NO_HEDGE", "WAIT_FOR_DATA"}:
-        rejected.append(
-            PreTradeRecommendationRejectedAlternativeOut(
-                alternative="FUTURES",
-                reason="A futures hedge may not match the draft's floating or basis-sensitive exposure as directly as the selected instrument.",
-                source_refs=_evidence_refs_for_adapter_keys(snapshots, ("latest-mark",)),
-            )
-        )
-    if selected not in {"PHYSICAL_OFFSET", "NO_HEDGE", "WAIT_FOR_DATA"}:
-        rejected.append(
-            PreTradeRecommendationRejectedAlternativeOut(
-                alternative="PHYSICAL_OFFSET",
-                reason="No separate physical offset candidate has been validated beyond the draft scenario itself.",
-                source_refs=_evidence_refs_for_adapter_keys(snapshots, ("desk-context",)),
-            )
-        )
-    return rejected[:3]
+    return rejected[:4]
 
 
 def _build_recommendation_explanation(
@@ -846,6 +2671,10 @@ def build_pretrade_recommendation_result(
         _safe_divide(abs(draft.target_price - latest_mark), abs(latest_mark))
         if latest_mark is not None and draft.target_price is not None and latest_mark != 0
         else None
+    )
+    arbitrage_candidate = _build_arbitrage_candidate(
+        draft=draft,
+        snapshots=input_snapshots,
     )
     has_credit_profile = _payload_bool(input_snapshots, ("has_credit_profile",))
     breach_action = _payload_text(input_snapshots, ("breach_action", "credit_breach_action"))
@@ -1008,6 +2837,61 @@ def build_pretrade_recommendation_result(
             )
         )
 
+    if arbitrage_candidate is not None:
+        if (
+            arbitrage_candidate.status == "SUPPORTED"
+            and arbitrage_candidate.net_opportunity is not None
+            and arbitrage_candidate.net_opportunity > ARBITRAGE_POSITIVE_THRESHOLD
+        ):
+            checks.append(
+                _build_check(
+                    key="arbitrage",
+                    label="Arbitrage economics",
+                    status="good",
+                    detail=(
+                        f"{arbitrage_candidate.family.replace('_', ' ').title()} arbitrage candidate "
+                        f"shows gross spread {_format_unit_amount(arbitrage_candidate.gross_spread)}, "
+                        f"bridge cost {_format_unit_amount(arbitrage_candidate.bridge_cost)}, and "
+                        f"net opportunity {_format_unit_amount(arbitrage_candidate.net_opportunity)} per unit."
+                    ),
+                )
+            )
+        elif arbitrage_candidate.status == "SUPPORTED":
+            checks.append(
+                _build_check(
+                    key="arbitrage",
+                    label="Arbitrage economics",
+                    status="good",
+                    detail="Captured arbitrage economics do not show a positive net opportunity after bridge costs.",
+                )
+            )
+        elif arbitrage_candidate.status == "INCOMPLETE":
+            stance = _max_stance(stance, "PROCEED_WITH_CARE")
+            checks.append(
+                _build_check(
+                    key="arbitrage",
+                    label="Arbitrage economics",
+                    status="watch",
+                    detail=(
+                        "Arbitrage evidence is incomplete: "
+                        + "; ".join(arbitrage_candidate.missing_evidence[:2])
+                    ),
+                )
+            )
+        else:
+            stance = _max_stance(stance, "PROCEED_WITH_CARE")
+            checks.append(
+                _build_check(
+                    key="arbitrage",
+                    label="Arbitrage economics",
+                    status="watch",
+                    detail=(
+                        "Arbitrage mapping is unsupported: "
+                        + "; ".join(arbitrage_candidate.stop_reasons[:2])
+                    ),
+                )
+            )
+
     if current_net_position is not None and draft.target_volume is not None:
         same_direction = (
             (current_net_position >= 0 and draft.trade_side == "BUY")
@@ -1062,14 +2946,21 @@ def build_pretrade_recommendation_result(
     opportunity_summary = _build_opportunity_summary(
         stance=stance,
         mark_gap_pct=mark_gap_pct,
+        arbitrage_candidate=arbitrage_candidate,
         residual_exposure=residual_exposure,
         checks=checks,
+        snapshots=input_snapshots,
+    )
+    netting_candidates = _build_netting_candidates(
+        draft=draft,
+        residual_exposure=residual_exposure,
         snapshots=input_snapshots,
     )
     hedge_recommendation = _build_hedge_recommendation(
         draft=draft,
         stance=stance,
         residual_exposure=residual_exposure,
+        netting_candidates=netting_candidates,
         snapshots=input_snapshots,
     )
 
@@ -1103,20 +2994,66 @@ def build_pretrade_recommendation_result(
         next_actions=next_actions
         or ["No blocking gaps were detected. Hand the scenario into trade capture when the desk is ready."],
         opportunity_summary=opportunity_summary,
+        arbitrage_candidate=arbitrage_candidate,
         residual_exposure=residual_exposure,
-        netting_candidates=_build_netting_candidates(
-            draft=draft,
-            residual_exposure=residual_exposure,
-        ),
+        netting_candidates=netting_candidates,
         hedge_recommendation=hedge_recommendation,
         rejected_alternatives=_build_rejected_alternatives(
+            draft=draft,
             hedge_recommendation=hedge_recommendation,
+            residual_exposure=residual_exposure,
+            netting_candidates=netting_candidates,
             snapshots=input_snapshots,
         ),
         missing_evidence=_build_missing_evidence(
             snapshots=input_snapshots,
             required_adapter_keys=required_adapter_keys,
-        ),
+        )
+        + _build_arbitrage_missing_evidence(arbitrage_candidate),
+    )
+
+
+def prepare_pretrade_recommendation_evaluation(
+    *,
+    draft: PreTradeScenarioDraft,
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot],
+    as_of: datetime | None = None,
+    actor_id: str | None = None,
+) -> PreparedPreTradeRecommendationEvaluation:
+    effective_as_of = as_of or datetime.now(timezone.utc)
+    normalized_input_snapshots = normalize_recommendation_input_snapshots(
+        input_snapshots,
+        as_of=effective_as_of,
+        actor_id=actor_id,
+    )
+    recommendation = build_pretrade_recommendation_result(
+        draft=draft,
+        input_snapshots=normalized_input_snapshots,
+        as_of=effective_as_of,
+    )
+    return PreparedPreTradeRecommendationEvaluation(
+        input_snapshots=normalized_input_snapshots,
+        recommendation=recommendation,
+    )
+
+
+def resolve_pretrade_recommendation_input_snapshots(
+    *,
+    db: Session | None,
+    draft: PreTradeScenarioDraft,
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot],
+    as_of: datetime | None = None,
+    actor_id: str | None = None,
+) -> list[PreTradeRecommendationSourceSnapshot]:
+    if input_snapshots:
+        return input_snapshots
+    if db is None:
+        return input_snapshots
+    return collect_live_pretrade_recommendation_input_snapshots(
+        db,
+        draft=draft,
+        as_of=as_of,
+        actor_id=actor_id,
     )
 
 
@@ -1137,6 +3074,178 @@ def build_recommendation_run_payload(
         "input_snapshots": [snapshot.model_dump(mode="json", exclude_none=True) for snapshot in input_snapshots],
         "recommendation": recommendation.model_dump(mode="json", exclude_none=True),
     }
+
+
+def _enrichment_source_freshness_summary(snapshots: list[PreTradeRecommendationSourceSnapshot]) -> str | None:
+    if not snapshots:
+        return "No source snapshots were captured with this recommendation run."
+
+    impaired_snapshots = [
+        snapshot
+        for snapshot in snapshots
+        if not snapshot.source_available
+        or snapshot.quality_status != "OK"
+        or snapshot.freshness in {"STALE", "DEGRADED", "UNKNOWN"}
+    ]
+    if not impaired_snapshots:
+        return f"All {len(snapshots)} source snapshot{'s' if len(snapshots) != 1 else ''} were OK at capture."
+
+    labels = [
+        snapshot.adapter_label or snapshot.adapter_key or snapshot.source_key
+        for snapshot in impaired_snapshots[:4]
+    ]
+    suffix = f" plus {len(impaired_snapshots) - 4} more" if len(impaired_snapshots) > 4 else ""
+    return (
+        f"{len(impaired_snapshots)} of {len(snapshots)} source snapshot"
+        f"{'s' if len(snapshots) != 1 else ''} need review: {', '.join(labels)}{suffix}."
+    )
+
+
+def _enrichment_residual_exposure_summary(recommendation: PreTradeRecommendationResultOut) -> str | None:
+    residual_exposure = recommendation.residual_exposure
+    if residual_exposure is None:
+        return None
+
+    values = [
+        f"current {residual_exposure.current_net_position:g}"
+        if residual_exposure.current_net_position is not None
+        else None,
+        f"delta {residual_exposure.proposed_trade_delta:+g}"
+        if residual_exposure.proposed_trade_delta is not None
+        else None,
+        f"residual {residual_exposure.residual_after_trade:g}"
+        if residual_exposure.residual_after_trade is not None
+        else None,
+        residual_exposure.exposure_effect.replace("_", " ").lower()
+        if residual_exposure.exposure_effect != "UNKNOWN"
+        else None,
+    ]
+    numeric_summary = "; ".join(value for value in values if value)
+    if numeric_summary:
+        return f"{residual_exposure.detail} ({numeric_summary})."
+    return residual_exposure.detail
+
+
+def _enrichment_review_focus(recommendation: PreTradeRecommendationResultOut) -> list[str]:
+    focus_items: list[str] = []
+    focus_items.extend(recommendation.explanation.reviewer_focus)
+    focus_items.extend(recommendation.next_actions)
+    focus_items.extend(
+        f"{item.severity}: {item.detail}"
+        for item in recommendation.missing_evidence
+    )
+    if recommendation.hedge_recommendation is not None:
+        focus_items.extend(recommendation.hedge_recommendation.policy_stops)
+    if recommendation.arbitrage_candidate is not None:
+        focus_items.extend(recommendation.arbitrage_candidate.missing_evidence)
+        focus_items.extend(recommendation.arbitrage_candidate.stop_reasons)
+
+    normalized_items: list[str] = []
+    seen_items: set[str] = set()
+    for item in focus_items:
+        normalized_item = item.strip()
+        if not normalized_item:
+            continue
+        item_key = normalized_item.casefold()
+        if item_key in seen_items:
+            continue
+        normalized_items.append(normalized_item)
+        seen_items.add(item_key)
+        if len(normalized_items) >= 8:
+            break
+    return normalized_items
+
+
+def build_pretrade_scenario_enrichment(run: PreTradeRecommendationRunOut) -> PreTradeScenarioEnrichmentOut:
+    recommendation = run.recommendation
+    return PreTradeScenarioEnrichmentOut(
+        opportunity_category=(
+            recommendation.opportunity_summary.category
+            if recommendation.opportunity_summary is not None
+            else None
+        ),
+        hedge_intent=(
+            recommendation.hedge_recommendation.instrument_type
+            if recommendation.hedge_recommendation is not None
+            else None
+        ),
+        residual_exposure_summary=_enrichment_residual_exposure_summary(recommendation),
+        source_freshness_summary=_enrichment_source_freshness_summary(run.input_snapshots),
+        reviewer_focus=_enrichment_review_focus(recommendation),
+        recommendation_run_id=run.run_id if run.run_id > 0 else None,
+        recommendation_run_key=run.run_key,
+        recommendation_stance=recommendation.stance,
+        recommendation_score=recommendation.score,
+        recommendation_headline=recommendation.headline,
+        captured_at=run.created_at,
+    )
+
+
+def build_pretrade_recommendation_draft_analysis(
+    *,
+    thesis: str | None,
+    draft: PreTradeScenarioDraft,
+    source_scenario_id: int | None,
+    source_review_id: int | None,
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot],
+    db: Session | None = None,
+    as_of: datetime | None = None,
+    actor_id: str | None = None,
+    previous_record: ReportPreset | None = None,
+) -> PreTradeRecommendationDraftAnalysisOut:
+    effective_as_of = as_of or datetime.now(timezone.utc)
+    resolved_input_snapshots = resolve_pretrade_recommendation_input_snapshots(
+        db=db,
+        draft=draft,
+        input_snapshots=input_snapshots,
+        as_of=effective_as_of,
+        actor_id=actor_id,
+    )
+    evaluation = prepare_pretrade_recommendation_evaluation(
+        draft=draft,
+        input_snapshots=resolved_input_snapshots,
+        as_of=effective_as_of,
+        actor_id=actor_id,
+    )
+
+    comparison = None
+    if previous_record is not None:
+        previous_run = _to_recommendation_run_out_base(
+            previous_record,
+            actor_id=actor_id or previous_record.created_by,
+        )
+        current_run = PreTradeRecommendationRunOut(
+            run_id=0,
+            run_key="draft-analysis",
+            name="Draft analysis",
+            thesis=thesis,
+            draft=draft,
+            source_scenario_id=source_scenario_id,
+            source_review_id=source_review_id,
+            input_snapshots=evaluation.input_snapshots,
+            recommendation=evaluation.recommendation,
+            created_at=effective_as_of,
+            created_by=actor_id or "system",
+            updated_at=effective_as_of,
+            updated_by=actor_id or "system",
+            version=0,
+            can_edit=actor_id is not None,
+        )
+        comparison = build_recommendation_run_comparison(
+            current=current_run,
+            previous=previous_run,
+        )
+
+    return PreTradeRecommendationDraftAnalysisOut(
+        thesis=thesis,
+        draft=draft,
+        source_scenario_id=source_scenario_id,
+        source_review_id=source_review_id,
+        input_snapshots=evaluation.input_snapshots,
+        recommendation=evaluation.recommendation,
+        comparison=comparison,
+        evaluated_at=effective_as_of,
+    )
 
 
 def recommendation_run_source_scenario_id(record: ReportPreset) -> int | None:
@@ -1189,6 +3298,113 @@ def _ordered_text_delta(current: list[str], previous: list[str]) -> tuple[list[s
         [item for item in current if item not in previous_set],
         [item for item in previous if item not in current_set],
     )
+
+
+def same_recommendation_comparison_group(left: ReportPreset, right: ReportPreset) -> bool:
+    left_review_id = recommendation_run_source_review_id(left)
+    right_review_id = recommendation_run_source_review_id(right)
+    if left_review_id is not None or right_review_id is not None:
+        return left_review_id is not None and left_review_id == right_review_id
+
+    left_scenario_id = recommendation_run_source_scenario_id(left)
+    right_scenario_id = recommendation_run_source_scenario_id(right)
+    return left_scenario_id is not None and left_scenario_id == right_scenario_id
+
+
+def previous_recommendation_run_record(
+    records: list[ReportPreset],
+    current_record: ReportPreset,
+) -> ReportPreset | None:
+    matching_older_records = [
+        record
+        for record in records
+        if record.id != current_record.id
+        and same_recommendation_comparison_group(current_record, record)
+        and (record.created_at, record.id) < (current_record.created_at, current_record.id)
+    ]
+    return max(matching_older_records, key=lambda record: (record.created_at, record.id), default=None)
+
+
+def recommendation_run_attached_to_shared_review(db, recommendation_run_id: int) -> bool:
+    review_records = db.execute(
+        select(ReportPreset).where(
+            ReportPreset.preset_key == PRETRADE_REVIEW_PRESET_KEY,
+            ReportPreset.scope_owner_key == PRETRADE_SHARED_OWNER_KEY,
+        )
+    ).scalars().all()
+    return any(review_recommendation_run_id(record) == recommendation_run_id for record in review_records)
+
+
+def get_accessible_recommendation_run_record(
+    db,
+    *,
+    recommendation_run_id: int,
+    actor_id: str,
+) -> ReportPreset | None:
+    record = db.execute(pretrade_recommendation_run_record_stmt(recommendation_run_id)).scalars().first()
+    if record is None:
+        return None
+    if record.scope_owner_key in {actor_id, PRETRADE_SHARED_OWNER_KEY} or recommendation_run_attached_to_shared_review(db, recommendation_run_id):
+        return record
+    return None
+
+
+def accessible_recommendation_run_records(
+    db,
+    *,
+    actor_id: str,
+) -> list[ReportPreset]:
+    records_by_id = {
+        record.id: record
+        for record in db.execute(pretrade_recommendation_run_records_stmt(actor_id)).scalars().all()
+    }
+    review_records = db.execute(
+        select(ReportPreset).where(
+            ReportPreset.preset_key == PRETRADE_REVIEW_PRESET_KEY,
+            ReportPreset.scope_owner_key == PRETRADE_SHARED_OWNER_KEY,
+        )
+    ).scalars().all()
+    attached_run_ids = sorted(
+        {
+            recommendation_run_id
+            for recommendation_run_id in (review_recommendation_run_id(record) for record in review_records)
+            if recommendation_run_id is not None and recommendation_run_id not in records_by_id
+        }
+    )
+    if attached_run_ids:
+        attached_records = db.execute(
+            select(ReportPreset).where(
+                ReportPreset.preset_key == PRETRADE_RECOMMENDATION_RUN_PRESET_KEY,
+                ReportPreset.id.in_(attached_run_ids),
+            )
+        ).scalars().all()
+        records_by_id.update({record.id: record for record in attached_records})
+    return sorted(records_by_id.values(), key=lambda record: (record.created_at, record.id), reverse=True)
+
+
+def latest_accessible_recommendation_run_record(
+    db,
+    *,
+    actor_id: str,
+    source_scenario_id: int | None = None,
+    source_review_id: int | None = None,
+) -> ReportPreset | None:
+    if source_scenario_id is None and source_review_id is None:
+        return None
+
+    matching_records = [
+        record
+        for record in accessible_recommendation_run_records(db, actor_id=actor_id)
+        if (
+            source_review_id is not None and recommendation_run_source_review_id(record) == source_review_id
+        )
+        or (
+            source_review_id is None
+            and source_scenario_id is not None
+            and recommendation_run_source_scenario_id(record) == source_scenario_id
+        )
+    ]
+    return max(matching_records, key=lambda record: (record.created_at, record.id), default=None)
 
 
 def build_recommendation_run_comparison(

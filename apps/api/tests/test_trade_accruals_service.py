@@ -9,7 +9,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from apps.api.app.domains.accruals.services import (
+    create_manual_accrual_entry,
     rebuild_trade_accruals_ledger,
+    reverse_manual_accrual_entry,
     synchronize_trade_accruals,
 )
 from apps.api.app.domains.operations.services.actualizations import build_delivery_obligation_id
@@ -338,6 +340,88 @@ class TradeAccrualServiceTests(unittest.TestCase):
         self.assertEqual([entry.entry_type for entry in invoice_entries], ["INVOICE_APPLIED"])
         self.assertEqual(float(invoice_entries[0].quantity_delta), -40.0)
         self.assertEqual(float(invoice_entries[0].amount_delta), -3200.0)
+
+    def test_manual_accrual_entry_updates_lot_rollup_without_losing_system_managed_balance(self) -> None:
+        self._seed_trade(trade_id="T-ACC-MANUAL", pricing_type="FIXED", price=80.0)
+        self._seed_actualization(trade_id="T-ACC-MANUAL", actual_quantity=Decimal("100"))
+
+        with self.SessionLocal() as session:
+            synchronize_trade_accruals(session, trade_id="T-ACC-MANUAL", actor_id="ops", now=self.now)
+            lot = session.query(TradeAccrualLot).filter_by(trade_id="T-ACC-MANUAL").one()
+            entry = create_manual_accrual_entry(
+                session,
+                accrual_lot_id=lot.accrual_lot_id,
+                actor_id="controller",
+                quantity_delta=Decimal("10"),
+                amount_delta=Decimal("500"),
+                effective_at=self.now,
+                notes="Controller catch-up accrual.",
+                now=self.now,
+            )
+            session.commit()
+
+            refreshed_lot = session.get(TradeAccrualLot, lot.accrual_lot_id)
+            entries = (
+                session.query(TradeAccrualEntry)
+                .filter_by(accrual_lot_id=lot.accrual_lot_id)
+                .order_by(TradeAccrualEntry.created_at.asc(), TradeAccrualEntry.entry_id.asc())
+                .all()
+            )
+
+        assert refreshed_lot is not None
+        self.assertEqual(entry.entry_type, "MANUAL_ADJUSTMENT")
+        self.assertIsNone(entry.reversal_of_entry_id)
+        self.assertEqual(float(refreshed_lot.actualized_quantity), 110.0)
+        self.assertEqual(float(refreshed_lot.accrued_amount), 8500.0)
+        self.assertEqual(refreshed_lot.status, "ACCRUED")
+        manual_entry = next(row for row in entries if row.entry_type == "MANUAL_ADJUSTMENT")
+        self.assertEqual(float(manual_entry.quantity_delta), 10.0)
+        self.assertEqual(float(manual_entry.amount_delta), 500.0)
+
+    def test_reverse_manual_accrual_entry_restores_lot_rollup_with_offsetting_entry(self) -> None:
+        self._seed_trade(trade_id="T-ACC-MANUAL-REV", pricing_type="FIXED", price=80.0)
+        self._seed_actualization(trade_id="T-ACC-MANUAL-REV", actual_quantity=Decimal("100"))
+
+        with self.SessionLocal() as session:
+            synchronize_trade_accruals(session, trade_id="T-ACC-MANUAL-REV", actor_id="ops", now=self.now)
+            lot = session.query(TradeAccrualLot).filter_by(trade_id="T-ACC-MANUAL-REV").one()
+            original_entry = create_manual_accrual_entry(
+                session,
+                accrual_lot_id=lot.accrual_lot_id,
+                actor_id="controller",
+                quantity_delta=Decimal("5"),
+                amount_delta=Decimal("200"),
+                effective_at=self.now,
+                notes="Temporary adjustment.",
+                now=self.now,
+            )
+            reversal_entry = reverse_manual_accrual_entry(
+                session,
+                entry_id=original_entry.entry_id,
+                actor_id="controller",
+                reversal_reason="Evidence corrected.",
+                effective_at=self.now,
+                now=self.now,
+            )
+            session.commit()
+
+            refreshed_lot = session.get(TradeAccrualLot, lot.accrual_lot_id)
+            entries = (
+                session.query(TradeAccrualEntry)
+                .filter_by(accrual_lot_id=lot.accrual_lot_id)
+                .order_by(TradeAccrualEntry.created_at.asc(), TradeAccrualEntry.entry_id.asc())
+                .all()
+            )
+
+        assert refreshed_lot is not None
+        self.assertEqual(reversal_entry.entry_type, "MANUAL_REVERSAL")
+        self.assertEqual(reversal_entry.reversal_of_entry_id, original_entry.entry_id)
+        self.assertEqual(float(refreshed_lot.actualized_quantity), 100.0)
+        self.assertEqual(float(refreshed_lot.accrued_amount), 8000.0)
+        self.assertEqual(refreshed_lot.status, "ACCRUED")
+        reversal_ledger_entry = next(row for row in entries if row.entry_type == "MANUAL_REVERSAL")
+        self.assertEqual(float(reversal_ledger_entry.quantity_delta), -5.0)
+        self.assertEqual(float(reversal_ledger_entry.amount_delta), -200.0)
 
     def test_invoice_dispute_updates_lot_disputed_balance_with_history(self) -> None:
         self._seed_trade(trade_id="T-ACC-DISPUTE", pricing_type="FIXED", price=80.0)

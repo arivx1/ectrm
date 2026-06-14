@@ -459,9 +459,22 @@ class TradeEventWorkflowTests(unittest.TestCase):
             )
 
             trade = session.query(Trade).filter(Trade.trade_id == "T-INDEX-1").one()
+            event = (
+                session.query(Event)
+                .filter(
+                    Event.aggregate_type == "trade",
+                    Event.aggregate_id == "T-INDEX-1",
+                    Event.event_type == "TradeCreated",
+                )
+                .one()
+            )
 
         self.assertEqual(trade.pricing_type, "INDEX")
         self.assertEqual(trade.price_index_code, "WTI_M1")
+        self.assertEqual(trade.unit_of_measure, "BBL")
+        self.assertEqual(trade.price_unit_code, "BBL")
+        self.assertEqual(event.payload["unit_of_measure"], "BBL")
+        self.assertEqual(event.payload["price_unit_code"], "BBL")
         self.assertIsNone(trade.price)
         self.assertEqual(float(trade.volume), 1000.0)
 

@@ -30,6 +30,81 @@ FIELD_DEFINITIONS: dict[str, tuple[FieldDefinition, ...]] = {
         FieldDefinition("sender", "Sender", (r"(?:from|sender)\s*[:#]?\s*(.+)",)),
         FieldDefinition("subject", "Subject", (r"subject\s*[:#]?\s*(.+)",)),
     ),
+    "DEAL_RECAP": (
+        FieldDefinition(
+            "recap_number",
+            "Recap Number",
+            (r"(?:deal|trade|commercial)?\s*recap\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",),
+        ),
+        FieldDefinition(
+            "recap_date",
+            "Recap Date",
+            (r"(?:deal|trade|commercial)?\s*recap\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)", r"trade\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)"),
+        ),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition(
+            "external_trade_id",
+            "External Trade ID",
+            (r"external\s*trade\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",),
+        ),
+        FieldDefinition("counterparty", "Counterparty", (r"counterparty\s*[:#]?\s*(.+)",)),
+        FieldDefinition("trader", "Trader", (r"trader\s*[:#]?\s*(.+)",)),
+        FieldDefinition("commodity", "Commodity", (r"commodity\s*[:#]?\s*(.+)", r"product\s*[:#]?\s*(.+)")),
+        FieldDefinition("quantity", "Quantity", (r"quantity\s*[:#]?\s*([A-Z0-9,.\- ]+)",)),
+        FieldDefinition("price", "Price", (r"price\s*[:#]?\s*([$A-Z0-9,.\-\/ ]+)",)),
+        FieldDefinition("delivery_start", "Delivery Start", (r"delivery\s*start\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("delivery_end", "Delivery End", (r"delivery\s*end\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+    ),
+    "PURCHASE_ORDER": (
+        FieldDefinition(
+            "purchase_order_number",
+            "Purchase Order Number",
+            (
+                r"purchase\s*order\s*(?:number|no\.?|#)\s*[:#]?\s*([A-Z0-9\-\/]+)",
+                r"\bpo\s*(?:number|no\.?|#)\s*[:#]?\s*([A-Z0-9\-\/]+)",
+                r"\bp\.?o\.?\s*(?:number|no\.?|#)\s*[:#]?\s*([A-Z0-9\-\/]+)",
+            ),
+        ),
+        FieldDefinition("order_date", "Order Date", (r"(?:purchase\s*)?order\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("buyer", "Buyer", (r"buyer\s*[:#]?\s*(.+)",)),
+        FieldDefinition("seller", "Seller", (r"seller\s*[:#]?\s*(.+)", r"(?:vendor|supplier)\s*[:#]?\s*(.+)")),
+        FieldDefinition("counterparty", "Counterparty", (r"counterparty\s*[:#]?\s*(.+)",)),
+        FieldDefinition("commodity", "Commodity", (r"commodity\s*[:#]?\s*(.+)", r"product\s*[:#]?\s*(.+)")),
+        FieldDefinition("quantity", "Quantity", (r"quantity\s*[:#]?\s*([A-Z0-9,.\- ]+)",)),
+        FieldDefinition("unit_price", "Unit Price", (r"(?:unit\s*)?price\s*[:#]?\s*([$A-Z0-9,.\-\/ ]+)",)),
+        FieldDefinition("delivery_start", "Delivery Start", (r"delivery\s*start\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("delivery_end", "Delivery End", (r"delivery\s*end\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("delivery_location", "Delivery Location", (r"delivery\s*(?:location|point|port)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("vessel_name", "Vessel Name", (r"vessel\s*(?:name)?\s*[:#]?\s*(.+)",)),
+    ),
+    "SALES_ORDER": (
+        FieldDefinition(
+            "sales_order_number",
+            "Sales Order Number",
+            (
+                r"sales\s*order\s*(?:number|no\.?|#)\s*[:#]?\s*([A-Z0-9\-\/]+)",
+                r"\bso\s*(?:number|no\.?|#)\s*[:#]?\s*([A-Z0-9\-\/]+)",
+                r"\bs\.?o\.?\s*(?:number|no\.?|#)\s*[:#]?\s*([A-Z0-9\-\/]+)",
+            ),
+        ),
+        FieldDefinition("order_date", "Order Date", (r"(?:sales\s*)?order\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition(
+            "buyer",
+            "Buyer",
+            (r"buyer\s*[:#]?\s*(.+)", r"(?:customer(?!\s*[-.]?\s*ref(?:erence)?\.?)|sold\s*to)\s*[:#]?\s*(.+)"),
+        ),
+        FieldDefinition("seller", "Seller", (r"seller\s*[:#]?\s*(.+)",)),
+        FieldDefinition("counterparty", "Counterparty", (r"counterparty\s*[:#]?\s*(.+)",)),
+        FieldDefinition("commodity", "Commodity", (r"commodity\s*[:#]?\s*(.+)", r"product\s*[:#]?\s*(.+)")),
+        FieldDefinition("quantity", "Quantity", (r"quantity\s*[:#]?\s*([A-Z0-9,.\- ]+)",)),
+        FieldDefinition("unit_price", "Unit Price", (r"(?:unit\s*)?price\s*[:#]?\s*([$A-Z0-9,.\-\/ ]+)",)),
+        FieldDefinition("delivery_start", "Delivery Start", (r"delivery\s*start\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("delivery_end", "Delivery End", (r"delivery\s*end\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("delivery_location", "Delivery Location", (r"delivery\s*(?:location|point|port)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("vessel_name", "Vessel Name", (r"vessel\s*(?:name)?\s*[:#]?\s*(.+)",)),
+    ),
     "INVOICE": (
         FieldDefinition("invoice_number", "Invoice Number", (r"invoice\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
         FieldDefinition("invoice_date", "Invoice Date", (r"invoice\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
@@ -93,6 +168,97 @@ FIELD_DEFINITIONS: dict[str, tuple[FieldDefinition, ...]] = {
         FieldDefinition("period_end", "Period End", (r"period\s*end\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
         FieldDefinition("currency", "Currency", (r"currency\s*[:#]?\s*([A-Z]{3})",)),
     ),
+    "PRICE_PUBLICATION": (
+        FieldDefinition(
+            "publication_reference",
+            "Publication Reference",
+            (r"(?:publication|bulletin|assessment)\s*(?:reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",),
+        ),
+        FieldDefinition(
+            "publication_date",
+            "Publication Date",
+            (
+                r"publication\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",
+                r"published\s*(?:on|date)?\s*[:#]?\s*([A-Z0-9,\/\- ]+)",
+            ),
+        ),
+        FieldDefinition(
+            "observation_date",
+            "Observation Date",
+            (
+                r"observation\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",
+                r"price\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",
+                r"assessment\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",
+            ),
+        ),
+        FieldDefinition(
+            "price_index_code",
+            "Price Index Code",
+            (r"price\s*index\s*(?:code|id|identifier)\s*[:#]?\s*([A-Z0-9_\-\/]+)", r"index\s*code\s*[:#]?\s*([A-Z0-9_\-\/]+)"),
+        ),
+        FieldDefinition("source_provider", "Source Provider", (r"(?:source\s*)?(?:provider|publisher)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("source_series_id", "Source Series ID", (r"source\s*series\s*(?:id|identifier)\s*[:#]?\s*([A-Z0-9_.\-\/]+)", r"series\s*(?:id|identifier)\s*[:#]?\s*([A-Z0-9_.\-\/]+)")),
+        FieldDefinition("commodity", "Commodity", (r"commodity\s*[:#]?\s*(.+)", r"product\s*[:#]?\s*(.+)")),
+        FieldDefinition("market", "Market", (r"market\s*[:#]?\s*(.+)",)),
+        FieldDefinition("location", "Location", (r"location\s*[:#]?\s*(.+)",)),
+        FieldDefinition(
+            "price",
+            "Price",
+            (r"^(?:published\s*)?price\s*[:#]\s*([$A-Z0-9,.\-\/ ]+)", r"^assessment\s*price\s*[:#]\s*([$A-Z0-9,.\-\/ ]+)"),
+        ),
+        FieldDefinition("currency", "Currency", (r"currency\s*[:#]?\s*([A-Z]{3})",)),
+        FieldDefinition("unit", "Unit", (r"(?:unit|uom|unit\s*of\s*measure)\s*[:#]?\s*([A-Z0-9\/]+)",)),
+    ),
+    "LETTER_OF_CREDIT": (
+        FieldDefinition(
+            "letter_of_credit_number",
+            "Letter of Credit Number",
+            (
+                r"letter\s+of\s+credit\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",
+                r"\blc\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",
+                r"\bl\/c\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",
+            ),
+        ),
+        FieldDefinition("issue_date", "Issue Date", (r"issue\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("expiry_date", "Expiry Date", (r"(?:expiry|expiration)\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("issuing_bank", "Issuing Bank", (r"issuing\s*bank\s*[:#]?\s*(.+)",)),
+        FieldDefinition("applicant", "Applicant", (r"applicant\s*[:#]?\s*(.+)",)),
+        FieldDefinition("beneficiary", "Beneficiary", (r"beneficiary\s*[:#]?\s*(.+)",)),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("amount", "Amount", (r"(?:amount|credit\s*amount)\s*[:#]?\s*([$A-Z0-9,.\- ]+)",)),
+        FieldDefinition("currency", "Currency", (r"currency\s*[:#]?\s*([A-Z]{3})",)),
+    ),
+    "NOMINATION": (
+        FieldDefinition("nomination_reference", "Nomination Reference", (r"nomination\s*(?:reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("nomination_date", "Nomination Date", (r"nomination\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("flow_date", "Flow Date", (r"(?:flow|gas|movement)\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("delivery_id", "Delivery ID", (r"delivery\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("pipeline_system", "Pipeline System", (r"pipeline\s*(?:system|name)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("contract_number", "Contract Number", (r"contract\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("receipt_location_code", "Receipt Location", (r"receipt\s*(?:location|point)\s*[:#]?\s*([A-Z0-9_\-\/ ]+)",)),
+        FieldDefinition("delivery_location_code", "Delivery Location", (r"delivery\s*(?:location|point)\s*[:#]?\s*([A-Z0-9_\-\/ ]+)",)),
+        FieldDefinition("quantity", "Quantity", (r"quantity\s*[:#]?\s*([A-Z0-9,.\- ]+)",)),
+    ),
+    "CURTAILMENT_NOTICE": (
+        FieldDefinition(
+            "curtailment_notice_number",
+            "Curtailment Notice Number",
+            (r"curtailment\s*notice\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",),
+        ),
+        FieldDefinition("notice_date", "Notice Date", (r"notice\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("effective_start", "Effective Start", (r"effective\s*start\s*[:#]?\s*([A-Z0-9,\/\-: ]+)",)),
+        FieldDefinition("effective_end", "Effective End", (r"effective\s*end\s*[:#]?\s*([A-Z0-9,\/\-: ]+)",)),
+        FieldDefinition("issuing_entity", "Issuing Entity", (r"(?:issuing\s*entity|issuer)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("pipeline_system", "Pipeline System", (r"pipeline\s*(?:system|name)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("facility", "Facility", (r"(?:facility|terminal)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("location", "Location", (r"location\s*[:#]?\s*(.+)",)),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("delivery_id", "Delivery ID", (r"delivery\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("nomination_reference", "Nomination Reference", (r"nomination\s*(?:reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("curtailed_quantity", "Curtailed Quantity", (r"curtailed\s*(?:quantity|volume|amount)\s*[:#]?\s*([A-Z0-9,.\- ]+)",)),
+        FieldDefinition("reason", "Reason", (r"reason\s*[:#]?\s*(.+)",)),
+    ),
     "PIPELINE_STATEMENT": (
         FieldDefinition("statement_number", "Statement Number", (r"statement\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
         FieldDefinition("statement_date", "Statement Date", (r"statement\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
@@ -115,6 +281,33 @@ FIELD_DEFINITIONS: dict[str, tuple[FieldDefinition, ...]] = {
         FieldDefinition("destination", "Destination", (r"(?:destination|delivery)\s*[:#]?\s*(.+)",)),
         FieldDefinition("net_quantity", "Net Quantity", (r"net\s*(?:quantity|volume|weight)\s*[:#]?\s*([A-Z0-9,.\- ]+)",)),
     ),
+    "RAILCAR_TICKET": (
+        FieldDefinition("waybill_number", "Waybill Number", (r"waybill\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("railcar_number", "Railcar Number", (r"rail\s*car\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)", r"railcar\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)")),
+        FieldDefinition("load_date", "Load Date", (r"(?:load|shipment)\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("delivery_id", "Delivery ID", (r"delivery\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("carrier", "Carrier", (r"carrier\s*[:#]?\s*(.+)", r"railroad\s*[:#]?\s*(.+)")),
+        FieldDefinition("carrier_reference", "Carrier Reference", (r"carrier\s*(?:reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("origin", "Origin", (r"(?:origin|ship\s*from)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("destination", "Destination", (r"(?:destination|ship\s*to)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("net_quantity", "Net Quantity", (r"net\s*(?:quantity|volume|weight)\s*[:#]?\s*([A-Z0-9,.\- ]+)",)),
+    ),
+    "DISPATCH_NOTICE": (
+        FieldDefinition("dispatch_number", "Dispatch Number", (r"dispatch\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("dispatch_date", "Dispatch Date", (r"dispatch\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("dispatch_start", "Dispatch Start", (r"dispatch\s*start\s*[:#]?\s*([A-Z0-9,\/\-: ]+)",)),
+        FieldDefinition("dispatch_end", "Dispatch End", (r"dispatch\s*end\s*[:#]?\s*([A-Z0-9,\/\-: ]+)",)),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("delivery_id", "Delivery ID", (r"delivery\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("carrier", "Carrier", (r"carrier\s*[:#]?\s*(.+)",)),
+        FieldDefinition("carrier_reference", "Carrier Reference", (r"carrier\s*(?:reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("asset_reference", "Asset Reference", (r"(?:asset|truck|railcar|unit)\s*(?:reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("origin", "Origin", (r"(?:origin|pickup|source)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("destination", "Destination", (r"(?:destination|delivery|sink)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("quantity", "Quantity", (r"quantity\s*[:#]?\s*([A-Z0-9,.\- ]+)",)),
+        FieldDefinition("instructions", "Instructions", (r"instructions\s*[:#]?\s*(.+)",)),
+    ),
     "BILL_OF_LADING": (
         FieldDefinition(
             "bill_of_lading_number",
@@ -127,6 +320,33 @@ FIELD_DEFINITIONS: dict[str, tuple[FieldDefinition, ...]] = {
         FieldDefinition("load_date", "Load Date", (r"(?:load|shipment)\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
         FieldDefinition("origin", "Origin", (r"(?:origin|load\s+port)\s*[:#]?\s*(.+)",)),
         FieldDefinition("destination", "Destination", (r"(?:destination|discharge\s+port)\s*[:#]?\s*(.+)",)),
+    ),
+    "PACKING_LIST": (
+        FieldDefinition(
+            "packing_list_number",
+            "Packing List Number",
+            (r"packing\s*list\s*(?:number|no\.?|#)\s*[:#]?\s*([A-Z0-9\-\/]+)",),
+        ),
+        FieldDefinition(
+            "delivery_order_number",
+            "Delivery Order Number",
+            (r"delivery\s*order\s*(?:number|no\.?|#)\s*[:#]?\s*([A-Z0-9\-\/]+)",),
+        ),
+        FieldDefinition("packing_date", "Packing List Date", (r"^\s*(?:packing\s*list\s*)?date\s*[:#]?\s*([A-Z0-9,\/\-. ]+)",)),
+        FieldDefinition("loading_date", "Loading Date", (r"loading\s*date\s*[:#]?\s*([A-Z0-9,\/\-. ]+)",)),
+        FieldDefinition("delivery_date", "Delivery Date", (r"delivery\s*date\s*[:#]?\s*([A-Z0-9,\/\-. ]+)",)),
+        FieldDefinition(
+            "customer_reference",
+            "Customer Reference",
+            (r"(?:cust\.?|customer)\s*ref(?:erence)?\s*(?:number|no\.?)?\s*[:#]?\s*([A-Z0-9\-\/]+)",),
+        ),
+        FieldDefinition("carrier", "Carrier", (r"(?:carrier|haulier)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("shipper", "Shipper", (r"shipper\s*[:#]?\s*(.+)",)),
+        FieldDefinition("consignee", "Consignee", (r"(?:consignee|ship\s*to|deliver\s*to)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("product", "Product", (r"(?:product|commodity|goods)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("gross_weight", "Gross Weight", (r"gross\s*w(?:eigh)?t\.?\s*[:#]?\s*([A-Z0-9,.\- ]+)",)),
+        FieldDefinition("net_weight", "Net Weight", (r"net\s*w(?:eigh)?t\.?\s*[:#]?\s*([A-Z0-9,.\- ]+)",)),
+        FieldDefinition("tare_weight", "Tare Weight", (r"tare\s*w(?:eigh)?t\.?\s*[:#]?\s*([A-Z0-9,.\- ]+)",)),
     ),
     "DELIVERY_CONFIRMATION": (
         FieldDefinition(
@@ -141,6 +361,18 @@ FIELD_DEFINITIONS: dict[str, tuple[FieldDefinition, ...]] = {
         FieldDefinition("origin", "Origin", (r"(?:origin|pickup)\s*[:#]?\s*(.+)",)),
         FieldDefinition("destination", "Destination", (r"(?:destination|delivery)\s*[:#]?\s*(.+)",)),
     ),
+    "NOTICE_OF_READINESS": (
+        FieldDefinition("notice_number", "Notice Number", (r"notice\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("notice_date", "Notice Date", (r"notice\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("notice_time", "Notice Time", (r"notice\s*time\s*[:#]?\s*([A-Z0-9:.\- ]+)",)),
+        FieldDefinition("delivery_id", "Delivery ID", (r"delivery\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("vessel_name", "Vessel Name", (r"vessel\s*(?:name)?\s*[:#]?\s*(.+)",)),
+        FieldDefinition("voyage_number", "Voyage Number", (r"voyage\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("load_port", "Load Port", (r"load\s*port\s*[:#]?\s*(.+)",)),
+        FieldDefinition("discharge_port", "Discharge Port", (r"discharge\s*port\s*[:#]?\s*(.+)",)),
+        FieldDefinition("eta", "ETA", (r"(?:eta|estimated\s*time\s*of\s*arrival)\s*[:#]?\s*([A-Z0-9,\/\-: ]+)",)),
+    ),
     "CERTIFICATE_OF_ANALYSIS": (
         FieldDefinition(
             "certificate_number",
@@ -153,6 +385,60 @@ FIELD_DEFINITIONS: dict[str, tuple[FieldDefinition, ...]] = {
         FieldDefinition("delivery_id", "Delivery ID", (r"delivery\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
         FieldDefinition("lot_number", "Lot Number", (r"lot\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
         FieldDefinition("product", "Product", (r"product\s*[:#]?\s*(.+)",)),
+    ),
+    "CERTIFICATE_OF_ORIGIN": (
+        FieldDefinition(
+            "certificate_number",
+            "Certificate Number",
+            (r"certificate\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",),
+        ),
+        FieldDefinition("issue_date", "Issue Date", (r"issue\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("origin_country", "Origin Country", (r"(?:origin\s*country|country\s*of\s*origin)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("product", "Product", (r"product\s*[:#]?\s*(.+)", r"commodity\s*[:#]?\s*(.+)")),
+        FieldDefinition("shipper", "Shipper", (r"shipper\s*[:#]?\s*(.+)",)),
+        FieldDefinition("consignee", "Consignee", (r"consignee\s*[:#]?\s*(.+)",)),
+        FieldDefinition(
+            "bill_of_lading_number",
+            "Bill of Lading Number",
+            (r"bill\s+of\s+lading\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",),
+        ),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("delivery_id", "Delivery ID", (r"delivery\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+    ),
+    "INSPECTION_REPORT": (
+        FieldDefinition(
+            "inspection_report_number",
+            "Inspection Report Number",
+            (r"inspection\s*report\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)", r"report\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)"),
+        ),
+        FieldDefinition("inspection_date", "Inspection Date", (r"inspection\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("delivery_id", "Delivery ID", (r"delivery\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition(
+            "bill_of_lading_number",
+            "Bill of Lading Number",
+            (r"bill\s+of\s+lading\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",),
+        ),
+        FieldDefinition("inspector", "Inspector", (r"(?:inspector|inspection\s*company)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("location", "Location", (r"location\s*[:#]?\s*(.+)",)),
+        FieldDefinition("vessel_name", "Vessel Name", (r"vessel\s*(?:name)?\s*[:#]?\s*(.+)",)),
+        FieldDefinition("product", "Product", (r"product\s*[:#]?\s*(.+)", r"commodity\s*[:#]?\s*(.+)")),
+    ),
+    "FORCE_MAJEURE_NOTICE": (
+        FieldDefinition(
+            "force_majeure_notice_number",
+            "Force Majeure Notice Number",
+            (r"force\s*majeure\s*notice\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",),
+        ),
+        FieldDefinition("notice_date", "Notice Date", (r"notice\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("counterparty", "Counterparty", (r"counterparty\s*[:#]?\s*(.+)",)),
+        FieldDefinition("contract_number", "Contract Number", (r"contract\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("delivery_id", "Delivery ID", (r"delivery\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("event_start", "Event Start", (r"event\s*start\s*[:#]?\s*([A-Z0-9,\/\-: ]+)",)),
+        FieldDefinition("event_end", "Event End", (r"event\s*end\s*[:#]?\s*([A-Z0-9,\/\-: ]+)",)),
+        FieldDefinition("affected_location", "Affected Location", (r"affected\s*location\s*[:#]?\s*(.+)",)),
+        FieldDefinition("event_description", "Event Description", (r"(?:event\s*description|description)\s*[:#]?\s*(.+)",)),
     ),
     "QUALITY_STATEMENT": (
         FieldDefinition("statement_number", "Statement Number", (r"statement\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
@@ -179,6 +465,58 @@ FIELD_DEFINITIONS: dict[str, tuple[FieldDefinition, ...]] = {
         FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
         FieldDefinition("counterparty", "Counterparty", (r"counterparty\s*[:#]?\s*(.+)",)),
         FieldDefinition("product", "Product", (r"product\s*[:#]?\s*(.+)",)),
+    ),
+    "DEMURRAGE_CLAIM": (
+        FieldDefinition("claim_number", "Claim Number", (r"claim\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("claim_date", "Claim Date", (r"claim\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("delivery_id", "Delivery ID", (r"delivery\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition(
+            "bill_of_lading_number",
+            "Bill of Lading Number",
+            (r"bill\s+of\s+lading\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",),
+        ),
+        FieldDefinition("vessel_name", "Vessel Name", (r"vessel\s*(?:name)?\s*[:#]?\s*(.+)",)),
+        FieldDefinition("counterparty", "Counterparty", (r"counterparty\s*[:#]?\s*(.+)",)),
+        FieldDefinition("laytime_start", "Laytime Start", (r"laytime\s*start\s*[:#]?\s*([A-Z0-9,\/\-: ]+)",)),
+        FieldDefinition("laytime_end", "Laytime End", (r"laytime\s*end\s*[:#]?\s*([A-Z0-9,\/\-: ]+)",)),
+        FieldDefinition("claim_amount", "Claim Amount", (r"claim\s*amount\s*[:#]?\s*([$A-Z0-9,.\- ]+)", r"total\s*claim\s*[:#]?\s*([$A-Z0-9,.\- ]+)")),
+        FieldDefinition("currency", "Currency", (r"currency\s*[:#]?\s*([A-Z]{3})",)),
+    ),
+    "PAYMENT_ADVICE": (
+        FieldDefinition("payment_reference", "Payment Reference", (r"payment\s*(?:reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)", r"remittance\s*(?:reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)")),
+        FieldDefinition("advice_date", "Advice Date", (r"advice\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)", r"payment\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)")),
+        FieldDefinition("invoice_number", "Invoice Number", (r"invoice\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("payer", "Payer", (r"payer\s*[:#]?\s*(.+)",)),
+        FieldDefinition("payee", "Payee", (r"payee\s*[:#]?\s*(.+)",)),
+        FieldDefinition("account", "Account", (r"account\s*[:#]?\s*(.+)",)),
+        FieldDefinition("amount", "Amount", (r"(?:payment\s*)?amount\s*[:#]?\s*([$A-Z0-9,.\- ]+)",)),
+        FieldDefinition("currency", "Currency", (r"currency\s*[:#]?\s*([A-Z]{3})",)),
+    ),
+    "OUTAGE_NOTICE": (
+        FieldDefinition("outage_number", "Outage Number", (r"outage\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("notice_date", "Notice Date", (r"notice\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("facility", "Facility", (r"(?:facility|terminal|plant|station)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("pipeline_system", "Pipeline System", (r"pipeline\s*(?:system|name)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("asset_reference", "Asset Reference", (r"(?:asset|unit|line|equipment)\s*(?:reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("outage_start", "Outage Start", (r"outage\s*start\s*[:#]?\s*([A-Z0-9,\/\-: ]+)",)),
+        FieldDefinition("outage_end", "Outage End", (r"outage\s*end\s*[:#]?\s*([A-Z0-9,\/\-: ]+)",)),
+        FieldDefinition("location", "Location", (r"location\s*[:#]?\s*(.+)",)),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("delivery_id", "Delivery ID", (r"delivery\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("reason", "Reason", (r"reason\s*[:#]?\s*(.+)",)),
+    ),
+    "STORAGE_STATEMENT": (
+        FieldDefinition("statement_number", "Statement Number", (r"statement\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("statement_date", "Statement Date", (r"statement\s*date\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("facility", "Facility", (r"(?:facility|terminal|storage\s*location)\s*[:#]?\s*(.+)",)),
+        FieldDefinition("account", "Account", (r"account\s*[:#]?\s*(.+)",)),
+        FieldDefinition("period_start", "Period Start", (r"period\s*start\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("period_end", "Period End", (r"period\s*end\s*[:#]?\s*([A-Z0-9,\/\- ]+)",)),
+        FieldDefinition("product", "Product", (r"product\s*[:#]?\s*(.+)", r"commodity\s*[:#]?\s*(.+)")),
+        FieldDefinition("trade_id", "Trade ID", (r"trade\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("delivery_id", "Delivery ID", (r"delivery\s*(?:id|reference|number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
+        FieldDefinition("inventory_quantity", "Inventory Quantity", (r"inventory\s*(?:quantity|balance)\s*[:#]?\s*([A-Z0-9,.\- ]+)",)),
     ),
     "SETTLEMENT_STATEMENT": (
         FieldDefinition("statement_number", "Statement Number", (r"statement\s*(?:number|no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",)),
@@ -207,62 +545,53 @@ FIELD_DEFINITIONS: dict[str, tuple[FieldDefinition, ...]] = {
 
 CLASSIFICATION_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("HAZARDOUS_CARGO_DOCUMENTATION", ("hazardous cargo", "dangerous goods", "safety data sheet", "material safety data sheet", "msds")),
+    ("CERTIFICATE_OF_ORIGIN", ("certificate of origin", "country of origin", "origin certificate")),
+    ("FORCE_MAJEURE_NOTICE", ("force majeure notice", "force majeure event", "notice of force majeure")),
     ("DELIVERY_CONFIRMATION", ("delivery confirmation", "proof of delivery", "pod")),
+    ("NOTICE_OF_READINESS", ("notice of readiness", "nor tendered", "ready to load", "ready to discharge")),
+    ("CURTAILMENT_NOTICE", ("curtailment notice", "curtailed quantity", "flow curtailment", "capacity curtailment")),
+    ("DISPATCH_NOTICE", ("dispatch notice", "dispatch instruction", "dispatch number", "dispatch date")),
+    ("DEMURRAGE_CLAIM", ("demurrage claim", "laytime claim", "demurrage invoice", "laytime calculation")),
     ("BROKER_CONFIRMATION", ("broker confirmation", "execution confirmation", "clearing confirmation")),
     ("TRADE_CONFIRMATION", ("trade confirmation", "confirmation number", "confirmation no")),
     ("TRADE_CONTRACT", ("purchase and sale agreement", "sales contract", "trade contract", "master agreement")),
+    ("DEAL_RECAP", ("deal recap", "trade recap", "commercial recap", "recap date")),
+    ("PURCHASE_ORDER", ("purchase order", "purchase order number", "purchase order no", "po number", "po no", "p.o. number")),
+    ("SALES_ORDER", ("sales order", "sales order number", "sales order no", "so number", "so no", "s.o. number")),
     ("BROKER_STATEMENT", ("broker statement", "futures statement", "clearing statement", "account statement")),
+    ("PRICE_PUBLICATION", ("price publication", "daily price bulletin", "price bulletin", "published index price", "price assessment")),
+    ("LETTER_OF_CREDIT", ("letter of credit", "standby letter of credit", "documentary credit", "lc number", "l/c number")),
+    ("NOMINATION", ("nomination", "nomination reference", "gas nomination", "pipeline nomination")),
     ("PIPELINE_STATEMENT", ("pipeline statement", "nomination statement", "allocation statement", "pipeline allocation")),
+    ("RAILCAR_TICKET", ("railcar ticket", "rail car ticket", "waybill number", "railcar number")),
     ("TRUCK_TICKET", ("truck ticket", "load ticket", "unload ticket")),
     ("INVOICE", ("invoice", "invoice number", "invoice no", "amount due")),
+    ("PAYMENT_ADVICE", ("payment advice", "remittance advice", "payment reference", "remittance reference")),
+    ("PACKING_LIST", ("packing list", "packing slip", "quantity and description of goods")),
     ("BILL_OF_LADING", ("bill of lading", "bol number", "bill of lading number")),
-    ("CERTIFICATE_OF_ANALYSIS", ("certificate of analysis", "coa", "certificate number")),
+    ("CERTIFICATE_OF_ANALYSIS", ("certificate of analysis", "coa")),
+    ("INSPECTION_REPORT", ("inspection report", "inspection certificate", "inspector report")),
     ("QUALITY_STATEMENT", ("quality statement", "quality certificate")),
     ("SAMPLING_ANALYSIS", ("sampling analysis", "sample analysis", "laboratory analysis", "lab report")),
     ("QUALITY_SPECIFICATION", ("quality specification", "product specification", "specification sheet")),
+    ("OUTAGE_NOTICE", ("outage notice", "planned outage", "unplanned outage", "maintenance outage")),
+    ("STORAGE_STATEMENT", ("storage statement", "inventory statement", "terminal statement", "storage account statement")),
     ("SETTLEMENT_STATEMENT", ("settlement statement", "statement of settlement")),
     ("WEIGH_TICKET", ("weigh ticket", "scale ticket", "gross weight", "net weight")),
-    ("TRADE_COMMUNICATION", ("trade recap", "deal recap", "commercial recap", "trade communication")),
+    ("TRADE_COMMUNICATION", ("trade communication", "email thread", "message thread", "commercial communication")),
 )
 
 
 def classify_document_page(filename: str, raw_text: str | None) -> PageClassification:
-    normalized_filename = normalize_for_matching(filename)
-    normalized_text = normalize_for_matching(raw_text or "")
-    searchable = "\n".join(part for part in (normalized_filename, normalized_text) if part)
+    from .document_classification_scoring import score_document_page_classification
 
-    for document_kind, keywords in CLASSIFICATION_RULES:
-        for keyword in keywords:
-            if keyword in normalized_text:
-                return PageClassification(
-                    document_kind=document_kind,
-                    document_subtype=None,
-                    confidence=0.96,
-                    matched_by=f"text:{keyword}",
-                )
-        for keyword in keywords:
-            if keyword in normalized_filename:
-                return PageClassification(
-                    document_kind=document_kind,
-                    document_subtype=None,
-                    confidence=0.72,
-                    matched_by=f"filename:{keyword}",
-                )
-
-    if "statement" in searchable:
-        return PageClassification(
-            document_kind="OTHER",
-            document_subtype="STATEMENT",
-            confidence=0.45,
-            matched_by="fallback:statement",
-        )
-
-    return PageClassification(
-        document_kind="UNKNOWN",
-        document_subtype=None,
-        confidence=0.05,
-        matched_by="fallback:unknown",
+    assessment = score_document_page_classification(
+        filename=filename,
+        raw_text=raw_text,
+        text_source="pdf_text",
+        table_blocks=extract_document_table_blocks(raw_text),
     )
+    return assessment.classification
 
 
 def extract_document_header_fields(

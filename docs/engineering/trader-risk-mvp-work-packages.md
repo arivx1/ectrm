@@ -6,6 +6,8 @@ Deliver the first trustworthy trader and risk-manager slice from the business
 use-case roadmap:
 
 - identify opportunity and volatility signals worth reviewing
+- identify simple product or quality, time, and geographic arbitrage signals
+  worth reviewing
 - explain residual exposure and simple long/short offsets
 - draft hedge or book-flattening recommendations
 - enrich pre-trade scenarios with evidence, freshness, and reviewer focus
@@ -19,6 +21,7 @@ This is an MVP for decision support, not autonomous trading.
 
 - [Business Use Case Roadmap](./business-use-case-roadmap.md)
 - [Pre-Trade Design](./pre-trade-design.md)
+- [Arbitrage Detection Design](./arbitrage-detection-design.md)
 - [Trading Source Roadmap](./trading-source-roadmap.md)
 - [Agent Role Catalog](./agent-role-catalog.md)
 - [Human-Agent Authority Matrix](./human-agent-authority-matrix.md)
@@ -92,34 +95,47 @@ The MVP should use or prepare these durable work objects:
 | --- | --- | --- |
 | Pre-trade scenario | Existing | Extend draft fields only after schema and handoff implications are clear. |
 | Pre-trade review item | Existing | Primary human review object before trade capture. |
-| Market opportunity | Planned | Start as recommendation output; promote to first-class object only if humans reuse it. |
-| Netting set | Planned | Start as deterministic draft output tied to positions and trade legs. |
-| Hedge recommendation | Planned | Start as draft output with rejected alternatives and stop conditions. |
-| Risk scenario | Planned | Later stress/scenario object once hedge and netting rules stabilize. |
+| Market opportunity | Review-draft object implemented | Governance promotion signals can create shared market-opportunity review drafts tied to approved review and recommendation evidence. No trade, pricing, offer, order, execution, credit, risk-limit, or external-commitment authority. |
+| Netting set | Review-draft object implemented | Governance promotion signals can create shared review-only netting-set drafts tied to recommendation evidence. No legal, settlement, transfer, or booking authority. |
+| Hedge recommendation | Review-draft object implemented | Governance promotion signals can create shared hedge-recommendation review drafts tied to the deterministic decision table. No order, execution, hedge-accounting designation, margin, or treasury authority. |
+| Risk scenario | Review-draft object implemented | Governance promotion signals can create shared risk-scenario review drafts tied to approved review and recommendation evidence. No stress-limit, policy, trade, hedge, credit, or external-commitment authority. |
+| Promotion outcome metrics | Implemented | Shared read-only metrics summarize promoted draft creation, source-evidence reuse, retirement, source-review rejection, booked-trade merge, and blocking missing-evidence outcomes. No promotion, approval, trade, hedge, policy, credit, or external-commitment authority. |
 
 ## Delivery Order
 
 ### Wave 0: Contract And Evidence Foundation
 
-1. TRMVP-01 recommendation output contract
-2. TRMVP-02 source freshness and evidence normalization
+1. TRMVP-01 recommendation output contract - implemented
+2. TRMVP-02 source freshness and evidence normalization - implemented
 
 ### Wave 1: First Trader/Risk Slice
 
-3. TRMVP-03 opportunity and residual exposure triage
-4. TRMVP-04 pre-trade scenario enrichment
-5. TRMVP-05 pre-trade workspace integration
+3. TRMVP-03 opportunity, arbitrage, and residual exposure triage - implemented
+4. TRMVP-04 pre-trade scenario enrichment - implemented
+5. TRMVP-05 pre-trade workspace integration - implemented
 
 ### Wave 2: Netting And Hedge Depth
 
-6. TRMVP-06 long/short netting draft rules
-7. TRMVP-07 hedge instrument decision table
-8. TRMVP-08 risk workspace integration
+6. TRMVP-06 long/short netting draft rules - implemented
+7. TRMVP-07 hedge instrument decision table - implemented
+8. TRMVP-08 risk workspace integration - implemented
 
 ### Wave 3: Agent And Regression Coverage
 
-9. TRMVP-09 trader/risk assistant evals
-10. TRMVP-10 browser smoke for review-to-capture handoff
+9. TRMVP-09 trader/risk assistant evals - implemented
+10. TRMVP-10 browser smoke for review-to-capture handoff - implemented
+
+### Wave 4: Reviewer-Reuse Promotion Signals
+
+11. TRMVP-11 pre-trade governance promotion signals - implemented
+12. TRMVP-12 pre-trade netting-set review drafts - implemented
+13. TRMVP-13 pre-trade hedge-recommendation review drafts - implemented
+14. TRMVP-14 pre-trade risk-scenario review drafts - implemented
+15. TRMVP-15 pre-trade market-opportunity review drafts - implemented
+
+### Wave 5: Outcome Measurement
+
+16. TRMVP-16 promoted-draft review-outcome metrics - implemented
 
 ## Shared Definition Of Done
 
@@ -136,6 +152,8 @@ Each work package is done only when:
 - docs are updated when contracts, rules, or authority boundaries change
 
 ## TRMVP-01: Recommendation Output Contract
+
+Status: implemented.
 
 ### Priority
 
@@ -188,6 +206,8 @@ netting, and hedge-draft details without collapsing them into freeform text.
 
 ## TRMVP-02: Source Freshness And Evidence Normalization
 
+Status: implemented.
+
 ### Priority
 
 P0
@@ -235,7 +255,9 @@ across positions, marks, market context, weather, credit, and option exposure.
 - service tests for stale, missing, degraded, and healthy source inputs
 - web tests for freshness labels and missing-evidence display
 
-## TRMVP-03: Opportunity And Residual Exposure Triage
+## TRMVP-03: Opportunity, Arbitrage, And Residual Exposure Triage
+
+Status: implemented.
 
 ### Priority
 
@@ -248,20 +270,29 @@ M
 ### Outcome
 
 The system can draft a first trader/risk triage result that explains why a
-scenario may be interesting and what residual exposure remains.
+scenario or simple arbitrage candidate may be interesting and what residual
+exposure remains.
 
 ### Scope
 
 - add deterministic triage rules for:
   - target price versus latest mark gap
+  - product or quality spreads net of conversion price
+  - calendar or time spreads net of storage price
+  - geographic spreads net of transportation price
   - current net position impact
   - related active trade count
   - weather or market freshness watch conditions
   - credit readiness
+- model simple buy and sell states plus typed transformation edges for the
+  narrow MVP commodity set
+- use ask prices when buying and bid prices when selling whenever executable
+  quotes are available
 - calculate whether the draft direction appears to reduce or deepen current
   exposure
 - emit a reviewer-facing opportunity category such as:
   - `MARK_GAP`
+  - `ARBITRAGE`
   - `EXPOSURE_OFFSET`
   - `RISK_REDUCTION`
   - `WAIT_FOR_DATA`
@@ -272,11 +303,14 @@ scenario may be interesting and what residual exposure remains.
 - statistical alpha ranking
 - execution routing
 - automated watchlist persistence
+- advanced optimization beyond first-pass cheapest-path search
 
 ### Acceptance Criteria
 
 - a BUY or SELL draft can explain whether it offsets or deepens current
   exposure
+- a simple product, time, or geographic arbitrage candidate can show gross
+  spread, bridge cost, and net opportunity in deterministic fields
 - a material target-versus-mark gap is shown as an opportunity driver
 - missing mark, position, or credit evidence downgrades the recommendation
 - output is deterministic for the same inputs
@@ -285,6 +319,8 @@ scenario may be interesting and what residual exposure remains.
 
 - focused service tests for offsetting, deepening, missing mark, stale source,
   and credit-block scenarios
+- focused service tests for conversion-cost, storage-cost, transport-cost, and
+  unsupported-mapping scenarios
 
 ## TRMVP-04: Pre-Trade Scenario Enrichment
 
@@ -331,7 +367,18 @@ manual re-entry when the user moves from analysis to review and capture.
 - focused API tests for create/update compatibility
 - web tests for save, reopen, and handoff behavior
 
+### Implementation Status
+
+Implemented. Saved scenarios and shared review items now accept optional
+typed enrichment for opportunity category, hedge intent, residual exposure,
+source freshness, reviewer focus, and recommendation run reference fields.
+Review creation derives enrichment from an attached recommendation run when
+available, falls back to source scenario enrichment otherwise, and the approved
+review-to-Trade-Capture workflow note includes the enriched context.
+
 ## TRMVP-05: Pre-Trade Workspace Integration
+
+Status: implemented.
 
 ### Priority
 
@@ -372,7 +419,19 @@ draft context in a compact review flow.
 - focused web tests for recommendation rendering and review-item creation
 - browser smoke candidate for recommendation-to-capture handoff
 
+### Implementation Status
+
+Implemented. The Pre-Trade recommendation panel now builds a compact
+workspace brief from deterministic recommendation analysis, with stance,
+opportunity, residual exposure, source freshness, missing evidence, hedge
+draft, reviewer focus, and save/review/capture actions visible together.
+Manual scenario entry remains available when recommendation analysis is
+missing, and the readiness panel uses responsive grid and action-row styling
+so the handoff path stays usable on narrow screens.
+
 ## TRMVP-06: Long/Short Netting Draft Rules
+
+Status: implemented.
 
 ### Priority
 
@@ -419,7 +478,20 @@ trade groups appear offsettable and what residual remains.
 - service tests for exact match, partial offset, unit mismatch, location
   mismatch, and no-match cases
 
+### Implementation Status
+
+Implemented. Pre-trade recommendations now emit deterministic
+`netting_candidates` with gross exposure, offset quantity, residual exposure,
+legacy matched/residual quantities, source refs, matching constraints, and
+explicit rejection reasons. The first-pass rule accepts opposing long/short
+drafts when commodity, book or allowed book group, unit, location, delivery
+window, price index, and pricing type evidence are compatible. It rejects
+same-side drafts, missing open positions, and available mismatch evidence
+without mutating positions, trades, reviews, or scenarios.
+
 ## TRMVP-07: Hedge Instrument Decision Table
+
+Status: implemented.
 
 ### Priority
 
@@ -470,7 +542,23 @@ options, swaps, physical offsets, or no hedge should be reviewed.
 - assistant evals to ensure agents do not claim they executed or guaranteed a
   hedge
 
+### Implementation Status
+
+Implemented. Pre-trade recommendations now draft hedge-review instruments from
+an explicit deterministic decision table over residual delta, optionality,
+basis risk, tenor, liquidity availability, volatility evidence freshness,
+credit constraints, settlement constraints, hedge policy, curve freshness, and
+hedge-accounting clarity. The service emits a recommended instrument type,
+decision key, decision factors, policy stops, source refs, and rejected
+alternatives. Physical-offset recommendations reuse the typed netting result;
+option recommendations require fresh option/volatility evidence; linear
+residuals route to futures or swaps when policy and curve evidence allow; flat,
+stale, unsupported, or blocked cases return `NO_HEDGE`, `WAIT_FOR_DATA`, or
+`ESCALATE` without execution authority.
+
 ## TRMVP-08: Risk Workspace Integration
+
+Status: implemented.
 
 ### Priority
 
@@ -509,7 +597,20 @@ the risk-oriented workspace without starting in Trade Capture.
 
 - focused web tests for risk triage rendering and pre-trade handoff
 
+### Implementation Status
+
+Implemented. The Risk workspace now includes a Pre-Trade Risk Triage tile that
+derives review-only offset candidates from live linear positions, related
+active trades, and latest price-index marks. Each candidate keeps source
+position, source trade, mark freshness, draft side, target volume, and manual
+review guardrails visible before staging. Creating a review from Risk writes
+through the existing typed Pre-Trade scenario, recommendation-run, and review
+item APIs, enriches the review from the deterministic recommendation run, and
+keeps trade capture and hedge execution out of scope.
+
 ## TRMVP-09: Trader/Risk Assistant Evals
+
+Status: implemented.
 
 ### Priority
 
@@ -556,7 +657,20 @@ agent does not over-claim authority or certainty.
 
 - `make api-assistant-evals`
 
+### Implementation Status
+
+Implemented. The assistant eval harness now verifies pre-trade recommendation
+tool previews and the structured payload fields handed back to the model
+runtime. Trader/risk eval cases cover fresh opportunity explanation, missing
+source fallback with policy stops, netting explanation without mutation, hedge
+recommendation drafting without execution, and direct refusal to book or
+execute a hedge. The Market Research, Pre-Trade Structuring, and Risk Sentinel
+role coverage labels now include the trader/risk recommendation authority
+boundary.
+
 ## TRMVP-10: Browser Smoke For Review-To-Capture Handoff
+
+Status: implemented.
 
 ### Priority
 
@@ -596,15 +710,465 @@ protected by browser smoke coverage.
 
 - `make web-smoke-test`
 
+### Implementation Status
+
+Implemented. The browser smoke harness now seeds deterministic pre-trade
+analysis, recommendation-run, review, governance, drift-check, and workflow-note
+API behavior. Smoke coverage opens Pre-Trade, reviews stale source evidence,
+submits and approves a review item, opens the approved review in Trade Capture,
+books the ticket, and asserts the confirmation workflow note preserves the
+approved review context. A narrow-viewport smoke check verifies the primary
+`Submit For Review` action remains visible near the recommendation brief.
+
+## TRMVP-11: Pre-Trade Governance Promotion Signals
+
+Status: implemented.
+
+### Priority
+
+P1
+
+### Size
+
+M
+
+### Outcome
+
+Governance can show whether repeated human review behavior is creating enough
+evidence to promote a draft netting set, hedge recommendation, or Risk triage
+candidate into a durable work object.
+
+### Scope
+
+- add read-only promotion candidates to the pre-trade governance summary,
+  items payload, and audit export
+- derive candidates deterministically from visible review reuse, approved or
+  booked reviews, linked recommendation runs, override decisions, supported
+  netting matches, hedge decision-table output, and Risk workspace triage notes
+- preserve stop reasons when promotion evidence is incomplete, overridden, or
+  only partially supported
+- surface promotion signals in the Pre-Trade governance tile without creating
+  netting sets, hedge orders, risk scenarios, or trade mutations
+
+### Out Of Scope
+
+- durable netting-set records
+- durable hedge-recommendation workflow objects
+- first-class risk scenario records
+- hedge execution, booking automation, or policy override automation
+
+### Acceptance Criteria
+
+- governance summary exposes promotion-signal counts and top candidate type
+- governance items expose candidate type, status, score, evidence counts,
+  latest review/run ids, rationale, stop reasons, and sample ids
+- audit export includes promotion-candidate rows for reviewability
+- Pre-Trade users can drill into promotion signals separately from review
+  queues and stale evidence
+
+### Verification
+
+- `./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api`
+- focused web type/build checks when the workspace contract changes
+
+### Implementation Status
+
+Implemented. The governance service now emits read-only promotion candidates
+for netting sets, hedge recommendations, Risk scenarios, and market
+opportunities. Candidates remain review-only signals: rejected reviews do not
+count, overrides hold candidates in watch status, partial netting evidence
+preserves stop reasons, market-opportunity signals are limited to supported
+mark-gap or arbitrage recommendation evidence, and no business records are
+created by the signal.
+
+## TRMVP-12: Pre-Trade Netting-Set Review Drafts
+
+Status: implemented.
+
+### Priority
+
+P1
+
+### Size
+
+M
+
+### Outcome
+
+The strongest reviewer-approved netting-set promotion signal can be promoted
+into a durable, shared, review-only netting-set draft with source evidence and
+stop reasons preserved.
+
+### Scope
+
+- add a typed backend service for pre-trade netting-set review drafts
+- create drafts only from a current `NETTING_SET` governance promotion signal
+  with a linked recommendation run and supported `EXACT` or `PARTIAL` netting
+  candidates
+- persist the source promotion score, evidence counts, latest ids, sample ids,
+  rationale, stop reasons, scenario draft, and netting candidates
+- keep creation idempotent for the same latest review/run source evidence
+- expose list and promote-from-governance API endpoints
+- surface existing drafts in the Pre-Trade governance promotion drill-through
+
+### Out Of Scope
+
+- legal netting agreement decisions
+- settlement netting
+- position transfers, book-flattening trades, trade amendments, or trade
+  booking
+- hedge execution or hedge-order workflow
+- automatic approval of review items or policy overrides
+
+### Acceptance Criteria
+
+- `GET /pretrade/netting-sets` lists shared review drafts
+- `POST /pretrade/netting-sets/from-promotion` creates or returns the review
+  draft for the current netting-set promotion signal
+- unsupported or missing promotion evidence returns a reviewable error instead
+  of creating a weak draft
+- the Pre-Trade workspace shows netting-set drafts alongside promotion signals
+- agents and UI copy preserve the boundary between review-draft netting and
+  legal, settlement, or execution authority
+
+### Verification
+
+- `./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api`
+- `npm --prefix apps/web run test -- preTradeApi.test.ts`
+- `npm --prefix apps/web run build`
+- `npm --prefix apps/web run lint`
+
+### Implementation Status
+
+Implemented. A governance `NETTING_SET` promotion signal can now create a
+shared `REVIEW_DRAFT` netting-set work object that preserves the linked
+recommendation run, latest review id, source score, source evidence summary,
+rationale, stop reasons, scenario draft, and supported netting candidates. The
+promotion path is idempotent for the same latest run/review evidence, visible
+in the Pre-Trade governance tile, and remains review-only with no trade,
+position, hedge, legal-netting, or settlement-netting mutation authority.
+
+## TRMVP-13: Pre-Trade Hedge-Recommendation Review Drafts
+
+Status: implemented.
+
+### Priority
+
+P1
+
+### Size
+
+M
+
+### Outcome
+
+The strongest reviewer-approved hedge-recommendation promotion signal can be
+promoted into a durable, shared, review-only hedge workflow draft with source
+evidence, policy stops, and rejected alternatives preserved.
+
+### Scope
+
+- add a typed backend service for pre-trade hedge-recommendation review drafts
+- create drafts only from a current `HEDGE_RECOMMENDATION` governance
+  promotion signal with a linked recommendation run and a supported hedge
+  instrument recommendation
+- persist the source promotion score, evidence counts, latest ids, sample ids,
+  rationale, stop reasons, recommendation stance/score/headline, scenario
+  draft, residual exposure, hedge recommendation, rejected alternatives, and
+  missing evidence
+- keep creation idempotent for the same latest review/run source evidence
+- expose list and promote-from-governance API endpoints
+- surface existing drafts in the Pre-Trade governance promotion drill-through
+
+### Out Of Scope
+
+- hedge execution, order routing, or broker/venue communication
+- hedge-accounting designation
+- margin, treasury, collateral, or liquidity optimization
+- credit approval, settlement approval, policy override, or limit changes
+- trade booking, trade amendment, or automatic approval of pre-trade reviews
+
+### Acceptance Criteria
+
+- `GET /pretrade/hedge-recommendations` lists shared review drafts
+- `POST /pretrade/hedge-recommendations/from-promotion` creates or returns the
+  review draft for the current hedge-recommendation promotion signal
+- unsupported or missing hedge recommendation evidence returns a reviewable
+  error instead of creating a weak draft
+- the Pre-Trade workspace shows hedge-recommendation drafts alongside promotion
+  signals
+- agents and UI copy preserve the boundary between review-draft hedge
+  recommendations and execution, accounting, credit, settlement, or policy
+  authority
+
+### Verification
+
+- `./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api`
+- `npm --prefix apps/web run test -- preTradeApi.test.ts`
+- `npm --prefix apps/web run build`
+- `npm --prefix apps/web run lint`
+- `npm --prefix apps/web run test:smoke -- --grep "pre-trade smoke"`
+
+### Implementation Status
+
+Implemented. A governance `HEDGE_RECOMMENDATION` promotion signal can now
+create a shared `REVIEW_DRAFT` hedge-recommendation work object that preserves
+the linked recommendation run, latest review id, source score, source evidence
+summary, rationale, stop reasons, deterministic hedge recommendation,
+residual exposure, rejected alternatives, and missing evidence. The promotion
+path is idempotent for the same latest run/review evidence, visible in the
+Pre-Trade governance tile, and remains review-only with no hedge execution,
+trade mutation, hedge-accounting, margin, treasury, credit, settlement, or
+policy-change authority.
+
+## TRMVP-14: Pre-Trade Risk-Scenario Review Drafts
+
+Status: implemented.
+
+### Priority
+
+P1
+
+### Size
+
+M
+
+### Outcome
+
+The strongest reviewer-approved Risk triage promotion signal can be promoted
+into a durable, shared, review-only risk-scenario draft with review provenance,
+recommendation evidence, residual exposure, missing evidence, and reviewer
+focus preserved.
+
+### Scope
+
+- add a typed backend service for pre-trade risk-scenario review drafts
+- create drafts only from a current `RISK_SCENARIO` governance promotion signal
+  with a linked pre-trade review
+- carry linked recommendation-run evidence when the review or promotion signal
+  has a visible run
+- persist the source promotion score, evidence counts, latest ids, sample ids,
+  rationale, stop reasons, source review status/thesis/notes/owner,
+  recommendation stance/score/headline, scenario draft, enrichment, residual
+  exposure, input snapshots, missing evidence, and reviewer focus
+- keep creation idempotent for the same latest review/run source evidence
+- expose list and promote-from-governance API endpoints
+- surface existing risk-scenario drafts in the Pre-Trade governance promotion
+  drill-through
+
+### Out Of Scope
+
+- stress-limit, VaR, or official risk methodology changes
+- policy override, limit approval, credit approval, or exposure-limit mutation
+- hedge execution, hedge-order workflow, or hedge-accounting designation
+- trade booking, trade amendment, or automatic approval of pre-trade reviews
+- external counterparty, broker, venue, logistics, or payment commitments
+
+### Acceptance Criteria
+
+- `GET /pretrade/risk-scenarios` lists shared review drafts
+- `POST /pretrade/risk-scenarios/from-promotion` creates or returns the review
+  draft for the current Risk scenario promotion signal
+- missing review evidence returns a reviewable error instead of creating a weak
+  draft
+- the Pre-Trade workspace shows risk-scenario drafts alongside promotion
+  signals and existing netting/hedge drafts
+- agents and UI copy preserve the boundary between review-draft Risk scenarios
+  and official risk, policy, credit, hedge, trade, or external-commitment
+  authority
+
+### Verification
+
+- `./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api`
+- `npm --prefix apps/web run test -- preTradeApi.test.ts`
+- `npm --prefix apps/web run build`
+- `npm --prefix apps/web run lint`
+- `npm --prefix apps/web run test:smoke -- --grep "pre-trade smoke"`
+
+### Implementation Status
+
+Implemented. A governance `RISK_SCENARIO` promotion signal can now create a
+shared `REVIEW_DRAFT` risk-scenario work object that preserves the linked
+review, optional linked recommendation run, source score, source evidence
+summary, rationale, stop reasons, review status/thesis/notes/owner,
+recommendation stance/score/headline, scenario draft, enrichment, residual
+exposure, input snapshots, missing evidence, and reviewer focus. The promotion
+path is idempotent for the same latest run/review evidence, visible in the
+Pre-Trade governance tile, and remains review-only with no trade, hedge,
+stress-limit, policy, credit, settlement, or external-commitment authority.
+
+## TRMVP-15: Pre-Trade Market-Opportunity Review Drafts
+
+Status: implemented.
+
+### Priority
+
+P1
+
+### Size
+
+M
+
+### Outcome
+
+The strongest reviewer-approved market-opportunity promotion signal can be
+promoted into a durable, shared, review-only market-opportunity draft with
+review provenance, recommendation evidence, opportunity summary, optional
+arbitrage economics, residual exposure, missing evidence, and reviewer focus
+preserved.
+
+### Scope
+
+- add a typed backend service for pre-trade market-opportunity review drafts
+- create drafts only from a current `MARKET_OPPORTUNITY` governance promotion
+  signal with a linked pre-trade review, linked recommendation run, and
+  supported `MARK_GAP` or `ARBITRAGE` opportunity category
+- carry linked recommendation-run evidence, including opportunity summary,
+  optional arbitrage candidate, residual exposure, input snapshots, missing
+  evidence, next actions, and reviewer focus
+- persist the source promotion score, evidence counts, latest ids, sample ids,
+  rationale, stop reasons, source review status/thesis/notes/owner, and
+  recommendation stance/score/headline
+- keep creation idempotent for the same latest review/run source evidence
+- expose list and promote-from-governance API endpoints
+- surface existing market-opportunity drafts in the Pre-Trade governance
+  promotion drill-through
+
+### Out Of Scope
+
+- trade booking, trade amendment, automatic review approval, or offer acceptance
+- order routing, broker/venue communication, external counterparty outreach, or
+  logistics/payment commitment
+- official price marks, valuation methodology, or pricing policy changes
+- stress-limit, exposure-limit, credit, compliance, or policy override changes
+- hedge execution, hedge-accounting designation, margin, treasury, collateral,
+  settlement, or position-transfer workflow
+
+### Acceptance Criteria
+
+- `GET /pretrade/market-opportunities` lists shared review drafts
+- `POST /pretrade/market-opportunities/from-promotion` creates or returns the
+  review draft for the current market-opportunity promotion signal
+- unsupported opportunity categories or missing review/run evidence return a
+  reviewable error instead of creating a weak draft
+- the Pre-Trade workspace shows market-opportunity drafts alongside promotion
+  signals and existing netting, hedge, and risk-scenario drafts
+- agents and UI copy preserve the boundary between review-draft market
+  opportunities and trade, price-mark, order, credit, risk-limit, hedge,
+  settlement, or external-commitment authority
+
+### Verification
+
+- `./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api`
+- `npm --prefix apps/web run test -- preTradeApi.test.ts`
+- `npm --prefix apps/web run build`
+- `npm --prefix apps/web run lint`
+- `npm --prefix apps/web run test:smoke -- --grep "pre-trade smoke"`
+
+### Implementation Status
+
+Implemented. A governance `MARKET_OPPORTUNITY` promotion signal can now create
+a shared `REVIEW_DRAFT` market-opportunity work object that preserves the
+linked review, linked recommendation run, source score, source evidence
+summary, rationale, stop reasons, review status/thesis/notes/owner,
+recommendation stance/score/headline, recommendation draft, opportunity
+summary, optional arbitrage candidate, residual exposure, input snapshots,
+missing evidence, next actions, and reviewer focus. The promotion path is
+idempotent for the same latest run/review evidence, visible in the Pre-Trade
+governance tile, and remains review-only with no trade, price-mark, order,
+execution, hedge, risk-limit, credit, settlement, or external-commitment
+authority.
+
+## TRMVP-16: Promoted-Draft Review-Outcome Metrics
+
+Status: implemented.
+
+### Priority
+
+P1
+
+### Size
+
+S
+
+### Outcome
+
+Promoted netting-set, hedge-recommendation, risk-scenario, and
+market-opportunity review drafts now have read-only outcome metrics that show
+whether drafts were created, reused by source evidence, retired, rejected by
+the source review, merged into a booked trade, or still blocked by missing
+evidence.
+
+### Scope
+
+- add a typed backend service that reads all shared promoted draft records
+- derive outcome buckets from persisted draft payloads plus live linked
+  pre-trade review and trade status where available
+- expose aggregate counts, per-draft-type counts, and per-draft evidence rows
+  through `GET /pretrade/promotion-outcomes`
+- surface the outcome metrics and latest promoted draft rows in the Pre-Trade
+  governance tile
+- keep outcome metrics read-only and suitable for future agent/autonomy
+  promotion analysis
+
+### Out Of Scope
+
+- changing draft status, approving reviews, or retiring drafts automatically
+- creating action requests from outcome metrics
+- trade booking, trade amendment, hedge execution, price-mark changes, credit
+  approval, policy changes, settlement workflow, or external commitments
+- using outcome metrics as sufficient proof for autonomous execution without a
+  separate owner-approved threshold policy
+
+### Acceptance Criteria
+
+- `GET /pretrade/promotion-outcomes` requires authentication and returns all
+  six outcome buckets
+- counts are split by promoted draft type and backed by per-draft evidence rows
+- booked linked reviews appear as booked-trade merge outcomes with linked trade
+  status when the trade is visible
+- rejected source reviews, retired draft payloads, repeated source evidence,
+  and blocking missing evidence are counted separately
+- the Pre-Trade workspace shows the metrics without creating any new business
+  mutation path
+
+### Verification
+
+- `./.venv/bin/python -m unittest apps.api.tests.test_pretrade_api`
+- `npm --prefix apps/web run test -- preTradeApi.test.ts`
+- `npm --prefix apps/web run build`
+- targeted frontend ESLint for touched Pre-Trade files
+- `npm --prefix apps/web run test:smoke -- --grep "pre-trade smoke"`
+
+### Implementation Status
+
+Implemented. The reports domain now builds a shared promoted-draft outcome
+summary across netting-set, hedge-recommendation, risk-scenario, and
+market-opportunity review drafts. The summary is deterministic, read-only, and
+derives its buckets from persisted promotion evidence plus live linked
+pre-trade review/trade state. The Pre-Trade governance tile renders the
+aggregate counts, per-object counts, and latest draft rows while preserving the
+existing boundary: metrics inform humans and future policy design, but they do
+not approve reviews, retire drafts, book trades, execute hedges, change price
+marks, change credit/risk policy, or externally commit the firm.
+
 ## Recommended First Implementation Slice
 
-Implement in this order:
+The TRMVP-01 through TRMVP-16 sequence is now implemented as the evidence,
+triage, rationale handoff, workspace-review, deterministic netting,
+deterministic hedge-draft, Risk workspace exposure triage, assistant-eval, and
+regression-smoke foundation plus reviewer-reuse promotion signals and the first
+durable netting-set, hedge-recommendation, risk-scenario, and
+market-opportunity review drafts, with promoted-draft outcome metrics for
+trader/risk decision support.
 
-1. TRMVP-01 and TRMVP-02 together, because the UI and assistant should not grow
-   new recommendation language before the evidence contract exists.
-2. TRMVP-03 as a backend-first deterministic service with focused tests.
-3. TRMVP-05 as the first user-visible slice in Pre-Trade.
-4. TRMVP-09 before any assistant role starts producing hedge or netting drafts.
+Next recommended work should turn those outcomes into explicit lifecycle and
+promotion policy, still before adding higher-authority workflows:
 
-This sequence gives traders and risk managers visible value while keeping the
-system inside read, explain, and draft authority.
+1. Add manual promoted-draft lifecycle controls for owner notes, retire
+   reasons, and stale/reopened review handling.
+2. Define owner-approved promotion thresholds that use outcome metrics:
+   minimum reuse, maximum rejection/correction rate, no blocking evidence, and
+   documented rollback/correction paths.
+3. Only deepen hedge-accounting, margin, treasury, or execution workflows after
+   owner-approved policies and source contracts exist.

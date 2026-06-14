@@ -13,7 +13,10 @@ from apps.api.app.models import Base
 from apps.api.app.models.delivery_pipeline_detail import DeliveryPipelineDetail
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
+from apps.api.app.models.price_index_observation import PriceIndexObservation
+from apps.api.app.models.reference_price_index import ReferencePriceIndex
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_leg import TradeLeg
@@ -38,9 +41,12 @@ class DocumentLinkageServiceTests(unittest.TestCase):
 
     def setUp(self) -> None:
         with self.SessionLocal() as session:
+            session.query(PriceIndexObservation).delete()
+            session.query(ReferencePriceIndex).delete()
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()
             session.query(TradeConfirmation).delete()
+            session.query(TradeActualization).delete()
             session.query(DeliveryPipelineDetail).delete()
             session.query(DeliveryObligation).delete()
             session.query(Trade).delete()
@@ -121,6 +127,53 @@ class DocumentLinkageServiceTests(unittest.TestCase):
             last_event_id="evt-100",
         )
 
+    def test_delivery_confirmation_links_to_existing_actualization(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-ACT-100")
+            actualization = TradeActualization(
+                delivery_id="DLV-TRD-ACT-100",
+                trade_id=trade.trade_id,
+                leg_no=None,
+                actual_quantity=Decimal("1000"),
+                actualized_at=datetime(2026, 4, 18, 0, 0, tzinfo=timezone.utc),
+                source="DOCUMENT_LIBRARY",
+                notes="Prior reviewed actualization.",
+                created_at=datetime(2026, 4, 18, 0, 0, tzinfo=timezone.utc),
+                created_by="tester",
+                updated_at=datetime(2026, 4, 18, 0, 0, tzinfo=timezone.utc),
+                updated_by="tester",
+                version=1,
+            )
+            session.add_all([trade, actualization])
+            session.commit()
+            session.refresh(actualization)
+            actualization_id = str(actualization.id)
+
+            page = self._reviewed_page(
+                document_kind="DELIVERY_CONFIRMATION",
+                header_fields=[
+                    {"field_key": "delivery_confirmation_number", "value": "POD-ACT-100"},
+                    {"field_key": "confirmation_date", "value": "2026-04-18"},
+                    {"field_key": "trade_id", "value": "TRD-ACT-100"},
+                    {"field_key": "delivery_id", "value": "DLV-TRD-ACT-100"},
+                    {"field_key": "actual_quantity", "value": "1000"},
+                ],
+            )
+
+            assessment = build_document_linkage_assessment(
+                session,
+                pages=[page],
+                review_status="VERIFIED",
+            )
+
+        self.assertEqual(assessment.status, "READY")
+        self.assertEqual(assessment.recommended_action, "ATTACH")
+        self.assertEqual(assessment.primary_record_type, "TRADE_ACTUALIZATION")
+        self.assertEqual(assessment.primary_record_id, actualization_id)
+        self.assertEqual(assessment.candidates[0].candidate_state, "ATTACH_READY")
+        self.assertIn("delivery_id", assessment.candidates[0].matched_keys)
+        self.assertIn("actual_quantity", assessment.candidates[0].matched_keys)
+
     def test_invoice_links_to_existing_trade_invoice(self) -> None:
         with self.SessionLocal() as session:
             trade = self._seed_trade(trade_id="TRD-INV-100")
@@ -170,6 +223,7 @@ class DocumentLinkageServiceTests(unittest.TestCase):
         self.assertEqual(assessment.recommended_action, "ATTACH")
         self.assertEqual(assessment.primary_record_type, "TRADE_INVOICE")
         self.assertEqual(assessment.primary_record_id, str(invoice.id))
+        self.assertEqual(assessment.candidates[0].candidate_state, "ATTACH_READY")
         self.assertIn("invoice_number", assessment.candidates[0].matched_keys)
         self.assertIn("trade_id", assessment.candidates[0].matched_keys)
 
@@ -202,6 +256,7 @@ class DocumentLinkageServiceTests(unittest.TestCase):
         self.assertEqual(assessment.primary_record_type, "TRADE_INVOICE")
         self.assertIsNone(assessment.primary_record_id)
         self.assertFalse(assessment.candidates[0].existing_record)
+        self.assertEqual(assessment.candidates[0].candidate_state, "CREATE_CANDIDATE")
         self.assertTrue(any(candidate.record_type == "TRADE" and candidate.existing_record for candidate in assessment.candidates))
 
     def test_pipeline_statement_links_to_delivery_by_nomination(self) -> None:
@@ -298,6 +353,7 @@ class DocumentLinkageServiceTests(unittest.TestCase):
         self.assertEqual(assessment.status, "READY")
         self.assertEqual(assessment.primary_record_type, "DELIVERY")
         self.assertEqual(assessment.primary_record_id, "DLV-300")
+        self.assertEqual(assessment.candidates[0].candidate_state, "ATTACH_READY")
         self.assertIn("nomination_reference", assessment.candidates[0].matched_keys)
 
     def test_quality_specification_can_propose_creation_and_keep_trade_context(self) -> None:
@@ -326,6 +382,80 @@ class DocumentLinkageServiceTests(unittest.TestCase):
         self.assertEqual(assessment.status, "CREATE")
         self.assertEqual(assessment.primary_record_type, "QUALITY_SPECIFICATION")
         self.assertTrue(any(candidate.record_type == "TRADE" and candidate.existing_record for candidate in assessment.candidates))
+
+    def test_price_publication_links_to_existing_price_observation(self) -> None:
+        with self.SessionLocal() as session:
+            now = datetime(2026, 4, 15, 12, 0, tzinfo=timezone.utc)
+            price_index = ReferencePriceIndex(
+                code="WTI_CUSHING_D",
+                name="WTI Cushing Daily",
+                commodity_code="WTI",
+                currency_code="USD",
+                unit_code="BBL",
+                provider="EIA",
+                quote_type="SPOT",
+                market="Crude Oil",
+                location_code="CUSHING",
+                calendar_code=None,
+                description="Daily WTI Cushing price assessment.",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=now,
+                created_by="tester",
+                updated_at=now,
+                updated_by="tester",
+                version=1,
+            )
+            observation = PriceIndexObservation(
+                price_index_code=price_index.code,
+                observation_date=date(2026, 4, 15),
+                value=Decimal("84.250000"),
+                unit_code="BBL",
+                currency_code="USD",
+                source_provider="EIA",
+                source_series_id="PET.RWTC.D",
+                source_frequency="daily",
+                source_published_at=now,
+                source_revision="2026-04-15",
+                downloaded_at=now,
+                run_id=42,
+                raw_payload={"series_id": "PET.RWTC.D"},
+                created_at=now,
+                updated_at=now,
+            )
+            session.add_all([price_index, observation])
+            session.commit()
+            session.refresh(observation)
+
+            page = self._reviewed_page(
+                document_kind="PRICE_PUBLICATION",
+                header_fields=[
+                    {"field_key": "publication_date", "value": "2026-04-15"},
+                    {"field_key": "observation_date", "value": "2026-04-15"},
+                    {"field_key": "price_index_code", "value": "WTI_CUSHING_D"},
+                    {"field_key": "source_provider", "value": "EIA"},
+                    {"field_key": "source_series_id", "value": "PET.RWTC.D"},
+                    {"field_key": "commodity", "value": "WTI"},
+                    {"field_key": "location", "value": "CUSHING"},
+                    {"field_key": "price", "value": "84.25"},
+                    {"field_key": "currency", "value": "USD"},
+                    {"field_key": "unit", "value": "BBL"},
+                ],
+            )
+
+            assessment = build_document_linkage_assessment(
+                session,
+                pages=[page],
+                review_status="VERIFIED",
+            )
+
+        self.assertEqual(assessment.status, "READY")
+        self.assertEqual(assessment.recommended_action, "ATTACH")
+        self.assertEqual(assessment.primary_record_type, "PRICE_INDEX_OBSERVATION")
+        self.assertEqual(assessment.primary_record_id, str(observation.id))
+        self.assertIn("price_index_code", assessment.candidates[0].matched_keys)
+        self.assertIn("observation_date", assessment.candidates[0].matched_keys)
 
 
 if __name__ == "__main__":

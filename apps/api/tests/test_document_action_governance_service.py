@@ -12,6 +12,7 @@ from apps.api.app.domains.documents.services.document_action_governance import b
 from apps.api.app.domains.documents.services.document_action_planning import build_document_action_plan
 from apps.api.app.domains.documents.services.document_linkage import build_document_linkage_assessment
 from apps.api.app.models import Base
+from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_confirmation import TradeConfirmation
@@ -41,6 +42,7 @@ class DocumentActionGovernanceServiceTests(unittest.TestCase):
             session.query(TradePayment).delete()
             session.query(TradeInvoice).delete()
             session.query(TradeConfirmation).delete()
+            session.query(DeliveryObligation).delete()
             session.query(Trade).delete()
             session.commit()
 
@@ -210,6 +212,87 @@ class DocumentActionGovernanceServiceTests(unittest.TestCase):
         self.assertFalse(governance.auto_execution_allowed)
         self.assertIn("CREATES_NEW_RECORD", governance.risk_flags)
         self.assertIn("FINANCIAL_MUTATION", governance.risk_flags)
+
+    def test_actualization_plan_requires_operational_human_confirmation(self) -> None:
+        with self.SessionLocal() as session:
+            trade = self._seed_trade(trade_id="TRD-GOV-ACT-250")
+            delivery = DeliveryObligation(
+                delivery_id="DLV-TRD-GOV-ACT-250",
+                trade_id=trade.trade_id,
+                trade_leg_id=None,
+                leg_no=None,
+                external_trade_id=None,
+                direction="OUTBOUND",
+                mode_family="NETWORK_FLOW",
+                transport_mode="PIPELINE",
+                transport_mode_source="EXPLICIT",
+                delivery_profile="FLOW_WINDOW",
+                book=trade.book,
+                book_source="TRADE_DERIVED",
+                portfolio=trade.portfolio,
+                portfolio_source="TRADE_DERIVED",
+                counterparty=trade.counterparty,
+                counterparty_source="TRADE_DERIVED",
+                commodity_class=trade.commodity_class,
+                commodity=trade.commodity,
+                volume=trade.volume,
+                unit_of_measure=trade.unit_of_measure,
+                trade_currency_code=trade.trade_currency_code,
+                price_unit_code=trade.price_unit_code,
+                location_code=trade.location_code,
+                location_source="TRADE_DERIVED",
+                delivery_start=trade.delivery_start,
+                delivery_end=trade.delivery_end,
+                delivery_window_source="TRADE_DERIVED",
+                execution_status="SCHEDULED",
+                execution_status_source="SYSTEM_GENERATED",
+                operations_owner=None,
+                operations_owner_source="SYSTEM_GENERATED",
+                external_reference=None,
+                external_reference_source="SYSTEM_GENERATED",
+                ops_notes=None,
+                ops_notes_source="SYSTEM_GENERATED",
+                booked_at=datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc),
+                source_trade_updated_at=trade.updated_at,
+                created_at=datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc),
+                created_by="tester",
+                updated_at=datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc),
+                updated_by="tester",
+                version=1,
+            )
+            session.add_all([trade, delivery])
+            session.commit()
+
+            page = self._reviewed_page(
+                document_kind="DELIVERY_CONFIRMATION",
+                header_fields=[
+                    {"field_key": "delivery_confirmation_number", "value": "POD-GOV-ACT-250"},
+                    {"field_key": "confirmation_date", "value": "2026-04-18"},
+                    {"field_key": "trade_id", "value": "TRD-GOV-ACT-250"},
+                    {"field_key": "delivery_id", "value": "DLV-TRD-GOV-ACT-250"},
+                    {"field_key": "actual_quantity", "value": "1000"},
+                ],
+            )
+            linkage = build_document_linkage_assessment(session, pages=[page], review_status="VERIFIED")
+            plan = build_document_action_plan(
+                document_id="DOC-GOV-ACT-250",
+                pages=[page],
+                review_status="VERIFIED",
+                linkage_assessment=linkage,
+            )
+            governance = build_document_action_governance(
+                action_plan=plan,
+                linkage_assessment=linkage,
+            )
+
+        self.assertEqual(plan.operation_type, "record_trade_actualization_from_document")
+        self.assertEqual(governance.status, "HUMAN_CONFIRMATION_REQUIRED")
+        self.assertEqual(governance.recommended_execution_mode, "MANUAL")
+        self.assertTrue(governance.manual_execution_allowed)
+        self.assertFalse(governance.auto_execution_allowed)
+        self.assertTrue(governance.approval_required)
+        self.assertIn("CREATES_NEW_RECORD", governance.risk_flags)
+        self.assertIn("OPERATIONAL_MUTATION", governance.risk_flags)
 
     def test_blocked_plan_remains_manual_review_required(self) -> None:
         with self.SessionLocal() as session:

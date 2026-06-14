@@ -6,6 +6,7 @@ import type {
   AssistantActionReviewContext,
   AssistantActionReviewObjectRef,
   AssistantActionReviewOutcome,
+  AssistantActionType,
   AssistantActionRequestLifecycleTone,
 } from '../../shared/models'
 
@@ -116,6 +117,14 @@ function parseCorrectionFields(value: string): string[] {
   )
 }
 
+function formatReviewFieldLabel(value: string): string {
+  return value
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ')
+}
+
 function renderReviewList(title: string, items: string[]) {
   if (items.length === 0) {
     return null
@@ -189,9 +198,66 @@ function ActionPreview({ preview }: { preview: AssistantActionPreview }) {
   )
 }
 
-function ActionReviewContext({ reviewContext }: { reviewContext: AssistantActionReviewContext }) {
-  const staleStateEntries = Object.entries(reviewContext.stale_state_basis)
+function renderSettlementPresetMutation(reviewContext: AssistantActionReviewContext) {
+  const proposedMutation = reviewContext.proposed_mutation
+  const name = typeof proposedMutation.name === 'string' ? proposedMutation.name : null
+  const scope = typeof proposedMutation.scope === 'string' ? proposedMutation.scope : null
+  const filters =
+    proposedMutation.filters && typeof proposedMutation.filters === 'object' && !Array.isArray(proposedMutation.filters)
+      ? Object.entries(proposedMutation.filters as Record<string, unknown>)
+      : []
+
+  return (
+    <div className="assistant-action-review-block">
+      <strong>Preset proposal</strong>
+      <div className="assistant-action-field-list">
+        {name ? <span>Name: {name}</span> : null}
+        {scope ? <span>Scope: {formatReviewFieldLabel(scope)}</span> : null}
+        {filters.map(([key, value]) => (
+          <span key={`preset-filter-${key}`}>
+            {formatReviewFieldLabel(key)}: {formatReviewValue(value)}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function renderProposedMutation(
+  actionType: AssistantActionType,
+  reviewContext: AssistantActionReviewContext,
+) {
   const proposedMutationEntries = Object.entries(reviewContext.proposed_mutation)
+  if (proposedMutationEntries.length === 0) {
+    return null
+  }
+
+  if (actionType === 'create_settlement_report_preset') {
+    return renderSettlementPresetMutation(reviewContext)
+  }
+
+  return (
+    <div className="assistant-action-review-block">
+      <strong>Proposed mutation</strong>
+      <div className="assistant-action-field-list">
+        {proposedMutationEntries.map(([key, value]) => (
+          <span key={`mutation-${key}`}>
+            {key}: {formatReviewValue(value)}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ActionReviewContext({
+  actionType,
+  reviewContext,
+}: {
+  actionType: AssistantActionType
+  reviewContext: AssistantActionReviewContext
+}) {
+  const staleStateEntries = Object.entries(reviewContext.stale_state_basis)
 
   return (
     <div className="assistant-action-review-grid">
@@ -208,18 +274,7 @@ function ActionReviewContext({ reviewContext }: { reviewContext: AssistantAction
         <p>{reviewContext.business_rationale}</p>
       </div>
 
-      {proposedMutationEntries.length > 0 ? (
-        <div className="assistant-action-review-block">
-          <strong>Proposed mutation</strong>
-          <div className="assistant-action-field-list">
-            {proposedMutationEntries.map(([key, value]) => (
-              <span key={`mutation-${key}`}>
-                {key}: {formatReviewValue(value)}
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
+      {renderProposedMutation(actionType, reviewContext)}
 
       {reviewContext.supporting_records.length > 0 ? (
         <div className="assistant-action-review-block">
@@ -246,7 +301,7 @@ function ActionReviewContext({ reviewContext }: { reviewContext: AssistantAction
           <div className="assistant-action-field-list">
             {staleStateEntries.map(([key, value]) => (
               <span key={`stale-${key}`}>
-                {key}: {formatReviewValue(value)}
+                {formatReviewFieldLabel(key)}: {formatReviewValue(value)}
               </span>
             ))}
           </div>
@@ -369,10 +424,14 @@ export function AssistantActionRequestList({
             ) : null}
 
             {actionRequest.review_context ? (
-              <ActionReviewContext reviewContext={actionRequest.review_context} />
+              <ActionReviewContext
+                actionType={actionRequest.action_type}
+                reviewContext={actionRequest.review_context}
+              />
             ) : null}
 
-            {Object.keys(actionRequest.payload).length > 0 ? (
+            {Object.keys(actionRequest.payload).length > 0 &&
+            actionRequest.action_type !== 'create_settlement_report_preset' ? (
               <code>{JSON.stringify(actionRequest.payload)}</code>
             ) : null}
 

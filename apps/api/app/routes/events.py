@@ -3,26 +3,29 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.query_params import STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
-from apps.api.app.domains.trading.services import trade_event_support as support
 from apps.api.app.domains.trading.services.event_writes import (
     AppendDomainEventCommand,
     append_domain_event,
+)
+from apps.api.app.domains.trading.services.trade_command_contracts import (
+    TradeCommandValidationError,
+)
+from apps.api.app.domains.trading.services.trade_commands import (
+    append_trade_write_command,
+)
+from apps.api.app.domains.trading.services.trade_event_command_adapter import (
+    build_trade_write_command_from_event,
 )
 from apps.api.app.models.event import Event
 from apps.api.app.schemas.event import EventCreate, EventOut
 
 router = APIRouter(prefix="/events", tags=["events"])
-
-OPTION_LIFECYCLE_EVENT_TYPES = support.OPTION_LIFECYCLE_EVENT_TYPES
-trade_snapshot = support.trade_snapshot
-sync_positions_for_trade_change = support.sync_positions_for_trade_change
-sync_option_exposures_for_trade_change = support.sync_option_exposures_for_trade_change
 
 
 @router.post("", response_model=EventOut, status_code=201)
@@ -31,23 +34,44 @@ def append_event(payload: EventCreate, request: Request, db: Session = Depends(g
         "x-correlation-id"
     )
     recorded_at = datetime.now(timezone.utc)
-    event = append_domain_event(
-        db,
-        AppendDomainEventCommand(
-            aggregate_type=payload.aggregate_type,
-            aggregate_id=payload.aggregate_id,
-            event_type=payload.event_type,
-            occurred_at=payload.occurred_at,
-            recorded_at=recorded_at,
-            actor_id=getattr(request.state, "actor_id", None) or payload.actor_id,
+    actor_id = getattr(request.state, "actor_id", None) or payload.actor_id
+
+    try:
+        trade_command = build_trade_write_command_from_event(
+            payload,
+            actor_id=actor_id,
             correlation_id=correlation_id,
-            causation_id=payload.causation_id,
-            schema_version=payload.schema_version,
-            payload=payload.payload,
-        ),
-        commit=True,
-        refresh=True,
-    )
+            recorded_at=recorded_at,
+        )
+    except TradeCommandValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if trade_command is not None:
+        event = append_trade_write_command(
+            db,
+            trade_command,
+            commit=True,
+            refresh=True,
+        )
+    else:
+        event = append_domain_event(
+            db,
+            AppendDomainEventCommand(
+                aggregate_type=payload.aggregate_type,
+                aggregate_id=payload.aggregate_id,
+                event_type=payload.event_type,
+                occurred_at=payload.occurred_at,
+                recorded_at=recorded_at,
+                actor_id=actor_id,
+                correlation_id=correlation_id,
+                causation_id=payload.causation_id,
+                schema_version=payload.schema_version,
+                payload=payload.payload,
+                source_surface=payload.source_surface or "events",
+            ),
+            commit=True,
+            refresh=True,
+        )
 
     return EventOut(
         event_id=event.event_id,

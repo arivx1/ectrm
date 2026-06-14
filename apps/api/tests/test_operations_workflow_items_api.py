@@ -1664,6 +1664,163 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         self.assertEqual(payload["settlement"]["workflow_exception_count"], 0)
         self.assertEqual(payload["settlement"]["breakdown"], [{"status": "PENDING", "count": 1}])
 
+    def test_trade_attention_candidates_endpoint_returns_typed_candidate_rows(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-ATTN-1", confirmation_status="PENDING")
+
+        with self.SessionLocal() as session:
+            trade = session.get(Trade, "T-ATTN-1")
+            assert trade is not None
+            trade.execution_timestamp = self.now - timedelta(days=2)
+            session.commit()
+
+        response = self.client.get(
+            "/operations/trade-attention-candidates?candidate_type=confirmation_backlog",
+            headers=self._auth_headers(admin_token),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["total_count"], 1)
+        self.assertEqual(payload["candidate_type"], "confirmation_backlog")
+        self.assertEqual(
+            payload["source_count_key"],
+            "dashboard.attention.confirmation_backlog_count",
+        )
+        self.assertEqual(payload["items"][0]["trade_id"], "T-ATTN-1")
+        self.assertEqual(payload["items"][0]["candidate_types"], ["confirmation_backlog"])
+        self.assertEqual(
+            payload["items"][0]["priority_reason"],
+            "Older unconfirmed trades rise first in the confirmation queue.",
+        )
+
+    def test_trade_attention_candidates_endpoint_supports_offset_pagination(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-ATTN-1", confirmation_status="PENDING")
+        self._seed_trade(trade_id="T-ATTN-2", confirmation_status="PENDING")
+
+        with self.SessionLocal() as session:
+            first_trade = session.get(Trade, "T-ATTN-1")
+            second_trade = session.get(Trade, "T-ATTN-2")
+            assert first_trade is not None
+            assert second_trade is not None
+            first_trade.execution_timestamp = self.now - timedelta(days=3)
+            second_trade.execution_timestamp = self.now - timedelta(days=2)
+            session.commit()
+
+        response = self.client.get(
+            "/operations/trade-attention-candidates?candidate_type=confirmation_backlog&limit=1&offset=1",
+            headers=self._auth_headers(admin_token),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["total_count"], 2)
+        self.assertEqual(payload["candidate_type"], "confirmation_backlog")
+        self.assertEqual(payload["candidate_type_counts"], {"confirmation_backlog": 1})
+        self.assertEqual(payload["items"][0]["trade_id"], "T-ATTN-2")
+
+    def test_trade_attention_candidates_prioritize_nomination_backlog_by_delivery_window(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-NOM-SOON", nomination_status="PENDING")
+        self._seed_trade(trade_id="T-NOM-LATER", nomination_status="PENDING")
+
+        with self.SessionLocal() as session:
+            soon_trade = session.get(Trade, "T-NOM-SOON")
+            later_trade = session.get(Trade, "T-NOM-LATER")
+            assert soon_trade is not None
+            assert later_trade is not None
+            soon_trade.delivery_start = self.now.date() + timedelta(days=1)
+            soon_trade.delivery_end = self.now.date() + timedelta(days=1)
+            later_trade.delivery_start = self.now.date() + timedelta(days=3)
+            later_trade.delivery_end = self.now.date() + timedelta(days=3)
+            session.commit()
+
+        response = self.client.get(
+            "/operations/trade-attention-candidates?candidate_type=nomination_backlog",
+            headers=self._auth_headers(admin_token),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            [item["trade_id"] for item in payload["items"]],
+            ["T-NOM-SOON", "T-NOM-LATER"],
+        )
+        self.assertEqual(
+            payload["items"][0]["priority_reason"],
+            "Delivery-near trades rise first in the nomination queue.",
+        )
+
+    def test_trade_attention_candidates_prioritize_disputed_settlement_exceptions_first(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(
+            trade_id="T-SET-DISPUTED",
+            invoice_status="DISPUTED",
+            payment_status="PENDING",
+            settlement_status="DISPUTED",
+        )
+        self._seed_trade(
+            trade_id="T-SET-OVERDUE",
+            invoice_status="ISSUED",
+            payment_status="OVERDUE",
+            settlement_status="INVOICED",
+        )
+
+        response = self.client.get(
+            "/operations/trade-attention-candidates?candidate_type=settlement_exception",
+            headers=self._auth_headers(admin_token),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            [item["trade_id"] for item in payload["items"]],
+            ["T-SET-DISPUTED", "T-SET-OVERDUE"],
+        )
+        self.assertEqual(payload["items"][0]["priority_reason"], "Disputed settlement exceptions rise first.")
+        self.assertEqual(
+            payload["items"][1]["priority_reason"],
+            "Overdue cash exceptions rise after disputed items.",
+        )
+
+    def test_trade_attention_candidates_prioritize_overdue_cash_before_due_cash(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(
+            trade_id="T-PMT-OVERDUE",
+            invoice_status="ISSUED",
+            payment_status="OVERDUE",
+            settlement_status="INVOICED",
+        )
+        self._seed_trade(
+            trade_id="T-PMT-DUE",
+            invoice_status="ISSUED",
+            payment_status="DUE",
+            settlement_status="INVOICED",
+        )
+
+        response = self.client.get(
+            "/operations/trade-attention-candidates?candidate_type=payment_due",
+            headers=self._auth_headers(admin_token),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            [item["trade_id"] for item in payload["items"]],
+            ["T-PMT-OVERDUE", "T-PMT-DUE"],
+        )
+        self.assertEqual(
+            payload["items"][0]["priority_reason"],
+            "Overdue cash rises ahead of merely due payments.",
+        )
+        self.assertEqual(
+            payload["items"][1]["priority_reason"],
+            "Due cash follows overdue items, then older trades.",
+        )
+
     def test_operational_resource_descriptors_endpoint_exposes_registry_metadata(self) -> None:
         response = self.client.get("/operations/resources")
 
@@ -1671,7 +1828,15 @@ class OperationsWorkflowItemsApiTests(unittest.TestCase):
         descriptors = {row["resource_key"]: row for row in response.json()}
         self.assertEqual(
             set(descriptors),
-            {"confirmations", "deliveries", "shipments", "invoices", "payments", "work_items"},
+            {
+                "confirmations",
+                "deliveries",
+                "document_record_creation_requests",
+                "shipments",
+                "invoices",
+                "payments",
+                "work_items",
+            },
         )
         self.assertEqual(descriptors["confirmations"]["filters"], ["trade_id"])
         self.assertEqual(descriptors["deliveries"]["actions"][0], "sync_from_trades")

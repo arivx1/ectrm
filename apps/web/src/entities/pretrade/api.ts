@@ -1,14 +1,22 @@
 import { fetchJson, patchJson, postJson, requestOk } from '../../shared/api'
 import type {
   PreTradeGovernanceAuditExportRecord,
+  PreTradeHedgeRecommendationRecord,
   PreTradeGovernanceItemsRecord,
+  PreTradeMarketOpportunityRecord,
+  PreTradeNettingSetRecord,
+  PreTradePromotionOutcomeSummaryRecord,
+  PreTradeRecommendationDraftAnalysisRecord,
   PreTradeGovernanceSummaryRecord,
   PreTradeRecommendationSourceAdapterRecord,
   PreTradeRecommendationRunRecord,
   PreTradeRecommendationSourceSnapshotRecord,
+  PreTradeReviewDriftRecord,
   PreTradeReviewItemRecord,
   PreTradeReviewStatus,
+  PreTradeRiskScenarioRecord,
   PreTradeScenarioDraft,
+  PreTradeScenarioEnrichmentRecord,
   PreTradeScenarioRecord,
 } from '../../shared/models'
 
@@ -20,12 +28,14 @@ export type CreatePreTradeScenarioPayload = {
   name: string
   thesis?: string | null
   draft: PreTradeScenarioDraft
+  enrichment?: PreTradeScenarioEnrichmentRecord | null
 }
 
 export type UpdatePreTradeScenarioPayload = {
   name?: string | null
   thesis?: string | null
   draft?: PreTradeScenarioDraft
+  enrichment?: PreTradeScenarioEnrichmentRecord | null
 }
 
 export type CreatePreTradeReviewItemPayload = {
@@ -34,6 +44,7 @@ export type CreatePreTradeReviewItemPayload = {
   draft: PreTradeScenarioDraft
   source_scenario_id?: number | null
   recommendation_run_id?: number | null
+  enrichment?: PreTradeScenarioEnrichmentRecord | null
   owner?: string | null
   due_at?: string | null
   review_notes?: string | null
@@ -44,6 +55,7 @@ export type UpdatePreTradeReviewItemPayload = {
   thesis?: string | null
   draft?: PreTradeScenarioDraft
   recommendation_run_id?: number | null
+  enrichment?: PreTradeScenarioEnrichmentRecord | null
   recommendation_override_reason?: string | null
   review_status?: PreTradeReviewStatus
   owner?: string | null
@@ -63,6 +75,34 @@ export type CreatePreTradeRecommendationRunPayload = {
   source_scenario_id?: number | null
   source_review_id?: number | null
   input_snapshots?: PreTradeRecommendationSourceSnapshotRecord[]
+}
+
+export type AnalyzePreTradeRecommendationDraftPayload = {
+  thesis?: string | null
+  draft: PreTradeScenarioDraft
+  source_scenario_id?: number | null
+  source_review_id?: number | null
+  input_snapshots?: PreTradeRecommendationSourceSnapshotRecord[]
+}
+
+export type PromotePreTradeNettingSetPayload = {
+  owner?: string | null
+  review_note?: string | null
+}
+
+export type PromotePreTradeHedgeRecommendationPayload = {
+  owner?: string | null
+  review_note?: string | null
+}
+
+export type PromotePreTradeRiskScenarioPayload = {
+  owner?: string | null
+  review_note?: string | null
+}
+
+export type PromotePreTradeMarketOpportunityPayload = {
+  owner?: string | null
+  review_note?: string | null
 }
 
 export async function loadPreTradeScenarios(
@@ -147,6 +187,96 @@ export async function loadPreTradeGovernanceAuditExport(
   })
 }
 
+export async function loadPreTradePromotionOutcomes(
+  apiBase: string,
+  accessToken: string,
+): Promise<PreTradePromotionOutcomeSummaryRecord> {
+  return fetchJson<PreTradePromotionOutcomeSummaryRecord>(`${apiBase}/pretrade/promotion-outcomes`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function loadPreTradeNettingSets(
+  apiBase: string,
+  accessToken: string,
+): Promise<PreTradeNettingSetRecord[]> {
+  return fetchJson<PreTradeNettingSetRecord[]>(`${apiBase}/pretrade/netting-sets`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function promotePreTradeNettingSetFromGovernance(
+  apiBase: string,
+  accessToken: string,
+  payload: PromotePreTradeNettingSetPayload = {},
+): Promise<PreTradeNettingSetRecord> {
+  return postJson<PreTradeNettingSetRecord>(`${apiBase}/pretrade/netting-sets/from-promotion`, payload, {
+    headers: authorizationHeaders(accessToken),
+  })
+}
+
+export async function loadPreTradeHedgeRecommendations(
+  apiBase: string,
+  accessToken: string,
+): Promise<PreTradeHedgeRecommendationRecord[]> {
+  return fetchJson<PreTradeHedgeRecommendationRecord[]>(`${apiBase}/pretrade/hedge-recommendations`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function promotePreTradeHedgeRecommendationFromGovernance(
+  apiBase: string,
+  accessToken: string,
+  payload: PromotePreTradeHedgeRecommendationPayload = {},
+): Promise<PreTradeHedgeRecommendationRecord> {
+  return postJson<PreTradeHedgeRecommendationRecord>(`${apiBase}/pretrade/hedge-recommendations/from-promotion`, payload, {
+    headers: authorizationHeaders(accessToken),
+  })
+}
+
+export async function loadPreTradeRiskScenarios(
+  apiBase: string,
+  accessToken: string,
+): Promise<PreTradeRiskScenarioRecord[]> {
+  return fetchJson<PreTradeRiskScenarioRecord[]>(`${apiBase}/pretrade/risk-scenarios`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function promotePreTradeRiskScenarioFromGovernance(
+  apiBase: string,
+  accessToken: string,
+  payload: PromotePreTradeRiskScenarioPayload = {},
+): Promise<PreTradeRiskScenarioRecord> {
+  return postJson<PreTradeRiskScenarioRecord>(`${apiBase}/pretrade/risk-scenarios/from-promotion`, payload, {
+    headers: authorizationHeaders(accessToken),
+  })
+}
+
+export async function loadPreTradeMarketOpportunities(
+  apiBase: string,
+  accessToken: string,
+): Promise<PreTradeMarketOpportunityRecord[]> {
+  return fetchJson<PreTradeMarketOpportunityRecord[]>(`${apiBase}/pretrade/market-opportunities`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function promotePreTradeMarketOpportunityFromGovernance(
+  apiBase: string,
+  accessToken: string,
+  payload: PromotePreTradeMarketOpportunityPayload = {},
+): Promise<PreTradeMarketOpportunityRecord> {
+  return postJson<PreTradeMarketOpportunityRecord>(`${apiBase}/pretrade/market-opportunities/from-promotion`, payload, {
+    headers: authorizationHeaders(accessToken),
+  })
+}
+
 export async function loadPreTradeRecommendationSourceAdapters(
   apiBase: string,
   accessToken: string,
@@ -199,6 +329,31 @@ export async function loadPreTradeReviewItem(
     headers: authorizationHeaders(accessToken),
     cache: 'no-store',
   })
+}
+
+export async function loadPreTradeReviewDrift(
+  apiBase: string,
+  accessToken: string,
+  reviewId: number,
+): Promise<PreTradeReviewDriftRecord> {
+  return fetchJson<PreTradeReviewDriftRecord>(`${apiBase}/pretrade/reviews/${reviewId}/drift`, {
+    headers: authorizationHeaders(accessToken),
+    cache: 'no-store',
+  })
+}
+
+export async function analyzePreTradeRecommendationDraft(
+  apiBase: string,
+  accessToken: string,
+  payload: AnalyzePreTradeRecommendationDraftPayload,
+): Promise<PreTradeRecommendationDraftAnalysisRecord> {
+  return postJson<PreTradeRecommendationDraftAnalysisRecord>(
+    `${apiBase}/pretrade/recommendations/draft-analysis`,
+    payload,
+    {
+      headers: authorizationHeaders(accessToken),
+    },
+  )
 }
 
 export async function createPreTradeReviewItem(

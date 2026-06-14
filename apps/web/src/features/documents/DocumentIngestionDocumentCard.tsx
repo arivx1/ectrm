@@ -3,8 +3,10 @@ import {
   actionPlanExecutable,
   actionPlanPrimaryLabel,
   actionPlanTone,
+  correctedPageCount,
   documentActionPlan,
   documentActionAlreadyApplied,
+  documentFacetDisplayValues,
   documentLinkageAssessment,
   documentProcessorTrace,
   documentRecordLinks,
@@ -15,6 +17,7 @@ import {
   documentStatusTone,
   dominantDocumentKind,
   formatBytes,
+  formatDocumentFacetLabel,
   linkagePrimaryLabel,
   linkageStatusTone,
   processorLabel,
@@ -23,8 +26,10 @@ import {
   routingPrimaryLabel,
   routingStatusTone,
   routingStrategyLabel,
+  learnedPageCount,
   reviewedPageCount,
 } from './documentIngestionUtils'
+import { DocumentFacetEditor } from './DocumentFacetEditor'
 import { DocumentIngestionPageEditor } from './DocumentIngestionPageEditor'
 import type { DocumentIngestionController } from './useDocumentIngestionController'
 
@@ -45,6 +50,7 @@ export function DocumentIngestionDocumentCard({
     document.processor_provider ||
     controller.processorSettings?.effective_default_provider ||
     ''
+  const reprocessUsesAiProvider = reprocessProviderValue !== '' && reprocessProviderValue !== 'builtin'
   const isExpanded = controller.expandedDocumentIds[document.document_id] ?? false
   const documentSaveTarget = `document:${document.document_id}`
   const reprocessTarget = `reprocess:${document.document_id}`
@@ -62,6 +68,10 @@ export function DocumentIngestionDocumentCard({
   const linkedRecords = documentRecordLinks(document)
   const actionApplied = documentActionAlreadyApplied(document)
   const canExecuteAction = actionPlanExecutable(actionPlan) && !actionApplied && !isDocumentProcessing
+  const correctedPages = correctedPageCount(document)
+  const learnedPages = learnedPageCount(document)
+  const facetDisplayValues = documentFacetDisplayValues(document)
+  const documentLevelFacetValues = (document.facet_values ?? []).filter((value) => value.page_id === null)
 
   return (
     <article className="position-card shipment-card workflow-item-card document-ingestion-card">
@@ -108,6 +118,15 @@ export function DocumentIngestionDocumentCard({
       <div className="shipment-card-meta">
         <span className="entity-chip entity-chip-soft">{document.page_count} page{document.page_count === 1 ? '' : 's'}</span>
         <span className="entity-chip entity-chip-soft">{dominantDocumentKind(document)}</span>
+        {facetDisplayValues.map((value) => (
+          <span
+            key={`${value.facet_key}-${value.value_code}`}
+            className={`entity-chip entity-chip-soft document-facet-chip document-facet-chip-${value.review_status.toLowerCase()}`}
+          >
+            {formatDocumentFacetLabel(value)}
+            {value.review_status === 'SUGGESTED' ? ' • Suggested' : ''}
+          </span>
+        ))}
         {document.processor_provider ? (
           <span className="entity-chip entity-chip-soft">
             {processorLabel(document.processor_provider)}
@@ -133,6 +152,16 @@ export function DocumentIngestionDocumentCard({
         <span className="entity-chip entity-chip-soft">
           {reviewReady(document) ? 'Ready To Verify' : 'Review Incomplete'}
         </span>
+        {correctedPages > 0 ? (
+          <span className="entity-chip entity-chip-soft">
+            {correctedPages} corrected page{correctedPages === 1 ? '' : 's'}
+          </span>
+        ) : null}
+        {learnedPages > 0 ? (
+          <span className="entity-chip entity-chip-soft">
+            {learnedPages} learned match{learnedPages === 1 ? '' : 'es'}
+          </span>
+        ) : null}
         {routingAssessment ? (
           <>
             <span className={`status-pill status-pill-${routingStatusTone(routingAssessment)}`}>
@@ -180,6 +209,12 @@ export function DocumentIngestionDocumentCard({
         {linkageAssessment?.reasons?.[0] ? <p>{linkageAssessment.reasons[0]}</p> : null}
         {actionPlan?.description ? <p>{actionPlan.description}</p> : null}
         {linkedRecords[0] ? <p>{`Linked to ${linkedRecords[0].record_label}.`}</p> : null}
+        {correctedPages > 0 ? (
+          <p>
+            {correctedPages} page{correctedPages === 1 ? '' : 's'} ha{correctedPages === 1 ? 's' : 've'} a saved
+            classification correction. Future uploads with similar extracted content can reuse that saved choice.
+          </p>
+        ) : null}
         {document.processing_errors.length > 0 ? <p className="field-error">{document.processing_errors.join(' ')}</p> : null}
       </div>
 
@@ -248,6 +283,22 @@ export function DocumentIngestionDocumentCard({
                 </label>
               ) : null}
             </div>
+            <DocumentFacetEditor
+              documentId={document.document_id}
+              pageId={null}
+              title="Document Tags"
+              values={documentLevelFacetValues}
+              facetSchemas={controller.schemaRegistry?.document_facets}
+              onChange={(nextValues) =>
+                controller.updateDocumentDraft(document.document_id, (current) => ({
+                  ...current,
+                  facet_values: [
+                    ...(current.facet_values ?? []).filter((value) => value.page_id !== null),
+                    ...nextValues,
+                  ],
+                }))
+              }
+            />
             <label>
               <span>Document Review Notes</span>
               <textarea
@@ -275,7 +326,13 @@ export function DocumentIngestionDocumentCard({
               </span>
               {configuredProviders.length > 0 ? (
                 <span className="workflow-editor-note">
-                  Reprocess will use {processorLabel((reprocessProviderValue || null) as DocumentIngestionRecord['processor_provider'])}.
+                  Reprocess will use {processorLabel((reprocessProviderValue || null) as DocumentIngestionRecord['processor_provider'])}
+                  {reprocessUsesAiProvider
+                    ? ` when classifier confidence is below ${controller.effectiveAiConfidenceThresholdPercent}%.`
+                    : '.'}
+                  {reprocessUsesAiProvider && controller.aiConfidenceThresholdOverridePercent !== null
+                    ? ' The session override is active until logout.'
+                    : ''}
                 </span>
               ) : null}
             </div>

@@ -3,6 +3,9 @@ import { useMemo, useState } from 'react'
 import { combineTextFilters } from '../../shared/filtering'
 import { classForCommodity } from '../../shared/reference'
 import type {
+  AssetForm,
+  AssetRecord,
+  AssetStandards,
   BookForm,
   CommodityForm,
   CounterpartyForm,
@@ -17,22 +20,82 @@ import type {
   PortfolioRecord,
   PriceIndexForm,
   PriceIndexRecord,
+  RailRouteForm,
+  RailRouteRecord,
   ReferenceRecord,
   ReferenceTab,
+  SpatialFeatureForm,
+  SpatialFeatureRecord,
+  SpatialFeatureStandards,
   UnitForm,
   UnitRecord,
 } from '../../shared/models'
 import {
+  DEFAULT_ASSET_STANDARDS as defaultAssetStandards,
   DEFAULT_COUNTERPARTY_STANDARDS as defaultCounterpartyStandards,
   DEFAULT_LOCATION_STANDARDS as defaultLocationStandards,
+  DEFAULT_SPATIAL_FEATURE_STANDARDS as defaultSpatialFeatureStandards,
 } from '../../shared/models'
+import type { ConfigurableTransportMode } from '../../shared/transportModes'
+import { formatAssetGeometryInput } from './referenceDataFormState'
 
 export function emptyBookForm(): BookForm {
   return { code: '', name: '', description: '' }
 }
 
-export function emptyCommodityForm(defaultClass: string): CommodityForm {
-  return { code: '', name: '', description: '', commodity_class: defaultClass }
+export function emptyCommodityForm(
+  defaultClass: string,
+  defaultAllowedTransportModes: ConfigurableTransportMode[] = [],
+): CommodityForm {
+  return {
+    code: '',
+    name: '',
+    description: '',
+    commodity_class: defaultClass,
+    allowed_transport_modes: defaultAllowedTransportModes,
+  }
+}
+
+export function emptyAssetForm(assetStandards: AssetStandards = defaultAssetStandards): AssetForm {
+  const defaultAssetClass = assetStandards.default_asset_class
+  const defaultAssetType =
+    assetStandards.default_asset_type_by_class[defaultAssetClass] ??
+    assetStandards.asset_types_by_class[defaultAssetClass]?.[0] ??
+    ''
+  return {
+    code: '',
+    name: '',
+    asset_class: defaultAssetClass,
+    asset_type: defaultAssetType,
+    asset_reality: assetStandards.default_asset_reality,
+    commodity_code: '',
+    location_code: '',
+    latitude: '',
+    longitude: '',
+    geometry_geojson: '',
+    capacity_value: '',
+    capacity_unit_code: '',
+    operator_name: '',
+    operating_status: assetStandards.default_operating_status,
+    description: '',
+  }
+}
+
+export function emptySpatialFeatureForm(
+  spatialFeatureStandards: SpatialFeatureStandards = defaultSpatialFeatureStandards,
+): SpatialFeatureForm {
+  return {
+    code: '',
+    name: '',
+    feature_kind: spatialFeatureStandards.default_feature_kind,
+    entity_type: '',
+    entity_code: '',
+    label_latitude: '',
+    label_longitude: '',
+    is_primary: false,
+    geometry_geojson: '',
+    description: '',
+  }
 }
 
 export function emptyPriceIndexForm(defaultCommodityCode = ''): PriceIndexForm {
@@ -44,6 +107,7 @@ export function emptyPriceIndexForm(defaultCommodityCode = ''): PriceIndexForm {
     currency_code: 'USD',
     unit_code: 'BBL',
     provider: '',
+    quote_type: 'SPOT',
     market: '',
     location_code: '',
     calendar_code: '',
@@ -92,6 +156,24 @@ export function emptyLocationForm(locationStandards: LocationStandards = default
   }
 }
 
+export function emptyRailRouteForm(): RailRouteForm {
+  return {
+    code: '',
+    name: '',
+    rail_line_code: '',
+    origin_location_code: '',
+    destination_location_code: '',
+    service_calendar_code: '',
+    route_direction: 'BIDIRECTIONAL',
+    schedule_timezone: '',
+    placement_cutoff_time_local: '',
+    release_cutoff_time_local: '',
+    placement_free_time_hours: '',
+    release_free_time_hours: '',
+    description: '',
+  }
+}
+
 export function emptyCounterpartyForm(
   counterpartyStandards: CounterpartyStandards = defaultCounterpartyStandards,
 ): CounterpartyForm {
@@ -135,11 +217,16 @@ export function resolveSelectedCode<T extends { code: string }>(
 
 type UseReferenceDataWorkspaceArgs = {
   books: ReferenceRecord[]
+  assets: AssetRecord[]
   commodities: ReferenceRecord[]
   priceIndices: PriceIndexRecord[]
   currencies: CurrencyRecord[]
   units: UnitRecord[]
   locations: LocationRecord[]
+  railRoutes: RailRouteRecord[]
+  spatialFeatures: SpatialFeatureRecord[]
+  assetStandards: AssetStandards
+  spatialFeatureStandards: SpatialFeatureStandards
   counterparties: CounterpartyRecord[]
   portfolios: PortfolioRecord[]
   activeBooks: ReferenceRecord[]
@@ -155,11 +242,16 @@ type UseReferenceDataWorkspaceArgs = {
 
 export function useReferenceDataWorkspace({
   books,
+  assets,
   commodities,
   priceIndices,
   currencies,
   units,
   locations,
+  railRoutes,
+  spatialFeatures,
+  assetStandards,
+  spatialFeatureStandards,
   counterparties,
   portfolios,
   activeBooks,
@@ -175,45 +267,61 @@ export function useReferenceDataWorkspace({
   const [referenceTab, setReferenceTab] = useState<ReferenceTab>('books')
   const [referenceSearch, setReferenceSearch] = useState('')
   const [selectedBookCode, setSelectedBookCode] = useState<string | null>(null)
+  const [selectedAssetCode, setSelectedAssetCode] = useState<string | null>(null)
   const [selectedCommodityCode, setSelectedCommodityCode] = useState<string | null>(null)
   const [selectedPriceIndexCode, setSelectedPriceIndexCode] = useState<string | null>(null)
   const [selectedCurrencyCode, setSelectedCurrencyCode] = useState<string | null>(null)
   const [selectedUnitCode, setSelectedUnitCode] = useState<string | null>(null)
   const [selectedLocationCode, setSelectedLocationCode] = useState<string | null>(null)
+  const [selectedRailRouteCode, setSelectedRailRouteCode] = useState<string | null>(null)
+  const [selectedSpatialFeatureCode, setSelectedSpatialFeatureCode] = useState<string | null>(null)
   const [selectedCounterpartyCode, setSelectedCounterpartyCode] = useState<string | null>(null)
   const [selectedPortfolioCode, setSelectedPortfolioCode] = useState<string | null>(null)
 
   const [bookForm, setBookForm] = useState(emptyBookForm())
+  const [assetForm, setAssetForm] = useState(emptyAssetForm(assetStandards))
   const [commodityForm, setCommodityForm] = useState(emptyCommodityForm(commodityClassOrder[0]))
   const [priceIndexForm, setPriceIndexForm] = useState(emptyPriceIndexForm())
   const [currencyForm, setCurrencyForm] = useState(emptyCurrencyForm())
   const [unitForm, setUnitForm] = useState(emptyUnitForm(commodityClassOrder[0]))
   const [locationForm, setLocationForm] = useState(emptyLocationForm(locationStandards))
+  const [railRouteForm, setRailRouteForm] = useState(emptyRailRouteForm())
+  const [spatialFeatureForm, setSpatialFeatureForm] = useState(emptySpatialFeatureForm(spatialFeatureStandards))
   const [counterpartyForm, setCounterpartyForm] = useState(emptyCounterpartyForm(counterpartyStandards))
   const [portfolioForm, setPortfolioForm] = useState(emptyPortfolioForm())
 
   const [bookFormMode, setBookFormMode] = useState<'create' | 'edit'>('create')
+  const [assetFormMode, setAssetFormMode] = useState<'create' | 'edit'>('create')
   const [commodityFormMode, setCommodityFormMode] = useState<'create' | 'edit'>('create')
   const [priceIndexFormMode, setPriceIndexFormMode] = useState<'create' | 'edit'>('create')
   const [currencyFormMode, setCurrencyFormMode] = useState<'create' | 'edit'>('create')
   const [unitFormMode, setUnitFormMode] = useState<'create' | 'edit'>('create')
   const [locationFormMode, setLocationFormMode] = useState<'create' | 'edit'>('create')
+  const [railRouteFormMode, setRailRouteFormMode] = useState<'create' | 'edit'>('create')
+  const [spatialFeatureFormMode, setSpatialFeatureFormMode] = useState<'create' | 'edit'>('create')
   const [counterpartyFormMode, setCounterpartyFormMode] = useState<'create' | 'edit'>('create')
   const [portfolioFormMode, setPortfolioFormMode] = useState<'create' | 'edit'>('create')
   const effectiveReferenceSearch = combineTextFilters(referenceSearch, externalReferenceSearch)
 
   const resolvedSelectedBookCode = resolveSelectedCode(selectedBookCode, books, { preserveMissingSelection: true })
+  const resolvedSelectedAssetCode = resolveSelectedCode(selectedAssetCode, assets)
   const resolvedSelectedCommodityCode = resolveSelectedCode(selectedCommodityCode, commodities)
   const resolvedSelectedPriceIndexCode = resolveSelectedCode(selectedPriceIndexCode, priceIndices)
   const resolvedSelectedCurrencyCode = resolveSelectedCode(selectedCurrencyCode, currencies)
   const resolvedSelectedUnitCode = resolveSelectedCode(selectedUnitCode, units)
   const resolvedSelectedLocationCode = resolveSelectedCode(selectedLocationCode, locations)
+  const resolvedSelectedRailRouteCode = resolveSelectedCode(selectedRailRouteCode, railRoutes)
+  const resolvedSelectedSpatialFeatureCode = resolveSelectedCode(selectedSpatialFeatureCode, spatialFeatures)
   const resolvedSelectedCounterpartyCode = resolveSelectedCode(selectedCounterpartyCode, counterparties)
   const resolvedSelectedPortfolioCode = resolveSelectedCode(selectedPortfolioCode, portfolios)
 
   const selectedBook = useMemo(
     () => books.find((book) => book.code === resolvedSelectedBookCode) ?? null,
     [books, resolvedSelectedBookCode],
+  )
+  const selectedAsset = useMemo(
+    () => assets.find((asset) => asset.code === resolvedSelectedAssetCode) ?? null,
+    [assets, resolvedSelectedAssetCode],
   )
   const selectedCommodity = useMemo(
     () => commodities.find((commodity) => commodity.code === resolvedSelectedCommodityCode) ?? null,
@@ -235,6 +343,14 @@ export function useReferenceDataWorkspace({
     () => locations.find((location) => location.code === resolvedSelectedLocationCode) ?? null,
     [locations, resolvedSelectedLocationCode],
   )
+  const selectedRailRoute = useMemo(
+    () => railRoutes.find((route) => route.code === resolvedSelectedRailRouteCode) ?? null,
+    [railRoutes, resolvedSelectedRailRouteCode],
+  )
+  const selectedSpatialFeature = useMemo(
+    () => spatialFeatures.find((feature) => feature.code === resolvedSelectedSpatialFeatureCode) ?? null,
+    [resolvedSelectedSpatialFeatureCode, spatialFeatures],
+  )
   const selectedCounterparty = useMemo(
     () => counterparties.find((counterparty) => counterparty.code === resolvedSelectedCounterpartyCode) ?? null,
     [counterparties, resolvedSelectedCounterpartyCode],
@@ -255,6 +371,29 @@ export function useReferenceDataWorkspace({
       )
     })
   }, [books, effectiveReferenceSearch])
+
+  const filteredAssets = useMemo(() => {
+    const query = effectiveReferenceSearch.trim().toLowerCase()
+    return assets.filter((asset) => {
+      if (!query) return true
+      return (
+        asset.code.toLowerCase().includes(query) ||
+        asset.name.toLowerCase().includes(query) ||
+        asset.asset_class.toLowerCase().includes(query) ||
+        asset.asset_type.toLowerCase().includes(query) ||
+        asset.asset_reality.toLowerCase().includes(query) ||
+        asset.operating_status.toLowerCase().includes(query) ||
+        (asset.commodity_code ?? '').toLowerCase().includes(query) ||
+        (asset.location_code ?? '').toLowerCase().includes(query) ||
+        (asset.latitude?.toString() ?? '').toLowerCase().includes(query) ||
+        (asset.longitude?.toString() ?? '').toLowerCase().includes(query) ||
+        formatAssetGeometryInput(asset.geometry_geojson).toLowerCase().includes(query) ||
+        (asset.capacity_unit_code ?? '').toLowerCase().includes(query) ||
+        (asset.operator_name ?? '').toLowerCase().includes(query) ||
+        (asset.description ?? '').toLowerCase().includes(query)
+      )
+    })
+  }, [assets, effectiveReferenceSearch])
 
   const referenceCommodityGroups = useMemo(
     () =>
@@ -340,6 +479,41 @@ export function useReferenceDataWorkspace({
     })
   }, [effectiveReferenceSearch, locations])
 
+  const filteredRailRoutes = useMemo(() => {
+    const query = effectiveReferenceSearch.trim().toLowerCase()
+    return railRoutes.filter((route) => {
+      if (!query) return true
+      return (
+        route.code.toLowerCase().includes(query) ||
+        route.name.toLowerCase().includes(query) ||
+        route.rail_line_code.toLowerCase().includes(query) ||
+        (route.origin_location_code ?? '').toLowerCase().includes(query) ||
+        (route.destination_location_code ?? '').toLowerCase().includes(query) ||
+        (route.service_calendar_code ?? '').toLowerCase().includes(query) ||
+        route.route_direction.toLowerCase().includes(query) ||
+        (route.schedule_timezone ?? '').toLowerCase().includes(query) ||
+        (route.description ?? '').toLowerCase().includes(query)
+      )
+    })
+  }, [effectiveReferenceSearch, railRoutes])
+
+  const filteredSpatialFeatures = useMemo(() => {
+    const query = effectiveReferenceSearch.trim().toLowerCase()
+    return spatialFeatures.filter((feature) => {
+      if (!query) return true
+      return (
+        feature.code.toLowerCase().includes(query) ||
+        feature.name.toLowerCase().includes(query) ||
+        feature.feature_kind.toLowerCase().includes(query) ||
+        feature.geometry_type.toLowerCase().includes(query) ||
+        (feature.entity_type ?? '').toLowerCase().includes(query) ||
+        (feature.entity_code ?? '').toLowerCase().includes(query) ||
+        formatAssetGeometryInput(feature.geometry_geojson).toLowerCase().includes(query) ||
+        (feature.description ?? '').toLowerCase().includes(query)
+      )
+    })
+  }, [effectiveReferenceSearch, spatialFeatures])
+
   const filteredCounterparties = useMemo(() => {
     const query = effectiveReferenceSearch.trim().toLowerCase()
     return counterparties.filter((counterparty) => {
@@ -414,9 +588,17 @@ export function useReferenceDataWorkspace({
     [activeBooks, portfolioForm],
   )
 
+  const activeAssets = useMemo(() => assets.filter((asset) => asset.is_active), [assets])
+  const activeRailRoutes = useMemo(() => railRoutes.filter((route) => route.is_active), [railRoutes])
+
   function startCreateBook() {
     setBookFormMode('create')
     setBookForm(emptyBookForm())
+  }
+
+  function startCreateAsset() {
+    setAssetFormMode('create')
+    setAssetForm(emptyAssetForm(assetStandards))
   }
 
   function startEditBook(code: string) {
@@ -429,9 +611,40 @@ export function useReferenceDataWorkspace({
     setBookForm({ code: record.code, name: record.name, description: record.description ?? '' })
   }
 
+  function startEditAsset(code: string) {
+    const record = assets.find((asset) => asset.code === code)
+    if (!record) {
+      return
+    }
+    setSelectedAssetCode(code)
+    setAssetFormMode('edit')
+    setAssetForm({
+      code: record.code,
+      name: record.name,
+      asset_class: record.asset_class,
+      asset_type: record.asset_type,
+      asset_reality: record.asset_reality,
+      commodity_code: record.commodity_code ?? '',
+      location_code: record.location_code ?? '',
+      latitude: record.latitude?.toString() ?? '',
+      longitude: record.longitude?.toString() ?? '',
+      geometry_geojson: formatAssetGeometryInput(record.geometry_geojson),
+      capacity_value: record.capacity_value?.toString() ?? '',
+      capacity_unit_code: record.capacity_unit_code ?? '',
+      operator_name: record.operator_name ?? '',
+      operating_status: record.operating_status,
+      description: record.description ?? '',
+    })
+  }
+
   function startCreateCommodity() {
     setCommodityFormMode('create')
-    setCommodityForm(emptyCommodityForm(selectedCommodity?.commodity_class ?? commodityClassOrder[0]))
+    setCommodityForm(
+      emptyCommodityForm(
+        selectedCommodity?.commodity_class ?? commodityClassOrder[0],
+        selectedCommodity?.allowed_transport_modes ?? [],
+      ),
+    )
   }
 
   function startEditCommodity(code: string) {
@@ -446,6 +659,7 @@ export function useReferenceDataWorkspace({
       name: record.name,
       description: record.description ?? '',
       commodity_class: record.commodity_class ?? commodityClassOrder[0],
+      allowed_transport_modes: record.allowed_transport_modes ?? [],
     })
   }
 
@@ -469,6 +683,7 @@ export function useReferenceDataWorkspace({
       currency_code: record.currency_code,
       unit_code: record.unit_code,
       provider: record.provider,
+      quote_type: record.quote_type ?? 'SPOT',
       market: record.market ?? '',
       location_code: record.location_code ?? '',
       calendar_code: record.calendar_code ?? '',
@@ -524,6 +739,11 @@ export function useReferenceDataWorkspace({
     setLocationForm(emptyLocationForm(locationStandards))
   }
 
+  function startCreateRailRoute() {
+    setRailRouteFormMode('create')
+    setRailRouteForm(emptyRailRouteForm())
+  }
+
   function startEditLocation(code: string) {
     const record = locations.find((location) => location.code === code)
     if (!record) {
@@ -546,6 +766,56 @@ export function useReferenceDataWorkspace({
       longitude: record.longitude?.toString() ?? '',
       region: record.region ?? '',
       timezone: record.timezone ?? '',
+      description: record.description ?? '',
+    })
+  }
+
+  function startEditRailRoute(code: string) {
+    const record = railRoutes.find((route) => route.code === code)
+    if (!record) {
+      return
+    }
+    setSelectedRailRouteCode(code)
+    setRailRouteFormMode('edit')
+    setRailRouteForm({
+      code: record.code,
+      name: record.name,
+      rail_line_code: record.rail_line_code,
+      origin_location_code: record.origin_location_code ?? '',
+      destination_location_code: record.destination_location_code ?? '',
+      service_calendar_code: record.service_calendar_code ?? '',
+      route_direction: record.route_direction,
+      schedule_timezone: record.schedule_timezone ?? '',
+      placement_cutoff_time_local: record.placement_cutoff_time_local ?? '',
+      release_cutoff_time_local: record.release_cutoff_time_local ?? '',
+      placement_free_time_hours: record.placement_free_time_hours?.toString() ?? '',
+      release_free_time_hours: record.release_free_time_hours?.toString() ?? '',
+      description: record.description ?? '',
+    })
+  }
+
+  function startCreateSpatialFeature() {
+    setSpatialFeatureFormMode('create')
+    setSpatialFeatureForm(emptySpatialFeatureForm(spatialFeatureStandards))
+  }
+
+  function startEditSpatialFeature(code: string) {
+    const record = spatialFeatures.find((feature) => feature.code === code)
+    if (!record) {
+      return
+    }
+    setSelectedSpatialFeatureCode(code)
+    setSpatialFeatureFormMode('edit')
+    setSpatialFeatureForm({
+      code: record.code,
+      name: record.name,
+      feature_kind: record.feature_kind,
+      entity_type: record.entity_type ?? '',
+      entity_code: record.entity_code ?? '',
+      label_latitude: record.label_latitude?.toString() ?? '',
+      label_longitude: record.label_longitude?.toString() ?? '',
+      is_primary: record.is_primary,
+      geometry_geojson: formatAssetGeometryInput(record.geometry_geojson),
       description: record.description ?? '',
     })
   }
@@ -604,8 +874,14 @@ export function useReferenceDataWorkspace({
     setReferenceTab,
     referenceSearch,
     setReferenceSearch,
+    assets,
+    locations,
+    railRoutes,
+    spatialFeatures,
     selectedBookCode: resolvedSelectedBookCode,
     setSelectedBookCode,
+    selectedAssetCode: resolvedSelectedAssetCode,
+    setSelectedAssetCode,
     selectedCommodityCode: resolvedSelectedCommodityCode,
     setSelectedCommodityCode,
     selectedPriceIndexCode: resolvedSelectedPriceIndexCode,
@@ -616,12 +892,18 @@ export function useReferenceDataWorkspace({
     setSelectedUnitCode,
     selectedLocationCode: resolvedSelectedLocationCode,
     setSelectedLocationCode,
+    selectedRailRouteCode: resolvedSelectedRailRouteCode,
+    setSelectedRailRouteCode,
+    selectedSpatialFeatureCode: resolvedSelectedSpatialFeatureCode,
+    setSelectedSpatialFeatureCode,
     selectedCounterpartyCode: resolvedSelectedCounterpartyCode,
     setSelectedCounterpartyCode,
     selectedPortfolioCode: resolvedSelectedPortfolioCode,
     setSelectedPortfolioCode,
     bookForm,
     setBookForm,
+    assetForm,
+    setAssetForm,
     commodityForm,
     setCommodityForm,
     priceIndexForm: resolvedPriceIndexForm,
@@ -632,12 +914,18 @@ export function useReferenceDataWorkspace({
     setUnitForm,
     locationForm,
     setLocationForm,
+    railRouteForm,
+    setRailRouteForm,
+    spatialFeatureForm,
+    setSpatialFeatureForm,
     counterpartyForm,
     setCounterpartyForm,
     portfolioForm: resolvedPortfolioForm,
     setPortfolioForm,
     bookFormMode,
     setBookFormMode,
+    assetFormMode,
+    setAssetFormMode,
     commodityFormMode,
     setCommodityFormMode,
     priceIndexFormMode,
@@ -648,29 +936,43 @@ export function useReferenceDataWorkspace({
     setUnitFormMode,
     locationFormMode,
     setLocationFormMode,
+    railRouteFormMode,
+    setRailRouteFormMode,
+    spatialFeatureFormMode,
+    setSpatialFeatureFormMode,
     counterpartyFormMode,
     setCounterpartyFormMode,
     portfolioFormMode,
     setPortfolioFormMode,
     selectedBook,
+    selectedAsset,
     selectedCommodity,
     selectedPriceIndex,
     selectedCurrency,
     selectedUnit,
     selectedLocation,
+    selectedRailRoute,
+    selectedSpatialFeature,
     selectedCounterparty,
     selectedPortfolio,
     filteredBooks,
+    filteredAssets,
     referenceCommodityGroups,
     filteredPriceIndices,
     filteredCurrencies,
     filteredUnits,
     filteredLocations,
+    filteredRailRoutes,
+    filteredSpatialFeatures,
     filteredCounterparties,
     filteredPortfolios,
     selectablePriceIndexUnits,
+    activeAssets,
+    activeRailRoutes,
     startCreateBook,
     startEditBook,
+    startCreateAsset,
+    startEditAsset,
     startCreateCommodity,
     startEditCommodity,
     startCreatePriceIndex,
@@ -681,6 +983,10 @@ export function useReferenceDataWorkspace({
     startEditUnit,
     startCreateLocation,
     startEditLocation,
+    startCreateRailRoute,
+    startEditRailRoute,
+    startCreateSpatialFeature,
+    startEditSpatialFeature,
     startCreateCounterparty,
     startEditCounterparty,
     startCreatePortfolio,

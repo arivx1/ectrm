@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.auth import is_admin_role, resolve_session_principal
+from apps.api.app.domains.assistant.services.action_handlers import AssistantActionRequestError
+from apps.api.app.domains.assistant.services.action_registry import ACTION_SPECS
 from apps.api.app.domains.assistant.services.action_requests import (
-    ACTION_SPECS,
     AssistantActionDecision,
-    AssistantActionRequestError,
     approve_action_request,
     create_action_requests,
     get_action_request,
@@ -33,9 +34,15 @@ from apps.api.app.domains.assistant.services.prompt_context import (
     AssistantPromptEnvelope,
     AssistantPromptSection,
     AssistantPromptUser,
+    build_prompt_section,
     build_prompt_context,
     render_prompt_sections,
 )
+from apps.api.app.domains.assistant.services.policies import (
+    authority_allows_execution,
+    evaluate_tool_policy,
+)
+from apps.api.app.domains.assistant.personas import normalize_assistant_persona_key
 from apps.api.app.domains.assistant.services.registry import (
     ACTIVE_ASSISTANT_AGENT_STATUS,
     ManagedAssistantAgent,
@@ -48,16 +55,139 @@ from apps.api.app.domains.assistant.services.runs import (
     attach_run_metadata,
     get_assistant_run,
 )
+from apps.api.app.domains.assistant.services.tools import (
+    AssistantToolService,
+    AssistantToolServiceError,
+    json_dumps,
+)
 from apps.api.app.models.assistant_action_request import AssistantActionRequest
 from apps.api.app.models.assistant_conversation import AssistantConversation
 from apps.api.app.models.assistant_run import AssistantRun
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.schemas.assistant import (
+    AssistantMessageOut,
     AssistantPromptContextRequest,
     AssistantPromptRequest,
     AssistantPromptResponse,
     AssistantPromptSectionOut,
     AssistantToolCallOut,
+    AssistantUsageOut,
+)
+
+_TOOL_PREFETCH_LIMIT = 5
+_SUMMARY_HINT_PHRASES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "settlement.invoice_pending_count",
+        (
+            "open invoice",
+            "open invoices",
+            "unissued invoice",
+            "unissued invoices",
+            "issue invoice",
+            "issue invoices",
+            "invoice issue",
+            "invoice issues",
+            "invoice pending",
+        ),
+    ),
+    (
+        "settlement.payment_due_count",
+        (
+            "payment due",
+            "payments due",
+            "due payment",
+            "due payments",
+            "due / overdue",
+            "due overdue",
+            "cash due",
+        ),
+    ),
+    (
+        "settlement.trade_exception_count",
+        (
+            "settlement exception",
+            "settlement exceptions",
+            "trade exception",
+            "trade exceptions",
+            "settlement dispute",
+            "settlement disputes",
+            "disputed settlement",
+            "disputed invoice",
+            "disputed invoices",
+        ),
+    ),
+    (
+        "dashboard.attention.confirmation_backlog_count",
+        (
+            "confirmation backlog",
+            "confirm backlog",
+            "unconfirmed trade",
+            "unconfirmed trades",
+            "confirmation queue",
+        ),
+    ),
+    (
+        "dashboard.attention.nomination_backlog_count",
+        (
+            "nomination backlog",
+            "nominations backlog",
+            "nomination queue",
+            "nominations needing attention",
+        ),
+    ),
+    (
+        "dashboard.attention.allocation_backlog_count",
+        (
+            "allocation backlog",
+            "allocations backlog",
+            "allocation queue",
+            "allocations needing attention",
+        ),
+    ),
+    (
+        "dashboard.attention.invoice_backlog_count",
+        (
+            "invoice backlog",
+            "invoice backlogs",
+            "backlog invoice",
+            "backlog invoices",
+        ),
+    ),
+    (
+        "dashboard.attention.overdue_payment_count",
+        (
+            "overdue payment",
+            "overdue payments",
+            "overdue cash",
+        ),
+    ),
+    (
+        "dashboard.attention.stale_pricing_count",
+        (
+            "stale pricing",
+            "pricing backlog",
+            "pricing stale",
+            "pending pricing",
+        ),
+    ),
+    (
+        "dashboard.attention.incomplete_ops_data_count",
+        (
+            "incomplete ops data",
+            "missing ops data",
+            "operational data gap",
+            "ops data gap",
+        ),
+    ),
+    (
+        "trades.pending_settlement_count",
+        (
+            "pending settlement",
+            "pending settlements",
+            "unsettled trade",
+            "unsettled trades",
+        ),
+    ),
 )
 
 
@@ -89,8 +219,14 @@ def resolve_prompt_user(
     return AssistantPromptUser(
         user_id=record.user_id,
         display_name=record.display_name,
+        first_name=record.first_name,
+        last_name=record.last_name,
+        preferred_timezone=record.preferred_timezone,
+        primary_location=record.primary_location,
         role=record.role,
         email=record.email,
+        default_persona=normalize_assistant_persona_key(record.default_assistant_persona),
+        assistant_context_blurb=record.assistant_context_blurb,
         session_id=principal.session_id,
         session_expires_at=principal.expires_at,
     )
@@ -269,11 +405,24 @@ def prepare_assistant_execution(
         db=db,
         agent_definition=agent_definition,
     )
+    prefetch_sections, prefetch_warnings = _build_workspace_summary_tool_prefetch(
+        db=db,
+        payload=payload,
+        user=user,
+        agent_definition=agent_definition,
+    )
+    prompt_context = _apply_prompt_enrichment(
+        prompt_context,
+        sections=prefetch_sections,
+        warnings=prefetch_warnings,
+    )
     action_runtime_result = plan_action_requests(
         payload=payload,
         db=db,
         agent_definition=agent_definition,
         action_specs=ACTION_SPECS,
+        user_role=user.role,
+        default_persona=user.default_persona,
     )
     prompt_context = _apply_prompt_enrichment(
         prompt_context,
@@ -299,11 +448,20 @@ async def execute_assistant_execution(
     payload: AssistantPromptRequest,
     prepared: PreparedAssistantExecution,
 ) -> tuple[AssistantPromptResponse, AssistantConversation]:
-    response = await assistant_service.generate_response(
-        payload,
-        agent_definition=prepared.agent_definition,
-        prompt_context=prepared.prompt_context,
-    )
+    try:
+        response = await assistant_service.generate_response(
+            payload,
+            agent_definition=prepared.agent_definition,
+            prompt_context=prepared.prompt_context,
+        )
+    except AssistantServiceError as exc:
+        fallback_response = _build_provider_empty_response_fallback(
+            exc,
+            prepared=prepared,
+        )
+        if fallback_response is None:
+            raise
+        response = fallback_response
     if not isinstance(response, AssistantPromptResponse):
         response = AssistantPromptResponse.model_validate(response)
     if response.agent_role_key is None:
@@ -329,23 +487,109 @@ async def execute_assistant_execution(
         assistant_message=response.message.content,
     )
 
-    response.action_requests = to_action_request_out_list(
-        create_action_requests(
-            db=db,
-            run_id=run_record.id,
-            user_id=prepared.user.user_id,
-            session_id=prepared.user.session_id,
-            workspace=payload.workspace,
-            agent_id=response.agent_id,
-            agent_name=response.agent_name,
-            proposals=prepared.action_runtime_result.proposals,
-        )
+    action_request_records = create_action_requests(
+        db=db,
+        run_id=run_record.id,
+        user_id=prepared.user.user_id,
+        session_id=prepared.user.session_id,
+        workspace=payload.workspace,
+        agent_id=response.agent_id,
+        agent_name=response.agent_name,
+        proposals=prepared.action_runtime_result.proposals,
     )
+    if _agent_can_autonomously_execute(prepared.agent_definition):
+        action_request_records = _autonomously_execute_action_requests(
+            db=db,
+            records=action_request_records,
+            actor_id=response.agent_id or prepared.agent_definition.agent_id,
+            actor_role=prepared.user.role,
+        )
+        execution_update = _autonomous_execution_update_message(action_request_records)
+        if execution_update:
+            response.message.content = f"{response.message.content}\n\n{execution_update}"
+            run_record.assistant_message = response.message.content
+            updated_conversation.latest_assistant_message = response.message.content
+            db.commit()
+            db.refresh(run_record)
+            db.refresh(updated_conversation)
+
+    response.action_requests = to_action_request_out_list(action_request_records)
 
     response = attach_run_metadata(response, run_record)
     response.conversation_id = updated_conversation.id
     response.conversation_updated_at = updated_conversation.updated_at
     return response, updated_conversation
+
+
+def _build_provider_empty_response_fallback(
+    exc: AssistantServiceError,
+    *,
+    prepared: PreparedAssistantExecution,
+) -> AssistantPromptResponse | None:
+    if "returned an empty response" not in exc.detail.lower():
+        return None
+
+    fallback_message = _governed_action_fallback_message(prepared.action_runtime_result)
+    if fallback_message is None:
+        return None
+
+    fallback_warning = (
+        "The model provider returned no response text, so the assistant used the governed action planner's deterministic stop condition."
+        if prepared.action_runtime_result.warnings
+        else "The model provider returned no response text, so the assistant used the governed action planner's typed action plan."
+    )
+    return AssistantPromptResponse(
+        agent_id=prepared.prompt_context.agent_id,
+        agent_name=prepared.prompt_context.agent_name,
+        agent_role_key=prepared.prompt_context.agent_role_key,
+        agent_profile_kind=prepared.prompt_context.agent_profile_kind,
+        provider=prepared.provider_name,
+        model=prepared.model_name,
+        message=AssistantMessageOut(content=fallback_message),
+        usage=AssistantUsageOut(input_tokens=None, output_tokens=None),
+        warnings=_dedupe_strings(
+            [
+                *prepared.runtime_warnings,
+                *prepared.prompt_context.warnings,
+                fallback_warning,
+            ]
+        ),
+        tool_calls=[],
+    )
+
+
+def _governed_action_fallback_message(result: AssistantActionRuntimeResult) -> str | None:
+    action_warnings = [warning.strip() for warning in result.warnings if warning.strip()]
+    if action_warnings:
+        return (
+            "I could not stage a governed action from that prompt yet. "
+            + " ".join(action_warnings)
+            + " No trade or business record was created, amended, or executed from this chat. "
+            "Provide the missing structured fields or use the manual workspace path."
+        )
+
+    if result.proposals:
+        summaries = "; ".join(proposal.summary for proposal in result.proposals[:3])
+        return (
+            "I prepared governed action context for review: "
+            + summaries
+            + ". The model provider returned no response text, so this reply is based on the platform's typed action plan. "
+            "Review the action request status before treating anything as executed."
+        )
+
+    return None
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
 
 
 def record_failed_assistant_execution(
@@ -414,11 +658,261 @@ def _apply_prompt_enrichment(
     )
 
 
+def _build_workspace_summary_tool_prefetch(
+    *,
+    db: Session,
+    payload: AssistantPromptRequest,
+    user: AssistantPromptUser,
+    agent_definition: ManagedAssistantAgent | None,
+) -> tuple[tuple[AssistantPromptSection, ...], tuple[str, ...]]:
+    if not payload.use_live_tools:
+        return (), ()
+    if not _tool_is_allowed(
+        agent_definition=agent_definition,
+        tool_name="get_workspace_summary",
+        workspace=payload.workspace,
+    ):
+        return (), ()
+
+    explicit_targets = _matching_explicit_workspace_summary_targets(payload)
+    keyword_text = _workspace_summary_prefetch_text(payload)
+    if not explicit_targets and (not keyword_text or _looks_like_specific_trade_focus(keyword_text)):
+        return (), ()
+
+    tool_service = AssistantToolService(db, actor_id=user.user_id)
+    try:
+        summary_result, _trace = tool_service.execute_tool("get_workspace_summary", {})
+    except AssistantToolServiceError:
+        return (), ()
+
+    hint_keys = explicit_targets or _matching_workspace_summary_hint_keys(summary_result.output, keyword_text)
+    if not hint_keys:
+        return (), ()
+
+    hints = summary_result.output.get("candidate_read_hints")
+    if not isinstance(hints, dict):
+        return (), ()
+
+    sections: list[AssistantPromptSection] = [
+        _build_tool_prefetch_section(
+            key="tool-prefetch-workspace-summary",
+            tool_name="get_workspace_summary",
+            arguments={},
+            summary=summary_result.summary,
+            output={
+                "matched_counts": {
+                    count_key: _resolve_nested_value(summary_result.output, count_key)
+                    for count_key in hint_keys
+                },
+                "candidate_read_hints": {
+                    count_key: hints[count_key]
+                    for count_key in hint_keys
+                    if count_key in hints
+                },
+            },
+        )
+    ]
+
+    seen_signatures: set[tuple[str, str]] = set()
+    for count_key in hint_keys:
+        hint = hints.get(count_key)
+        if not isinstance(hint, dict):
+            continue
+        tool_name = str(hint.get("tool") or "").strip()
+        if not tool_name:
+            continue
+        if not _tool_is_allowed(
+            agent_definition=agent_definition,
+            tool_name=tool_name,
+            workspace=payload.workspace,
+        ):
+            continue
+
+        arguments = hint.get("arguments")
+        if not isinstance(arguments, dict):
+            arguments = {}
+        call_arguments = dict(arguments)
+        call_arguments.setdefault("limit", _TOOL_PREFETCH_LIMIT)
+        signature = (tool_name, json_dumps(call_arguments))
+        if signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+
+        try:
+            result, _trace = tool_service.execute_tool(tool_name, call_arguments)
+        except AssistantToolServiceError:
+            continue
+
+        sections.append(
+            _build_tool_prefetch_section(
+                key=f"tool-prefetch-{count_key.replace('.', '-').replace('_', '-')}",
+                tool_name=tool_name,
+                arguments=call_arguments,
+                summary=result.summary,
+                output=result.output,
+            )
+        )
+
+    return tuple(sections), ()
+
+
+def _tool_is_allowed(
+    *,
+    agent_definition: ManagedAssistantAgent | None,
+    tool_name: str,
+    workspace: str | None,
+) -> bool:
+    return evaluate_tool_policy(
+        agent=agent_definition,
+        tool_id=tool_name,
+        workspace=workspace,
+    ).allowed
+
+
+def _agent_can_autonomously_execute(agent_definition: ManagedAssistantAgent | None) -> bool:
+    if agent_definition is None:
+        return False
+    return authority_allows_execution(agent_definition.authority_ceiling)
+
+
+def _autonomously_execute_action_requests(
+    *,
+    db: Session,
+    records: list[AssistantActionRequest],
+    actor_id: str,
+    actor_role: str | None,
+) -> list[AssistantActionRequest]:
+    executed_records: list[AssistantActionRequest] = []
+    for record in records:
+        try:
+            executed_records.append(
+                approve_action_request(
+                    db=db,
+                    record=record,
+                    actor_id=actor_id,
+                    actor_role=actor_role,
+                    decision=AssistantActionDecision(
+                        review_outcome="APPROVED_AS_IS",
+                        decision_note=(
+                            "Autonomously executed by an execute-capable managed agent so the platform record "
+                            "could align with asserted real-world state."
+                        ),
+                    ),
+                )
+            )
+        except AssistantActionRequestError:
+            refreshed = get_action_request(db, record.id)
+            executed_records.append(refreshed or record)
+    return executed_records
+
+
+def _autonomous_execution_update_message(records: list[AssistantActionRequest]) -> str | None:
+    if not records:
+        return None
+
+    executed = [record.summary for record in records if record.status == "EXECUTED"]
+    failed = [
+        f"{record.summary} ({record.error_detail})"
+        for record in records
+        if record.status == "FAILED"
+    ]
+    pending = [record.summary for record in records if record.status == "PENDING"]
+    rejected = [record.summary for record in records if record.status == "REJECTED"]
+
+    parts: list[str] = []
+    if executed:
+        parts.append("executed autonomously: " + "; ".join(executed[:3]))
+    if failed:
+        parts.append("not executed: " + "; ".join(failed[:2]))
+    if pending:
+        parts.append("still pending: " + "; ".join(pending[:2]))
+    if rejected:
+        parts.append("rejected: " + "; ".join(rejected[:2]))
+    if not parts:
+        return None
+    return "Governed action update: " + " ".join(parts) + "."
+
+
+def _workspace_summary_prefetch_text(payload: AssistantPromptRequest) -> str:
+    parts: list[str] = []
+    if payload.context:
+        parts.append(payload.context)
+    parts.extend(message.content for message in payload.messages[-6:] if message.content)
+    return "\n".join(parts).strip().lower()
+
+
+def _matching_explicit_workspace_summary_targets(
+    payload: AssistantPromptRequest,
+) -> tuple[str, ...]:
+    return tuple(target for target in payload.summary_targets if target)
+
+
+def _looks_like_specific_trade_focus(text: str) -> bool:
+    return "selected trade:" in text or re.search(r"\bt-[a-z0-9-]+\b", text) is not None
+
+
+def _matching_workspace_summary_hint_keys(
+    summary_output: dict[str, object],
+    keyword_text: str,
+) -> tuple[str, ...]:
+    hints = summary_output.get("candidate_read_hints")
+    if not isinstance(hints, dict):
+        return ()
+
+    matched_keys: list[str] = []
+    for count_key, phrases in _SUMMARY_HINT_PHRASES:
+        if count_key not in hints:
+            continue
+        if any(phrase in keyword_text for phrase in phrases):
+            matched_keys.append(count_key)
+    return tuple(matched_keys)
+
+
+def _resolve_nested_value(payload: dict[str, object], dotted_key: str) -> object | None:
+    current: object = payload
+    for segment in dotted_key.split("."):
+        if not isinstance(current, dict) or segment not in current:
+            return None
+        current = current[segment]
+    return current
+
+
+def _build_tool_prefetch_section(
+    *,
+    key: str,
+    tool_name: str,
+    arguments: dict[str, object],
+    summary: str,
+    output: dict[str, object],
+) -> AssistantPromptSection:
+    return build_prompt_section(
+        contract_key="tool-prefetch",
+        key=key,
+        title=f"Live Tool Prefetch: {tool_name}",
+        content=(
+            f"tool: {tool_name}\n"
+            f"arguments: {json_dumps(arguments)}\n"
+            f"summary: {summary}\n"
+            f"output: {json_dumps(output)}"
+        ),
+        owner_reference=tool_name,
+    )
+
+
 def _to_prompt_section_out(section: AssistantPromptSection) -> AssistantPromptSectionOut:
     return AssistantPromptSectionOut(
+        contract_key=section.contract_key,
+        contract_version=section.contract_version,
         key=section.key,
         title=section.title,
         source=section.source,
+        scope=section.scope,
+        kind=section.kind,
+        owner=section.owner,
+        owner_reference=section.owner_reference,
+        freshness=section.freshness,
+        merge_strategy=section.merge_strategy,
+        uses_fallback=section.uses_fallback,
         content=section.content,
     )
 

@@ -14,7 +14,8 @@ DEFAULT_LOG_LEVEL = "INFO"
 LOG_FORMAT = (
     "%(asctime)s %(levelname)s [%(name)s] %(message)s "
     "correlation_id=%(correlation_id)s actor_id=%(actor_id)s role=%(role)s "
-    "session_id=%(session_id)s request_method=%(request_method)s request_path=%(request_path)s"
+    "session_id=%(session_id)s request_method=%(request_method)s request_path=%(request_path)s "
+    "source_surface=%(source_surface)s"
 )
 
 
@@ -54,6 +55,9 @@ class RequestContextFilter(logging.Filter):
             getattr(record, "request_method", None) or identity.request_method,
         )
         record.request_path = _normalize_log_value(getattr(record, "request_path", None) or identity.request_path)
+        record.source_surface = _normalize_log_value(
+            getattr(record, "source_surface", None) or identity.source_surface,
+        )
         return True
 
 

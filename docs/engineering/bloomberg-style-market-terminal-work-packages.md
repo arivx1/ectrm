@@ -1,0 +1,897 @@
+# Bloomberg-Style Market Terminal Work Packages
+
+## Goal
+
+Make meaningful progress toward a Bloomberg-style market terminal mode inside
+ECTRM without cloning Bloomberg screen art or turning the product into a
+separate application.
+
+The target experience is:
+
+- users can choose a denser, monitor-first shell that feels familiar to market
+  terminal users
+- the shell emphasizes search, saved layouts, quote or monitor boards, fast
+  navigation, and multi-panel context
+- the first slice stays grounded in ECTRM's current data model: trades,
+  positions, events, deliveries, reports, messages, documents, price indices,
+  and external market context
+- business writes remain behind typed services, permissions, audit, and manual
+  review paths
+
+This is a familiarity and productivity program, not an attempt to replicate
+vendor branding or proprietary product behavior.
+
+## Primary Design Inputs
+
+- [Trading UI Familiarity Reference](./trading-ui-familiarity-reference.md)
+- [Market Terminal Operator Guide](./market-terminal-operator-guide.md)
+- [Platform Blueprint](./platform-blueprint.md)
+- [Prompt-First Operator Experience Work Packages](./prompt-first-operator-experience-work-packages.md)
+- [Trader/Risk MVP Work Packages](./trader-risk-mvp-work-packages.md)
+- [Trading Source Roadmap](./trading-source-roadmap.md)
+
+## Implementation Status
+
+Phase 1 is implemented and verified as a Bloomberg-style familiarity layer, not
+a vendor clone. The shipped slice is a read, explain, navigate, and personalize
+surface over existing ECTRM workspaces.
+
+| Package | Status | Evidence |
+| --- | --- | --- |
+| MTERM-01 terminal shell and density mode | Implemented | User-selectable market terminal mode, persisted appearance preference, denser shell treatment, and Live Desk landing behavior. |
+| MTERM-02 global command and search bar | Implemented | Terminal command bar supports workspace, trade, counterparty, commodity, price-index, and report routing with mutation verbs blocked. |
+| MTERM-03 monitor presets and saved layouts | Implemented | Market Overview, Risk Board, and Operations Monitor presets reuse `TileLayout` and saved workspace layout state. |
+| MTERM-04 market monitor board | Implemented | Live Desk includes terminal-style market strip, monitor board, cross-panel market, exposure, and operational signals. |
+| MTERM-05 instrument brief and drill-down pages | Implemented | Supported market instruments and commodity classes open read-only contextual briefs from terminal search and dashboard tiles. |
+| MTERM-06 desk headlines and attention stream | Implemented | Desk headlines blend market, pricing, operational, settlement, document, and message context with routeable source links. |
+| MTERM-07 keyboard shortcuts and quick navigation | Implemented | Command, workspace, filter, tile, reset, and shortcut-reference shortcuts are available with conflict-aware handling. |
+| MTERM-08 watchlists and alerts | Implemented | Live Desk watchlists serialize safely and evaluate typed price, stale data, exposure, pricing, and settlement alert rules. |
+| MTERM-09 regression, assistant routing, and browser smoke coverage | Implemented | Focused web tests, Prompt Home fail-closed coverage, dashboard smoke, full web smoke, and assistant evals pass. |
+| MTERM-10 multi-monitor workspace sets | Implemented | Terminal mode exposes Trader Morning, Risk Review, and Ops Close workspace sets with safe route launch targets and manual pop-out guidance. |
+| MTERM-11 expanded terminal command aliases and functions | Implemented | Terminal command search supports deterministic aliases such as `TRD`, `CP`, `PX`, `MON`, `DES`, `EOD`, `SETL`, and workspace-set functions while mutation verbs remain blocked. |
+| MTERM-12 time-series, quote chart, and curve panels | Implemented | Live Desk includes a read-only quote chart and curve panel over stored price-index observations, with deterministic latest marks, deltas, curve rows, and commodity buckets. |
+| MTERM-13 persistent alert delivery and notification routing | Implemented | Terminal watchlist alerts persist to a local in-product delivery trail with deterministic instrument-brief and owning-workspace routes. |
+| MTERM-14 deeper instrument analytics for curve, basis, volatility, and P&L | Implemented | Live Desk includes read-only deterministic instrument analytics over stored curves, compatible basis pairs, realized volatility, and existing P&L report valuations. |
+| MTERM-CLOSEOUT release readiness | Implemented | Roadmap status, operator guide, and Wave 3 candidate backlog documented. |
+
+## Current Repo Anchors
+
+The first Bloomberg-style slice should extend existing seams before adding a
+new app surface.
+
+- App shell and route state: `apps/web/src/App.tsx`
+- Primary navigation model: `apps/web/src/app/navigation.ts`
+- Workspace registry and lazy loading:
+  `apps/web/src/entities/app/workspaceRendererRegistry.tsx`
+- Dashboard workspace and market tiles:
+  `apps/web/src/workspaces/dashboard/DashboardWorkspace.tsx`
+- Reports workspace: `apps/web/src/workspaces/reports/ReportsWorkspace.tsx`
+- Messaging workspace: `apps/web/src/workspaces/messages/MessagingWorkspace.tsx`
+- Document library workspace: `apps/web/src/workspaces/library/LibraryWorkspace.tsx`
+- Tile layout engine: `apps/web/src/shared/ui/TileLayout.tsx`
+- Personal layout client: `apps/web/src/entities/layouts/api.ts`
+- Personal layout API: `apps/api/app/routes/layout_definitions.py`
+- External data and market context routes:
+  `apps/api/app/routes/external_data.py`
+
+## Experience Principles
+
+1. Emulate workflows, not branding.
+   We want information density, keyboard-first movement, saved monitors, and
+   fast drill-downs. We do not want copied logos, colors, icons, keyboard
+   legends, or screen art.
+
+2. Start as a mode, not a forked app.
+   The first step should be a market terminal mode, preset, or workspace layer
+   on top of the current shell and dashboard infrastructure.
+
+3. Keep one domain model underneath.
+   Terminal mode should not invent new meanings for trades, positions, reports,
+   events, or approvals.
+
+4. Read and route first, mutate later if ever.
+   Bloomberg-style familiarity should begin with search, monitoring, explain,
+   and navigation. Trade capture and business changes must continue through
+   governed flows.
+
+5. Design for multiple monitors and power users.
+   Density, saved layouts, keyboard shortcuts, and fast context switching are
+   part of the value proposition, not polish items.
+
+## Authority Boundary
+
+Phase 1 authority for this program is read, explain, navigate, and save
+personal view preferences.
+
+The market terminal mode may:
+
+- open workspaces and route to focused records
+- search for supported objects
+- show derived market context, positions, reports, events, and desk attention
+- save user-specific layout, density, and watchlist preferences
+
+It may not:
+
+- book, amend, cancel, approve, or settle trades directly
+- submit orders to an exchange or broker
+- send external commitments
+- bypass action requests, permissions, stale-state checks, or audit
+
+## Work Objects
+
+| Work object | Status | Notes |
+| --- | --- | --- |
+| Terminal mode preference | Implemented | User-level choice for layout density and terminal-style navigation. |
+| Workspace layout definition | Existing | Reuse the current personal layout API before adding anything heavier. |
+| Monitor preset | Implemented | System-owned starting layouts such as Market Overview, Risk Board, and Operations Monitor. |
+| Watchlist | Implemented | Saved list of price indices, commodity classes, and desk signals for the Live Desk. |
+| Workspace set | Implemented | Named terminal-mode launch bundles for opening related safe workspaces across browser windows. |
+| Terminal function | Implemented | Deterministic command aliases that resolve to existing read, explain, and navigate actions. |
+| Quote chart and curve panel | Implemented | Read-only price-index history and curve strip built from stored observations and active trade links. |
+| Instrument analytics panel | Implemented | Read-only curve diagnostics, compatible basis, volatility, and P&L attribution context. |
+| Instrument brief | Implemented | Read-only drill-down object for a price index, commodity class, or market theme. |
+| Alert definition | Implemented | Typed thresholds or status triggers for watchlists and attention cards. |
+| Alert delivery record | Implemented | Local in-product notification trail with cooldowns, delivery counts, and safe route targets. |
+| Desk headline or attention item | Implemented | Unified stream built from market context, events, reports, docs, and messages. |
+
+## Delivery Order
+
+### Wave 0: Foundation For A Terminal Mode
+
+1. MTERM-01 terminal shell and density mode - implemented
+2. MTERM-02 global command and search bar - implemented
+3. MTERM-03 monitor presets and saved layouts - implemented
+
+### Wave 1: First Bloomberg-Style Operating Surface
+
+4. MTERM-04 market monitor board - implemented
+5. MTERM-05 instrument brief and drill-down pages - implemented
+6. MTERM-06 desk headlines and attention stream - implemented
+
+### Wave 2: Power-User Depth
+
+7. MTERM-07 keyboard shortcuts and quick navigation - implemented
+8. MTERM-08 watchlists and alerts - implemented
+9. MTERM-09 regression, assistant routing, and browser smoke coverage - implemented
+
+### Closeout
+
+10. MTERM-CLOSEOUT release readiness - implemented
+
+### Wave 3: Candidate Enhancements
+
+These are intentionally candidates, not committed scope. They should be
+selected after the Phase 1 terminal mode has been reviewed by operators.
+
+1. MTERM-10 multi-monitor workspace sets - implemented
+2. MTERM-11 expanded terminal command aliases and functions - implemented
+3. MTERM-12 time-series, quote chart, and curve panels - implemented
+4. MTERM-13 persistent alert delivery and notification routing - implemented
+5. MTERM-14 deeper instrument analytics for curve, basis, volatility, and P&L - implemented
+
+## Shared Definition Of Done
+
+Each work package is done only when:
+
+- the new terminal behavior reuses existing route, workspace, and business
+  objects where possible
+- terminal-mode actions cannot mutate business records outside governed flows
+- manual fallback to the existing workspaces remains obvious
+- dense layouts still work on a standard laptop viewport and large monitors
+- saved user preferences fail closed when the underlying workspace changes
+- focused tests cover the new client-side contract or rendering behavior
+- browser smoke or assistant eval coverage is added when route or prompt-led
+  behavior changes
+- docs are updated when the user workflow or operating model changes
+
+## MTERM-01: Terminal Shell And Density Mode
+
+### Status
+
+Implemented.
+
+### Priority
+
+P0
+
+### Outcome
+
+ECTRM has a user-selectable market terminal mode that makes the shell denser,
+reduces oversized onboarding chrome, and makes dashboard-style monitoring a
+first-class landing option.
+
+### Scope
+
+- add a user-facing "market terminal" appearance or workspace mode
+- define a denser spacing and panel treatment for the shell
+- support a monitoring-first landing path alongside the existing Prompt Home
+- make room for multi-panel work without creating a second application shell
+- preserve direct links to all existing workspaces
+
+### Out Of Scope
+
+- copying Bloomberg visual branding
+- replacing Prompt Home
+- removing the current dashboard or assistant surfaces
+
+### Acceptance Criteria
+
+- a signed-in user can switch between the default shell and terminal mode
+- terminal mode uses a visibly denser layout tuned for heavy information use
+- route navigation, auth gating, and current workspaces still behave normally
+- the mode is stored as a user preference and restored on reload
+
+### Verification
+
+- focused web tests for mode toggle and persisted preference
+- focused rendering checks for shell class changes and fallback behavior
+
+## MTERM-02: Global Command And Search Bar
+
+### Status
+
+Implemented.
+
+### Priority
+
+P0
+
+### Outcome
+
+Users can open one keyboard-first command bar to search and navigate across
+workspaces and key desk objects.
+
+### Scope
+
+- add a global command bar entrypoint such as `/` or `Ctrl/Cmd+K`
+- support typed search results for at least:
+  - workspaces
+  - trades
+  - counterparties
+  - commodities
+  - price indices
+  - reports
+- route selected results into existing workspaces with handoff context
+- distinguish navigation intents from business mutations
+- show clear empty, loading, and unsupported-result states
+
+### Out Of Scope
+
+- natural-language order entry
+- unrestricted fuzzy search across every record in the database
+- model-only routing without deterministic result types
+
+### Acceptance Criteria
+
+- the command bar opens from keyboard and shell UI affordances
+- selecting a result routes to a concrete existing workspace or focused object
+- unsupported results fail closed with a readable explanation
+- the command bar works in both default mode and terminal mode
+
+### Verification
+
+- focused web tests for search categories, keyboard open, and route handoff
+- browser smoke for open-search-select-route behavior
+
+## MTERM-03: Monitor Presets And Saved Layouts
+
+### Status
+
+Implemented.
+
+### Priority
+
+P0
+
+### Outcome
+
+Users can start from system-provided monitor presets and save personal
+variations using the existing layout-definition infrastructure.
+
+### Scope
+
+- define system presets such as:
+  - Market Overview
+  - Risk Board
+  - Operations Monitor
+  - Settlement Watch
+- map those presets onto the existing tile layout engine and layout API
+- allow users to save personal layout changes on top of a chosen preset
+- provide reset and fallback behavior when tiles evolve over time
+
+### Out Of Scope
+
+- arbitrary user-authored layout DSLs
+- cross-workspace freeform drag-and-drop composition
+- multi-user shared publishing workflows
+
+### Acceptance Criteria
+
+- at least three terminal-friendly presets are available from the UI
+- a user can personalize tile order, visibility, and span and persist changes
+- preset changes do not break existing saved layouts silently
+- the fallback path is deterministic when a tile no longer exists
+
+### Verification
+
+- focused API tests for layout validation
+- focused web tests for preset selection, save, reset, and schema drift fallback
+
+## MTERM-04: Market Monitor Board
+
+### Status
+
+Implemented.
+
+### Priority
+
+P1
+
+### Outcome
+
+ECTRM exposes a first monitor board that feels closer to a market-data terminal
+than a simple dashboard.
+
+### Scope
+
+- extend the dashboard or add a dedicated monitor board using existing tiles
+  plus new terminal-oriented tiles
+- include a compact market strip for selected commodities or price indices
+- include cross-panel market context, price, exposure, and operational signals
+- support fast click-through from a tile into reports, positions, trades, or
+  operations
+- start with current market context and external data rather than requiring a
+  full real-time market data stack
+
+### Out Of Scope
+
+- tick-level market data infrastructure
+- exchange execution
+- custom formula scripting
+
+### Acceptance Criteria
+
+- the board supports a dense, multi-tile monitoring layout
+- users can see market context next to exposure and operational risk signals
+- each major tile has a clear click-through path into an existing workspace
+- stale or missing external data is visible on the board
+
+### Verification
+
+- focused web tests for tile rendering and navigation
+- focused backend or contract tests if new summary payloads are introduced
+
+## MTERM-05: Instrument Brief And Drill-Down Pages
+
+### Status
+
+Implemented.
+
+### Priority
+
+P1
+
+### Outcome
+
+Users can open a Bloomberg-like read-only brief for a supported object such as
+a price index, commodity, or market theme.
+
+### Scope
+
+- define the first supported drill-down objects, likely:
+  - price indices
+  - commodity classes
+  - market context themes
+- show summary stats, recent history, related positions, relevant trades,
+  linked reports, and notable events
+- support deep links from the command bar, monitor board, and reports
+- reuse existing data contracts where possible before adding new endpoints
+
+### Out Of Scope
+
+- security-master coverage for every instrument type
+- options analytics depth beyond current repo capabilities
+- external charting terminals embedded in iframes
+
+### Acceptance Criteria
+
+- a user can open a supported drill-down from at least two different entry
+  points
+- each brief includes related ECTRM context, not just a standalone chart
+- unsupported objects fail closed instead of rendering partial junk
+- the brief makes it obvious which workspace owns deeper operational detail
+
+### Verification
+
+- focused web tests for drill-down rendering and routing
+- focused service tests if new summary builders are introduced
+
+## MTERM-06: Desk Headlines And Attention Stream
+
+### Status
+
+Implemented.
+
+### Priority
+
+P1
+
+### Outcome
+
+ECTRM provides a terminal-style headline and attention feed that blends market
+signals with desk workflow context.
+
+### Scope
+
+- define a unified read model for desk headlines or attention items
+- combine selected inputs such as:
+  - market context summaries
+  - notable trade or position changes
+  - expiring options or pricing coverage gaps
+  - operational blockers
+  - document ingestion or settlement exceptions
+  - messages or notifications where appropriate
+- allow filtering by commodity family, desk concern, or severity
+- link each item to the owning workspace
+
+### Out Of Scope
+
+- third-party licensed news ingestion unless a source is separately approved
+- chat or messaging replacement
+- model-generated headlines that bypass deterministic evidence selection
+
+### Acceptance Criteria
+
+- the feed shows a mixed stream of market and operational attention items
+- each item cites its source object or owning workflow
+- a user can filter the feed without losing routeability
+- empty states explain whether the issue is no data, no matches, or no events
+
+### Verification
+
+- focused web tests for feed filtering and link-through
+- focused backend tests if a new headline aggregation service is added
+
+## MTERM-07: Keyboard Shortcuts And Quick Navigation
+
+### Status
+
+Implemented.
+
+### Priority
+
+P1
+
+### Outcome
+
+Terminal mode feels materially faster for power users because high-frequency
+navigation flows no longer require pointer-only interaction.
+
+### Scope
+
+- add documented shortcuts for:
+  - open command bar
+  - switch primary workspaces
+  - focus filter bars
+  - move between tiles or panels
+  - reset to a default workspace focus
+- expose a small in-product shortcut reference
+- keep shortcuts discoverable and conflict-aware
+
+### Out Of Scope
+
+- one-to-one replication of Bloomberg keyboard legends
+- hidden expert-only navigation with no visible help
+
+### Acceptance Criteria
+
+- common navigation flows can be completed without reaching for the mouse
+- shortcuts are visible from the product
+- shortcut conflicts degrade safely in forms or text inputs
+
+### Verification
+
+- focused web tests for at least the command bar and workspace-switch shortcuts
+- browser smoke for a basic keyboard-only navigation path
+
+## MTERM-08: Watchlists And Alerts
+
+### Status
+
+Implemented.
+
+### Priority
+
+P2
+
+### Outcome
+
+Users can save the small set of markets and desk signals they care about and
+see terminal-mode attention cues when those signals move.
+
+### Scope
+
+- define typed watchlists for supported objects
+- allow a watchlist to power tiles, strips, or compact side panels
+- define typed alert thresholds for:
+  - price moves
+  - stale market data
+  - large position changes
+  - pricing or settlement exceptions
+- keep alert delivery in-product first
+
+### Out Of Scope
+
+- external SMS, email, or push notification infrastructure
+- arbitrary expression languages in the first slice
+
+### Acceptance Criteria
+
+- a user can save at least one watchlist and reuse it in terminal mode
+- alerts appear as governed in-product status, not freeform assistant text
+- alert conditions are typed and testable
+
+### Verification
+
+- focused tests for watchlist serialization and alert evaluation rules
+- focused web tests for rendering alert states
+
+## MTERM-09: Regression, Assistant Routing, And Browser Smoke Coverage
+
+### Status
+
+Implemented.
+
+### Priority
+
+P0
+
+### Outcome
+
+The new terminal-mode behavior has enough regression coverage that we can
+iterate without breaking route safety, layout persistence, or prompt-to-screen
+handoffs.
+
+### Scope
+
+- add focused web tests for terminal mode shell behavior
+- add route and handoff tests for command-bar navigation
+- add browser smoke coverage for:
+  - terminal-mode landing
+  - command bar open and route
+  - preset load
+  - drill-down open
+- add assistant eval or prompt-routing coverage if Prompt Home can open
+  terminal destinations
+
+### Out Of Scope
+
+- exhaustive end-to-end automation for every workspace
+- backend performance benchmarking as the only exit criterion
+
+### Acceptance Criteria
+
+- the highest-risk route and layout flows are covered by automated checks
+- prompt-led navigation into terminal mode fails closed when unsupported
+- smoke coverage proves the feature can be used from a fresh browser session
+
+### Verification
+
+- `make web-test`
+- `make web-smoke-test` for the seeded browser path when browser routing changes
+- `make api-assistant-evals` if prompt routing behavior changes
+
+## MTERM-10: Multi-Monitor Workspace Sets
+
+### Status
+
+Implemented.
+
+### Priority
+
+P2
+
+### Outcome
+
+Terminal mode can launch named workspace sets that mimic familiar multi-monitor
+desk setups while staying inside existing ECTRM route and workspace contracts.
+
+### Scope
+
+- define deterministic workspace sets for:
+  - Trader Morning
+  - Risk Review
+  - Ops Close
+- map each set to existing workspaces and available monitor presets
+- let the user choose and save a default workspace set in terminal mode
+- provide pop-out links for opening companion workspaces in separate browser
+  windows or tabs
+- make the browser limitation explicit: ECTRM opens safe routes, but the user
+  controls physical window placement
+
+### Out Of Scope
+
+- OS-level monitor detection or window placement
+- proprietary terminal workspace commands or vendor-specific layouts
+- direct business mutations from the workspace-set launcher
+
+### Acceptance Criteria
+
+- terminal mode shows a workspace-set launcher near the top of the app shell
+- each launch target resolves to an existing ECTRM workspace route
+- preset references fail closed if the underlying monitor preset disappears
+- default workspace-set preference is persisted locally and sanitized on read
+- companion workspaces can be opened as pop-out browser tabs or windows
+
+### Verification
+
+- focused web tests for workspace-set resolution, persistence, preset
+  references, launch targets, and launcher rendering
+
+## MTERM-11: Expanded Terminal Command Aliases And Functions
+
+### Status
+
+Implemented.
+
+### Priority
+
+P2
+
+### Outcome
+
+The terminal command bar accepts familiar short aliases and deterministic
+function-style commands without becoming a freeform mutation surface.
+
+### Scope
+
+- add bare scoped aliases such as:
+  - `TRD` or `T` for trades
+  - `CP` or `CPTY` for counterparties
+  - `CMDTY` for commodities
+  - `PX` or `IDX` for price indices
+  - `RPT` for reports
+  - `WS` for workspaces
+- add deterministic terminal functions such as:
+  - `MON` for Live Desk monitor
+  - `DES <price index or commodity class>` for read-only instrument briefs
+  - `EOD`, `CR`, and `PNL` for anchored report modules
+  - `SETL`, `OPS`, `POS`, `SCH`, `REF`, and `HELP` for common workspace jumps
+  - `WSET` or `SETUP` for workspace-set primary launches
+- keep all function results as typed navigation actions into existing
+  workspaces, reports, reference records, or instrument briefs
+- continue blocking mutation verbs before any alias resolution
+
+### Out Of Scope
+
+- arbitrary expression evaluation or command scripting
+- order entry, settlement, confirmation, approval, or workflow mutation from
+  the command bar
+- vendor-specific command semantics beyond familiar, non-branded abbreviations
+
+### Acceptance Criteria
+
+- bare aliases resolve to the same safe action contracts as prefixed searches
+- terminal functions appear as command results and show a `Function` result kind
+- `DES` opens read-only Live Desk instrument briefs through typed handoff
+  metadata
+- mutation verbs such as `settle` still fail closed even when nearby safe
+  abbreviations such as `SETL` exist
+- command-bar help text and operator docs explain the supported aliases
+
+### Verification
+
+- focused web tests for scoped aliases, function routing, `DES` handoffs, and
+  mutation blocking
+
+## MTERM-12: Time-Series, Quote Chart, And Curve Panels
+
+### Status
+
+Implemented.
+
+### Priority
+
+P2
+
+### Outcome
+
+Live Desk has a terminal-style quote chart and curve panel that make stored
+price-index observations easier to scan without adding a real-time execution
+surface.
+
+### Scope
+
+- load recent stored price-index observations for desk-linked candidate indices
+- render a selected quote history chart with latest mark, prior-observation
+  move, percent move, low, high, average, and history count
+- render a curve strip ranked by active trade usage, with normalized latest
+  marks and prior-observation deltas
+- group curve rows into commodity or provider buckets for quick desk context
+- route quote and curve rows into existing read-only price-index instrument
+  briefs
+- keep all chart and curve behavior deterministic, client-side, and read-only
+
+### Out Of Scope
+
+- real-time tick streaming, licensed-data entitlement modeling, or exchange
+  connectivity
+- curve interpolation, valuation models, basis analytics, volatility analytics,
+  or P&L attribution
+- trade capture, order entry, settlement, confirmation, or approval from chart
+  interactions
+- copying proprietary chart layouts, function keys, or vendor-specific screen
+  behavior
+
+### Acceptance Criteria
+
+- Live Desk includes a quote chart and curve panel tile in the market overview
+  layout
+- chart models sort observations chronologically and compute latest, previous,
+  delta, percent delta, low, high, and average deterministically
+- curve rows rank desk-linked indices by active trade usage and normalize
+  latest values across the visible curve set
+- curve buckets summarize commodity or provider groupings without model-written
+  business state
+- brief actions use existing read-only instrument handoff behavior
+
+### Verification
+
+- focused web tests for quote chart and curve helper calculations
+- focused dashboard rendering tests for the Live Desk tile
+- workspace layout preset tests for the market overview placement
+
+## MTERM-13: Persistent Alert Delivery And Notification Routing
+
+### Status
+
+Implemented.
+
+### Priority
+
+P2
+
+### Outcome
+
+Terminal watchlist alerts now leave a persistent local delivery trail and route
+operators to the correct read-only brief or owning workspace without creating
+external commitments.
+
+### Scope
+
+- persist triggered terminal watchlist alerts as typed delivery records in
+  browser storage
+- include severity, condition, source, metric, threshold, delivery count, last
+  delivery time, and last opened time
+- apply a deterministic cooldown so repeated dashboard renders do not spam the
+  delivery trail
+- route price-index and commodity-class notifications to read-only instrument
+  briefs
+- route desk-signal notifications to their owning ECTRM workspaces
+- expose clear local history controls without changing business records
+
+### Out Of Scope
+
+- email, Slack, mobile push, browser push, or incident-management delivery
+- autonomous acknowledgement, escalation, trade capture, settlement,
+  confirmation, or approval
+- server-side notification queues, cross-device delivery state, or entitlement
+  modeling
+- freeform assistant-authored alert dispatch
+
+### Acceptance Criteria
+
+- active watchlist alerts persist to a local in-product delivery trail
+- delivery records parse fail-closed and reject unsupported payloads
+- repeated active alerts respect a deterministic cooldown before incrementing
+  delivery count
+- notification routes reuse existing instrument-brief and workspace navigation
+  paths
+- operators can clear the local delivery trail without mutating business data
+
+### Verification
+
+- focused web tests for alert delivery parsing, serialization, routing,
+  cooldown, and opened-state marking
+- focused dashboard rendering tests for the delivery trail
+
+## MTERM-14: Deeper Instrument Analytics For Curve, Basis, Volatility, And P&L
+
+### Status
+
+Implemented.
+
+### Priority
+
+P2
+
+### Outcome
+
+Live Desk now includes a read-only instrument analytics tile that gives
+operators deeper curve, compatible-basis, volatility, and P&L context without
+turning terminal mode into an autonomous valuation or execution system.
+
+### Scope
+
+- load stored price-index histories for desk-linked candidate curves
+- rank curve diagnostics by active trade usage
+- compute latest mark, history move, and realized annualized volatility from
+  stored observations
+- compute basis analytics only for compatible curve pairs with matching
+  currency and unit
+- summarize existing P&L history report totals, window change, included
+  valuation rows, and valuation rows linked to visible curves
+- route curve rows to existing read-only price-index briefs and reports
+
+### Out Of Scope
+
+- production valuation methodology, VaR, Greeks, stress testing, hedge
+  recommendation, or trade execution
+- model-authored marks, freeform basis formulas, or direct mutation of P&L
+  records
+- licensed real-time market-data entitlement or server-side analytics engines
+- replacing the Reports workspace as the owner of P&L reporting
+
+### Acceptance Criteria
+
+- Live Desk includes an instrument analytics tile in the market overview layout
+- curve diagnostics are deterministic and based on stored price observations
+- basis analytics fail soft unless a compatible comparison curve exists
+- volatility uses deterministic percentage-return calculations
+- P&L context comes from the existing P&L report model and remains read-only
+
+### Verification
+
+- focused web tests for terminal instrument analytics calculations
+- focused dashboard rendering tests for the analytics tile
+- workspace layout preset tests for market overview placement
+
+## MTERM-CLOSEOUT: Terminal Mode Release Readiness
+
+### Status
+
+Implemented.
+
+### Priority
+
+P0
+
+### Outcome
+
+The implemented terminal-mode slice, including the Wave 3 enhancements, is
+documented, reviewable, and ready for operator feedback without relying on chat
+history or code archaeology.
+
+### Scope
+
+- mark MTERM-01 through MTERM-14 implementation status in this roadmap
+- add an operator guide that explains:
+  - terminal mode intent and boundaries
+  - command bar scopes and supported prefixes
+  - monitor presets and saved layouts
+  - workspace sets
+  - watchlists and typed alerts
+  - quote charts, curve panels, alert delivery, and instrument analytics
+  - keyboard shortcuts
+  - assistant handoffs and fail-closed behavior
+- keep the authority boundary explicit: terminal mode is still read, explain,
+  navigate, analyze, and personalize first
+
+### Out Of Scope
+
+- creating new terminal product behavior
+- staging or committing unrelated dirty worktree changes
+- promoting a future Wave 4 backlog without operator review
+
+### Acceptance Criteria
+
+- the roadmap reflects the implemented terminal-mode slice through Wave 3
+- operators have a single guide for using the terminal-mode behavior
+- future contributors can see what is shipped, what is bounded, and what is
+  out of scope
+
+### Verification
+
+- docs links resolve locally and markdown formatting is readable
+- focused web tests, full web lint/build, and seeded browser smoke pass when
+  implementation behavior changes

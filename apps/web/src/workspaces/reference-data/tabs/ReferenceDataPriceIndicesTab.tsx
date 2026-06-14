@@ -2,6 +2,18 @@ import { DataSheet } from '../../../shared/ui/DataSheet'
 import { EditorStateBadge } from '../ReferenceDataShared'
 import { createStatusColumn, type ReferenceDataTabProps } from '../referenceDataTabShared'
 
+const PRICE_INDEX_QUOTE_TYPE_OPTIONS = [
+  ['SPOT', 'Spot'],
+  ['FUTURE', 'Future'],
+  ['FORWARD', 'Forward'],
+  ['INDEX', 'Index'],
+  ['OTHER', 'Other'],
+] as const
+
+function formatPriceIndexQuoteType(value: string | null | undefined): string {
+  return PRICE_INDEX_QUOTE_TYPE_OPTIONS.find(([optionValue]) => optionValue === value)?.[1] ?? 'Spot'
+}
+
 export function ReferenceDataPriceIndicesDirectory({ controller }: ReferenceDataTabProps) {
   const { filteredPriceIndices, selectedPriceIndexCode, startEditPriceIndex } = controller
 
@@ -13,6 +25,7 @@ export function ReferenceDataPriceIndicesDirectory({ controller }: ReferenceData
         { id: 'code', label: 'Code', width: '12rem', renderCell: (priceIndex) => priceIndex.code },
         { id: 'commodity', label: 'Commodity', width: '10rem', renderCell: (priceIndex) => priceIndex.commodity_code },
         { id: 'provider', label: 'Provider', width: '10rem', renderCell: (priceIndex) => priceIndex.provider },
+        { id: 'quote-type', label: 'Type', width: '8rem', renderCell: (priceIndex) => formatPriceIndexQuoteType(priceIndex.quote_type) },
         { id: 'market', label: 'Market', width: '10rem', renderCell: (priceIndex) => priceIndex.market ?? '—' },
         { id: 'currency', label: 'Currency', width: '8rem', renderCell: (priceIndex) => priceIndex.currency_code },
         { id: 'unit', label: 'Unit', width: '8rem', renderCell: (priceIndex) => priceIndex.unit_code },
@@ -142,6 +155,26 @@ export function ReferenceDataPriceIndicesEditor({ controller, formatDate }: Refe
             {priceIndexFieldErrors.provider && (
               <small className="field-error">{priceIndexFieldErrors.provider}</small>
             )}
+          </label>
+          <label className="field">
+            <span>Quote Type</span>
+            <select
+              className="control"
+              value={priceIndexForm.quote_type}
+              onChange={(event) =>
+                setPriceIndexForm((current) => ({
+                  ...current,
+                  quote_type: event.target.value as (typeof PRICE_INDEX_QUOTE_TYPE_OPTIONS)[number][0],
+                }))
+              }
+              disabled={savingReference}
+            >
+              {PRICE_INDEX_QUOTE_TYPE_OPTIONS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
 
@@ -284,6 +317,10 @@ export function ReferenceDataPriceIndicesEditor({ controller, formatDate }: Refe
           <div className="detail-row">
             <span>Provider</span>
             <strong>{selectedPriceIndex.provider}</strong>
+          </div>
+          <div className="detail-row">
+            <span>Quote Type</span>
+            <strong>{formatPriceIndexQuoteType(selectedPriceIndex.quote_type)}</strong>
           </div>
           <div className="detail-row">
             <span>Location</span>

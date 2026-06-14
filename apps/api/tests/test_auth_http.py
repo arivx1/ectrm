@@ -27,6 +27,7 @@ from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.models.reference_counterparty import ReferenceCounterparty
 from apps.api.app.models.reference_portfolio import ReferencePortfolio
+from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
 from apps.api.app.models.trade_leg import TradeLeg
 from apps.api.app.models.trade_price_term import TradePriceTerm
@@ -86,6 +87,11 @@ class AuthHttpTests(unittest.TestCase):
         self._previous_google_auth_default_role = settings.GOOGLE_AUTH_DEFAULT_ROLE
         self._previous_google_auth_timeout_seconds = settings.GOOGLE_AUTH_TIMEOUT_SECONDS
         self._previous_google_auth_tokeninfo_url = settings.GOOGLE_AUTH_TOKENINFO_URL
+        self._previous_projection_monitoring_email_from = settings.PROJECTION_MONITORING_EMAIL_FROM
+        self._previous_projection_monitoring_email_smtp_host = settings.PROJECTION_MONITORING_EMAIL_SMTP_HOST
+        self._previous_projection_monitoring_email_smtp_port = settings.PROJECTION_MONITORING_EMAIL_SMTP_PORT
+        self._previous_projection_monitoring_email_smtp_username = settings.PROJECTION_MONITORING_EMAIL_SMTP_USERNAME
+        self._previous_projection_monitoring_email_smtp_password = settings.PROJECTION_MONITORING_EMAIL_SMTP_PASSWORD
         settings.BOOTSTRAP_ADMIN_TOKEN = "bootstrap-secret"
         settings.SINGLE_USER_AUTH_ENABLED = False
         settings.SINGLE_USER_AUTH_USER_ID = "local_admin"
@@ -97,6 +103,11 @@ class AuthHttpTests(unittest.TestCase):
         settings.GOOGLE_AUTH_DEFAULT_ROLE = "TRADER"
         settings.GOOGLE_AUTH_TIMEOUT_SECONDS = 10
         settings.GOOGLE_AUTH_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
+        settings.PROJECTION_MONITORING_EMAIL_FROM = "projection-monitoring@localhost"
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_HOST = ""
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_PORT = 587
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_USERNAME = ""
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_PASSWORD = ""
 
         with self.SessionLocal() as session:
             for table in reversed(Base.metadata.sorted_tables):
@@ -115,6 +126,11 @@ class AuthHttpTests(unittest.TestCase):
         settings.GOOGLE_AUTH_DEFAULT_ROLE = self._previous_google_auth_default_role
         settings.GOOGLE_AUTH_TIMEOUT_SECONDS = self._previous_google_auth_timeout_seconds
         settings.GOOGLE_AUTH_TOKENINFO_URL = self._previous_google_auth_tokeninfo_url
+        settings.PROJECTION_MONITORING_EMAIL_FROM = self._previous_projection_monitoring_email_from
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_HOST = self._previous_projection_monitoring_email_smtp_host
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_PORT = self._previous_projection_monitoring_email_smtp_port
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_USERNAME = self._previous_projection_monitoring_email_smtp_username
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_PASSWORD = self._previous_projection_monitoring_email_smtp_password
 
     def _bootstrap_admin(self) -> dict[str, object]:
         response = self.client.post(
@@ -193,6 +209,26 @@ class AuthHttpTests(unittest.TestCase):
                     trader_persona=None,
                     risk_archetype=None,
                     description="Test portfolio",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=now,
+                    created_by="system",
+                    updated_at=now,
+                    updated_by="system",
+                    version=1,
+                )
+            )
+            session.add(
+                ReferenceUnit(
+                    code="BBL",
+                    name="Barrel",
+                    commodity_class="CRUDE_OIL",
+                    dimension="VOLUME",
+                    base_unit_code=None,
+                    conversion_factor=None,
+                    precision=3,
+                    description="Test barrel unit",
                     is_active=True,
                     effective_from=None,
                     effective_to=None,
@@ -450,6 +486,22 @@ class AuthHttpTests(unittest.TestCase):
         self.assertEqual(authenticated_workspace_summary.status_code, 200)
         self.assertIn("trades", authenticated_workspace_summary.json())
 
+        unauthenticated_trade_attention_candidates = self.client.get("/operations/trade-attention-candidates")
+        self.assertEqual(unauthenticated_trade_attention_candidates.status_code, 401)
+        authenticated_trade_attention_candidates = self.client.get(
+            "/operations/trade-attention-candidates",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(authenticated_trade_attention_candidates.status_code, 200)
+
+        unauthenticated_invoice_issue_candidates = self.client.get("/settlement/invoice-issue-candidates")
+        self.assertEqual(unauthenticated_invoice_issue_candidates.status_code, 401)
+        authenticated_invoice_issue_candidates = self.client.get(
+            "/settlement/invoice-issue-candidates",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(authenticated_invoice_issue_candidates.status_code, 200)
+
     def test_successful_requests_emit_completion_logs(self) -> None:
         stream, handler, original_stream = self._swap_log_stream()
         try:
@@ -473,7 +525,10 @@ class AuthHttpTests(unittest.TestCase):
     def test_unhandled_exception_is_logged_with_request_context(self) -> None:
         stream, handler, original_stream = self._swap_log_stream()
         try:
-            with patch("apps.api.app.main.build_database_overview", side_effect=RuntimeError("boom")):
+            with patch(
+                "apps.api.app.core.public_runtime_settings.build_database_overview",
+                side_effect=RuntimeError("boom"),
+            ):
                 with TestClient(app, raise_server_exceptions=False) as client:
                     response = client.get(
                         "/settings/public",
@@ -519,8 +574,10 @@ class AuthHttpTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
+        self.assertEqual(payload["show_start_here"], True)
         self.assertEqual(payload["user"]["user_id"], "admin")
         self.assertEqual(payload["user"]["role"], "OPS_ADMIN")
+        self.assertEqual(payload["user"]["default_assistant_persona"], "admin")
 
         admin_response = self.client.get(
             "/admin/external-data/runs",
@@ -534,8 +591,127 @@ class AuthHttpTests(unittest.TestCase):
             assert created is not None
             self.assertTrue(created.is_active)
             self.assertEqual(created.role, "OPS_ADMIN")
+            self.assertEqual(created.default_assistant_persona, "admin")
             self.assertTrue(created.email.endswith("@local.invalid"))
             self.assertIsNotNone(created.password_hash)
+
+    def test_current_user_can_update_profile_context_for_assistant_prompts(self) -> None:
+        session_payload = self._bootstrap_admin()
+        access_token = session_payload["access_token"]
+
+        response = self.client.patch(
+            "/auth/me/profile",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "display_name": "Operations Context Owner",
+                "first_name": "  Operations  ",
+                "last_name": "  Owner  ",
+                "preferred_timezone": "America/Chicago",
+                "primary_location": "  Houston desk  ",
+                "default_assistant_persona": "risk",
+                "assistant_context_blurb": "  I cover the morning queue and prefer exposure risk first.  ",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["display_name"], "Operations Context Owner")
+        self.assertEqual(payload["first_name"], "Operations")
+        self.assertEqual(payload["last_name"], "Owner")
+        self.assertEqual(payload["preferred_timezone"], "America/Chicago")
+        self.assertEqual(payload["primary_location"], "Houston desk")
+        self.assertEqual(payload["default_assistant_persona"], "risk")
+        self.assertEqual(payload["assistant_context_blurb"], "I cover the morning queue and prefer exposure risk first.")
+
+        current_response = self.client.get(
+            "/auth/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        self.assertEqual(current_response.status_code, 200)
+        current_user = current_response.json()["user"]
+        self.assertEqual(current_user["first_name"], "Operations")
+        self.assertEqual(current_user["last_name"], "Owner")
+        self.assertEqual(current_user["preferred_timezone"], "America/Chicago")
+        self.assertEqual(current_user["primary_location"], "Houston desk")
+        self.assertEqual(current_user["assistant_context_blurb"], "I cover the morning queue and prefer exposure risk first.")
+
+        clear_response = self.client.patch(
+            "/auth/me/profile",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "first_name": "   ",
+                "last_name": "   ",
+                "preferred_timezone": "   ",
+                "primary_location": "   ",
+                "assistant_context_blurb": "   ",
+            },
+        )
+        self.assertEqual(clear_response.status_code, 200)
+        self.assertIsNone(clear_response.json()["first_name"])
+        self.assertIsNone(clear_response.json()["last_name"])
+        self.assertIsNone(clear_response.json()["preferred_timezone"])
+        self.assertIsNone(clear_response.json()["primary_location"])
+        self.assertIsNone(clear_response.json()["assistant_context_blurb"])
+
+        with self.SessionLocal() as session:
+            user = session.get(UserAccount, "ops_admin")
+            self.assertIsNotNone(user)
+            assert user is not None
+            self.assertEqual(user.display_name, "Operations Context Owner")
+            self.assertIsNone(user.first_name)
+            self.assertIsNone(user.last_name)
+            self.assertIsNone(user.preferred_timezone)
+            self.assertIsNone(user.primary_location)
+            self.assertEqual(user.default_assistant_persona, "risk")
+            self.assertIsNone(user.assistant_context_blurb)
+
+    def test_current_user_profile_rejects_unknown_timezone(self) -> None:
+        session_payload = self._bootstrap_admin()
+        access_token = session_payload["access_token"]
+
+        response = self.client.patch(
+            "/auth/me/profile",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"preferred_timezone": "Mars/Olympus"},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("preferred_timezone", str(response.json()["detail"]))
+
+    def test_password_session_only_requests_start_here_for_first_login(self) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                UserAccount(
+                    user_id="ops_admin",
+                    email="ops@example.com",
+                    display_name="Ops Admin",
+                    role="OPS_ADMIN",
+                    password_hash=hash_password("supersecret1"),
+                    is_active=True,
+                    last_login_at=None,
+                    created_at=now,
+                    created_by="seed",
+                    updated_at=now,
+                    updated_by="seed",
+                    version=1,
+                )
+            )
+            session.commit()
+
+        first_response = self.client.post(
+            "/auth/session",
+            json={"identifier": "ops_admin", "password": "supersecret1"},
+        )
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(first_response.json()["show_start_here"], True)
+
+        second_response = self.client.post(
+            "/auth/session",
+            json={"identifier": "ops_admin", "password": "supersecret1"},
+        )
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_response.json()["show_start_here"], False)
 
     def test_single_user_session_creates_ops_admin_when_enabled(self) -> None:
         settings.SINGLE_USER_AUTH_ENABLED = True
@@ -547,10 +723,12 @@ class AuthHttpTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
+        self.assertEqual(payload["show_start_here"], True)
         self.assertEqual(payload["user"]["user_id"], "solo_admin")
         self.assertEqual(payload["user"]["email"], "solo@example.com")
         self.assertEqual(payload["user"]["display_name"], "Solo Admin")
         self.assertEqual(payload["user"]["role"], "OPS_ADMIN")
+        self.assertEqual(payload["user"]["default_assistant_persona"], "admin")
 
         with self.SessionLocal() as session:
             created = session.get(UserAccount, "solo_admin")
@@ -558,6 +736,7 @@ class AuthHttpTests(unittest.TestCase):
             assert created is not None
             self.assertTrue(created.is_active)
             self.assertEqual(created.role, "OPS_ADMIN")
+            self.assertEqual(created.default_assistant_persona, "admin")
             self.assertIsNone(created.password_hash)
 
     def test_single_user_session_reuses_existing_account(self) -> None:
@@ -576,7 +755,7 @@ class AuthHttpTests(unittest.TestCase):
                     role="TRADER",
                     password_hash=hash_password("supersecret1"),
                     is_active=False,
-                    last_login_at=None,
+                    last_login_at=now,
                     created_at=now,
                     created_by="seed",
                     updated_at=now,
@@ -590,6 +769,7 @@ class AuthHttpTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
+        self.assertEqual(payload["show_start_here"], False)
         self.assertEqual(payload["user"]["user_id"], "solo_admin")
         self.assertEqual(payload["user"]["role"], "OPS_ADMIN")
 
@@ -652,9 +832,11 @@ class AuthHttpTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
+        self.assertEqual(payload["show_start_here"], True)
         self.assertEqual(payload["user"]["user_id"], "ops_admin")
         self.assertEqual(payload["user"]["email"], "ops@example.com")
         self.assertEqual(payload["user"]["role"], "OPS_ADMIN")
+        self.assertEqual(payload["user"]["default_assistant_persona"], "operator")
 
         with self.SessionLocal() as session:
             user = session.get(UserAccount, "ops_admin")
@@ -681,10 +863,12 @@ class AuthHttpTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
+        self.assertEqual(payload["show_start_here"], True)
         self.assertEqual(payload["user"]["user_id"], "google_1234567890")
         self.assertEqual(payload["user"]["email"], "new.user@example.com")
         self.assertEqual(payload["user"]["display_name"], "New User")
         self.assertEqual(payload["user"]["role"], "TRADER")
+        self.assertEqual(payload["user"]["default_assistant_persona"], "trader")
 
         with self.SessionLocal() as session:
             user = session.get(UserAccount, "google_1234567890")
@@ -693,6 +877,7 @@ class AuthHttpTests(unittest.TestCase):
             self.assertEqual(user.google_subject, "1234567890")
             self.assertIsNone(user.password_hash)
             self.assertTrue(user.is_active)
+            self.assertEqual(user.default_assistant_persona, "trader")
 
     def test_google_session_requires_linked_user_when_auto_create_disabled(self) -> None:
         settings.GOOGLE_AUTH_ENABLED = True
@@ -736,6 +921,30 @@ class AuthHttpTests(unittest.TestCase):
             },
         )
 
+    def test_public_settings_include_projection_monitoring_email_runtime(self) -> None:
+        settings.PROJECTION_MONITORING_EMAIL_FROM = "alerts@gmail.com"
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_HOST = "smtp.gmail.com"
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_PORT = 587
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_USERNAME = "alerts@gmail.com"
+        settings.PROJECTION_MONITORING_EMAIL_SMTP_PASSWORD = "gmail-app-password"
+        self._bootstrap_admin()
+
+        response = self.client.get("/settings/public")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["projection_monitoring_email"],
+            {
+                "transport": "smtp",
+                "provider_hint": "gmail",
+                "smtp_host": "smtp.gmail.com",
+                "smtp_port": 587,
+                "sender": "alerts@gmail.com",
+                "recipient_count": 1,
+                "auth_status": "configured",
+            },
+        )
+
     def test_public_settings_include_database_metadata(self) -> None:
         response = self.client.get("/settings/public")
 
@@ -748,6 +957,20 @@ class AuthHttpTests(unittest.TestCase):
         self.assertEqual(payload["database"]["record_count"], 0)
         self.assertIsInstance(payload["database"]["size_bytes"], int)
         self.assertGreater(payload["database"]["size_bytes"], 0)
+
+    def test_public_settings_tolerate_missing_managed_tables(self) -> None:
+        missing_table = Base.metadata.tables["gmail_inbox_import_receipts"]
+        missing_table.drop(bind=self.engine, checkfirst=True)
+
+        try:
+            response = self.client.get("/settings/public")
+            payload = response.json()
+        finally:
+            missing_table.create(bind=self.engine, checkfirst=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["database"]["table_count"], len(Base.metadata.sorted_tables) - 1)
+        self.assertEqual(payload["database"]["record_count"], 0)
 
     def test_trade_writes_require_session_and_use_session_actor(self) -> None:
         self._seed_trade_reference_data()

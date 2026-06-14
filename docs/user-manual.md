@@ -33,7 +33,6 @@ primary question best matches your current task.
 | --- | --- | --- |
 | User Manual | Onboarding, orientation, and workflow handoff | "Where should I go for this job?" |
 | Live Desk | Desk-wide situational awareness | "What needs attention right now?" |
-| Walkthrough | Safe product practice | "Can I learn this flow without touching live data?" |
 | Trade Capture | Trade entry and lifecycle review | "What is the current state of this trade?" |
 | Activity Feed | Event chronology and explainability | "What changed, and in what order?" |
 | Exposure | Concentration and pricing review | "Where is the open risk?" |
@@ -142,15 +141,6 @@ planned workflow.
 | An invoice is missing, a payment looks late, or cash is unreconciled | Settlement | Operations | Cash follow-through lives in settlement first, with queue follow-up only if ownership or blockers are unclear. |
 | A dropdown or lookup value is missing or incorrect | Reference Data | Trade Capture or the affected downstream workspace | Fix the controlled value at the source, then return to the business workflow that depends on it. |
 | A user cannot reach a workflow or mutate data | Settings | Admin | Check session and runtime setup first, then escalate to privileged controls if the problem is policy or system-level. |
-
-## Visual Walkthroughs
-
-Use the visual walkthrough cards below when someone learns faster from a guided
-screen tour than from prose alone.
-
-Each walkthrough should point people toward the major surfaces where they need
-to look first, what the workspace is best for, and which action usually comes
-next.
 
 ## Task Playbooks
 
@@ -267,8 +257,6 @@ Not every question should begin in a trading screen.
   can provide.
 - Use `Assistant` when you need grounded help explaining the product, the desk
   state, or the likely next workspace to open.
-- Use `Walkthrough` when you want to practice the flow safely before touching
-  live operational data.
 
 ## Access And Safe Use
 
@@ -277,8 +265,6 @@ privileged administration.
 
 - If the app feels read-only or routes you away from a workflow, open
   `Settings` first and confirm you are signed in.
-- Use `Walkthrough` when you want a safe scenario for training or product
-  orientation.
 - Expect privileged controls to live under `Admin`, not mixed into day-to-day
   operating screens.
 - Expect some reference data deactivations to be blocked when active trades

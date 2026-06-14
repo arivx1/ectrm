@@ -65,24 +65,22 @@ function resolvePositiveIntSetting(storageKey: string, envName: string, fallback
   return readPositiveInt(readEnvString(envName), fallback)
 }
 
-function isLoopbackHost(hostname: string): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1'
-}
+export function normalizeApiBase(configuredBase: string): string {
+  const trimmedBase = configuredBase.trim()
+  if (!trimmedBase) {
+    return ''
+  }
 
-function resolveBrowserReachableApiBase(configuredBase: string): string {
+  const normalizedBase = trimmedBase.replace(/\/+$/, '')
   if (typeof window === 'undefined') {
-    return configuredBase
+    return normalizedBase
   }
 
   try {
-    const parsedBase = new URL(configuredBase, window.location.href)
-    if (isLoopbackHost(parsedBase.hostname) && !isLoopbackHost(window.location.hostname)) {
-      parsedBase.hostname = window.location.hostname
-    }
-
+    const parsedBase = new URL(normalizedBase, window.location.href)
     return parsedBase.toString().replace(/\/+$/, '')
   } catch {
-    return configuredBase.replace(/\/+$/, '')
+    return normalizedBase
   }
 }
 
@@ -94,7 +92,7 @@ function resolveApiBase(): string {
 
   const configuredBase = readEnvString('VITE_API_BASE')
   if (configuredBase) {
-    return resolveBrowserReachableApiBase(configuredBase)
+    return normalizeApiBase(configuredBase)
   }
 
   const configuredPort = readEnvString('VITE_API_PORT') ?? '8000'

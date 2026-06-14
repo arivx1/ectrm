@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from apps.api.app.domains.trading.services.trade_event_support import (
-    DEFAULT_SOURCE_SYSTEM,
+from apps.api.app.domains.trading.services.trade_option_validation import (
     OPTION_LIFECYCLE_EVENT_TO_STATUS,
     OPTION_LIFECYCLE_EVENT_TYPES,
+)
+from apps.api.app.domains.trading.services.trade_defaults import (
+    DEFAULT_SOURCE_SYSTEM,
     default_trade_workflow_statuses,
 )
 from apps.api.app.schemas.trade import TradeMetadataDefaultsOut

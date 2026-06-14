@@ -143,6 +143,7 @@ class TradeWorkflowType(StrEnum):
 
 class TransportMode(StrEnum):
     UNSPECIFIED = "UNSPECIFIED"
+    AIR = "AIR"
     TRUCK = "TRUCK"
     RAIL = "RAIL"
     BARGE = "BARGE"
@@ -188,9 +189,81 @@ class DeliveryEventType(StrEnum):
     HOLD_APPLIED = "HOLD_APPLIED"
     HOLD_RELEASED = "HOLD_RELEASED"
     CANCELLED = "CANCELLED"
+    EVENT_REVERSED = "EVENT_REVERSED"
 
 
 class DeliveryFieldSource(StrEnum):
     TRADE_DERIVED = "TRADE_DERIVED"
     MANUAL = "MANUAL"
     SYSTEM_GENERATED = "SYSTEM_GENERATED"
+
+
+class TruckMovementStatus(StrEnum):
+    PLANNED = "PLANNED"
+    ASSIGNED = "ASSIGNED"
+    EN_ROUTE_TO_STOP = "EN_ROUTE_TO_STOP"
+    AT_STOP = "AT_STOP"
+    IN_TRANSIT = "IN_TRANSIT"
+    ON_HOLD = "ON_HOLD"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+class TruckStopStatus(StrEnum):
+    PLANNED = "PLANNED"
+    EN_ROUTE = "EN_ROUTE"
+    ARRIVED = "ARRIVED"
+    WORKING = "WORKING"
+    DEPARTED = "DEPARTED"
+    SKIPPED = "SKIPPED"
+    CANCELLED = "CANCELLED"
+
+
+class TruckStopType(StrEnum):
+    PICKUP = "PICKUP"
+    DROPOFF = "DROPOFF"
+    WAYPOINT = "WAYPOINT"
+
+
+class TruckCheckpointCode(StrEnum):
+    ARRIVED_PICKUP = "ARRIVED_PICKUP"
+    DEPARTED_PICKUP = "DEPARTED_PICKUP"
+    ARRIVED_DESTINATION = "ARRIVED_DESTINATION"
+
+
+class TrackingSignalProcessingStatus(StrEnum):
+    RECEIVED = "RECEIVED"
+    MATCHED = "MATCHED"
+    UNRESOLVED = "UNRESOLVED"
+    REJECTED = "REJECTED"
+    ERROR = "ERROR"
+
+
+class TruckTrackingFreshnessStatus(StrEnum):
+    FRESH = "FRESH"
+    STALE = "STALE"
+    MISSING = "MISSING"
+    NOT_REQUIRED = "NOT_REQUIRED"
+
+
+class TruckEtaStatus(StrEnum):
+    ON_TIME = "ON_TIME"
+    AT_RISK = "AT_RISK"
+    LATE = "LATE"
+    MISSING_ETA = "MISSING_ETA"
+    ARRIVED = "ARRIVED"
+    UNKNOWN = "UNKNOWN"
+    NOT_REQUIRED = "NOT_REQUIRED"
+
+
+class TruckDwellStatus(StrEnum):
+    NOT_DWELLING = "NOT_DWELLING"
+    DWELLING = "DWELLING"
+    OVER_DWELL = "OVER_DWELL"
+    UNKNOWN = "UNKNOWN"
+
+
+class TruckTrackingExceptionSeverity(StrEnum):
+    CLEAR = "CLEAR"
+    WATCH = "WATCH"
+    ACTION_REQUIRED = "ACTION_REQUIRED"

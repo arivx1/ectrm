@@ -18,6 +18,7 @@ class ReferencePriceIndex(Base):
     currency_code: Mapped[str] = mapped_column(String(20), nullable=False)
     unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
     provider: Mapped[str] = mapped_column(String(120), nullable=False)
+    quote_type: Mapped[str] = mapped_column(String(20), nullable=False, default="SPOT")
     market: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     location_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     calendar_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)

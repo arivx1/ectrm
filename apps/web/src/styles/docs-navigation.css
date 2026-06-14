@@ -106,3 +106,14 @@
   text-align: right;
 }
 
+.wiki-tree-button {
+  width: 100%;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  cursor: pointer;
+  text-align: left;
+}
+
+.wiki-tree-button small {
+  max-width: none;
+  text-align: left;
+}

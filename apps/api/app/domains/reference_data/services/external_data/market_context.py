@@ -56,7 +56,51 @@ def build_market_context(
     }
 
 
+def build_latest_price_snapshot(
+    db: Session,
+    *,
+    commodity: Optional[str] = None,
+    price_index_code: Optional[str] = None,
+    limit: int = DEFAULT_MARKET_CONTEXT_LIMIT,
+) -> dict[str, Any]:
+    normalized_limit = max(1, min(int(limit), MAX_MARKET_CONTEXT_LIMIT))
+    normalized_commodity = _normalize_commodity(commodity)
+    normalized_price_index_code = _normalize_price_index_code(price_index_code)
+    freshness_by_provider = {
+        str(row["provider"]).upper(): row
+        for row in _load_freshness_context(db)
+    }
+
+    if normalized_price_index_code is not None:
+        items = _load_specific_price_index_context(db, price_index_code=normalized_price_index_code)
+    else:
+        items = _load_price_index_context(db, commodity=normalized_commodity, limit=normalized_limit)
+
+    enriched_items: list[dict[str, Any]] = []
+    for row in items[:normalized_limit]:
+        freshness = freshness_by_provider.get(str(row["source_provider"]).upper())
+        enriched_row = dict(row)
+        enriched_row["provider_health_status"] = freshness["health_status"] if freshness else "unknown"
+        enriched_row["provider_due_for_sync"] = freshness["due_for_sync"] if freshness else None
+        enriched_row["provider_observation_age_hours"] = freshness["observation_age_hours"] if freshness else None
+        enriched_row["provider_last_success_at"] = freshness["last_success_at"] if freshness else None
+        enriched_items.append(enriched_row)
+
+    return {
+        "generated_at": datetime.now(timezone.utc),
+        "commodity": normalized_commodity,
+        "price_index_code": normalized_price_index_code,
+        "count": len(enriched_items),
+        "items": enriched_items,
+    }
+
+
 def _normalize_commodity(value: Optional[str]) -> Optional[str]:
+    normalized = str(value or "").strip().upper()
+    return normalized or None
+
+
+def _normalize_price_index_code(value: Optional[str]) -> Optional[str]:
     normalized = str(value or "").strip().upper()
     return normalized or None
 
@@ -79,25 +123,24 @@ def _load_price_index_context(
         observation = _latest_price_index_observation(db, price_index.code)
         if observation is None:
             continue
-        items.append(
-            {
-                "price_index_code": price_index.code,
-                "name": price_index.name,
-                "commodity_code": price_index.commodity_code,
-                "market": price_index.market,
-                "location_code": price_index.location_code,
-                "observation_date": observation.observation_date,
-                "value": float(observation.value),
-                "unit_code": observation.unit_code,
-                "currency_code": observation.currency_code,
-                "source_provider": observation.source_provider,
-                "source_series_id": observation.source_series_id,
-                "downloaded_at": observation.downloaded_at,
-            }
-        )
+        items.append(_serialize_price_index_context_row(price_index, observation))
         if len(items) >= limit:
             break
     return items
+
+
+def _load_specific_price_index_context(
+    db: Session,
+    *,
+    price_index_code: str,
+) -> list[dict[str, Any]]:
+    price_index = db.get(ReferencePriceIndex, price_index_code)
+    if price_index is None or not price_index.is_active:
+        return []
+    observation = _latest_price_index_observation(db, price_index.code)
+    if observation is None:
+        return []
+    return [_serialize_price_index_context_row(price_index, observation)]
 
 
 def _select_price_index_candidates(
@@ -179,6 +222,27 @@ def _latest_price_index_observation(db: Session, price_index_code: str) -> Optio
             PriceIndexObservation.id.desc(),
         )
     ).scalars().first()
+
+
+def _serialize_price_index_context_row(
+    price_index: ReferencePriceIndex,
+    observation: PriceIndexObservation,
+) -> dict[str, Any]:
+    return {
+        "price_index_code": price_index.code,
+        "name": price_index.name,
+        "commodity_code": price_index.commodity_code,
+        "quote_type": price_index.quote_type,
+        "market": price_index.market,
+        "location_code": price_index.location_code,
+        "observation_date": observation.observation_date,
+        "value": float(observation.value),
+        "unit_code": observation.unit_code,
+        "currency_code": observation.currency_code,
+        "source_provider": observation.source_provider,
+        "source_series_id": observation.source_series_id,
+        "downloaded_at": observation.downloaded_at,
+    }
 
 
 def _load_external_series_context(

@@ -8,11 +8,18 @@ import {
   type AssistantControlTowerSummary,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import {
+  buildControlTowerWorkPackageReviewIntent,
+  controlTowerSignalTypeLabel,
+  type AssistantControlTowerAgentSupervisionIntent,
+  type AssistantControlTowerSupervisionIntent,
+} from './assistantSupervisionDraft'
 
 type AssistantControlTowerPanelProps = {
   authSession: StoredAuthSession | null
   formatDate: (value: string | null | undefined) => string
   onOpenSettings: () => void
+  onStartSupervisionIntent?: (intent: AssistantControlTowerSupervisionIntent) => void
   initialSummary?: AssistantControlTowerSummary | null
 }
 
@@ -50,23 +57,6 @@ function formatAgeSeconds(value: number | null | undefined): string {
   }
 
   return `${(hours / 24).toFixed(1)}d waiting`
-}
-
-function signalTypeLabel(signal: AssistantControlTowerAgentTrustSignal['signal_type']): string {
-  switch (signal) {
-    case 'MISSING_EVAL_COVERAGE':
-      return 'Missing eval coverage'
-    case 'POLICY_WARNING':
-      return 'Policy warning'
-    case 'RUN_WARNING':
-      return 'Run warning'
-    case 'ACTION_BACKLOG':
-      return 'Action backlog'
-    case 'FAILED_ACTIONS':
-      return 'Failed actions'
-    default:
-      return signal
-  }
 }
 
 function signalTone(signal: AssistantControlTowerAgentTrustSignal['severity']): 'blocked' | 'planned' | 'in-progress' {
@@ -118,6 +108,21 @@ function summaryCards(summary: AssistantControlTowerSummary): ControlTowerCard[]
       value: summary.actions.pending_count,
       note: `${summary.actions.failed_count} failed · ${summary.actions.rejected_count} rejected · ${summary.actions.preview_blocked_count} blocked preview${summary.actions.preview_blocked_count === 1 ? '' : 's'}`,
     },
+    {
+      label: 'Tracked Packages',
+      value: summary.work_packages.total_count,
+      note: `${summary.work_packages.implemented_count} implemented · ${summary.work_packages.in_progress_count} in progress · ${summary.work_packages.accepted_count} accepted`,
+    },
+    {
+      label: 'Stale Packages',
+      value: summary.work_packages.stale_count,
+      note: `${summary.work_packages.stale_in_progress_count} in progress · ${summary.work_packages.stale_accepted_count} accepted · 72h+ without shipped proof`,
+    },
+    {
+      label: 'Implemented Proof',
+      value: summary.work_packages.implemented_count,
+      note: `${summary.work_packages.implemented_with_pr_count} PR · ${summary.work_packages.implemented_with_eval_count} eval · ${summary.work_packages.implemented_with_tests_count} test · ${summary.work_packages.implemented_with_docs_count} doc`,
+    },
   ]
 }
 
@@ -125,6 +130,7 @@ export function AssistantControlTowerPanel({
   authSession,
   formatDate,
   onOpenSettings,
+  onStartSupervisionIntent,
   initialSummary = null,
 }: AssistantControlTowerPanelProps) {
   const requestSequenceRef = useRef(0)
@@ -176,6 +182,28 @@ export function AssistantControlTowerPanel({
   )
   const oldestPendingAction = summary?.actions.oldest_pending_action ?? null
   const latestRunLabel = summary?.runs.latest_run_at ? formatDate(summary.runs.latest_run_at) : 'No run history yet'
+  const startSupervisionIntent = useCallback(
+    (
+      signal: AssistantControlTowerAgentTrustSignal,
+      mode: AssistantControlTowerAgentSupervisionIntent['mode'],
+    ) => {
+      onStartSupervisionIntent?.({
+        intent_id: Date.now(),
+        agent_id: signal.agent_id,
+        agent_name: signal.agent_name,
+        signal_type: signal.signal_type,
+        kind: 'agent_supervision',
+        mode,
+      })
+    },
+    [onStartSupervisionIntent],
+  )
+  const startWorkPackageReview = useCallback(
+    (signal: AssistantControlTowerAgentTrustSignal) => {
+      onStartSupervisionIntent?.(buildControlTowerWorkPackageReviewIntent(signal))
+    },
+    [onStartSupervisionIntent],
+  )
 
   return (
     <section className="surface feature-panel assistant-control-tower-panel">
@@ -304,7 +332,7 @@ export function AssistantControlTowerPanel({
                 {trustSignals.length === 0 ? (
                   <div className="empty-state">
                     <strong>No trust signals in this snapshot</strong>
-                    <p>There are no policy warnings, eval gaps, failed actions, run warnings, or pending backlogs.</p>
+                    <p>There are no policy warnings, eval gaps, failed actions, run warnings, pending backlogs, or stale work packages.</p>
                   </div>
                 ) : (
                   <div className="assistant-control-tower-signal-list">
@@ -321,7 +349,7 @@ export function AssistantControlTowerPanel({
                             </span>
                           </div>
                           <span className={`status-pill status-pill-${signalTone(signal.severity)}`}>
-                            {signalTypeLabel(signal.signal_type)}
+                            {controlTowerSignalTypeLabel(signal.signal_type)}
                           </span>
                         </div>
                         <p>{signal.summary}</p>
@@ -336,6 +364,37 @@ export function AssistantControlTowerPanel({
                           <span>{formatCount(signal.pending_action_count, 'pending action')}</span>
                           <span>{formatCount(signal.failed_action_count, 'failed action')}</span>
                           <span>{signal.eval_status ?? 'Eval n/a'}</span>
+                        </div>
+                        <div className="assistant-control-tower-actions">
+                          {signal.signal_type === 'STALE_WORK_PACKAGE' ? (
+                            <a
+                              className="button button-secondary"
+                              href="#assistant-agent-work-packages"
+                              onClick={() => startWorkPackageReview(signal)}
+                            >
+                              Review Stale Packages
+                            </a>
+                          ) : null}
+                          <a
+                            className={
+                              signal.signal_type === 'STALE_WORK_PACKAGE'
+                                ? 'button button-ghost'
+                                : 'button button-secondary'
+                            }
+                            href="#assistant-agent-management"
+                            onClick={() => startSupervisionIntent(signal, 'narrow')}
+                          >
+                            Narrow Scope
+                          </a>
+                          {signal.status === 'ACTIVE' ? (
+                            <a
+                              className="button button-ghost"
+                              href="#assistant-agent-management"
+                              onClick={() => startSupervisionIntent(signal, 'pause')}
+                            >
+                              Pause Agent
+                            </a>
+                          ) : null}
                         </div>
                       </article>
                     ))}

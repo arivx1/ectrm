@@ -1,16 +1,18 @@
 import assert from 'node:assert/strict'
 import { beforeEach, test, vi } from 'vitest'
 
-const { buildMutationHeadersMock, fetchJsonMock, getMutationContextMock, postJsonMock, putJsonMock } = vi.hoisted(() => ({
+const { buildMutationHeadersMock, fetchJsonMock, getMutationContextMock, patchJsonMock, postJsonMock, putJsonMock } = vi.hoisted(() => ({
   buildMutationHeadersMock: vi.fn(),
   fetchJsonMock: vi.fn(),
   getMutationContextMock: vi.fn(),
+  patchJsonMock: vi.fn(),
   postJsonMock: vi.fn(),
   putJsonMock: vi.fn(),
 }))
 
 vi.mock('../src/shared/api.ts', () => ({
   fetchJson: fetchJsonMock,
+  patchJson: patchJsonMock,
   postJson: postJsonMock,
   putJson: putJsonMock,
 }))
@@ -21,8 +23,15 @@ vi.mock('../src/shared/mutation.ts', () => ({
 }))
 
 import {
+  createJobSchedule,
+  enqueueEventJobRuns,
+  getAnthropicIntegrationApiKey,
   importCounterpartyCreditSnapshots,
+  isExternalDataSyncProvider,
+  listJobSchedules,
+  loadAnthropicIntegrationSettings,
   loadTradeProjectionMonitoring,
+  materializeDueJobRuns,
   previewCounterpartyCreditImport,
   runExternalDataSync,
   runNwsWeatherSync,
@@ -30,12 +39,15 @@ import {
   saveTradeProjectionMonitoring,
   seedAssistantAgents,
   seedTradingSources,
+  updateJobRunStatus,
+  updateJobSchedule,
 } from '../src/entities/app/adminApi.ts'
 
 beforeEach(() => {
   buildMutationHeadersMock.mockReset()
   fetchJsonMock.mockReset()
   getMutationContextMock.mockReset()
+  patchJsonMock.mockReset()
   postJsonMock.mockReset()
   putJsonMock.mockReset()
 
@@ -48,6 +60,140 @@ beforeEach(() => {
     actorId: 'ops.admin',
     accessToken: 'admin-token',
     role: 'ADMIN',
+  })
+})
+
+test('anthropic integration helpers use typed admin routes with explicit auth headers', async () => {
+  const settings = {
+    enabled: true,
+    configured: true,
+    provider: 'anthropic_admin_api',
+    auth_status: 'configured',
+    base_url: 'https://api.anthropic.com',
+    api_version: '2023-06-01',
+    tracked_api_key_id: 'apikey_123',
+    missing_configuration: [],
+  }
+  const lookup = {
+    provider: 'anthropic_admin_api',
+    status: 'connected',
+    api_key: {
+      id: 'apikey_123',
+      created_at: '2024-10-30T23:58:27.427722Z',
+      created_by: { id: 'user_123', type: 'user' },
+      expires_at: null,
+      name: 'Developer Key',
+      partial_key_hint: 'sk-ant-api03-R2D...igAA',
+      status: 'active',
+      type: 'api_key',
+      workspace_id: 'wrkspc_123',
+    },
+    warnings: [],
+  }
+  fetchJsonMock.mockResolvedValueOnce(settings)
+  fetchJsonMock.mockResolvedValueOnce(lookup)
+
+  const settingsPayload = await loadAnthropicIntegrationSettings('http://api.test', 'admin-session-token')
+  const lookupPayload = await getAnthropicIntegrationApiKey('http://api.test', 'admin-session-token')
+
+  assert.equal(settingsPayload, settings)
+  assert.equal(lookupPayload, lookup)
+  assert.equal(fetchJsonMock.mock.calls[0][0], 'http://api.test/admin/integrations/anthropic/settings')
+  assert.equal(fetchJsonMock.mock.calls[1][0], 'http://api.test/admin/integrations/anthropic/api-key')
+  const settingsHeaders = new Headers((fetchJsonMock.mock.calls[0][1] as RequestInit).headers)
+  const lookupHeaders = new Headers((fetchJsonMock.mock.calls[1][1] as RequestInit).headers)
+  assert.equal(settingsHeaders.get('Authorization'), 'Bearer admin-session-token')
+  assert.equal(lookupHeaders.get('Authorization'), 'Bearer admin-session-token')
+})
+
+test('job scheduling admin helpers shape schedule and run requests', async () => {
+  const schedule = {
+    id: 1,
+    name: 'Daily EOD readiness',
+    description: 'Check readiness',
+    status: 'ACTIVE',
+    trigger_type: 'TIME',
+    time_trigger: {
+      starts_at: '2026-05-29T14:00:00Z',
+      timezone: 'America/Chicago',
+      recurrence: { frequency: 'DAILY', interval: 1 },
+    },
+    event_trigger: null,
+    execution_plan: {
+      mode: 'HYBRID',
+      deterministic_task_key: 'trading_eod_readiness',
+      agent_id: 'ops-sentinel',
+      allowed_action_types: ['update_trade_workflow_item'],
+      max_authority: 'STAGE',
+      payload: { workspace: 'operations' },
+    },
+    next_run_at: '2026-05-29T14:00:00Z',
+    last_run_at: null,
+    is_user_enabled: true,
+    created_at: '2026-05-29T13:00:00Z',
+    created_by: 'ops.admin',
+    updated_at: '2026-05-29T13:00:00Z',
+    updated_by: 'ops.admin',
+    version: 1,
+  }
+  const runBatch = { count: 1, items: [{ id: 10, schedule_id: 1, status: 'QUEUED' }] }
+  fetchJsonMock.mockResolvedValueOnce([schedule])
+  postJsonMock.mockResolvedValueOnce(schedule)
+  patchJsonMock.mockResolvedValueOnce({ ...schedule, status: 'PAUSED' })
+  postJsonMock.mockResolvedValueOnce(runBatch)
+  postJsonMock.mockResolvedValueOnce(runBatch)
+  patchJsonMock.mockResolvedValueOnce({ id: 10, status: 'SUCCEEDED' })
+
+  await listJobSchedules('http://api.test', { status: 'ACTIVE', triggerType: 'TIME', limit: 25, offset: 5 })
+  await createJobSchedule('http://api.test', {
+    name: ' Daily EOD readiness ',
+    description: ' Check readiness ',
+    trigger_type: 'TIME',
+    time_trigger: schedule.time_trigger,
+    execution_plan: schedule.execution_plan,
+  })
+  await updateJobSchedule('http://api.test', 1, { status: 'PAUSED', description: '  ' })
+  await materializeDueJobRuns('http://api.test', { as_of: '2026-05-29T15:00:00Z', limit: 10 })
+  await enqueueEventJobRuns('http://api.test', {
+    event_source: ' document_workflow ',
+    event_type: ' DOCUMENT_REVIEW_NEEDED ',
+    event_ref: ' doc-1 ',
+    event_payload: { classification: 'BILL_OF_LADING' },
+  })
+  await updateJobRunStatus('http://api.test', 10, {
+    status: 'SUCCEEDED',
+    result: { ok: true },
+    action_request_ids: [101],
+  })
+
+  assert.equal(
+    fetchJsonMock.mock.calls[0][0],
+    'http://api.test/admin/job-scheduling/schedules?status=ACTIVE&trigger_type=TIME&limit=25&offset=5',
+  )
+  assert.equal(postJsonMock.mock.calls[0][0], 'http://api.test/admin/job-scheduling/schedules')
+  assert.deepEqual(postJsonMock.mock.calls[0][1], {
+    name: 'Daily EOD readiness',
+    description: 'Check readiness',
+    trigger_type: 'TIME',
+    time_trigger: schedule.time_trigger,
+    execution_plan: schedule.execution_plan,
+  })
+  assert.equal(patchJsonMock.mock.calls[0][0], 'http://api.test/admin/job-scheduling/schedules/1')
+  assert.deepEqual(patchJsonMock.mock.calls[0][1], { description: null, status: 'PAUSED' })
+  assert.equal(postJsonMock.mock.calls[1][0], 'http://api.test/admin/job-scheduling/runs/materialize-due')
+  assert.deepEqual(postJsonMock.mock.calls[1][1], { as_of: '2026-05-29T15:00:00Z', limit: 10 })
+  assert.equal(postJsonMock.mock.calls[2][0], 'http://api.test/admin/job-scheduling/runs/enqueue-event')
+  assert.deepEqual(postJsonMock.mock.calls[2][1], {
+    event_source: 'document_workflow',
+    event_type: 'DOCUMENT_REVIEW_NEEDED',
+    event_ref: 'doc-1',
+    event_payload: { classification: 'BILL_OF_LADING' },
+  })
+  assert.equal(patchJsonMock.mock.calls[1][0], 'http://api.test/admin/job-scheduling/runs/10/status')
+  assert.deepEqual(patchJsonMock.mock.calls[1][1], {
+    status: 'SUCCEEDED',
+    result: { ok: true },
+    action_request_ids: [101],
   })
 })
 
@@ -64,6 +210,51 @@ test('runExternalDataSync routes provider-specific syncs through the typed admin
   assert.deepEqual(body, { requested_by: 'ops.admin' })
   const headers = new Headers((init as RequestInit | undefined)?.headers)
   assert.equal(headers.get('Authorization'), 'Bearer admin-token')
+})
+
+test('runExternalDataSync supports the full price-provider sync route set', async () => {
+  const providerRoutes = [
+    ['BLS_PPI', 'bls-ppi'],
+    ['WORLD_BANK', 'world-bank'],
+    ['USDA_NASS', 'usda-nass'],
+    ['EIA_WHOLESALE_POWER', 'eia-wholesale-power'],
+    ['MISO', 'miso'],
+    ['NYISO', 'nyiso'],
+  ] as const
+
+  for (const [provider, route] of providerRoutes) {
+    postJsonMock.mockResolvedValueOnce({ id: 102, provider })
+    await runExternalDataSync('http://api.test', provider)
+    const [url] = postJsonMock.mock.calls.at(-1)!
+    assert.equal(url, `http://api.test/admin/external-data/${route}/sync`)
+  }
+})
+
+test('runExternalDataSync can use an explicit actor and headers outside admin workspace state', async () => {
+  const expected = { id: 103, provider: 'ERCOT' }
+  const headers = new Headers({ Authorization: 'Bearer home-admin-token' })
+  postJsonMock.mockResolvedValueOnce(expected)
+
+  const payload = await runExternalDataSync('http://api.test', 'ERCOT', {
+    requestedBy: 'home.admin',
+    headers,
+  })
+
+  assert.equal(payload, expected)
+  assert.equal(getMutationContextMock.mock.calls.length, 0)
+  assert.equal(buildMutationHeadersMock.mock.calls.length, 0)
+  const [url, body, init] = postJsonMock.mock.calls[0]
+  assert.equal(url, 'http://api.test/admin/external-data/ercot/sync')
+  assert.deepEqual(body, { requested_by: 'home.admin' })
+  const sentHeaders = new Headers((init as RequestInit | undefined)?.headers)
+  assert.equal(sentHeaders.get('Authorization'), 'Bearer home-admin-token')
+})
+
+test('isExternalDataSyncProvider narrows configured provider routes', () => {
+  assert.equal(isExternalDataSyncProvider('EIA'), true)
+  assert.equal(isExternalDataSyncProvider('ERCOT'), true)
+  assert.equal(isExternalDataSyncProvider('ALPHA_VANTAGE'), true)
+  assert.equal(isExternalDataSyncProvider('OPIS'), false)
 })
 
 test('previewCounterpartyCreditImport applies the shared preview payload contract', async () => {
@@ -131,24 +322,31 @@ test('seedTradingSources keeps replaceExisting inside the typed admin helper', a
 test('seedAssistantAgents routes through the typed admin seed helper', async () => {
   const expected = {
     requested_by: 'ops.admin',
-    total_profiles: 13,
-    total_templates: 13,
+    total_profiles: 20,
+    total_templates: 20,
     created_count: 2,
     updated_count: 1,
     agent_ids: [
       'trade-ops-copilot',
       'settlement-copilot',
       'trade-governor',
-      'trade-explainer',
-      'ops-coordinator',
-      'settlement-analyst',
-      'document-triage',
-      'desk-briefing',
+      'trade-capture-agent',
+      'movement-controller-agent',
+      'accrual-controller-agent',
+      'accounting-posting-agent',
+      'counterparty-state-sync-agent',
+      'confirmation-controller-agent',
+      'workflow-controller-agent',
+      'invoice-controller-agent',
       'market-research-agent',
       'pre-trade-structuring-agent',
-      'document-agent',
       'risk-sentinel',
+      'document-agent',
       'reporting-reconciliation-agent',
+      'logistics-coordinator',
+      'fee-accrual-agent',
+      'counterparty-outreach-agent',
+      'control-tower-agent',
     ],
   }
   postJsonMock.mockResolvedValueOnce(expected)

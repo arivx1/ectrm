@@ -16,6 +16,8 @@ This keeps prompts explainable, reviewable, and ready for future governance.
 
 Related governance:
 
+- [Agent Context And Configuration Work Packages](./agent-context-work-packages.md)
+- [ChatGPT MCP Work Packages](./chatgpt-mcp-work-packages.md)
 - [Agent Platform Phase 1 Roadmap](./agent-platform-phase-1-roadmap.md)
 - [Agent Platform Phase 1 Tickets](./agent-platform-phase-1-tickets.md)
 - [Agent Action Request Contract](./agent-action-request-contract.md)
@@ -33,13 +35,54 @@ envelope with these sections:
 1. `System Mission`
 2. `Organization Context`
 3. `Authenticated User`
-4. `Business Operating Model`
-5. `Data Landscape`
-6. `Live Data Inventory`
-7. `World And Time`
-8. `Managed Agent Profile` when an agent is selected
-9. `Current Workspace` when provided
-10. `Application Context` when provided
+4. `Active Persona`
+5. `Business Operating Model`
+6. `Organization Glossary` when published definitions are active
+7. `Organization Guardrails` when published definitions are active
+8. `Data Landscape`
+9. `Live Data Inventory`
+10. `Application Access Surface`
+11. `Desk Wiki Knowledge`
+12. `World And Time`
+13. `Managed Agent Profile` when an agent is selected
+14. `Current Workspace` when provided
+15. `Application Context` when provided
+
+The `Active Persona` section is a request-interpretation lens such as
+`operator`, `trader`, `risk`, `admin`, `operations`, `settlement`, or
+`reference_data`. Resolution order is request override, then the authenticated
+user's saved default persona, then a role-derived fallback, then `operator`.
+Persona context shapes terminology, priorities, evidence emphasis, and likely
+workflow intent, but it does not change permissions, row access, allowed tools,
+allowed actions, reviewer roles, or deterministic policy checks.
+
+The `Authenticated User` section can also include the user's saved AI context
+blurb from their profile. This is user-provided background and preference
+context, such as the user's role, working style, coverage area, or recurring
+preferences. Treat it like persona context: useful for interpretation and
+response shape, but not executable instructions and never authority to bypass
+permissions, policy, reviewer roles, deterministic checks, or evidence
+requirements.
+
+Organization and operating-model sections now prefer published organization
+context definitions from the backend registry when they exist. Until those
+records are populated, the assistant still falls back to the env-backed
+bootstrap values and marks that fallback explicitly in prompt preview metadata.
+
+Admin-managed organization context now has a first backend workflow:
+
+- list or inspect definitions:
+  `GET /admin/assistant/organization-context/definitions`
+- create or update draft definitions:
+  `POST` or `PUT /admin/assistant/organization-context/definitions/*`
+- publish or retire definitions explicitly:
+  `POST /admin/assistant/organization-context/definitions/{definition_id}/publish`
+  and
+  `POST /admin/assistant/organization-context/definitions/{definition_id}/retire`
+
+Published definitions are immutable. To supersede a published organization
+entry, create a new draft with the same `definition_key`, let the backend bump
+the version, and publish the latest draft explicitly.
 
 The rendered system prompt is then passed to the configured model provider.
 
@@ -47,6 +90,23 @@ When `use_live_tools` is enabled on `/assistant/respond`, the API can expose
 read-only data tools to the model runtime. If the provider requests those
 tools, the API executes them server-side and returns a tool-call trace so the
 UI can show which live data lookups were actually used.
+
+The published read-only tool catalog now covers more than business data. The
+assistant can also inspect:
+
+- application topology, route groups, workspaces, and documentation anchors
+- database table, column, and relationship metadata
+- managed-agent construction and hierarchy
+- published repo code and docs under the app-owned source roots
+
+Use these explicit tools instead of hiding platform knowledge in prompt prose
+or expecting the model to remember stale code layout details.
+
+Keep live-tool provenance explicit. When a tool answers with platform-loaded
+market data, the response should cite the synced records and freshness state
+already stored in ECTRM. When a tool answers with latest external headlines,
+the response should identify that the headlines were fetched live at response
+time instead of implying they are persisted platform records.
 
 ## Live Data Inventory Reference
 
@@ -87,6 +147,11 @@ Governance and knowledge data:
 
 - Users: 3 active / 3 total
 - Trading sources: 48
+- Wiki pages: active pages are included as read-only assistant grounding when
+  present. `/assistant/respond` ranks active wiki pages against the latest user
+  message and request context before injecting excerpts, page IDs, and link
+  metadata. Prompt preview falls back to recent active pages when no request
+  text is available.
 - Roadmap documents: 0
 
 ## Managed Prompt Profiles
@@ -97,13 +162,20 @@ Assistant agents are the first prompt-management surface.
 - Admin list: `GET /admin/assistant/agents`
 - Admin create: `POST /admin/assistant/agents`
 - Admin update: `PUT /admin/assistant/agents/{agent_id}`
+- Admin unsaved draft preview:
+  `POST /admin/assistant/agents/{agent_id}/context-preview`
 
 Each agent carries:
 
 - identity and description
+- role mapping, specialization summary, and explicit skills
 - scope and allowed workspaces
-- capability tags
-- explicit `allowed_tools` governance for live read-only tool access
+- capability tags and authority ceiling
+- explicit `allowed_tools` governance for live read and inter-agent
+  coordination access
+- explicit `allowed_action_types` governance for typed business mutations
+- optional hierarchy metadata such as `orchestration_pattern`,
+  `parent_agent_id`, `managed_agent_ids`, and `delegation_guidance`
 - optional provider and model defaults
 - an agent-specific `system_prompt`
 
@@ -113,6 +185,26 @@ When an agent is tagged with `READ`, the admin surface can now pin that agent
 to a subset of the published live tools. This prevents newly added or
 unreviewed tools from becoming available to every managed agent by default.
 
+Some read-only introspection tools are always added for `READ` agents even when
+the admin-selected tool subset is narrow. This keeps core explainability
+surfaces consistently available for app topology, schema, code, and
+managed-agent roster questions without forcing every role definition to repeat
+them manually.
+
+When an agent includes the `inter_agent_consultation` skill and the matching
+tool policy, it can coordinate other managed agents through two explicit
+runtime tools:
+
+- `consult_managed_agent` for advisory-only specialist help
+- `enlist_managed_agent` for bounded delegated execution that still stays
+  inside the enlisted agent's own tools, action types, authority ceiling, and
+  typed action-request or autonomous-execution lanes
+
+This makes the build recipe explainable to users: a managed agent is assembled
+from role, skills, capabilities, workspaces, live tools, governed action
+types, hierarchy metadata, and system prompt instead of a single hidden prompt
+string.
+
 ## Prompt Preview
 
 Use `POST /assistant/context` to inspect the effective prompt before sending a
@@ -120,9 +212,17 @@ message to a model. The response includes:
 
 - resolved provider and model
 - the generated prompt sections
+- section metadata such as source ownership, contract version, owner reference,
+  and fallback usage
 - the final rendered system prompt
 
 This is the main debugging and prompt-review surface for now.
+
+Admin agent edits can also be previewed before save through
+`POST /admin/assistant/agents/{agent_id}/context-preview`. That endpoint accepts
+the same proposed update payload as the save route, runs the agent hierarchy,
+profile-policy, and activation validation path without persisting, and returns
+the server-built prompt context for the unsaved draft.
 
 Note that prompt preview shows the stable server-built foundation. Tool calls
 only happen during `/assistant/respond`, because they depend on the user's
@@ -157,9 +257,11 @@ services. Recurring comments that point to stable product behavior should be
 promoted through the deterministic algorithm loop.
 
 Admin outcome metrics include feedback totals, helpful vs. needs-work rates,
-workspace-level feedback rows, and recent run feedback notes so reviewers can
-spot agent or workspace patterns without turning comments into automatic
-authority changes.
+workspace-level feedback rows, explicit action-review outcome counters
+(`APPROVED_AS_IS`, `APPROVED_WITH_CORRECTIONS`, rejected, failed), duplicate
+or invalid action payload failure counters, and recent run feedback notes so
+reviewers can spot agent or workspace patterns without turning comments into
+automatic authority changes.
 
 ## Assistant Evals
 
@@ -211,6 +313,46 @@ At minimum:
 - add a new fixture case or update an existing one when behavior changes
 - note the eval case added, updated, or intentionally not needed in the change
   notes or PR description
+
+For prompt-first UX work, pair this lane with the matching web lane from
+[Local Development](./local-development.md): use `make web-test` for prompt
+parsing or component behavior, and `make web-smoke-test` for landing, auth
+resume, prompt submission, or workspace handoff flows.
+
+## Agent Self-Update Drafts
+
+Agents can now turn recent mistakes into a reviewable self-update draft from
+the admin surface through:
+
+- `POST /admin/assistant/agents/{agent_id}/self-update-draft`
+- `GET /admin/assistant/agents/{agent_id}/revisions`
+- `POST /admin/assistant/agents/{agent_id}/revisions/{revision_id}/publish`
+
+This is a supervised learning loop, not silent self-modification. The server
+builds the draft from current agent configuration plus:
+
+- recent `NEEDS_WORK` feedback comments
+- latest failing eval cases
+- autonomy-review recommendation reasons
+- matched knowledge-base lessons and stop conditions
+
+The generated draft is intentionally constrained and now lands as an
+unpublished stored revision:
+
+- it preserves identity and governance metadata such as `agent_id`, provider,
+  model, scope, role mapping, owner role, authority ceiling, and token budget
+- it may preserve or narrow allowed workspaces, capabilities, live tools, and
+  governed action types
+- it may not widen authority from observed mistakes
+- it does not mutate the live agent until an admin explicitly publishes the
+  stored revision
+
+Admins can review the returned draft evidence, inspect the field-level diff
+against the published snapshot, load the revision into the editor if they want
+to refine it further, and then publish it explicitly. If the learning signal
+points to durable product behavior instead of a prompt boundary, prefer the
+deterministic algorithm loop and knowledge-base update instead of relying on
+prompt-only correction.
 
 ## Codex Task Dispatch
 

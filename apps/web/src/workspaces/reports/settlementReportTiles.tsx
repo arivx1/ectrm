@@ -1,7 +1,12 @@
+import { savePromptResumeIntent } from "../../shared/promptResumeIntent";
 import { formatCurrencyAmount } from '../../shared/format'
 import type { WorkspaceTile } from '../../shared/ui/TileLayout'
 import { buildAsyncReportTile } from './reportTileScaffold'
 import { ALL_FILTER_VALUE } from './settlementReportLens'
+import {
+  buildSettlementPresetPromptDraft,
+  buildSettlementReportPromptContext,
+} from "./settlementReportPromptContext";
 import type { SettlementReportLensState } from './useSettlementReportLens'
 
 type SettlementReportTileOptions = {
@@ -9,6 +14,7 @@ type SettlementReportTileOptions = {
   formatNumber: (value: number | null, digits?: number) => string
   formatDate: (value: string | null | undefined) => string
   formatDateOnly: (value: string | null | undefined) => string
+  onOpenPrompt: () => void
   onOpenSettlement: () => void
   onOpenTrade: (tradeId: string) => void
 }
@@ -18,6 +24,7 @@ export function buildSettlementReportTiles({
   formatNumber,
   formatDate,
   formatDateOnly,
+  onOpenPrompt,
   onOpenSettlement,
   onOpenTrade,
 }: SettlementReportTileOptions): WorkspaceTile[] {
@@ -58,6 +65,21 @@ export function buildSettlementReportTiles({
                   Delete Active Preset
                 </button>
               ) : null}
+              <button
+                type="button"
+                className="button button-ghost"
+                disabled={!settlement.settlementFilterActive}
+                onClick={() => {
+                  savePromptResumeIntent({
+                    draft: buildSettlementPresetPromptDraft(settlement),
+                    applicationContext: buildSettlementReportPromptContext(settlement),
+                    submitAfterSignIn: false,
+                  })
+                  onOpenPrompt()
+                }}
+              >
+                Ask Assistant
+              </button>
               <button
                 type="button"
                 className="button button-secondary"

@@ -5,12 +5,17 @@ import type {
   ExposureSummaryRow,
   PnlComparisonReport,
   PnlHistoryReport,
+  ReportDefinitionDraft,
+  ReportDefinitionValidationResult,
   ReportingOverview,
+  SemanticDatasetDefinition,
   SettlementReportFilterOptions,
   SettlementReportFilters,
   SettlementReportPresetRecord,
   SettlementExceptionReport,
   SettlementAgingReport,
+  TradingEodReport,
+  WorkbookDefinitionDraft,
 } from '../../shared/models'
 
 type LoadPnlHistoryReportOptions = {
@@ -23,6 +28,11 @@ type LoadPnlHistoryReportOptions = {
 }
 
 type LoadSettlementReportOptions = SettlementReportFilters & {
+  asOf?: string
+}
+
+type LoadTradingEodReportOptions = {
+  businessDate?: string
   asOf?: string
 }
 
@@ -152,6 +162,53 @@ export async function loadPnlComparisonReport(
 
 export async function loadReportingOverview(apiBase: string, accessToken?: string): Promise<ReportingOverview> {
   return fetchJson<ReportingOverview>(`${apiBase}/reports/overview`, {
+    cache: 'no-store',
+    ...authenticatedRequestInit(accessToken),
+  })
+}
+
+export async function loadSemanticDatasets(apiBase: string, accessToken?: string): Promise<SemanticDatasetDefinition[]> {
+  return fetchJson<SemanticDatasetDefinition[]>(`${apiBase}/reports/datasets`, {
+    cache: 'no-store',
+    ...authenticatedRequestInit(accessToken),
+  })
+}
+
+export async function validateReportDefinitionDraft(
+  apiBase: string,
+  payload: ReportDefinitionDraft,
+  accessToken?: string,
+): Promise<ReportDefinitionValidationResult> {
+  return postJson<ReportDefinitionValidationResult>(`${apiBase}/reports/definitions/validate`, payload, {
+    ...authenticatedRequestInit(accessToken),
+  })
+}
+
+export async function validateWorkbookDefinitionDraft(
+  apiBase: string,
+  payload: WorkbookDefinitionDraft,
+  accessToken?: string,
+): Promise<ReportDefinitionValidationResult> {
+  return postJson<ReportDefinitionValidationResult>(`${apiBase}/reports/workbooks/validate`, payload, {
+    ...authenticatedRequestInit(accessToken),
+  })
+}
+
+export async function loadTradingEodReport(
+  apiBase: string,
+  options: LoadTradingEodReportOptions = {},
+  accessToken?: string,
+): Promise<TradingEodReport> {
+  const params = new URLSearchParams()
+  if (options.businessDate) {
+    params.set('business_date', options.businessDate)
+  }
+  if (options.asOf) {
+    params.set('as_of', options.asOf)
+  }
+
+  const queryString = params.toString()
+  return fetchJson<TradingEodReport>(`${apiBase}/reports/trading-eod${queryString ? `?${queryString}` : ''}`, {
     cache: 'no-store',
     ...authenticatedRequestInit(accessToken),
   })

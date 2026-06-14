@@ -76,6 +76,10 @@ export function shouldPresentStartHereOnboarding(
   authSession: StoredAuthSession | null,
 ): boolean {
   if (authSession) {
+    if (authSession.showStartHere !== true) {
+      return false
+    }
+
     return snapshot.dismissedAuthenticatedSessionId !== authSession.sessionId
   }
 

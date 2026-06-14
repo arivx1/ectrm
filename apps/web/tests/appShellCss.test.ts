@@ -44,3 +44,30 @@ test('assistant message cards keep long prompt text visible', () => {
   assert.match(paragraphBlock, /white-space:\s*pre-wrap;/)
   assert.match(paragraphBlock, /overflow-wrap:\s*anywhere;/)
 })
+
+test('messaging workspace keeps the composer outside the scrollable message feed', () => {
+  const messagingCss = readFileSync(new URL('../src/styles/messaging-workspace.css', import.meta.url), 'utf8')
+  const cssBlock = (selector: string, fromIndex = 0) => {
+    const start = messagingCss.indexOf(selector, fromIndex)
+    assert.notEqual(start, -1)
+    const end = messagingCss.indexOf('\n}', start)
+    assert.notEqual(end, -1)
+    return messagingCss.slice(start, end + 2)
+  }
+  const stageBlock = cssBlock('.main-stage-messages {')
+  const shellOverrideBlock = cssBlock('.main-stage-messages .messaging-desk-shell {')
+  const channelBlock = cssBlock('.messaging-desk-channel {', messagingCss.indexOf('.messaging-desk-empty p {'))
+  const feedBlock = cssBlock('.messaging-desk-feed {')
+
+  assert.match(stageBlock, /display:\s*flex;/)
+  assert.match(stageBlock, /flex-direction:\s*column;/)
+  assert.match(stageBlock, /height:\s*100dvh;/)
+  assert.match(stageBlock, /overflow:\s*hidden;/)
+  assert.match(shellOverrideBlock, /height:\s*100%;/)
+  assert.match(shellOverrideBlock, /min-height:\s*0;/)
+  assert.match(channelBlock, /grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto;/)
+  assert.match(channelBlock, /overflow:\s*hidden;/)
+  assert.match(feedBlock, /overflow-y:\s*auto;/)
+  assert.match(feedBlock, /overscroll-behavior:\s*contain;/)
+  assert.match(feedBlock, /scrollbar-gutter:\s*stable;/)
+})

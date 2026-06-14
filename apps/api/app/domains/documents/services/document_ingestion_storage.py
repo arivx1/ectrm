@@ -9,8 +9,12 @@ from .document_ingestion_common import PREVIEW_IMAGE_EXTENSION
 from .document_ingestion_common import PREVIEW_SUBDIRECTORY
 
 
+def stored_pdf_absolute_path(storage_key: str) -> Path:
+    return settings.DOCUMENT_STORAGE_ROOT / storage_key
+
+
 def load_stored_pdf_bytes(storage_key: str) -> bytes:
-    absolute_path = settings.DOCUMENT_STORAGE_ROOT / storage_key
+    absolute_path = stored_pdf_absolute_path(storage_key)
     if not absolute_path.exists():
         raise ValueError(f"Stored PDF '{storage_key}' could not be found")
     return absolute_path.read_bytes()

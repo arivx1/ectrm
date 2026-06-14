@@ -32,6 +32,13 @@ class TradePayment(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     received_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    reversal_of_payment_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("trade_payments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    reversal_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[str] = mapped_column(String(128), nullable=False)

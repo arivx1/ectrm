@@ -11,6 +11,10 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.auth import hash_password, resolve_audit_actor_id
 from apps.api.app.core.query_params import ADMIN_LIST_LIMIT_QUERY, LIST_OFFSET_QUERY
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.assistant.personas import (
+    default_assistant_persona_for_role,
+    normalize_assistant_persona_key,
+)
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.schemas.user_account import (
     UserAccountCreate,
@@ -38,7 +42,13 @@ def list_users(
                 UserAccount.user_id.ilike(pattern),
                 UserAccount.display_name.ilike(pattern),
                 UserAccount.email.ilike(pattern),
+                UserAccount.first_name.ilike(pattern),
+                UserAccount.last_name.ilike(pattern),
+                UserAccount.preferred_timezone.ilike(pattern),
+                UserAccount.primary_location.ilike(pattern),
                 UserAccount.role.ilike(pattern),
+                UserAccount.default_assistant_persona.ilike(pattern),
+                UserAccount.assistant_context_blurb.ilike(pattern),
             )
         )
     if is_active is not None:
@@ -62,7 +72,16 @@ def create_user(payload: UserAccountCreate, db: Session = Depends(get_db)) -> Us
         user_id=payload.user_id,
         email=payload.email,
         display_name=payload.display_name,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        preferred_timezone=payload.preferred_timezone,
+        primary_location=payload.primary_location,
         role=payload.role,
+        default_assistant_persona=(
+            payload.default_assistant_persona
+            or default_assistant_persona_for_role(payload.role)
+        ),
+        assistant_context_blurb=payload.assistant_context_blurb,
         password_hash=hash_password(payload.password),
         is_active=True,
         last_login_at=payload.last_login_at,
@@ -109,8 +128,22 @@ def update_user(user_id: str, payload: UserAccountUpdate, db: Session = Depends(
 
     if payload.display_name is not None:
         record.display_name = payload.display_name
+    if "first_name" in payload.model_fields_set:
+        record.first_name = payload.first_name
+    if "last_name" in payload.model_fields_set:
+        record.last_name = payload.last_name
+    if "preferred_timezone" in payload.model_fields_set:
+        record.preferred_timezone = payload.preferred_timezone
+    if "primary_location" in payload.model_fields_set:
+        record.primary_location = payload.primary_location
     if payload.role is not None:
         record.role = payload.role
+    if payload.default_assistant_persona is not None:
+        record.default_assistant_persona = payload.default_assistant_persona
+    elif normalize_assistant_persona_key(record.default_assistant_persona) is None:
+        record.default_assistant_persona = default_assistant_persona_for_role(record.role)
+    if "assistant_context_blurb" in payload.model_fields_set:
+        record.assistant_context_blurb = payload.assistant_context_blurb
     if payload.password is not None:
         record.password_hash = hash_password(payload.password)
     if payload.last_login_at is not None:
@@ -169,7 +202,16 @@ def _to_out(record: UserAccount) -> UserAccountOut:
         user_id=record.user_id,
         email=record.email,
         display_name=record.display_name,
+        first_name=record.first_name,
+        last_name=record.last_name,
+        preferred_timezone=record.preferred_timezone,
+        primary_location=record.primary_location,
         role=record.role,
+        default_assistant_persona=(
+            normalize_assistant_persona_key(record.default_assistant_persona)
+            or default_assistant_persona_for_role(record.role)
+        ),
+        assistant_context_blurb=record.assistant_context_blurb,
         is_active=record.is_active,
         password_set=bool(record.password_hash),
         last_login_at=record.last_login_at,

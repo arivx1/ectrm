@@ -16,6 +16,8 @@ from apps.api.app.models.weather_location import WeatherLocation
 from apps.api.app.models.weather_observation import WeatherObservation
 from apps.api.app.routes.weather import (
     create_weather_location,
+    get_public_nws_sync_status,
+    list_active_weather_locations,
     list_weather_forecast_periods,
     list_weather_locations,
     list_weather_observations,
@@ -193,6 +195,37 @@ class WeatherDataApiTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].code, "BOS")
 
+    def test_public_weather_location_listing_returns_only_active_locations(self) -> None:
+        self._seed_weather_location_with_data()
+        with self.SessionLocal() as session:
+            session.add(
+                WeatherLocation(
+                    code="CHI",
+                    name="Chicago Hub",
+                    reference_location_code=None,
+                    latitude=41.8781,
+                    longitude=-87.6298,
+                    timezone="America/Chicago",
+                    source_provider="NWS",
+                    cwa="LOT",
+                    grid_id="LOT",
+                    grid_x=76,
+                    grid_y=73,
+                    station_id="KORD",
+                    description="Inactive test point",
+                    is_active=False,
+                    created_at=datetime(2026, 3, 16, 9, 0, tzinfo=timezone.utc),
+                    created_by="test-user",
+                    updated_at=datetime(2026, 3, 16, 9, 0, tzinfo=timezone.utc),
+                    updated_by="test-user",
+                    version=1,
+                )
+            )
+            session.commit()
+            rows = list_active_weather_locations(q="", limit=50, offset=0, db=session)
+
+        self.assertEqual([row.code for row in rows], ["BOS"])
+
     def test_list_weather_forecast_periods_and_observations(self) -> None:
         self._seed_weather_location_with_data()
         with patch("apps.api.app.routes.weather.datetime") as datetime_mock:
@@ -268,6 +301,46 @@ class WeatherDataApiTests(unittest.TestCase):
                 forecasts = list_weather_forecast_periods("bos", limit=24, db=session)
 
         self.assertEqual([forecast.period_number for forecast in forecasts], [1, 2])
+
+    def test_public_weather_sync_status_reports_only_active_locations(self) -> None:
+        self._seed_weather_location_with_data()
+        with self.SessionLocal() as session:
+            session.add(
+                WeatherLocation(
+                    code="CHI",
+                    name="Chicago Hub",
+                    reference_location_code=None,
+                    latitude=41.8781,
+                    longitude=-87.6298,
+                    timezone="America/Chicago",
+                    source_provider="NWS",
+                    cwa="LOT",
+                    grid_id="LOT",
+                    grid_x=76,
+                    grid_y=73,
+                    station_id="KORD",
+                    description="Inactive test point",
+                    is_active=False,
+                    created_at=datetime(2026, 3, 16, 9, 0, tzinfo=timezone.utc),
+                    created_by="test-user",
+                    updated_at=datetime(2026, 3, 16, 9, 0, tzinfo=timezone.utc),
+                    updated_by="test-user",
+                    version=1,
+                )
+            )
+            session.commit()
+
+        with patch("apps.api.app.domains.weather.services.sync_status.datetime") as datetime_mock:
+            datetime_mock.now.return_value = datetime(2026, 3, 16, 12, 30, tzinfo=timezone.utc)
+            with self.SessionLocal() as session:
+                payload = get_public_nws_sync_status(db=session)
+
+        self.assertEqual(payload.active_location_count, 1)
+        self.assertEqual(payload.healthy_location_count, 1)
+        self.assertEqual(payload.stale_location_count, 0)
+        self.assertEqual(payload.missing_location_count, 0)
+        self.assertEqual([row.code for row in payload.locations], ["BOS"])
+        self.assertEqual(payload.locations[0].health_status, "healthy")
 
     def test_trigger_nws_sync_returns_external_data_run_payload(self) -> None:
         self._seed_weather_location_with_data()

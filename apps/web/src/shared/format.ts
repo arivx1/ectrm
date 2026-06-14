@@ -30,6 +30,28 @@ export function formatMoney(value: number | null): string {
   }).format(value)
 }
 
+export function formatBytes(value: number | null | undefined, fallback = '--'): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return fallback
+  }
+
+  if (value < 1024) {
+    return `${value} B`
+  }
+
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let normalized = value / 1024
+  let unitIndex = 0
+
+  while (normalized >= 1024 && unitIndex < units.length - 1) {
+    normalized /= 1024
+    unitIndex += 1
+  }
+
+  const digits = normalized >= 10 || Number.isInteger(normalized) ? 0 : 1
+  return `${normalized.toFixed(digits)} ${units[unitIndex]}`
+}
+
 export function formatCurrencyAmount(
   value: number | null,
   currencyCode: string | null | undefined,

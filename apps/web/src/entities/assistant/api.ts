@@ -3,6 +3,7 @@ import {
   fetchJson,
   getResponseCorrelationId,
   patchJson,
+  postFormData,
   postJson,
   putJson,
   requestOk,
@@ -15,7 +16,11 @@ import type {
   AssistantActionType,
   AssistantAdminAgent,
   AssistantAgent,
+  AssistantAgentProfileRequestKind,
   AssistantAgentHealthReview,
+  AssistantAgentRevision,
+  AssistantAgentSelfUpdateDraft,
+  AssistantAgentSkillKey,
   AssistantAgentWorkPackage,
   AssistantAgentWorkPackageStatus,
   AssistantAgentEval,
@@ -30,6 +35,11 @@ import type {
   AssistantOutcomeMetrics,
   AssistantPolicySimulation,
   AssistantPolicySimulationPhase,
+  AssistantPromptNavigationOutcome,
+  AssistantPromptNavigationFocusType,
+  AssistantPromptNavigationOutcomeStatus,
+  AssistantPromptRouteRecommendation,
+  AssistantPromptNavigationSurface,
   AssistantPromptContext,
   AssistantPromptContextRequest,
   AssistantPromptRequest,
@@ -41,6 +51,9 @@ import type {
   AssistantRunAuditTrace,
   AssistantRunSummary,
   AssistantRuntimeSettings,
+  AssistantTokenUsageSummary,
+  AssistantTokenUsageTracker,
+  AssistantVoiceTranscription,
   ViewKey,
 } from '../../shared/models'
 
@@ -58,9 +71,14 @@ export type CreateAssistantAgentInput = {
   human_owner_role?: AssistantAdminAgent['human_owner_role']
   authority_ceiling?: AssistantAdminAgent['authority_ceiling']
   activation_notes?: AssistantAdminAgent['activation_notes']
+  orchestration_pattern?: AssistantAdminAgent['orchestration_pattern']
+  parent_agent_id?: AssistantAdminAgent['parent_agent_id']
+  managed_agent_ids?: AssistantAdminAgent['managed_agent_ids']
+  delegation_guidance?: AssistantAdminAgent['delegation_guidance']
   profile_request_id?: AssistantAdminAgent['profile_request_id']
   allowed_workspaces: AssistantAdminAgent['allowed_workspaces']
   capabilities: AssistantAdminAgent['capabilities']
+  skills: AssistantAdminAgent['skills']
   allowed_tools: AssistantAdminAgent['allowed_tools']
   allowed_action_types: AssistantAdminAgent['allowed_action_types']
   daily_token_allocation?: AssistantAdminAgent['daily_token_allocation']
@@ -70,13 +88,18 @@ export type CreateAssistantAgentInput = {
 export type UpdateAssistantAgentInput = Omit<CreateAssistantAgentInput, 'agent_id'>
 
 export type CreateAssistantAgentProfileRequestInput = {
+  request_kind?: AssistantAgentProfileRequestKind
+  target_agent_id?: string | null
   requested_agent_id?: string | null
+  change_summary?: string | null
   business_problem: string
   proposed_mission: string
   human_owner_role: string
   requested_workspaces: AssistantAdminAgent['allowed_workspaces']
   work_objects: string[]
   requested_inputs_tools: string[]
+  requested_action_types?: AssistantActionType[]
+  requested_skills?: AssistantAgentSkillKey[]
   expected_outputs: string[]
   requested_authority_ceiling: NonNullable<AssistantAdminAgent['authority_ceiling']>
   stop_conditions: string[]
@@ -84,10 +107,36 @@ export type CreateAssistantAgentProfileRequestInput = {
   proposed_eval_cases: string[]
 }
 
+export type SubmitAssistantAgentProfileRequestInput = {
+  request_kind: AssistantAgentProfileRequestKind
+  target_agent_id?: string | null
+  requested_agent_id?: string | null
+  change_summary: string
+  business_problem: string
+  proposed_mission: string
+  human_owner_role?: string | null
+  requested_workspaces?: AssistantAdminAgent['allowed_workspaces']
+  work_objects?: string[]
+  requested_inputs_tools?: string[]
+  requested_action_types?: AssistantActionType[]
+  requested_skills?: AssistantAgentSkillKey[]
+  expected_outputs?: string[]
+  requested_authority_ceiling?: NonNullable<AssistantAdminAgent['authority_ceiling']> | null
+  stop_conditions?: string[]
+  success_metrics?: string[]
+  proposed_eval_cases?: string[]
+}
+
 export type DecideAssistantAgentProfileRequestInput = {
   reviewed_by?: string
   approval_notes?: string
   rejection_reason?: string
+}
+
+export type ActivateAssistantAgentProfileRequestInput = {
+  activated_by?: string
+  linked_agent_id: string
+  linked_revision_id: number
 }
 
 export type BuildAssistantAgentDraftInput = {
@@ -102,6 +151,7 @@ export type BuildAssistantAgentDraftInput = {
     model?: AssistantAdminAgent['model']
     allowed_workspaces?: AssistantAdminAgent['allowed_workspaces']
     capabilities?: AssistantAdminAgent['capabilities']
+    skills?: AssistantAdminAgent['skills']
     allowed_tools?: AssistantAdminAgent['allowed_tools']
     allowed_action_types?: AssistantAdminAgent['allowed_action_types']
     system_prompt?: string
@@ -116,6 +166,14 @@ export type BuildAssistantAgentDraftResult = Omit<CreateAssistantAgentInput, 'pr
   warnings: string[]
 }
 
+export type GenerateAssistantAgentSelfUpdateDraftInput = {
+  brief?: string
+}
+
+export type PublishAssistantAgentRevisionInput = {
+  revisionId: number
+}
+
 export type AssistantStreamEvent = {
   event: string
   data: Record<string, unknown>
@@ -124,6 +182,19 @@ export type AssistantStreamEvent = {
 export type SubmitAssistantRunFeedbackInput = {
   rating: AssistantRunFeedbackRating
   comment?: string
+}
+
+export type SubmitAssistantPromptNavigationOutcomeInput = {
+  surface?: AssistantPromptNavigationSurface
+  outcome: AssistantPromptNavigationOutcomeStatus
+  intentKey: string
+  targetView?: ViewKey
+  targetLabel?: string
+  targetRationale?: string
+  focusType?: AssistantPromptNavigationFocusType
+  focusId?: string
+  focusLabel?: string
+  detail?: string
 }
 
 export type AssistantActionDecisionInput = {
@@ -166,6 +237,14 @@ export type UpdateAssistantAgentWorkPackageInput = {
   status: AssistantAgentWorkPackageStatus
   updatedBy?: string
   notes?: string
+  implementationEvidence?: {
+    prUrl?: string
+    commitSha?: string
+    evalIds?: number[]
+    testNames?: string[]
+    docPaths?: string[]
+    owner?: string
+  }
 }
 
 function assistantMutationHeaders(): Headers {
@@ -275,10 +354,30 @@ function outcomeMetricsQuery(init?: {
 
 function agentWorkPackageQuery(init?: {
   status?: AssistantAgentWorkPackageStatus
+  hasPr?: boolean
+  hasCommit?: boolean
+  hasEval?: boolean
+  hasTests?: boolean
+  hasDocs?: boolean
 }): string {
   const params = new URLSearchParams()
   if (init?.status) {
     params.set('status', init.status)
+  }
+  if (typeof init?.hasPr === 'boolean') {
+    params.set('has_pr', String(init.hasPr))
+  }
+  if (typeof init?.hasCommit === 'boolean') {
+    params.set('has_commit', String(init.hasCommit))
+  }
+  if (typeof init?.hasEval === 'boolean') {
+    params.set('has_eval', String(init.hasEval))
+  }
+  if (typeof init?.hasTests === 'boolean') {
+    params.set('has_tests', String(init.hasTests))
+  }
+  if (typeof init?.hasDocs === 'boolean') {
+    params.set('has_docs', String(init.hasDocs))
   }
   return params.size > 0 ? `?${params.toString()}` : ''
 }
@@ -323,6 +422,14 @@ function assistantActionDecisionPayload(payload: AssistantActionDecisionInput): 
 
 export async function loadAssistantRuntimeSettings(apiBase: string): Promise<AssistantRuntimeSettings> {
   return fetchJson<AssistantRuntimeSettings>(`${apiBase}/assistant/settings`)
+}
+
+export async function loadAssistantTokenUsage(apiBase: string): Promise<AssistantTokenUsageSummary> {
+  return fetchJson<AssistantTokenUsageSummary>(`${apiBase}/assistant/token-usage`)
+}
+
+export async function loadAssistantTokenUsageTracker(apiBase: string): Promise<AssistantTokenUsageTracker> {
+  return fetchJson<AssistantTokenUsageTracker>(`${apiBase}/assistant/token-usage/tracker`)
 }
 
 export async function listAssistantAgents(apiBase: string): Promise<AssistantAgent[]> {
@@ -397,6 +504,39 @@ export async function submitAssistantRunFeedback(
   )
 }
 
+export async function submitAssistantPromptNavigationOutcome(
+  apiBase: string,
+  runId: number | null | undefined,
+  payload: SubmitAssistantPromptNavigationOutcomeInput,
+  init?: { accessToken?: string },
+): Promise<AssistantPromptNavigationOutcome> {
+  const normalizedTargetLabel = payload.targetLabel?.trim()
+  const normalizedTargetRationale = payload.targetRationale?.trim()
+  const normalizedFocusId = payload.focusId?.trim()
+  const normalizedFocusLabel = payload.focusLabel?.trim()
+  const normalizedDetail = payload.detail?.trim()
+  const endpoint =
+    typeof runId === 'number' && Number.isFinite(runId)
+      ? `${apiBase}/assistant/runs/${encodeURIComponent(String(runId))}/prompt-navigation-outcomes`
+      : `${apiBase}/assistant/prompt-navigation-outcomes`
+  return postJson<AssistantPromptNavigationOutcome>(
+    endpoint,
+    {
+      surface: payload.surface ?? 'PROMPT_HOME',
+      outcome: payload.outcome,
+      intent_key: payload.intentKey.trim(),
+      ...(payload.targetView ? { target_view: payload.targetView } : {}),
+      ...(normalizedTargetLabel ? { target_label: normalizedTargetLabel } : {}),
+      ...(normalizedTargetRationale ? { target_rationale: normalizedTargetRationale } : {}),
+      ...(payload.focusType ? { focus_type: payload.focusType } : {}),
+      ...(normalizedFocusId ? { focus_id: normalizedFocusId } : {}),
+      ...(normalizedFocusLabel ? { focus_label: normalizedFocusLabel } : {}),
+      ...(normalizedDetail ? { detail: normalizedDetail } : {}),
+    },
+    { headers: assistantReadHeaders(init?.accessToken) },
+  )
+}
+
 export async function getAdminAssistantRunAuditTrace(
   apiBase: string,
   runId: number,
@@ -436,6 +576,37 @@ export async function requestAssistantResponse(
     payload as unknown as Record<string, unknown>,
     { headers: assistantReadHeaders(init?.accessToken) },
   )
+}
+
+export async function transcribeAssistantVoice(
+  apiBase: string,
+  file: Blob,
+  init: { accessToken?: string; filename?: string },
+): Promise<AssistantVoiceTranscription> {
+  const formData = new FormData()
+  formData.append('file', file, init.filename?.trim() || 'voice-note.webm')
+  return postFormData<AssistantVoiceTranscription>(
+    `${apiBase}/assistant/voice/transcriptions`,
+    formData,
+    { headers: assistantReadHeaders(init.accessToken) },
+  )
+}
+
+export async function synthesizeAssistantVoice(
+  apiBase: string,
+  text: string,
+  init?: { accessToken?: string },
+): Promise<Blob> {
+  const response = await requestOk(`${apiBase}/assistant/voice/speech`, {
+    method: 'POST',
+    headers: (() => {
+      const headers = assistantReadHeaders(init?.accessToken) ?? new Headers()
+      headers.set('Content-Type', 'application/json')
+      return headers
+    })(),
+    body: JSON.stringify({ text }),
+  })
+  return response.blob()
 }
 
 export async function streamAssistantResponse(
@@ -522,6 +693,27 @@ export async function previewAssistantPromptContext(
   )
 }
 
+export async function listAssistantPromptRouteRecommendations(
+  apiBase: string,
+  init?: { accessToken?: string },
+): Promise<AssistantPromptRouteRecommendation[]> {
+  try {
+    return await fetchJson<AssistantPromptRouteRecommendation[]>(
+      `${apiBase}/assistant/prompt-route-recommendations`,
+      {
+        headers: assistantReadHeaders(init?.accessToken),
+      },
+    )
+  } catch (error) {
+    // Prompt Home should degrade gracefully while an older API worker is still
+    // running without the promoted-route endpoint.
+    if (isNotFoundApiError(error)) {
+      return []
+    }
+    throw error
+  }
+}
+
 function parseAssistantStreamEvent(rawEvent: string): AssistantStreamEvent | null {
   const trimmedEvent = rawEvent.trim()
   if (!trimmedEvent) {
@@ -555,6 +747,15 @@ function parseAssistantStreamEvent(rawEvent: string): AssistantStreamEvent | nul
       data: { raw: dataLines.join('\n') },
     }
   }
+}
+
+function isNotFoundApiError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const status = (error as { status?: unknown }).status
+  return typeof status === 'number' && status === 404
 }
 
 export async function approveAssistantActionRequest(
@@ -665,6 +866,11 @@ export async function listAdminAssistantAgentWorkPackages(
   apiBase: string,
   init?: {
     status?: AssistantAgentWorkPackageStatus
+    hasPr?: boolean
+    hasCommit?: boolean
+    hasEval?: boolean
+    hasTests?: boolean
+    hasDocs?: boolean
   },
 ): Promise<AssistantAgentWorkPackage[]> {
   return fetchJson<AssistantAgentWorkPackage[]>(
@@ -710,6 +916,31 @@ export async function updateAdminAssistantAgentWorkPackage(
   if (payload.notes?.trim()) {
     body.notes = payload.notes.trim()
   }
+  const evidence = payload.implementationEvidence
+  if (evidence) {
+    const evidencePayload: Record<string, unknown> = {}
+    if (evidence.prUrl?.trim()) {
+      evidencePayload.pr_url = evidence.prUrl.trim()
+    }
+    if (evidence.commitSha?.trim()) {
+      evidencePayload.commit_sha = evidence.commitSha.trim()
+    }
+    if (typeof evidence.owner === 'string' && evidence.owner.trim()) {
+      evidencePayload.owner = evidence.owner.trim()
+    }
+    if (Array.isArray(evidence.evalIds)) {
+      evidencePayload.eval_ids = evidence.evalIds
+    }
+    if (Array.isArray(evidence.testNames)) {
+      evidencePayload.test_names = evidence.testNames
+    }
+    if (Array.isArray(evidence.docPaths)) {
+      evidencePayload.doc_paths = evidence.docPaths
+    }
+    if (Object.keys(evidencePayload).length > 0) {
+      body.implementation_evidence = evidencePayload
+    }
+  }
   return patchJson<AssistantAgentWorkPackage>(
     `${apiBase}/admin/assistant/agent-work-packages/${encodeURIComponent(workPackageId.trim())}`,
     body,
@@ -753,6 +984,29 @@ export async function listAdminAssistantProfileRequests(
     `${apiBase}/admin/assistant/profile-requests`,
     {
       headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function listAssistantProfileRequests(
+  apiBase: string,
+  init: { accessToken: string; status?: AssistantAgentProfileRequest['status']; limit?: number; offset?: number },
+): Promise<AssistantAgentProfileRequest[]> {
+  const params = new URLSearchParams()
+  if (init.status) {
+    params.set('status', init.status)
+  }
+  if (typeof init.limit === 'number') {
+    params.set('limit', String(init.limit))
+  }
+  if (typeof init.offset === 'number') {
+    params.set('offset', String(init.offset))
+  }
+  const query = params.size > 0 ? `?${params.toString()}` : ''
+  return fetchJson<AssistantAgentProfileRequest[]>(
+    `${apiBase}/assistant/profile-requests${query}`,
+    {
+      headers: assistantReadHeaders(init.accessToken),
     },
   )
 }
@@ -863,7 +1117,43 @@ export async function createAssistantAgentProfileRequest(
     `${apiBase}/admin/assistant/profile-requests`,
     {
       ...payload,
+      request_kind: payload.request_kind ?? 'NEW_SPECIALIZATION',
+      target_agent_id: payload.target_agent_id ?? null,
       requested_by: actorId,
+      change_summary: payload.change_summary?.trim() || null,
+      requested_action_types: payload.requested_action_types ?? [],
+      requested_skills: payload.requested_skills ?? [],
+    },
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function submitAssistantAgentProfileRequest(
+  apiBase: string,
+  payload: SubmitAssistantAgentProfileRequestInput,
+): Promise<AssistantAgentProfileRequest> {
+  return postJson<AssistantAgentProfileRequest>(
+    `${apiBase}/assistant/profile-requests`,
+    {
+      request_kind: payload.request_kind,
+      target_agent_id: payload.target_agent_id?.trim() || null,
+      requested_agent_id: payload.requested_agent_id?.trim() || null,
+      change_summary: payload.change_summary.trim(),
+      business_problem: payload.business_problem.trim(),
+      proposed_mission: payload.proposed_mission.trim(),
+      human_owner_role: payload.human_owner_role?.trim() || null,
+      requested_workspaces: payload.requested_workspaces ?? [],
+      work_objects: payload.work_objects ?? [],
+      requested_inputs_tools: payload.requested_inputs_tools ?? [],
+      requested_action_types: payload.requested_action_types ?? [],
+      requested_skills: payload.requested_skills ?? [],
+      expected_outputs: payload.expected_outputs ?? [],
+      requested_authority_ceiling: payload.requested_authority_ceiling ?? null,
+      stop_conditions: payload.stop_conditions ?? [],
+      success_metrics: payload.success_metrics ?? [],
+      proposed_eval_cases: payload.proposed_eval_cases ?? [],
     },
     {
       headers: assistantMutationHeaders(),
@@ -909,6 +1199,26 @@ export async function rejectAssistantAgentProfileRequest(
   )
 }
 
+export async function activateAssistantAgentProfileRequest(
+  apiBase: string,
+  requestId: number,
+  payload: ActivateAssistantAgentProfileRequestInput,
+): Promise<AssistantAgentProfileRequest> {
+  const { actorId } = getMutationContext()
+
+  return postJson<AssistantAgentProfileRequest>(
+    `${apiBase}/admin/assistant/profile-requests/${requestId}/activate`,
+    {
+      activated_by: payload.activated_by || actorId,
+      linked_agent_id: payload.linked_agent_id.trim(),
+      linked_revision_id: payload.linked_revision_id,
+    },
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
 export async function listAdminAssistantAgents(apiBase: string): Promise<AssistantAdminAgent[]> {
   return fetchJson<AssistantAdminAgent[]>(`${apiBase}/admin/assistant/agents`, {
     headers: assistantMutationHeaders(),
@@ -942,6 +1252,25 @@ export async function updateAssistantAgent(
 
   return putJson<AssistantAdminAgent>(
     `${apiBase}/admin/assistant/agents/${encodeURIComponent(agentId)}`,
+    {
+      ...payload,
+      updated_by: actorId,
+    },
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function previewAdminAssistantAgentDraftContext(
+  apiBase: string,
+  agentId: string,
+  payload: UpdateAssistantAgentInput,
+): Promise<AssistantPromptContext> {
+  const { actorId } = getMutationContext()
+
+  return postJson<AssistantPromptContext>(
+    `${apiBase}/admin/assistant/agents/${encodeURIComponent(agentId)}/context-preview`,
     {
       ...payload,
       updated_by: actorId,
@@ -995,6 +1324,7 @@ export async function buildAssistantAgentDraft(
         ...(payload.current_draft.model?.trim() ? { model: payload.current_draft.model.trim() } : {}),
         allowed_workspaces: payload.current_draft.allowed_workspaces ?? [],
         capabilities: payload.current_draft.capabilities ?? [],
+        skills: payload.current_draft.skills ?? [],
         allowed_tools: payload.current_draft.allowed_tools ?? [],
         allowed_action_types: payload.current_draft.allowed_action_types ?? [],
         ...(payload.current_draft.system_prompt?.trim()
@@ -1009,6 +1339,47 @@ export async function buildAssistantAgentDraft(
       brief: payload.brief.trim(),
       ...(normalizedDraft ? { current_draft: normalizedDraft } : {}),
     },
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function generateAssistantAgentSelfUpdateDraft(
+  apiBase: string,
+  agentId: string,
+  payload?: GenerateAssistantAgentSelfUpdateDraftInput,
+): Promise<AssistantAgentSelfUpdateDraft> {
+  const normalizedBrief = payload?.brief?.trim()
+  return postJson<AssistantAgentSelfUpdateDraft>(
+    `${apiBase}/admin/assistant/agents/${encodeURIComponent(agentId)}/self-update-draft`,
+    normalizedBrief ? { brief: normalizedBrief } : {},
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function listAdminAssistantAgentRevisions(
+  apiBase: string,
+  agentId: string,
+): Promise<AssistantAgentRevision[]> {
+  return fetchJson<AssistantAgentRevision[]>(
+    `${apiBase}/admin/assistant/agents/${encodeURIComponent(agentId)}/revisions`,
+    {
+      headers: assistantMutationHeaders(),
+    },
+  )
+}
+
+export async function publishAssistantAgentRevision(
+  apiBase: string,
+  agentId: string,
+  revisionId: number,
+): Promise<AssistantAdminAgent> {
+  return postJson<AssistantAdminAgent>(
+    `${apiBase}/admin/assistant/agents/${encodeURIComponent(agentId)}/revisions/${revisionId}/publish`,
+    {},
     {
       headers: assistantMutationHeaders(),
     },

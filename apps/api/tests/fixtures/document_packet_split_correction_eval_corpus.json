@@ -1,0 +1,585 @@
+{
+  "fixture_type": "document_packet_split_correction_suite",
+  "source_event_type": "DocumentPacketSplitCorrectionCaptured",
+  "suite_version": "document-packet-split-corrections-v1",
+  "summary": {
+    "case_count": 3,
+    "document_count": 3,
+    "event_count": 3,
+    "limit": 100,
+    "skipped_event_count": 0
+  },
+  "thresholds": {
+    "max_mismatch_count": 0,
+    "min_exact_match_rate": 1.0
+  },
+  "cases": [
+    {
+      "captured_at": "2026-05-29T12:00:00+00:00",
+      "captured_by": "fixture",
+      "case_id": "packet-split-correction-shared-bol-invoice",
+      "changed_fields": [
+        "page_membership",
+        "shared_page_numbers"
+      ],
+      "correction_event_id": "fixture-shared-bol-invoice",
+      "detector_contract": {
+        "compare_fields": [
+          "sequence_number",
+          "document_kind",
+          "document_subtype",
+          "page_numbers",
+          "shared_page_numbers"
+        ],
+        "function": "apps.api.app.domains.documents.services.document_ingestion_review.build_logical_document_estimates"
+      },
+      "expected_logical_documents": [
+        {
+          "document_kind": "BILL_OF_LADING",
+          "document_subtype": null,
+          "logical_document_key": "LD-001",
+          "page_ids": [
+            1,
+            2
+          ],
+          "page_numbers": [
+            1,
+            2
+          ],
+          "sequence_number": 1,
+          "shared_page_numbers": [
+            2
+          ],
+          "split_confidence": 1.0,
+          "split_evidence": [
+            {
+              "confidence": 1.0,
+              "document_kind": "BILL_OF_LADING",
+              "page_numbers": [
+                1,
+                2
+              ],
+              "summary": "Operator accepted the BOL pages including the shared boundary page.",
+              "type": "operator_reviewed_membership"
+            }
+          ],
+          "split_source": "human_packet_split",
+          "split_strategy": "operator_reviewed_membership"
+        },
+        {
+          "document_kind": "INVOICE",
+          "document_subtype": null,
+          "logical_document_key": "LD-002",
+          "page_ids": [
+            2,
+            3
+          ],
+          "page_numbers": [
+            2,
+            3
+          ],
+          "sequence_number": 2,
+          "shared_page_numbers": [
+            2
+          ],
+          "split_confidence": 1.0,
+          "split_evidence": [
+            {
+              "confidence": 1.0,
+              "document_kind": "INVOICE",
+              "page_numbers": [
+                2,
+                3
+              ],
+              "summary": "Operator accepted the invoice pages including the shared boundary page.",
+              "type": "operator_reviewed_membership"
+            }
+          ],
+          "split_source": "human_packet_split",
+          "split_strategy": "operator_reviewed_membership"
+        }
+      ],
+      "expected_shared_page_numbers": [
+        2
+      ],
+      "fixture_type": "document_packet_split_correction",
+      "fixture_version": 1,
+      "original_filename": "shared-bol-invoice.pdf",
+      "page_count": 3,
+      "pages": [
+        {
+          "classification_confidence": 0.93,
+          "classification_payload": {
+            "text_source": "pdf_text"
+          },
+          "classification_status": "ANALYZED",
+          "document_kind": "BILL_OF_LADING",
+          "document_subtype": null,
+          "extraction_status": "ANALYZED",
+          "header_fields": [],
+          "page_id": 1,
+          "page_number": 1,
+          "processing_errors": [],
+          "processing_warnings": [],
+          "raw_text": "Bill of Lading\nBill of Lading Number: BOL-FIX-001\nCarrier: Acme Logistics\nLoad Date: 2026-05-01\nOrigin: HOUSTON\nDestination: NEW ORLEANS",
+          "review_status": "UNREVIEWED",
+          "table_blocks": []
+        },
+        {
+          "classification_confidence": 0.91,
+          "classification_payload": {
+            "text_source": "pdf_text"
+          },
+          "classification_status": "ANALYZED",
+          "document_kind": "BILL_OF_LADING",
+          "document_subtype": null,
+          "extraction_status": "ANALYZED",
+          "header_fields": [],
+          "page_id": 2,
+          "page_number": 2,
+          "processing_errors": [],
+          "processing_warnings": [],
+          "raw_text": "Bill of Lading\nBill of Lading Number: BOL-FIX-001\nCarrier: Acme Logistics\n\nInvoice\nInvoice Number: INV-FIX-002\nInvoice Date: 2026-05-02\nDue Date: 2026-05-10\nCounterparty: Shell Trading\nTotal Amount: USD 98000",
+          "review_status": "UNREVIEWED",
+          "table_blocks": []
+        },
+        {
+          "classification_confidence": 0.94,
+          "classification_payload": {
+            "text_source": "pdf_text"
+          },
+          "classification_status": "ANALYZED",
+          "document_kind": "INVOICE",
+          "document_subtype": null,
+          "extraction_status": "ANALYZED",
+          "header_fields": [],
+          "page_id": 3,
+          "page_number": 3,
+          "processing_errors": [],
+          "processing_warnings": [],
+          "raw_text": "Invoice\nInvoice Number: INV-FIX-002\nInvoice Date: 2026-05-02\nDue Date: 2026-05-10\nCounterparty: Shell Trading\nTotal Amount: USD 98000",
+          "review_status": "UNREVIEWED",
+          "table_blocks": []
+        }
+      ],
+      "source_file_id": "FIXTURE-SHARED-BOL-INVOICE",
+      "system_logical_documents": [
+        {
+          "document_kind": "BILL_OF_LADING",
+          "document_subtype": null,
+          "logical_document_key": "LD-001",
+          "page_ids": [
+            1,
+            2
+          ],
+          "page_numbers": [
+            1,
+            2
+          ],
+          "sequence_number": 1,
+          "shared_page_numbers": [],
+          "split_confidence": 0.68,
+          "split_evidence": [],
+          "split_source": "system_page_classification",
+          "split_strategy": "contiguous_page_classification_run"
+        },
+        {
+          "document_kind": "INVOICE",
+          "document_subtype": null,
+          "logical_document_key": "LD-002",
+          "page_ids": [
+            3
+          ],
+          "page_numbers": [
+            3
+          ],
+          "sequence_number": 2,
+          "shared_page_numbers": [],
+          "split_confidence": 0.68,
+          "split_evidence": [],
+          "split_source": "system_page_classification",
+          "split_strategy": "contiguous_page_classification_run"
+        }
+      ],
+      "system_shared_page_numbers": []
+    },
+    {
+      "captured_at": "2026-05-29T12:00:00+00:00",
+      "captured_by": "fixture",
+      "case_id": "packet-split-correction-repeated-invoices",
+      "changed_fields": [
+        "logical_document_count",
+        "page_membership"
+      ],
+      "correction_event_id": "fixture-repeated-invoices",
+      "detector_contract": {
+        "compare_fields": [
+          "sequence_number",
+          "document_kind",
+          "document_subtype",
+          "page_numbers",
+          "shared_page_numbers"
+        ],
+        "function": "apps.api.app.domains.documents.services.document_ingestion_review.build_logical_document_estimates"
+      },
+      "expected_logical_documents": [
+        {
+          "document_kind": "INVOICE",
+          "document_subtype": null,
+          "logical_document_key": "LD-001",
+          "page_ids": [
+            11,
+            12
+          ],
+          "page_numbers": [
+            1,
+            2
+          ],
+          "sequence_number": 1,
+          "shared_page_numbers": [],
+          "split_confidence": 1.0,
+          "split_evidence": [
+            {
+              "confidence": 1.0,
+              "document_kind": "INVOICE",
+              "page_numbers": [
+                1,
+                2
+              ],
+              "summary": "Operator accepted the first invoice packet.",
+              "type": "operator_reviewed_membership"
+            }
+          ],
+          "split_source": "human_packet_split",
+          "split_strategy": "operator_reviewed_membership"
+        },
+        {
+          "document_kind": "INVOICE",
+          "document_subtype": null,
+          "logical_document_key": "LD-002",
+          "page_ids": [
+            13,
+            14
+          ],
+          "page_numbers": [
+            3,
+            4
+          ],
+          "sequence_number": 2,
+          "shared_page_numbers": [],
+          "split_confidence": 1.0,
+          "split_evidence": [
+            {
+              "confidence": 1.0,
+              "document_kind": "INVOICE",
+              "page_numbers": [
+                3,
+                4
+              ],
+              "summary": "Operator accepted the second invoice packet.",
+              "type": "operator_reviewed_membership"
+            }
+          ],
+          "split_source": "human_packet_split",
+          "split_strategy": "operator_reviewed_membership"
+        }
+      ],
+      "expected_shared_page_numbers": [],
+      "fixture_type": "document_packet_split_correction",
+      "fixture_version": 1,
+      "original_filename": "repeated-invoices.pdf",
+      "page_count": 4,
+      "pages": [
+        {
+          "classification_confidence": 0.92,
+          "classification_payload": {
+            "text_source": "pdf_text"
+          },
+          "classification_status": "ANALYZED",
+          "document_kind": "INVOICE",
+          "document_subtype": null,
+          "extraction_status": "ANALYZED",
+          "header_fields": [],
+          "page_id": 11,
+          "page_number": 1,
+          "processing_errors": [],
+          "processing_warnings": [],
+          "raw_text": "Invoice\nInvoice Number: INV-REPEAT-001\nInvoice Date: 2026-05-01\nDue Date: 2026-05-10\nCounterparty: Shell Trading\nTotal Amount: USD 125000",
+          "review_status": "UNREVIEWED",
+          "table_blocks": []
+        },
+        {
+          "classification_confidence": 0.9,
+          "classification_payload": {
+            "text_source": "pdf_text"
+          },
+          "classification_status": "ANALYZED",
+          "document_kind": "INVOICE",
+          "document_subtype": null,
+          "extraction_status": "ANALYZED",
+          "header_fields": [],
+          "page_id": 12,
+          "page_number": 2,
+          "processing_errors": [],
+          "processing_warnings": [],
+          "raw_text": "Invoice continued\nLine items continued for INV-REPEAT-001.",
+          "review_status": "UNREVIEWED",
+          "table_blocks": []
+        },
+        {
+          "classification_confidence": 0.93,
+          "classification_payload": {
+            "text_source": "pdf_text"
+          },
+          "classification_status": "ANALYZED",
+          "document_kind": "INVOICE",
+          "document_subtype": null,
+          "extraction_status": "ANALYZED",
+          "header_fields": [],
+          "page_id": 13,
+          "page_number": 3,
+          "processing_errors": [],
+          "processing_warnings": [],
+          "raw_text": "Invoice\nInvoice Number: INV-REPEAT-002\nInvoice Date: 2026-05-02\nDue Date: 2026-05-11\nCounterparty: Shell Trading\nTotal Amount: USD 98000",
+          "review_status": "UNREVIEWED",
+          "table_blocks": []
+        },
+        {
+          "classification_confidence": 0.91,
+          "classification_payload": {
+            "text_source": "pdf_text"
+          },
+          "classification_status": "ANALYZED",
+          "document_kind": "INVOICE",
+          "document_subtype": null,
+          "extraction_status": "ANALYZED",
+          "header_fields": [],
+          "page_id": 14,
+          "page_number": 4,
+          "processing_errors": [],
+          "processing_warnings": [],
+          "raw_text": "Invoice continued\nLine items continued for INV-REPEAT-002.",
+          "review_status": "UNREVIEWED",
+          "table_blocks": []
+        }
+      ],
+      "source_file_id": "FIXTURE-REPEATED-INVOICES",
+      "system_logical_documents": [
+        {
+          "document_kind": "INVOICE",
+          "document_subtype": null,
+          "logical_document_key": "LD-001",
+          "page_ids": [
+            11,
+            12,
+            13,
+            14
+          ],
+          "page_numbers": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "sequence_number": 1,
+          "shared_page_numbers": [],
+          "split_confidence": 0.68,
+          "split_evidence": [],
+          "split_source": "system_page_classification",
+          "split_strategy": "contiguous_page_classification_run"
+        }
+      ],
+      "system_shared_page_numbers": []
+    },
+    {
+      "captured_at": "2026-05-29T12:00:00+00:00",
+      "captured_by": "fixture",
+      "case_id": "packet-split-correction-attachment-boundary",
+      "changed_fields": [
+        "page_membership",
+        "shared_page_numbers"
+      ],
+      "correction_event_id": "fixture-attachment-boundary",
+      "detector_contract": {
+        "compare_fields": [
+          "sequence_number",
+          "document_kind",
+          "document_subtype",
+          "page_numbers",
+          "shared_page_numbers"
+        ],
+        "function": "apps.api.app.domains.documents.services.document_ingestion_review.build_logical_document_estimates"
+      },
+      "expected_logical_documents": [
+        {
+          "document_kind": "INVOICE",
+          "document_subtype": null,
+          "logical_document_key": "LD-001",
+          "page_ids": [
+            21,
+            22
+          ],
+          "page_numbers": [
+            1,
+            2
+          ],
+          "sequence_number": 1,
+          "shared_page_numbers": [
+            2
+          ],
+          "split_confidence": 1.0,
+          "split_evidence": [
+            {
+              "confidence": 1.0,
+              "document_kind": "INVOICE",
+              "page_numbers": [
+                1,
+                2
+              ],
+              "summary": "Operator accepted the invoice through the attachment index page.",
+              "type": "operator_reviewed_membership"
+            }
+          ],
+          "split_source": "human_packet_split",
+          "split_strategy": "operator_reviewed_membership"
+        },
+        {
+          "document_kind": "OTHER",
+          "document_subtype": null,
+          "logical_document_key": "LD-002",
+          "page_ids": [
+            22,
+            23
+          ],
+          "page_numbers": [
+            2,
+            3
+          ],
+          "sequence_number": 2,
+          "shared_page_numbers": [
+            2
+          ],
+          "split_confidence": 1.0,
+          "split_evidence": [
+            {
+              "confidence": 1.0,
+              "document_kind": "OTHER",
+              "page_numbers": [
+                2,
+                3
+              ],
+              "summary": "Operator accepted the attachment index as shared with supporting documents.",
+              "type": "operator_reviewed_membership"
+            }
+          ],
+          "split_source": "human_packet_split",
+          "split_strategy": "operator_reviewed_membership"
+        }
+      ],
+      "expected_shared_page_numbers": [
+        2
+      ],
+      "fixture_type": "document_packet_split_correction",
+      "fixture_version": 1,
+      "original_filename": "invoice-supporting-documents.pdf",
+      "page_count": 3,
+      "pages": [
+        {
+          "classification_confidence": 0.92,
+          "classification_payload": {
+            "text_source": "pdf_text"
+          },
+          "classification_status": "ANALYZED",
+          "document_kind": "INVOICE",
+          "document_subtype": null,
+          "extraction_status": "ANALYZED",
+          "header_fields": [],
+          "page_id": 21,
+          "page_number": 1,
+          "processing_errors": [],
+          "processing_warnings": [],
+          "raw_text": "Invoice\nInvoice Number: INV-ATTACH-001\nInvoice Date: 2026-05-03\nCounterparty: Shell Trading\nTotal Amount: USD 117500",
+          "review_status": "UNREVIEWED",
+          "table_blocks": []
+        },
+        {
+          "classification_confidence": 0.88,
+          "classification_payload": {
+            "text_source": "pdf_text"
+          },
+          "classification_status": "ANALYZED",
+          "document_kind": "INVOICE",
+          "document_subtype": null,
+          "extraction_status": "ANALYZED",
+          "header_fields": [],
+          "page_id": 22,
+          "page_number": 2,
+          "processing_errors": [],
+          "processing_warnings": [],
+          "raw_text": "Invoice continued\nInvoice Number: INV-ATTACH-001\nAttachments\nSupporting documents follow: scale ticket, receipt, and terminal photos.",
+          "review_status": "UNREVIEWED",
+          "table_blocks": []
+        },
+        {
+          "classification_confidence": 0.64,
+          "classification_payload": {
+            "text_source": "pdf_text"
+          },
+          "classification_status": "ANALYZED",
+          "document_kind": "OTHER",
+          "document_subtype": null,
+          "extraction_status": "ANALYZED",
+          "header_fields": [],
+          "page_id": 23,
+          "page_number": 3,
+          "processing_errors": [],
+          "processing_warnings": [],
+          "raw_text": "Miscellaneous documents\nTerminal photo receipt\nScale image reference\nSupporting documentation",
+          "review_status": "UNREVIEWED",
+          "table_blocks": []
+        }
+      ],
+      "source_file_id": "FIXTURE-ATTACHMENT-BOUNDARY",
+      "system_logical_documents": [
+        {
+          "document_kind": "INVOICE",
+          "document_subtype": null,
+          "logical_document_key": "LD-001",
+          "page_ids": [
+            21,
+            22
+          ],
+          "page_numbers": [
+            1,
+            2
+          ],
+          "sequence_number": 1,
+          "shared_page_numbers": [],
+          "split_confidence": 0.68,
+          "split_evidence": [],
+          "split_source": "system_page_classification",
+          "split_strategy": "contiguous_page_classification_run"
+        },
+        {
+          "document_kind": "OTHER",
+          "document_subtype": null,
+          "logical_document_key": "LD-002",
+          "page_ids": [
+            23
+          ],
+          "page_numbers": [
+            3
+          ],
+          "sequence_number": 2,
+          "shared_page_numbers": [],
+          "split_confidence": 0.68,
+          "split_evidence": [],
+          "split_source": "system_page_classification",
+          "split_strategy": "contiguous_page_classification_run"
+        }
+      ],
+      "system_shared_page_numbers": []
+    }
+  ],
+  "skipped_events": []
+}

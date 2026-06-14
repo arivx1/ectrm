@@ -48,6 +48,10 @@ export type Trade = {
   credit_approval_status?: string
   credit_hold_active?: boolean
   credit_hold_reason?: string | null
+  pretrade_review_id?: number | null
+  pretrade_recommendation_run_id?: number | null
+  pretrade_approval_governance_snapshot?: PreTradeGovernanceAuditExportRecord | null
+  pretrade_booking_governance_snapshot?: PreTradeGovernanceAuditExportRecord | null
 }
 
 export type TradeLegDraft = {
@@ -144,6 +148,7 @@ export type DeliveryEventType =
   | 'HOLD_APPLIED'
   | 'HOLD_RELEASED'
   | 'CANCELLED'
+  | 'EVENT_REVERSED'
 
 export type DeliveryEventRecord = {
   event_id: number
@@ -153,6 +158,8 @@ export type DeliveryEventRecord = {
   event_type: DeliveryEventType
   execution_status: DeliveryExecutionStatus
   occurred_at: string
+  reversal_of_event_id: number | null
+  reversal_reason: string | null
   location_code: string | null
   reference_code: string | null
   source: string | null
@@ -162,6 +169,266 @@ export type DeliveryEventRecord = {
   updated_at: string
   updated_by: string
   version: number
+}
+
+export type TruckMovementStatus =
+  | 'PLANNED'
+  | 'ASSIGNED'
+  | 'EN_ROUTE_TO_STOP'
+  | 'AT_STOP'
+  | 'IN_TRANSIT'
+  | 'ON_HOLD'
+  | 'COMPLETED'
+  | 'CANCELLED'
+
+export type TruckStopStatus =
+  | 'PLANNED'
+  | 'EN_ROUTE'
+  | 'ARRIVED'
+  | 'WORKING'
+  | 'DEPARTED'
+  | 'SKIPPED'
+  | 'CANCELLED'
+
+export type TruckStopType = 'PICKUP' | 'DROPOFF' | 'WAYPOINT'
+
+export type TruckCheckpointCode =
+  | 'ARRIVED_PICKUP'
+  | 'DEPARTED_PICKUP'
+  | 'ARRIVED_DESTINATION'
+
+export type TruckTrackingSignalProcessingStatus =
+  | 'RECEIVED'
+  | 'MATCHED'
+  | 'UNRESOLVED'
+  | 'REJECTED'
+  | 'ERROR'
+
+export type DeliveryTruckDetailRecord = {
+  delivery_id: string
+  target_run_count: number | null
+  dispatcher_owner: string | null
+  tracking_provider: string | null
+  tracking_policy: string | null
+  default_carrier_name: string | null
+  default_carrier_name_source: DeliveryFieldSource
+  default_external_carrier_reference: string | null
+  default_external_carrier_reference_source: DeliveryFieldSource
+  equipment_type: string | null
+  equipment_type_source: DeliveryFieldSource
+  origin_geofence_code: string | null
+  origin_geofence_code_source: DeliveryFieldSource
+  destination_geofence_code: string | null
+  destination_geofence_code_source: DeliveryFieldSource
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type DeliveryTruckStopRecord = {
+  stop_id: string
+  movement_id: string
+  stop_sequence: number
+  stop_type: TruckStopType
+  status: TruckStopStatus
+  status_reason: string | null
+  location_code: string | null
+  location_code_source: DeliveryFieldSource
+  planned_arrival_start: string | null
+  planned_arrival_end: string | null
+  planned_departure_start: string | null
+  planned_departure_end: string | null
+  appointment_reference: string | null
+  appointment_reference_source: DeliveryFieldSource
+  planned_quantity: number | null
+  actual_quantity: number | null
+  actual_arrived_at: string | null
+  actual_departed_at: string | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type DeliveryTruckMovementTrackingHealthRecord = {
+  last_evaluated_at: string
+  eta_status: string
+  eta_status_reason: string
+  tracking_freshness_status: string
+  tracking_freshness_reason: string
+  dwell_status: string
+  dwell_status_reason: string
+  exception_severity: 'CLEAR' | 'WATCH' | 'ACTION_REQUIRED'
+  primary_exception: string | null
+  stale_after_minutes: number
+  dwell_threshold_minutes: number
+  destination_stop_id: string | null
+  current_stop_id: string | null
+  minutes_since_last_signal: number | null
+  current_dwell_minutes: number | null
+  eta_late_minutes: number | null
+}
+
+export type DeliveryTruckMovementSummaryRecord = {
+  movement_id: string
+  delivery_id: string
+  sequence_no: number
+  status: TruckMovementStatus
+  status_reason: string | null
+  planned_quantity: number | null
+  planned_unit_of_measure: string | null
+  carrier_name: string | null
+  carrier_name_source: DeliveryFieldSource
+  external_carrier_reference: string | null
+  external_carrier_reference_source: DeliveryFieldSource
+  dispatcher_owner: string | null
+  dispatcher_owner_source: DeliveryFieldSource
+  current_stop_sequence: number | null
+  current_location_code: string | null
+  last_signal_at: string | null
+  current_eta_at_destination: string | null
+  tracking_health?: DeliveryTruckMovementTrackingHealthRecord | null
+  hold_reason_code: string | null
+  hold_reason_code_source: DeliveryFieldSource
+  stop_count: number
+  active_stop_count: number
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type DeliveryTruckMovementRecord = DeliveryTruckMovementSummaryRecord & {
+  driver_name: string | null
+  driver_name_source: DeliveryFieldSource
+  driver_phone: string | null
+  driver_phone_source: DeliveryFieldSource
+  tractor_reference: string | null
+  tractor_reference_source: DeliveryFieldSource
+  trailer_reference: string | null
+  trailer_reference_source: DeliveryFieldSource
+  external_load_reference: string | null
+  external_load_reference_source: DeliveryFieldSource
+  bill_of_lading_number: string | null
+  bill_of_lading_number_source: DeliveryFieldSource
+  truck_ticket_number: string | null
+  truck_ticket_number_source: DeliveryFieldSource
+  stops: DeliveryTruckStopRecord[]
+}
+
+export type DeliveryTruckTrackingExceptionRecord = {
+  delivery_id: string
+  trade_id: string
+  leg_no: number | null
+  external_trade_id: string | null
+  book: string
+  portfolio: string | null
+  counterparty: string | null
+  commodity_class: string
+  commodity: string
+  transport_mode: DeliveryRecord['transport_mode']
+  execution_status: DeliveryExecutionStatus
+  delivery_start: string | null
+  delivery_end: string | null
+  location_code: string | null
+  origin_location_code: string | null
+  destination_location_code: string | null
+  operations_owner: string | null
+  movement: DeliveryTruckMovementSummaryRecord
+  tracking_health: DeliveryTruckMovementTrackingHealthRecord
+}
+
+export type DeliveryVesselTrackingHealthRecord = {
+  last_evaluated_at: string
+  tracking_freshness_status: string
+  tracking_freshness_reason: string
+  eta_status: string
+  eta_status_reason: string
+  exception_severity: string
+  primary_exception: string | null
+  stale_after_minutes: number
+  minutes_since_last_signal: number | null
+  eta_late_minutes: number | null
+}
+
+export type DeliveryVesselDetailRecord = {
+  delivery_id: string
+  vessel_name: string | null
+  imo_number: string | null
+  mmsi_number: string | null
+  call_sign: string | null
+  voyage_number: string | null
+  tracking_provider: string | null
+  tracking_policy: string | null
+  last_signal_at: string | null
+  last_position_at: string | null
+  last_latitude: number | null
+  last_longitude: number | null
+  last_speed_knots: number | null
+  last_course_degrees: number | null
+  last_heading_degrees: number | null
+  last_navigational_status: string | null
+  current_destination: string | null
+  current_eta_at_destination: string | null
+  tracking_health: DeliveryVesselTrackingHealthRecord
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type DeliveryTrackingSignalRecord = {
+  signal_id: number
+  delivery_id: string | null
+  movement_id: string | null
+  stop_id: string | null
+  source_system: string
+  source_event_id: string | null
+  signal_type: string
+  occurred_at: string
+  received_at: string
+  latitude: number | null
+  longitude: number | null
+  speed_knots: number | null
+  course_degrees: number | null
+  heading_degrees: number | null
+  draught_meters: number | null
+  location_code: string | null
+  destination: string | null
+  eta_at_destination: string | null
+  external_status: string | null
+  normalized_status: string | null
+  match_confidence: number | null
+  dedupe_key: string
+  processing_status: TruckTrackingSignalProcessingStatus
+  processing_error: string | null
+  raw_payload: Record<string, unknown>
+}
+
+export type DeliveryTrackingSignalIngestResultRecord = {
+  ingest_status: string
+  duplicate: boolean
+  signal: DeliveryTrackingSignalRecord
+  movement: DeliveryTruckMovementSummaryRecord
+}
+
+export type DeliveryVesselTrackingSignalIngestResultRecord = {
+  ingest_status: string
+  duplicate: boolean
+  signal: DeliveryTrackingSignalRecord
+  vessel_detail: DeliveryVesselDetailRecord
+  tracking_health: DeliveryVesselTrackingHealthRecord
+}
+
+export type DeliveryVesselAisstreamRefreshRecord = DeliveryVesselTrackingSignalIngestResultRecord & {
+  provider: string
+  matched_mmsi: string
+  listened_seconds: number
 }
 
 export type DeliveryRecord = {
@@ -174,6 +441,7 @@ export type DeliveryRecord = {
   mode_family: 'LOGISTICS' | 'NETWORK_FLOW' | 'POWER_SCHEDULE'
   transport_mode:
     | 'UNSPECIFIED'
+    | 'AIR'
     | 'TRUCK'
     | 'RAIL'
     | 'BARGE'
@@ -218,6 +486,34 @@ export type DeliveryRecord = {
   load_reference_source: DeliveryFieldSource | null
   discharge_reference: string | null
   discharge_reference_source: DeliveryFieldSource | null
+  truck_detail?: DeliveryTruckDetailRecord | null
+  truck_movement_count?: number
+  active_truck_movement_count?: number
+  vessel_detail?: DeliveryVesselDetailRecord | null
+  vessel_tracking_health?: DeliveryVesselTrackingHealthRecord | null
+  rail_route_code: string | null
+  rail_route_code_source: DeliveryFieldSource | null
+  rail_line_code: string | null
+  railroad_code: string | null
+  rail_route_direction: string | null
+  rail_schedule_timezone: string | null
+  rail_service_calendar_code: string | null
+  rail_placement_cutoff_time_local: string | null
+  rail_release_cutoff_time_local: string | null
+  rail_placement_free_time_hours: number | null
+  rail_release_free_time_hours: number | null
+  origin_station_code: string | null
+  origin_station_code_source: DeliveryFieldSource | null
+  destination_station_code: string | null
+  destination_station_code_source: DeliveryFieldSource | null
+  waybill_reference: string | null
+  waybill_reference_source: DeliveryFieldSource | null
+  release_number: string | null
+  release_number_source: DeliveryFieldSource | null
+  unit_train_id: string | null
+  unit_train_id_source: DeliveryFieldSource | null
+  railcar_count: number | null
+  railcar_count_source: DeliveryFieldSource | null
   receipt_location_code: string | null
   receipt_location_code_source: DeliveryFieldSource | null
   delivery_location_code: string | null
@@ -474,6 +770,9 @@ export type TradeInvoiceRecord = {
   issued_at: string
   due_at: string
   dispute_reason: string | null
+  voided_at: string | null
+  voided_by: string | null
+  void_reason: string | null
   notes: string | null
   created_at: string
   created_by: string
@@ -512,6 +811,8 @@ export type TradePaymentRecord = {
   status: string
   due_at: string
   received_at: string | null
+  reversal_of_payment_id: number | null
+  reversal_reason: string | null
   notes: string | null
   created_at: string
   created_by: string
@@ -558,6 +859,121 @@ export type DocumentTableBlockRecord = {
   source: string
 }
 
+export type DocumentUnderstandingSourceCountsRecord = {
+  none: number
+  pdf_text: number
+  ocr: number
+}
+
+export type DocumentUnderstandingTextStatsRecord = {
+  source: 'none' | 'pdf_text' | 'ocr'
+  text_available: boolean
+  character_count: number
+  line_count: number
+  token_count: number
+  numeric_token_count: number
+  date_like_value_count: number
+  currency_marker_count: number
+}
+
+export type DocumentUnderstandingDocumentTextStatsRecord = {
+  pages_with_text: number
+  source_counts: DocumentUnderstandingSourceCountsRecord
+  total_character_count: number
+  total_line_count: number
+  total_token_count: number
+  total_numeric_token_count: number
+  total_date_like_value_count: number
+  total_currency_marker_count: number
+}
+
+export type DocumentUnderstandingLayoutHintsRecord = {
+  non_empty_line_count: number
+  short_line_count: number
+  uppercase_line_count: number
+  key_value_line_count: number
+  table_like_line_count: number
+}
+
+export type DocumentUnderstandingStructureSignalsRecord = {
+  header_candidate_count: number
+  header_candidate_keys: string[]
+  table_candidate_count: number
+  table_template_keys: string[]
+  table_column_count: number
+  table_column_keys: string[]
+  table_row_count: number
+}
+
+export type DocumentUnderstandingVisualSignalsRecord = {
+  preview_generated: boolean
+  preview_available: boolean
+  image_has_visible_content: boolean
+  ocr_used: boolean
+}
+
+export type DocumentUnderstandingDocumentVisualSummaryRecord = {
+  preview_generated_page_count: number
+  preview_available_page_count: number
+  visible_content_page_count: number
+}
+
+export type DocumentUnderstandingContentFingerprintRecord = {
+  filename_signature: string | null
+  content_features: string[]
+  content_feature_count: number
+  learning_version: string | null
+}
+
+export type DocumentUnderstandingClassificationEvidenceRecord = {
+  system_document_kind: string | null
+  system_document_subtype: string | null
+  system_classification_source: string | null
+  system_classification_confidence: number | null
+  matched_by: string | null
+  corrected: boolean
+  correction_count: number
+  corrected_document_kind: string | null
+  corrected_document_subtype: string | null
+  learning_applied: boolean
+  learning_source: string | null
+  learning_similarity: number | null
+  learning_example_count: number
+  automated_document_kind: string | null
+  automated_document_subtype: string | null
+}
+
+export type DocumentUnderstandingClassificationAssessmentRecord = {
+  assessment_version: string | null
+  document_kind: string | null
+  document_subtype: string | null
+  confidence: number | null
+  matched_by: string | null
+  supporting_evidence: string[]
+  conflicts: string[]
+}
+
+export type DocumentIngestionPageUnderstandingRecord = {
+  bundle_version: string
+  text_stats: DocumentUnderstandingTextStatsRecord
+  layout_hints: DocumentUnderstandingLayoutHintsRecord
+  structure_signals: DocumentUnderstandingStructureSignalsRecord
+  visual_signals: DocumentUnderstandingVisualSignalsRecord
+  content_fingerprint: DocumentUnderstandingContentFingerprintRecord
+  classification_evidence: DocumentUnderstandingClassificationEvidenceRecord
+  deterministic_assessment: DocumentUnderstandingClassificationAssessmentRecord
+}
+
+export type DocumentIngestionUnderstandingRecord = {
+  bundle_version: string
+  page_count: number
+  text_stats: DocumentUnderstandingDocumentTextStatsRecord
+  structure_signals: DocumentUnderstandingStructureSignalsRecord
+  visual_signals: DocumentUnderstandingDocumentVisualSummaryRecord
+  content_fingerprint: DocumentUnderstandingContentFingerprintRecord
+  deterministic_assessment: DocumentUnderstandingClassificationAssessmentRecord
+}
+
 export type DocumentRoutingCandidateRecord = {
   record_type: string
   label: string
@@ -586,6 +1002,7 @@ export type DocumentLinkageCandidateRecord = {
   record_id: string | null
   record_label: string
   role: string
+  candidate_state: string
   existing_record: boolean
   score: number
   matched_keys: string[]
@@ -617,13 +1034,179 @@ export type DocumentActionPlanRecord = {
   status: string
   action_type: string
   operation_type: string | null
+  candidate_state: string
   title: string
   description: string
   confidence: number
   target: DocumentActionRecordRefRecord | null
   owner: DocumentActionRecordRefRecord | null
+  required_owner_record_types: string[]
+  missing_evidence: string[]
   reasons: string[]
   payload: Record<string, unknown>
+}
+
+export type DocumentActionGovernanceRecord = {
+  status: string
+  recommended_execution_mode: string
+  manual_execution_allowed: boolean
+  auto_execution_allowed: boolean
+  approval_required: boolean
+  risk_flags: string[]
+  reasons: string[]
+}
+
+export type DocumentActionApprovalRequestRecord = {
+  request_id: number
+  document_id: string
+  status: 'PENDING' | 'EXECUTED' | 'REJECTED'
+  title: string
+  description: string
+  action_type: string
+  operation_type: string | null
+  governance_status: string
+  target_record_type: string | null
+  target_record_id: string | null
+  owner_record_type: string | null
+  owner_record_id: string | null
+  request_comment: string | null
+  decision_comment: string | null
+  action_plan_snapshot: Record<string, unknown>
+  governance_snapshot: Record<string, unknown>
+  result_snapshot: Record<string, unknown>
+  error_detail: string | null
+  execution_decision_id: number | null
+  requested_at: string
+  requested_by: string
+  decided_at: string | null
+  decided_by: string | null
+}
+
+export type DocumentRecordCreationRequestRecord = {
+  request_id: number
+  document_id: string
+  status: 'OPEN' | 'RESOLVED' | 'CANCELLED'
+  document_kind: string | null
+  target_record_type: string
+  target_record_label: string
+  owner_record_type: string | null
+  owner_record_id: string | null
+  required_owner_record_types: string[]
+  matched_keys: string[]
+  missing_evidence: string[]
+  captured_fields: Record<string, unknown>
+  title: string
+  description: string
+  request_comment: string | null
+  resolution_comment: string | null
+  linkage_snapshot: Record<string, unknown>
+  action_plan_snapshot: Record<string, unknown>
+  resolved_record_type: string | null
+  resolved_record_id: string | null
+  requested_at: string
+  requested_by: string
+  resolved_at: string | null
+  resolved_by: string | null
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type DocumentRecordCreationWorkItemRecord = {
+  request_id: number
+  document_id: string
+  status: 'OPEN' | 'RESOLVED' | 'CANCELLED'
+  queue: 'operations' | 'settlement'
+  handoff_type: string
+  routing_label: string
+  next_action_label: string
+  priority: 'HIGH' | 'NORMAL' | 'BLOCKED' | string
+  document_kind: string | null
+  target_record_type: string
+  target_record_label: string
+  owner_record_type: string | null
+  owner_record_id: string | null
+  required_owner_record_types: string[]
+  matched_keys: string[]
+  missing_evidence: string[]
+  blocking_reasons: string[]
+  next_steps: string[]
+  captured_fields: Record<string, unknown>
+  title: string
+  description: string
+  request_comment: string | null
+  requested_at: string
+  requested_by: string
+  updated_at: string
+  updated_by: string
+  age_days: number
+  is_closed: boolean
+  version: number
+}
+
+export type DocumentWorkflowRecord = {
+  workflow_id: string
+  label: string
+  document_kind: string
+  document_type_label: string
+  description: string
+  status: string
+  recommended: boolean
+  action_type: string | null
+  operation_type: string | null
+  candidate_state: string | null
+  record_effect: string | null
+  target: DocumentActionRecordRefRecord | null
+  owner: DocumentActionRecordRefRecord | null
+  required_owner_record_types: string[]
+  missing_evidence: string[]
+  governance_status: string | null
+  recommended_execution_mode: string | null
+  approval_required: boolean
+  risk_flags: string[]
+  disabled_reason: string | null
+  reasons: string[]
+}
+
+export type DocumentWorkflowListRecord = {
+  document_id: string
+  document_kind: string | null
+  document_type_label: string | null
+  linkage_assessment: DocumentLinkageAssessmentRecord | null
+  action_plan: DocumentActionPlanRecord | null
+  governance: DocumentActionGovernanceRecord | null
+  pending_approval_request: DocumentActionApprovalRequestRecord | null
+  record_creation_requests: DocumentRecordCreationRequestRecord[]
+  record_links: DocumentRecordLinkRecord[]
+  workflows: DocumentWorkflowRecord[]
+  empty_message: string
+}
+
+export type DocumentWorkflowPriceObservationRecord = {
+  price_index_code: string
+  observation_date: string
+  value: number
+  unit_code: string
+  currency_code: string | null
+  source_provider: string
+  source_series_id: string
+  action: 'CREATED' | 'UPDATED' | 'UNCHANGED'
+  observation_id: number | null
+}
+
+export type DocumentWorkflowExecutionRecord = {
+  document_id: string
+  workflow_id: string
+  label: string
+  status: string
+  message: string
+  run_id: number
+  observation_count: number
+  created_count: number
+  updated_count: number
+  unchanged_count: number
+  price_index_codes: string[]
+  observations: DocumentWorkflowPriceObservationRecord[]
 }
 
 export type DocumentRecordLinkRecord = {
@@ -658,9 +1241,86 @@ export type DocumentProcessorDocumentTraceRecord = DocumentProcessorTraceRecord 
   partial_page_count: number
 }
 
+export type DocumentFacetAssignmentRecord = {
+  facet_value_id: number
+  document_id: string
+  page_id: number | null
+  facet_key: string
+  facet_label: string
+  value_code: string
+  value_label: string
+  source: string
+  confidence: number | null
+  review_status: string
+  evidence: string[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type DocumentLogicalDocumentPageRecord = {
+  membership_id: number
+  logical_document_id: string
+  document_id: string
+  page_id: number
+  page_number: number
+  sequence_number: number
+  span_type: string
+  region_payload: Record<string, unknown>
+  provenance: Record<string, unknown>
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type DocumentLogicalDocumentRecord = {
+  logical_document_id: string
+  document_id: string
+  logical_document_key: string
+  sequence_number: number
+  page_start: number
+  page_end: number
+  page_count: number
+  page_numbers: number[]
+  document_kind: string
+  document_subtype: string | null
+  classification_status: string
+  classification_confidence: number | null
+  review_status: string
+  review_notes: string | null
+  reviewed_at: string | null
+  reviewed_by: string | null
+  provenance: Record<string, unknown>
+  page_memberships: DocumentLogicalDocumentPageRecord[]
+  routing_assessment: DocumentRoutingAssessmentRecord | null
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+}
+
+export type DocumentActivityRecord = {
+  activity_id: string
+  event_type: string
+  label: string
+  detail: string
+  occurred_at: string
+  actor_id: string | null
+  payload: Record<string, unknown>
+}
+
 export type DocumentIngestionPageRecord = {
   page_id: number
   page_number: number
+  logical_document_id?: string | null
+  logical_document_key?: string | null
+  logical_document_ids?: string[]
+  logical_document_keys?: string[]
   classification_status: string
   extraction_status: string
   document_kind: string
@@ -679,8 +1339,10 @@ export type DocumentIngestionPageRecord = {
   reviewed_at: string | null
   reviewed_by: string | null
   processed_at: string | null
+  facet_values?: DocumentFacetAssignmentRecord[]
   processor_trace: DocumentProcessorPageTraceRecord | null
   routing_assessment: DocumentRoutingAssessmentRecord | null
+  understanding: DocumentIngestionPageUnderstandingRecord
 }
 
 export type DocumentIngestionRecord = {
@@ -692,6 +1354,7 @@ export type DocumentIngestionRecord = {
   sha256: string
   size_bytes: number
   page_count: number
+  source_available: boolean
   status: string
   processor_provider: 'builtin' | 'openai' | 'anthropic' | 'google' | null
   processor_model: string | null
@@ -713,7 +1376,11 @@ export type DocumentIngestionRecord = {
   linkage_assessment: DocumentLinkageAssessmentRecord | null
   action_plan: DocumentActionPlanRecord | null
   record_links: DocumentRecordLinkRecord[]
+  facet_values?: DocumentFacetAssignmentRecord[]
+  activity: DocumentActivityRecord[]
+  logical_documents?: DocumentLogicalDocumentRecord[]
   pages: DocumentIngestionPageRecord[]
+  understanding: DocumentIngestionUnderstandingRecord
 }
 
 export type DocumentFieldSchemaRecord = {
@@ -749,6 +1416,34 @@ export type DocumentRecordTargetRecord = {
   create_if_missing: boolean
 }
 
+export type DocumentFacetValueRecord = {
+  code: string
+  label: string
+  description: string | null
+}
+
+export type DocumentFacetSchemaRecord = {
+  facet_key: string
+  label: string
+  description: string | null
+  value_type: string
+  repeatable: boolean
+  required: boolean
+  allowed_values: DocumentFacetValueRecord[]
+}
+
+export type DocumentExtractionObjectSchemaRecord = {
+  object_key: string
+  label: string
+  cardinality: string
+  source_object_type: string | null
+  canonical_table: string | null
+  description: string | null
+  field_keys: string[]
+  table_template_keys: string[]
+  child_object_keys: string[]
+}
+
 export type DocumentKindSchemaRecord = {
   document_kind: string
   label: string
@@ -758,6 +1453,12 @@ export type DocumentKindSchemaRecord = {
   linkage_summary: string
   record_targets: DocumentRecordTargetRecord[]
   matching_keys: string[]
+  facets: DocumentFacetSchemaRecord[]
+  extraction_schema_code: string | null
+  deep_extraction_required: boolean
+  extraction_objects: DocumentExtractionObjectSchemaRecord[]
+  validation_rules: string[]
+  review_rules: string[]
   header_fields: DocumentFieldSchemaRecord[]
   table_templates: DocumentTableTemplateSchemaRecord[]
 }
@@ -765,6 +1466,7 @@ export type DocumentKindSchemaRecord = {
 export type DocumentSchemaRegistryRecord = {
   version: string
   document_kinds: DocumentKindSchemaRecord[]
+  document_facets?: DocumentFacetSchemaRecord[]
 }
 
 export type DocumentProcessorProviderStatusRecord = {
@@ -774,8 +1476,63 @@ export type DocumentProcessorProviderStatusRecord = {
   configured: boolean
   is_default: boolean
   default_model: string
+  available_models?: string[]
   base_url: string
   setup_env_var: string
+}
+
+export type DocumentGmailInboxRuntimeSettingsRecord = {
+  enabled: boolean
+  configured: boolean
+  provider: 'gmail_api'
+  account_email: string | null
+  query: string
+  max_messages_per_import: number
+  auth_status: 'none' | 'partial' | 'configured'
+}
+
+export type DocumentGmailInboxAttachmentRecord = {
+  filename: string
+  mime_type: string
+  size_bytes: number
+  part_token: string
+  attachment_id: string | null
+  importable: boolean
+  already_imported: boolean
+}
+
+export type DocumentGmailInboxMessageSummaryRecord = {
+  message_id: string
+  thread_id: string | null
+  subject: string | null
+  sender: string | null
+  received_at: string | null
+  snippet: string | null
+  unread: boolean
+  attachment_count: number
+  pdf_attachment_count: number
+  imported_pdf_attachment_count: number
+}
+
+export type DocumentGmailInboxBrowseResultRecord = {
+  query: string
+  page_size: number
+  next_page_token: string | null
+  messages: DocumentGmailInboxMessageSummaryRecord[]
+}
+
+export type DocumentGmailInboxMessageDetailRecord = {
+  message_id: string
+  thread_id: string | null
+  subject: string | null
+  sender: string | null
+  to_recipients: string | null
+  received_at: string | null
+  snippet: string | null
+  unread: boolean
+  body_text: string | null
+  body_truncated: boolean
+  attachments: DocumentGmailInboxAttachmentRecord[]
 }
 
 export type DocumentProcessorRuntimeSettingsRecord = {
@@ -783,7 +1540,9 @@ export type DocumentProcessorRuntimeSettingsRecord = {
   default_provider: 'openai' | 'anthropic' | 'google'
   effective_default_provider: 'openai' | 'anthropic' | 'google' | null
   configured_provider_count: number
+  ai_processing_confidence_threshold?: number
   providers: DocumentProcessorProviderStatusRecord[]
+  gmail_inbox?: DocumentGmailInboxRuntimeSettingsRecord | null
 }
 
 export type ReferenceRecord = {
@@ -797,6 +1556,54 @@ export type ReferenceRecord = {
   updated_by?: string
   version?: number
   commodity_class?: string
+  allowed_transport_modes?: Array<Exclude<DeliveryRecord['transport_mode'], 'UNSPECIFIED'>>
+}
+
+export type AssetRecord = ReferenceRecord & {
+  asset_class: string
+  asset_type: string
+  asset_reality: string
+  commodity_code?: string | null
+  location_code?: string | null
+  latitude?: number | null
+  longitude?: number | null
+  geometry_geojson?: Record<string, unknown> | null
+  capacity_value?: number | null
+  capacity_unit_code?: string | null
+  operator_name?: string | null
+  operating_status: string
+  source_name?: string | null
+  source_url?: string | null
+  confidence?: number | null
+  notes?: string | null
+}
+
+export type SpatialFeatureRecord = ReferenceRecord & {
+  feature_kind: string
+  geometry_type: string
+  geometry_geojson: Record<string, unknown>
+  entity_type?: string | null
+  entity_code?: string | null
+  label_latitude?: number | null
+  label_longitude?: number | null
+  is_primary: boolean
+  source_name?: string | null
+  source_url?: string | null
+  confidence?: number | null
+  notes?: string | null
+}
+
+export type RailRouteRecord = ReferenceRecord & {
+  rail_line_code: string
+  origin_location_code?: string | null
+  destination_location_code?: string | null
+  service_calendar_code?: string | null
+  route_direction: string
+  schedule_timezone?: string | null
+  placement_cutoff_time_local?: string | null
+  release_cutoff_time_local?: string | null
+  placement_free_time_hours?: number | null
+  release_free_time_hours?: number | null
 }
 
 export type PriceIndexRecord = ReferenceRecord & {
@@ -804,10 +1611,13 @@ export type PriceIndexRecord = ReferenceRecord & {
   currency_code: string
   unit_code: string
   provider: string
+  quote_type?: PriceIndexQuoteType | null
   market?: string | null
   location_code?: string | null
   calendar_code?: string | null
 }
+
+export type PriceIndexQuoteType = 'SPOT' | 'FUTURE' | 'FORWARD' | 'INDEX' | 'OTHER'
 
 export type CurrencyRecord = ReferenceRecord & {
   symbol?: string | null
@@ -858,6 +1668,69 @@ export const DEFAULT_LOCATION_STANDARDS: LocationStandards = {
   },
   market_codes: ['CAISO', 'CME', 'EEX', 'ERCOT', 'ICE', 'ICE_EUROPE', 'ISO_NE', 'JKM', 'MISO', 'NBP', 'NGX', 'NYISO', 'NYMEX', 'PHYSICAL', 'PJM', 'SPP', 'TTF'],
   continent_codes: ['AF', 'AN', 'AS', 'EU', 'NA', 'OC', 'SA'],
+}
+
+export type AssetStandards = {
+  default_asset_class: string
+  default_asset_type_by_class: Record<string, string>
+  asset_classes: string[]
+  asset_types_by_class: Record<string, string[]>
+  default_asset_reality: string
+  asset_realities: string[]
+  default_operating_status: string
+  operating_statuses: string[]
+}
+
+export const DEFAULT_ASSET_STANDARDS: AssetStandards = {
+  default_asset_class: 'PIPELINE',
+  default_asset_type_by_class: {
+    PIPELINE: 'TRANSMISSION',
+    GENERATION: 'THERMAL',
+    REFINERY: 'CONVERSION',
+    UPSTREAM_PRODUCTION: 'OIL_FIELD',
+    PROCESSING: 'GAS_PLANT',
+    STORAGE: 'TANK_FARM',
+    TERMINAL: 'MARINE',
+    CONSUMPTION: 'INDUSTRIAL',
+  },
+  asset_classes: [
+    'CONSUMPTION',
+    'GENERATION',
+    'PIPELINE',
+    'PROCESSING',
+    'REFINERY',
+    'STORAGE',
+    'TERMINAL',
+    'UPSTREAM_PRODUCTION',
+  ],
+  asset_types_by_class: {
+    PIPELINE: ['DISTRIBUTION', 'GATHERING', 'TRANSMISSION'],
+    GENERATION: ['HYDRO', 'NUCLEAR', 'RENEWABLE', 'STORAGE', 'THERMAL'],
+    REFINERY: ['CONVERSION', 'HYDROSKIMMING', 'INTEGRATED', 'TOPPING'],
+    UPSTREAM_PRODUCTION: ['GAS_FIELD', 'LNG_PROJECT', 'OFFSHORE', 'OIL_FIELD'],
+    PROCESSING: ['FRACTIONATOR', 'GAS_PLANT', 'LNG_EXPORT', 'LNG_IMPORT', 'PETROCHEMICAL'],
+    STORAGE: ['BATTERY', 'CAVERN', 'RESERVOIR', 'TANK_FARM'],
+    TERMINAL: ['LNG', 'MARINE', 'PIPELINE', 'RAIL', 'TRUCK'],
+    CONSUMPTION: ['DATACENTER', 'INDUSTRIAL', 'POWER_LOAD', 'RESIDENTIAL'],
+  },
+  default_asset_reality: 'REAL',
+  asset_realities: ['REAL', 'SIMULATED'],
+  default_operating_status: 'OPERATING',
+  operating_statuses: ['IDLED', 'MAINTENANCE', 'OPERATING', 'PLANNED', 'RETIRED', 'UNDER_CONSTRUCTION'],
+}
+
+export type SpatialFeatureStandards = {
+  default_feature_kind: string
+  feature_kinds: string[]
+  geometry_types: string[]
+  entity_types: string[]
+}
+
+export const DEFAULT_SPATIAL_FEATURE_STANDARDS: SpatialFeatureStandards = {
+  default_feature_kind: 'REGION',
+  feature_kinds: ['AREA', 'BASIN', 'CORRIDOR', 'FOOTPRINT', 'PIPELINE', 'REGION', 'ROUTE', 'TERRITORY'],
+  geometry_types: ['AREA', 'LINE', 'MIXED', 'POINT'],
+  entity_types: ['ASSET', 'LOCATION', 'RAIL_ROUTE'],
 }
 
 export type CounterpartyRecord = ReferenceRecord & {
@@ -1037,6 +1910,12 @@ export type ExternalDataProviderStatusRecord = {
   latest_run_status: string
   success_sla_hours: number
   scheduler_interval_minutes: number
+  ingestion_method: string
+  ingestion_mode: string
+  source_system: string
+  source_endpoint: string | null
+  sync_job_name: string
+  default_lookback_days: number | null
   active_series_count: number
   due_for_sync: boolean
   last_run_at: string | null
@@ -1060,6 +1939,55 @@ export type ExternalDataSyncStatusRecord = {
   providers: ExternalDataProviderStatusRecord[]
 }
 
+export type PriceSourceReviewRecord = {
+  id: number
+  price_index_code: string
+  price_index_name: string | null
+  commodity_code: string | null
+  quote_type: string | null
+  market: string | null
+  location_code: string | null
+  price_unit_code: string | null
+  price_currency_code: string | null
+  price_index_is_active: boolean | null
+  provider: string
+  dataset_code: string | null
+  series_id: string
+  frequency: string
+  source_unit: string
+  source_currency_code: string | null
+  transform_rule: string | null
+  ingestion_method: string | null
+  ingestion_mode: string | null
+  source_system: string | null
+  source_endpoint: string | null
+  sync_job_name: string | null
+  default_lookback_days: number | null
+  is_active: boolean
+  review_status: string
+  provider_health_status: string | null
+  scheduler_interval_minutes: number | null
+  success_sla_hours: number | null
+  due_for_sync: boolean | null
+  provider_latest_observation_at: string | null
+  provider_observation_age_hours: number | null
+  latest_run_status: string | null
+  latest_run_id: number | null
+  last_success_at: string | null
+  provider_error_summary: string | null
+  latest_observation_date: string | null
+  latest_value: number | null
+  latest_unit_code: string | null
+  latest_currency_code: string | null
+  latest_source_revision: string | null
+  latest_source_published_at: string | null
+  latest_downloaded_at: string | null
+  latest_observation_run_id: number | null
+  created_at: string
+  updated_at: string
+  version: number
+}
+
 export type ExposureSummaryRow = {
   commodity: string
   net_volume: number
@@ -1073,12 +2001,200 @@ export type ActivitySummaryRow = {
   last_occurred_at: string
 }
 
+export type SemanticDatasetFieldType = 'string' | 'integer' | 'number' | 'boolean' | 'date' | 'datetime'
+export type SemanticDatasetFieldRole = 'identifier' | 'dimension' | 'measure' | 'status' | 'timestamp' | 'narrative'
+export type SemanticDatasetSourceKind = 'projection' | 'reference_data' | 'report_service' | 'external_series' | 'manual'
+export type SemanticDatasetStatus = 'active' | 'planned'
+
+export type SemanticDatasetField = {
+  field_key: string
+  label: string
+  data_type: SemanticDatasetFieldType
+  role: SemanticDatasetFieldRole
+  nullable: boolean
+  filterable: boolean
+  groupable: boolean
+  aggregatable: boolean
+  formula_eligible: boolean
+  description?: string | null
+  source_path?: string | null
+}
+
+export type SemanticDatasetDefinition = {
+  dataset_id: string
+  name: string
+  description: string
+  owning_domain: string
+  source_kind: SemanticDatasetSourceKind
+  source_ref: string
+  grain: string
+  fields: SemanticDatasetField[]
+  parameter_keys: string[]
+  default_sort: string[]
+  freshness_policy: string
+  access_policy_key: string
+  status: SemanticDatasetStatus
+}
+
+export type ReportDefinitionValidationStatus = 'valid' | 'invalid'
+export type ReportDefinitionIssueSeverity = 'error' | 'warning'
+export type ReportDefinitionDependencyRole = 'source' | 'field' | 'parameter' | 'formula_input' | 'prior_run'
+export type ReportDefinitionScope = 'personal' | 'team' | 'global'
+export type WorkbookSheetKind = 'manual' | 'dataset' | 'report' | 'workbook_run' | 'formula'
+
+export type ReportDefinitionColumnDraft = {
+  field_key: string
+  label?: string | null
+}
+
+export type ReportDefinitionDraft = {
+  report_key: string
+  name: string
+  description?: string | null
+  scope?: ReportDefinitionScope
+  dataset_id: string
+  columns?: ReportDefinitionColumnDraft[]
+  parameter_keys?: string[]
+  default_sort?: string[]
+}
+
+export type WorkbookSheetDefinitionDraft = {
+  sheet_key: string
+  sheet_name: string
+  sheet_kind: WorkbookSheetKind
+  dataset_id?: string | null
+  report_key?: string | null
+  run_id?: string | null
+  columns?: ReportDefinitionColumnDraft[]
+  depends_on?: string[]
+  formulas?: string[]
+}
+
+export type WorkbookDefinitionDraft = {
+  workbook_key: string
+  name: string
+  description?: string | null
+  scope?: ReportDefinitionScope
+  parameter_keys?: string[]
+  sheets?: WorkbookSheetDefinitionDraft[]
+}
+
+export type ReportDefinitionValidationIssue = {
+  severity: ReportDefinitionIssueSeverity
+  code: string
+  message: string
+  location: string
+}
+
+export type ReportDefinitionDependencyEdge = {
+  from_ref: string
+  to_kind: string
+  to_ref: string
+  dependency_role: ReportDefinitionDependencyRole
+  field_ref?: string | null
+}
+
+export type ReportDefinitionValidationResult = {
+  status: ReportDefinitionValidationStatus
+  valid: boolean
+  error_count: number
+  warning_count: number
+  issues: ReportDefinitionValidationIssue[]
+  dependency_edges: ReportDefinitionDependencyEdge[]
+  referenced_dataset_ids: string[]
+}
+
 export type ReportingOverview = {
   active_trade_count: number
   tracked_commodity_count: number
   gross_net_volume: number
   exposure: ExposureSummaryRow[]
   activity: ActivitySummaryRow[]
+}
+
+export type TradingEodStatus = 'READY' | 'WARNING' | 'BLOCKED'
+
+export type TradingEodCheck = {
+  key: string
+  title: string
+  status: TradingEodStatus
+  owner_role: string
+  reason: string
+  supporting_metrics: Record<string, string | number | boolean>
+}
+
+export type TradingEodTradeSummary = {
+  active_trade_count: number
+  priced_active_count: number
+  pending_pricing_count: number
+  pending_settlement_count: number
+  tracked_book_count: number
+  total_active_volume: number
+}
+
+export type TradingEodPnlSummary = {
+  basis: string
+  methodology: string
+  total_pnl: number
+  realized_pnl: number
+  unrealized_pnl: number
+  priced_trade_count: number
+  realized_trade_count: number
+  unrealized_trade_count: number
+}
+
+export type TradingEodOperationsSummary = {
+  open_work_item_count: number
+  operations_queue_count: number
+  settlement_queue_count: number
+  attention_count: number
+  stale_pricing_count: number
+  incomplete_ops_data_count: number
+}
+
+export type TradingEodSettlementSummary = {
+  invoice_count: number
+  overdue_invoice_count: number
+  disputed_invoice_count: number
+  blocked_exception_count: number
+  warning_exception_count: number
+  payment_due_count: number
+  invoice_pending_count: number
+}
+
+export type TradingEodProjectionSummary = {
+  structural_issue_count: number
+  invariant_issue_count: number
+  impacted_trade_count: number
+}
+
+export type TradingEodAccrualSummary = {
+  row_count: number
+  lot_count: number
+  unbilled_amount_total: number
+  billed_uncollected_amount_total: number
+  net_open_amount_total: number
+  coverage_basis: string
+}
+
+export type TradingEodReport = {
+  generated_at: string
+  business_date: string
+  as_of: string
+  evaluation_timestamp: string
+  basis: string
+  status: TradingEodStatus
+  blocked_check_count: number
+  warning_check_count: number
+  ready_check_count: number
+  checks: TradingEodCheck[]
+  coverage_notes: string[]
+  trade_summary: TradingEodTradeSummary
+  pnl_summary: TradingEodPnlSummary
+  operations_summary: TradingEodOperationsSummary
+  settlement_summary: TradingEodSettlementSummary
+  projection_summary: TradingEodProjectionSummary
+  accrual_summary: TradingEodAccrualSummary
 }
 
 export type PnlHistoryPoint = {
@@ -1360,11 +2476,26 @@ export type PreTradeScenarioDraft = {
   delivery_end: string | null
 }
 
+export type PreTradeScenarioEnrichmentRecord = {
+  opportunity_category: PreTradeOpportunityCategory | null
+  hedge_intent: PreTradeHedgeInstrumentType | null
+  residual_exposure_summary: string | null
+  source_freshness_summary: string | null
+  reviewer_focus: string[]
+  recommendation_run_id: number | null
+  recommendation_run_key: string | null
+  recommendation_stance: PreTradeRecommendationStance | null
+  recommendation_score: number | null
+  recommendation_headline: string | null
+  captured_at: string | null
+}
+
 export type PreTradeScenarioRecord = {
   scenario_id: number
   name: string
   thesis: string | null
   draft: PreTradeScenarioDraft
+  enrichment: PreTradeScenarioEnrichmentRecord | null
   created_at: string
   created_by: string
   updated_at: string
@@ -1385,6 +2516,7 @@ export type PreTradeRecommendationSourceQuality = 'OK' | 'STALE' | 'DEGRADED' | 
 export type PreTradeGovernanceRiskStatus = 'CLEAR' | 'WATCH' | 'ACTION_REQUIRED'
 export type PreTradeOpportunityCategory =
   | 'MARK_GAP'
+  | 'ARBITRAGE'
   | 'EXPOSURE_OFFSET'
   | 'RISK_REDUCTION'
   | 'RISK_INCREASE'
@@ -1392,9 +2524,32 @@ export type PreTradeOpportunityCategory =
   | 'WAIT_FOR_DATA'
 export type PreTradeExposureDirection = 'LONG' | 'SHORT' | 'FLAT' | 'UNKNOWN'
 export type PreTradeExposureEffect = 'OFFSETS' | 'DEEPENS' | 'NEUTRAL' | 'UNKNOWN'
+export type PreTradeArbitrageFamily = 'PRODUCT_QUALITY' | 'TIME' | 'GEOGRAPHIC' | 'COMBINED'
+export type PreTradeArbitrageCandidateStatus = 'SUPPORTED' | 'INCOMPLETE' | 'UNSUPPORTED'
+export type PreTradeExecutablePriceBasis = 'ASK' | 'BID' | 'LAST' | 'TARGET' | 'ASSUMPTION'
+export type PreTradeTransformationEdgeType =
+  | 'PRODUCT_CONVERSION'
+  | 'STORAGE'
+  | 'TRANSPORT'
+  | 'FINANCING'
+  | 'FEES'
+  | 'RISK_BUFFER'
 export type PreTradeNettingCandidateMatchQuality = 'EXACT' | 'PARTIAL' | 'REJECTED'
 export type PreTradeHedgeInstrumentType = 'FUTURES' | 'OPTIONS' | 'SWAP' | 'PHYSICAL_OFFSET' | 'NO_HEDGE' | 'WAIT_FOR_DATA'
 export type PreTradeMissingEvidenceSeverity = 'BLOCKING' | 'WARNING'
+export type PreTradePromotionCandidateType = 'NETTING_SET' | 'HEDGE_RECOMMENDATION' | 'RISK_SCENARIO' | 'MARKET_OPPORTUNITY'
+export type PreTradePromotionCandidateStatus = 'WATCH' | 'CANDIDATE'
+export type PreTradePromotionOutcomeType =
+  | 'CREATED'
+  | 'REUSED'
+  | 'RETIRED'
+  | 'REJECTED'
+  | 'MERGED_INTO_BOOKED_TRADE'
+  | 'BLOCKED_BY_MISSING_EVIDENCE'
+export type PreTradeNettingSetStatus = 'REVIEW_DRAFT' | 'RETIRED'
+export type PreTradeHedgeRecommendationStatus = 'REVIEW_DRAFT' | 'RETIRED'
+export type PreTradeRiskScenarioStatus = 'REVIEW_DRAFT' | 'RETIRED'
+export type PreTradeMarketOpportunityStatus = 'REVIEW_DRAFT' | 'RETIRED'
 export type PreTradeGovernanceAuditCategory =
   | 'PENDING_REVIEW'
   | 'RISKY_RECOMMENDATION'
@@ -1402,6 +2557,15 @@ export type PreTradeGovernanceAuditCategory =
   | 'OVERRIDE'
   | 'BOOKED_WITH_OVERRIDE'
   | 'STALE_EVIDENCE'
+  | 'PROMOTION_CANDIDATE'
+export type PreTradeReviewDriftStatus = 'ALIGNED' | 'REAPPROVAL_REQUIRED' | 'NOT_APPROVED'
+export type PreTradeReviewDriftReasonCode =
+  | 'MISSING_APPROVAL_SNAPSHOT'
+  | 'MISSING_APPROVAL_BASELINE'
+  | 'RECOMMENDATION_CHANGED'
+  | 'NEWER_RECOMMENDATION_AVAILABLE'
+  | 'SOURCE_IMPAIRMENT_APPEARED'
+  | 'OVERRIDE_CHANGED'
 
 export type PreTradeReviewActivityRecord = {
   activity_id: string
@@ -1435,6 +2599,7 @@ export type PreTradeReviewItemRecord = {
   draft: PreTradeScenarioDraft
   source_scenario_id: number | null
   recommendation_run_id: number | null
+  enrichment: PreTradeScenarioEnrichmentRecord | null
   recommendation_summary: PreTradeReviewRecommendationSummaryRecord | null
   recommendation_override_reason: string | null
   recommendation_override_by: string | null
@@ -1447,6 +2612,8 @@ export type PreTradeReviewItemRecord = {
   linked_trade_status: string | null
   booked_at: string | null
   booked_by: string | null
+  approval_governance_snapshot: PreTradeGovernanceAuditExportRecord | null
+  booking_governance_snapshot: PreTradeGovernanceAuditExportRecord | null
   activity: PreTradeReviewActivityRecord[]
   created_at: string
   created_by: string
@@ -1454,6 +2621,86 @@ export type PreTradeReviewItemRecord = {
   updated_by: string
   version: number
   can_edit: boolean
+}
+
+export type PreTradeReviewDriftReasonRecord = {
+  code: PreTradeReviewDriftReasonCode
+  summary: string
+  detail: string
+}
+
+export type PreTradeReviewDriftRecord = {
+  review_id: number
+  checked_at: string
+  review_status: PreTradeReviewStatus
+  alignment_status: PreTradeReviewDriftStatus
+  requires_reapproval: boolean
+  approval_snapshot_generated_at: string | null
+  approval_snapshot_exported_by: string | null
+  approved_by: string | null
+  approved_at: string | null
+  approved_recommendation_run_id: number | null
+  approved_recommendation_stance: PreTradeRecommendationStance | null
+  approved_recommendation_score: number | null
+  current_recommendation_run_id: number | null
+  current_recommendation_stance: PreTradeRecommendationStance | null
+  current_recommendation_score: number | null
+  latest_recommendation_run_id: number | null
+  latest_recommendation_stance: PreTradeRecommendationStance | null
+  latest_recommendation_score: number | null
+  current_impaired_sources: string[]
+  reasons: PreTradeReviewDriftReasonRecord[]
+}
+
+export type PreTradePromotionOutcomeMetricRecord = {
+  outcome: PreTradePromotionOutcomeType
+  count: number
+}
+
+export type PreTradePromotionOutcomeByDraftTypeRecord = {
+  draft_type: PreTradePromotionCandidateType
+  label: string
+  total_count: number
+  created_count: number
+  reused_count: number
+  retired_count: number
+  rejected_count: number
+  merged_into_booked_trade_count: number
+  blocked_by_missing_evidence_count: number
+}
+
+export type PreTradePromotionOutcomeDraftRecord = {
+  draft_type: PreTradePromotionCandidateType
+  draft_id: number
+  draft_key: string
+  name: string
+  status: string
+  source_promotion_score: number
+  source_review_count: number
+  source_approved_review_count: number
+  source_booked_review_count: number
+  source_run_count: number
+  source_latest_review_id: number | null
+  source_latest_run_id: number | null
+  source_review_status: PreTradeReviewStatus | null
+  source_linked_trade_id: string | null
+  source_linked_trade_status: string | null
+  source_booked_at: string | null
+  has_blocking_missing_evidence: boolean
+  outcomes: PreTradePromotionOutcomeType[]
+  outcome_reasons: string[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+}
+
+export type PreTradePromotionOutcomeSummaryRecord = {
+  generated_at: string
+  total_draft_count: number
+  metrics: PreTradePromotionOutcomeMetricRecord[]
+  by_draft_type: PreTradePromotionOutcomeByDraftTypeRecord[]
+  drafts: PreTradePromotionOutcomeDraftRecord[]
 }
 
 export type PreTradeGovernanceSummaryRecord = {
@@ -1472,6 +2719,8 @@ export type PreTradeGovernanceSummaryRecord = {
   stale_evidence_run_count: number
   stale_evidence_source_count: number
   recommendation_run_count: number
+  promotion_candidate_count: number
+  top_promotion_candidate_type: PreTradePromotionCandidateType | null
 }
 
 export type PreTradeRecommendationSourceSnapshotRecord = {
@@ -1544,6 +2793,47 @@ export type PreTradeRecommendationOpportunitySummaryRecord = {
   source_refs: PreTradeRecommendationEvidenceRefRecord[]
 }
 
+export type PreTradeRecommendationCommodityStateRecord = {
+  commodity_class: string | null
+  commodity: string | null
+  quality_spec: string | null
+  location_code: string | null
+  delivery_start: string | null
+  delivery_end: string | null
+  price_index_code: string | null
+  unit_of_measure: string | null
+  currency_code: string | null
+}
+
+export type PreTradeRecommendationTransformationEdgeRecord = {
+  edge_type: PreTradeTransformationEdgeType
+  label: string
+  bridge_cost_per_unit: number
+  supported: boolean
+  detail: string
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
+export type PreTradeRecommendationArbitrageCandidateRecord = {
+  family: PreTradeArbitrageFamily
+  status: PreTradeArbitrageCandidateStatus
+  buy_state: PreTradeRecommendationCommodityStateRecord
+  sell_state: PreTradeRecommendationCommodityStateRecord
+  buy_price: number | null
+  buy_price_basis: PreTradeExecutablePriceBasis | null
+  sell_price: number | null
+  sell_price_basis: PreTradeExecutablePriceBasis | null
+  gross_spread: number | null
+  bridge_cost: number | null
+  net_opportunity: number | null
+  net_opportunity_pct: number | null
+  estimated_value: number | null
+  edges: PreTradeRecommendationTransformationEdgeRecord[]
+  missing_evidence: string[]
+  stop_reasons: string[]
+  source_refs: PreTradeRecommendationEvidenceRefRecord[]
+}
+
 export type PreTradeRecommendationResidualExposureRecord = {
   current_net_position: number | null
   proposed_trade_delta: number | null
@@ -1559,6 +2849,9 @@ export type PreTradeRecommendationNettingCandidateRecord = {
   candidate_id: string
   label: string
   match_quality: PreTradeNettingCandidateMatchQuality
+  gross_exposure?: number | null
+  offset_quantity?: number | null
+  residual_exposure?: number | null
   matched_quantity: number | null
   residual_quantity: number | null
   constraints: string[]
@@ -1568,9 +2861,11 @@ export type PreTradeRecommendationNettingCandidateRecord = {
 
 export type PreTradeRecommendationHedgeRecommendationRecord = {
   instrument_type: PreTradeHedgeInstrumentType
+  decision_key?: string | null
   rationale: string
   target_delta: number | null
   hedge_ratio: number | null
+  decision_factors?: string[]
   policy_stops: string[]
   source_refs: PreTradeRecommendationEvidenceRefRecord[]
 }
@@ -1605,6 +2900,7 @@ export type PreTradeRecommendationResultRecord = {
   checks: PreTradeRecommendationCheckRecord[]
   next_actions: string[]
   opportunity_summary: PreTradeRecommendationOpportunitySummaryRecord | null
+  arbitrage_candidate: PreTradeRecommendationArbitrageCandidateRecord | null
   residual_exposure: PreTradeRecommendationResidualExposureRecord | null
   netting_candidates: PreTradeRecommendationNettingCandidateRecord[]
   hedge_recommendation: PreTradeRecommendationHedgeRecommendationRecord | null
@@ -1642,6 +2938,17 @@ export type PreTradeRecommendationRunComparisonRecord = {
   summary: string
 }
 
+export type PreTradeRecommendationDraftAnalysisRecord = {
+  thesis: string | null
+  draft: PreTradeScenarioDraft
+  source_scenario_id: number | null
+  source_review_id: number | null
+  input_snapshots: PreTradeRecommendationSourceSnapshotRecord[]
+  recommendation: PreTradeRecommendationResultRecord
+  comparison: PreTradeRecommendationRunComparisonRecord | null
+  evaluated_at: string
+}
+
 export type PreTradeRecommendationRunRecord = {
   run_id: number
   run_key: string
@@ -1666,6 +2973,25 @@ export type PreTradeGovernanceStaleEvidenceRunRecord = {
   impaired_snapshots: PreTradeRecommendationSourceSnapshotRecord[]
 }
 
+export type PreTradeGovernancePromotionCandidateRecord = {
+  candidate_type: PreTradePromotionCandidateType
+  label: string
+  status: PreTradePromotionCandidateStatus
+  score: number
+  review_count: number
+  approved_review_count: number
+  booked_review_count: number
+  override_count: number
+  run_count: number
+  latest_review_id: number | null
+  latest_run_id: number | null
+  evidence_summary: string
+  promotion_rationale: string
+  stop_reasons: string[]
+  sample_review_ids: number[]
+  sample_run_ids: number[]
+}
+
 export type PreTradeGovernanceItemsRecord = {
   generated_at: string
   pending_reviews: PreTradeReviewItemRecord[]
@@ -1674,6 +3000,167 @@ export type PreTradeGovernanceItemsRecord = {
   override_reviews: PreTradeReviewItemRecord[]
   booked_with_override_reviews: PreTradeReviewItemRecord[]
   stale_evidence_runs: PreTradeGovernanceStaleEvidenceRunRecord[]
+  promotion_candidates: PreTradeGovernancePromotionCandidateRecord[]
+}
+
+export type PreTradeNettingSetRecord = {
+  netting_set_id: number
+  netting_set_key: string
+  name: string
+  status: PreTradeNettingSetStatus
+  owner: string | null
+  review_note: string | null
+  source_promotion_candidate_type: PreTradePromotionCandidateType
+  source_promotion_status: PreTradePromotionCandidateStatus
+  source_promotion_score: number
+  source_review_count: number
+  source_approved_review_count: number
+  source_booked_review_count: number
+  source_override_count: number
+  source_run_count: number
+  source_latest_review_id: number | null
+  source_latest_run_id: number | null
+  source_sample_review_ids: number[]
+  source_sample_run_ids: number[]
+  source_evidence_summary: string
+  source_promotion_rationale: string
+  source_stop_reasons: string[]
+  draft: PreTradeScenarioDraft
+  netting_candidates: PreTradeRecommendationNettingCandidateRecord[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
+}
+
+export type PreTradeHedgeRecommendationRecord = {
+  hedge_recommendation_id: number
+  hedge_recommendation_key: string
+  name: string
+  status: PreTradeHedgeRecommendationStatus
+  owner: string | null
+  review_note: string | null
+  source_promotion_candidate_type: PreTradePromotionCandidateType
+  source_promotion_status: PreTradePromotionCandidateStatus
+  source_promotion_score: number
+  source_review_count: number
+  source_approved_review_count: number
+  source_booked_review_count: number
+  source_override_count: number
+  source_run_count: number
+  source_latest_review_id: number | null
+  source_latest_run_id: number | null
+  source_sample_review_ids: number[]
+  source_sample_run_ids: number[]
+  source_evidence_summary: string
+  source_promotion_rationale: string
+  source_stop_reasons: string[]
+  source_recommendation_stance: PreTradeRecommendationStance
+  source_recommendation_score: number
+  source_recommendation_headline: string
+  draft: PreTradeScenarioDraft
+  residual_exposure: PreTradeRecommendationResidualExposureRecord | null
+  hedge_recommendation: PreTradeRecommendationHedgeRecommendationRecord
+  rejected_alternatives: PreTradeRecommendationRejectedAlternativeRecord[]
+  missing_evidence: PreTradeRecommendationMissingEvidenceRecord[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
+}
+
+export type PreTradeRiskScenarioRecord = {
+  risk_scenario_id: number
+  risk_scenario_key: string
+  name: string
+  status: PreTradeRiskScenarioStatus
+  owner: string | null
+  review_note: string | null
+  source_promotion_candidate_type: PreTradePromotionCandidateType
+  source_promotion_status: PreTradePromotionCandidateStatus
+  source_promotion_score: number
+  source_review_count: number
+  source_approved_review_count: number
+  source_booked_review_count: number
+  source_override_count: number
+  source_run_count: number
+  source_latest_review_id: number | null
+  source_latest_run_id: number | null
+  source_sample_review_ids: number[]
+  source_sample_run_ids: number[]
+  source_evidence_summary: string
+  source_promotion_rationale: string
+  source_stop_reasons: string[]
+  source_review_name: string
+  source_review_status: PreTradeReviewStatus
+  source_review_thesis: string | null
+  source_review_notes: string | null
+  source_review_owner: string | null
+  source_recommendation_stance: PreTradeRecommendationStance | null
+  source_recommendation_score: number | null
+  source_recommendation_headline: string | null
+  draft: PreTradeScenarioDraft
+  enrichment: PreTradeScenarioEnrichmentRecord | null
+  residual_exposure: PreTradeRecommendationResidualExposureRecord | null
+  input_snapshots: PreTradeRecommendationSourceSnapshotRecord[]
+  missing_evidence: PreTradeRecommendationMissingEvidenceRecord[]
+  reviewer_focus: string[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
+}
+
+export type PreTradeMarketOpportunityRecord = {
+  market_opportunity_id: number
+  market_opportunity_key: string
+  name: string
+  status: PreTradeMarketOpportunityStatus
+  owner: string | null
+  review_note: string | null
+  source_promotion_candidate_type: PreTradePromotionCandidateType
+  source_promotion_status: PreTradePromotionCandidateStatus
+  source_promotion_score: number
+  source_review_count: number
+  source_approved_review_count: number
+  source_booked_review_count: number
+  source_override_count: number
+  source_run_count: number
+  source_latest_review_id: number | null
+  source_latest_run_id: number | null
+  source_sample_review_ids: number[]
+  source_sample_run_ids: number[]
+  source_evidence_summary: string
+  source_promotion_rationale: string
+  source_stop_reasons: string[]
+  source_review_name: string
+  source_review_status: PreTradeReviewStatus
+  source_review_thesis: string | null
+  source_review_notes: string | null
+  source_review_owner: string | null
+  source_recommendation_stance: PreTradeRecommendationStance
+  source_recommendation_score: number
+  source_recommendation_headline: string
+  draft: PreTradeScenarioDraft
+  opportunity_summary: PreTradeRecommendationOpportunitySummaryRecord
+  arbitrage_candidate: PreTradeRecommendationArbitrageCandidateRecord | null
+  residual_exposure: PreTradeRecommendationResidualExposureRecord | null
+  input_snapshots: PreTradeRecommendationSourceSnapshotRecord[]
+  missing_evidence: PreTradeRecommendationMissingEvidenceRecord[]
+  next_actions: string[]
+  reviewer_focus: string[]
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by: string
+  version: number
+  can_edit: boolean
 }
 
 export type PreTradeGovernanceAuditRowRecord = {
@@ -1700,6 +3187,9 @@ export type PreTradeGovernanceAuditRowRecord = {
   source_provider: string | null
   source_dataset: string | null
   source_observed_at: string | null
+  promotion_candidate_type: PreTradePromotionCandidateType | null
+  promotion_status: PreTradePromotionCandidateStatus | null
+  promotion_score: number | null
   summary: string
 }
 
@@ -1724,6 +3214,7 @@ export type PreTradeReviewCaptureContext = {
   recommendationStance: PreTradeRecommendationStance | null
   recommendationScore: number | null
   recommendationRationale: string | null
+  enrichment: PreTradeScenarioEnrichmentRecord | null
   recommendationOverrideReason: string | null
   recommendationOverrideBy: string | null
   recommendationOverrideAt: string | null
@@ -1798,6 +3289,21 @@ export type MarketContextRecord = {
   macro: MarketContextSeriesRecord[]
   positioning: MarketContextSeriesRecord[]
   freshness: MarketContextFreshnessRecord[]
+}
+
+export type MarketNewsHeadlineRecord = {
+  title: string
+  source: string | null
+  published_at: string | null
+  link: string
+}
+
+export type MarketNewsRecord = {
+  generated_at: string
+  commodity: string | null
+  search_query: string
+  count: number
+  items: MarketNewsHeadlineRecord[]
 }
 
 export type ExternalSeriesDefinitionRecord = {
@@ -2034,8 +3540,31 @@ export type AssistantMessageRole = 'user' | 'assistant'
 export type AssistantAgentStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'RETIRED'
 export type AssistantAgentScope = 'PERSONAL' | 'TEAM' | 'ORGANIZATION'
 export type AssistantAgentCapability = 'READ' | 'EXPLAIN' | 'DRAFT' | 'ACTION'
+export type AssistantAgentSkillKey =
+  | 'market_intelligence'
+  | 'pretrade_structuring'
+  | 'risk_monitoring'
+  | 'trade_lifecycle_management'
+  | 'trade_governance'
+  | 'trade_operations_coordination'
+  | 'settlement_operations'
+  | 'movement_control'
+  | 'accrual_control'
+  | 'accounting_posting'
+  | 'counterparty_state_sync'
+  | 'confirmation_control'
+  | 'workflow_control'
+  | 'invoice_control'
+  | 'document_triage'
+  | 'reporting_reconciliation'
+  | 'logistics_coordination'
+  | 'fee_accrual_management'
+  | 'counterparty_outreach'
+  | 'agent_supervision'
+  | 'inter_agent_consultation'
 export type AssistantAgentRoleCatalogStatus = 'SEEDED' | 'TEMPLATE' | 'PHASE_1' | 'PHASE_2_PLUS'
 export type AssistantAgentProfileKind = 'CURATED' | 'ROLE_DERIVED' | 'CUSTOM'
+export type AssistantAgentProfileRequestKind = 'NEW_SPECIALIZATION' | 'EDIT_EXISTING' | 'NARROW_ACCESS'
 export type AssistantAgentProfileRequestStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'ACTIVATED'
 export type AssistantAgentEvalGateStatus = 'PASS' | 'BLOCKED' | 'NOT_REQUIRED'
 export type AssistantAgentAuthorityLevel =
@@ -2046,12 +3575,25 @@ export type AssistantAgentAuthorityLevel =
   | 'EXECUTE'
   | 'EXTERNAL_COMMIT'
 export const ASSISTANT_ACTION_TYPES = [
+  'create_trade',
+  'amend_trade',
   'cancel_trade',
+  'create_settlement_report_preset',
+  'record_delivery_event',
+  'reverse_delivery_event',
+  'create_manual_accrual_entry',
+  'reverse_accrual_entry',
   'issue_trade_confirmation',
   'record_trade_confirmation_response',
   'update_trade_workflow_item',
+  'record_trade_actualization',
+  'void_trade_actualization',
   'issue_trade_invoice',
+  'void_trade_invoice',
   'create_trade_payment',
+  'reverse_trade_payment',
+  'create_accounting_entry',
+  'reverse_accounting_entry',
   'reprocess_document_ingestion',
 ] as const
 export type AssistantActionType = (typeof ASSISTANT_ACTION_TYPES)[number]
@@ -2069,6 +3611,7 @@ export type AssistantControlTowerTrustSignalType =
   | 'RUN_WARNING'
   | 'ACTION_BACKLOG'
   | 'FAILED_ACTIONS'
+  | 'STALE_WORK_PACKAGE'
 export type AssistantControlTowerTrustSignalSeverity = 'info' | 'warning' | 'danger'
 
 export type AssistantProviderStatus = {
@@ -2084,6 +3627,12 @@ export type AssistantProviderStatus = {
 
 export type AssistantToolDefinition = {
   name: string
+  description: string
+}
+
+export type AssistantAgentSkillDefinition = {
+  name: AssistantAgentSkillKey
+  label: string
   description: string
 }
 
@@ -2155,15 +3704,85 @@ export type AssistantRuntimeSettings = {
   default_provider: AssistantProvider
   effective_default_provider: AssistantProvider | null
   configured_provider_count: number
+  default_daily_token_allocation?: number
   providers: AssistantProviderStatus[]
+  voice_transcription: AssistantVoiceTranscriptionSettings
+  voice_generation: AssistantVoiceGenerationSettings
+  available_skills: AssistantAgentSkillDefinition[]
   available_tools: AssistantToolDefinition[]
   available_action_types: AssistantActionDefinition[]
+  available_personas?: AssistantPersonaDefinition[]
+}
+
+export type AssistantTokenUsageSummary = {
+  used_tokens: number
+  input_tokens: number
+  output_tokens: number
+  recorded_run_count: number
+  managed_agent_tokens: number
+  unassigned_tokens: number
+  window_started_at: string
+  reset_at: string
+}
+
+export type AssistantTokenUsagePeriod = 'day' | 'week' | 'month'
+
+export type AssistantTokenUsageBucket = {
+  period: AssistantTokenUsagePeriod
+  bucket_started_at: string
+  bucket_ended_at: string
+  used_tokens: number
+  input_tokens: number
+  output_tokens: number
+  recorded_run_count: number
+  managed_agent_tokens: number
+  unassigned_tokens: number
+}
+
+export type AssistantTokenUsageTracker = {
+  generated_at: string
+  timezone: string
+  daily: AssistantTokenUsageBucket[]
+  weekly: AssistantTokenUsageBucket[]
+  monthly: AssistantTokenUsageBucket[]
+}
+
+export type AssistantVoiceTranscriptionSettings = {
+  enabled: boolean
+  provider: AssistantProvider
+  model: string
+  max_upload_bytes: number
+  requires_authentication: boolean
+  supported_content_types: string[]
+}
+
+export type AssistantVoiceTranscription = {
+  provider: AssistantProvider
+  model: string
+  text: string
+}
+
+export type AssistantVoiceGenerationSettings = {
+  enabled: boolean
+  provider: AssistantProvider
+  model: string
+  default_voice: string
+  response_format: string
+  max_input_chars: number
+  requires_authentication: boolean
 }
 
 export type AssistantMessage = {
   role: AssistantMessageRole
   content: string
 }
+
+export type AssistantAgentOrchestrationPattern =
+  | 'SINGLE'
+  | 'MANAGER'
+  | 'TRIAGE'
+  | 'PARALLEL'
+  | 'EVALUATOR'
 
 export type AssistantAgent = {
   agent_id: string
@@ -2179,9 +3798,14 @@ export type AssistantAgent = {
   human_owner_role?: string | null
   authority_ceiling?: AssistantAgentAuthorityLevel | null
   activation_notes?: string | null
+  orchestration_pattern: AssistantAgentOrchestrationPattern
+  parent_agent_id?: string | null
+  managed_agent_ids: string[]
+  delegation_guidance?: string | null
   profile_request_id?: number | null
   allowed_workspaces: ViewKey[]
   capabilities: AssistantAgentCapability[]
+  skills: AssistantAgentSkillKey[]
   allowed_tools: string[]
   allowed_action_types: AssistantActionType[]
   daily_token_allocation?: number | null
@@ -2212,6 +3836,109 @@ export type AssistantAdminAgent = AssistantAgent & {
   updated_at: string
   updated_by: string
   version: number
+  latest_revision_id?: number | null
+  published_revision_id?: number | null
+  published_at?: string | null
+  published_by?: string | null
+  has_unpublished_revision?: boolean
+}
+
+export type AssistantAgentRevisionPayload = {
+  name: string
+  description: string
+  status: AssistantAgentStatus
+  scope: AssistantAgentScope
+  provider: AssistantProvider | null
+  model: string | null
+  role_key?: string | null
+  profile_kind: AssistantAgentProfileKind
+  specialization_summary?: string | null
+  human_owner_role?: string | null
+  authority_ceiling?: AssistantAgentAuthorityLevel | null
+  activation_notes?: string | null
+  orchestration_pattern: AssistantAgentOrchestrationPattern
+  parent_agent_id?: string | null
+  managed_agent_ids: string[]
+  delegation_guidance?: string | null
+  profile_request_id?: number | null
+  allowed_workspaces: ViewKey[]
+  capabilities: AssistantAgentCapability[]
+  skills: AssistantAgentSkillKey[]
+  allowed_tools: string[]
+  allowed_action_types: AssistantActionType[]
+  daily_token_allocation?: number | null
+  system_prompt: string
+}
+
+export type AssistantAgentRevisionDiff = {
+  field_key: string
+  label: string
+  current_value: string
+  next_value: string
+}
+
+export type AssistantAgentRevision = {
+  revision_id: number
+  agent_id: string
+  version: number
+  change_summary: string[]
+  diff_summary: AssistantAgentRevisionDiff[]
+  payload: AssistantAgentRevisionPayload
+  created_at: string
+  created_by: string
+  published_at: string | null
+  published_by: string | null
+  restored_from_revision_id?: number | null
+  is_published: boolean
+}
+
+export type AssistantAgentSelfUpdateEvidence = {
+  recommendation_reasons: string[]
+  recent_needs_work_feedback: string[]
+  failing_eval_cases: string[]
+  knowledge_base_titles: string[]
+  stop_conditions: string[]
+}
+
+export type AssistantAgentSelfUpdateDraft = {
+  revision_id: number
+  revision_version: number
+  agent_id: string
+  name: string
+  description: string
+  status: AssistantAgentStatus
+  scope: AssistantAgentScope
+  provider: AssistantProvider | null
+  model: string | null
+  role_key?: string | null
+  profile_kind: AssistantAgentProfileKind
+  specialization_summary?: string | null
+  human_owner_role?: string | null
+  authority_ceiling?: AssistantAgentAuthorityLevel | null
+  activation_notes?: string | null
+  orchestration_pattern: AssistantAgentOrchestrationPattern
+  parent_agent_id?: string | null
+  managed_agent_ids: string[]
+  delegation_guidance?: string | null
+  profile_request_id?: number | null
+  allowed_workspaces: ViewKey[]
+  capabilities: AssistantAgentCapability[]
+  skills: AssistantAgentSkillKey[]
+  allowed_tools: string[]
+  allowed_action_types: AssistantActionType[]
+  daily_token_allocation?: number | null
+  system_prompt: string
+  source_brief: string
+  change_summary: string[]
+  diff_summary: AssistantAgentRevisionDiff[]
+  warnings: string[]
+  builder_provider: AssistantProvider
+  builder_model: string
+  evidence: AssistantAgentSelfUpdateEvidence
+  created_at: string
+  created_by: string
+  published_at: string | null
+  published_by: string | null
 }
 
 export type AssistantAgentRoleArchetype = {
@@ -2224,6 +3951,7 @@ export type AssistantAgentRoleArchetype = {
   allowed_workspaces: ViewKey[]
   work_objects: string[]
   capability_ceiling: AssistantAgentCapability[]
+  skills: AssistantAgentSkillKey[]
   default_tools: string[]
   maximum_action_types: AssistantActionType[]
   authority_ceiling: AssistantAgentAuthorityLevel
@@ -2233,19 +3961,28 @@ export type AssistantAgentRoleArchetype = {
   required_eval_coverage: string[]
   eval_gate?: AssistantAgentEvalGate | null
   base_prompt_guidance: string[]
+  recommended_orchestration_pattern: AssistantAgentOrchestrationPattern
+  recommended_parent_role_keys: string[]
+  recommended_managed_role_keys: string[]
+  delegation_guidance: string[]
   current_profile_ids: string[]
 }
 
 export type AssistantAgentProfileRequest = {
   request_id: number
   status: AssistantAgentProfileRequestStatus
+  request_kind: AssistantAgentProfileRequestKind
+  target_agent_id: string | null
   requested_agent_id: string | null
+  change_summary: string | null
   business_problem: string
   proposed_mission: string
   human_owner_role: string
   requested_workspaces: ViewKey[]
   work_objects: string[]
   requested_inputs_tools: string[]
+  requested_action_types: AssistantActionType[]
+  requested_skills: AssistantAgentSkillKey[]
   expected_outputs: string[]
   requested_authority_ceiling: AssistantAgentAuthorityLevel
   stop_conditions: string[]
@@ -2254,6 +3991,8 @@ export type AssistantAgentProfileRequest = {
   approval_notes: string | null
   rejection_reason: string | null
   linked_agent_id: string | null
+  linked_revision_id: number | null
+  applied_diff_summary: AssistantAgentRevisionDiff[]
   requested_at: string
   requested_by: string
   reviewed_at: string | null
@@ -2303,7 +4042,9 @@ export type AssistantPromptRequest = {
   agent_id?: string
   provider?: AssistantProvider
   workspace?: ViewKey
+  persona?: AssistantPersona
   context?: string
+  summary_targets?: AssistantWorkspaceSummaryTarget[]
   use_live_tools?: boolean
   messages: AssistantMessage[]
 }
@@ -2313,6 +4054,33 @@ export type AssistantToolCall = {
   summary: string
   arguments: Record<string, unknown>
   record_count: number | null
+  output_preview?: Record<string, unknown>
+  evidence_items?: AssistantToolEvidence[]
+}
+
+export type AssistantToolEvidenceKind =
+  | 'application'
+  | 'route_group'
+  | 'documentation'
+  | 'schema'
+  | 'table'
+  | 'code_search_hit'
+  | 'code_file'
+  | 'agent'
+  | 'agent_hierarchy'
+  | 'home_view_catalog'
+  | 'home_view_template'
+  | 'home_view_filter_options'
+  | 'home_view_instances'
+
+export type AssistantToolEvidence = {
+  kind: AssistantToolEvidenceKind
+  title: string
+  summary: string
+  locator?: string | null
+  excerpt?: string | null
+  badges: string[]
+  metadata: Record<string, unknown>
 }
 
 export type AssistantActionReviewObjectRef = {
@@ -2420,6 +4188,19 @@ export type AssistantOutcomeMetricRecommendationAction =
   | 'ELIGIBLE_FOR_BOUNDED_REVIEW'
   | 'RECOMMEND_PAUSE'
 
+export type AssistantPromptNavigationOutcomeStatus = 'ACCEPTED' | 'DISMISSED' | 'FAILED'
+export type AssistantPromptNavigationSurface = 'PROMPT_HOME'
+export type AssistantPromptNavigationFocusType =
+  | 'trade'
+  | 'workflow_item'
+  | 'document'
+  | 'invoice'
+  | 'payment'
+  | 'reference_record'
+  | 'market_instrument'
+  | 'report'
+export type AssistantPromptNavigationSignal = 'OBSERVE' | 'CANDIDATE_FOR_RULE' | 'NARROW' | 'RETIRE'
+
 export type AssistantOutcomeMetricThresholds = {
   min_decided_actions_for_promotion: number
   max_rejection_rate_for_promotion: number
@@ -2450,9 +4231,13 @@ export type AssistantOutcomeMetricCounters = {
   executed_action_count: number
   rejected_action_count: number
   failed_action_count: number
+  approved_as_is_count: number
+  approved_with_corrections_count: number
   correction_count: number
   decided_action_count: number
   stale_action_count: number
+  duplicate_action_count: number
+  invalid_action_payload_count: number
   unsupported_attempt_count: number
   policy_drift_count: number
   approval_rate?: number | null
@@ -2533,6 +4318,87 @@ export type AssistantRunFeedbackInsight = {
   updated_at: string
 }
 
+export type AssistantPromptNavigationSummary = {
+  total_outcome_count: number
+  accepted_count: number
+  dismissed_count: number
+  failed_count: number
+  acceptance_rate?: number | null
+  dismiss_rate?: number | null
+  failure_rate?: number | null
+}
+
+export type AssistantPromptNavigationTargetMetricRow = {
+  target_view?: ViewKey | null
+  target_label?: string | null
+  focus_type?: AssistantPromptNavigationFocusType | null
+  outcome_count: number
+  accepted_count: number
+  dismissed_count: number
+  failed_count: number
+  acceptance_rate?: number | null
+  dismiss_rate?: number | null
+  failure_rate?: number | null
+  signal: AssistantPromptNavigationSignal
+  signal_reasons: string[]
+  recent_prompt_examples: string[]
+}
+
+export type AssistantPromptNavigationOutcomeInsight = {
+  outcome_id: number
+  run_id?: number | null
+  conversation_id?: number | null
+  agent_id?: string | null
+  agent_name?: string | null
+  source_workspace?: ViewKey | null
+  user_id: string
+  user_role: string
+  surface: AssistantPromptNavigationSurface
+  outcome: AssistantPromptNavigationOutcomeStatus
+  target_view?: ViewKey | null
+  target_label?: string | null
+  focus_type?: AssistantPromptNavigationFocusType | null
+  focus_id?: string | null
+  focus_label?: string | null
+  detail?: string | null
+  latest_user_message?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type AssistantPromptNavigationOutcome = {
+  outcome_id: number
+  run_id?: number | null
+  conversation_id?: number | null
+  user_id: string
+  user_role: string
+  surface: AssistantPromptNavigationSurface
+  outcome: AssistantPromptNavigationOutcomeStatus
+  intent_key: string
+  target_view?: ViewKey | null
+  target_label?: string | null
+  target_rationale?: string | null
+  focus_type?: AssistantPromptNavigationFocusType | null
+  focus_id?: string | null
+  focus_label?: string | null
+  detail?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type AssistantPromptRouteRecommendation = {
+  target_view: ViewKey
+  target_label?: string | null
+  target_rationale?: string | null
+  focus_type?: AssistantPromptNavigationFocusType | null
+  last_accepted_at?: string | null
+  accepted_count: number
+  outcome_count: number
+  acceptance_rate?: number | null
+  signal: AssistantPromptNavigationSignal
+  signal_reasons: string[]
+}
+
 export type AssistantActionTypeOutcomeMetricRow = AssistantOutcomeMetricCounters & {
   action_type: AssistantActionType
   recommendation: AssistantOutcomeMetricRecommendation
@@ -2553,6 +4419,9 @@ export type AssistantOutcomeMetrics = {
   by_workspace: AssistantWorkspaceFeedbackMetricRow[]
   by_action_type: AssistantActionTypeOutcomeMetricRow[]
   recent_feedback: AssistantRunFeedbackInsight[]
+  prompt_navigation_summary: AssistantPromptNavigationSummary
+  by_prompt_target: AssistantPromptNavigationTargetMetricRow[]
+  recent_prompt_navigation_outcomes: AssistantPromptNavigationOutcomeInsight[]
 }
 
 export type AssistantControlTowerAgentRosterSummary = {
@@ -2596,6 +4465,23 @@ export type AssistantControlTowerActionSummary = {
   oldest_pending_action?: AssistantControlTowerOldestPendingAction | null
 }
 
+export type AssistantControlTowerWorkPackageSummary = {
+  total_count: number
+  accepted_count: number
+  in_progress_count: number
+  implemented_count: number
+  dismissed_count: number
+  stale_count: number
+  stale_accepted_count: number
+  stale_in_progress_count: number
+  implemented_with_pr_count: number
+  implemented_with_commit_count: number
+  implemented_with_eval_count: number
+  implemented_with_tests_count: number
+  implemented_with_docs_count: number
+  implemented_missing_evidence_count: number
+}
+
 export type AssistantControlTowerAgentTrustSignal = {
   agent_id: string
   agent_name: string
@@ -2619,6 +4505,7 @@ export type AssistantControlTowerSummary = {
   roster: AssistantControlTowerAgentRosterSummary
   runs: AssistantControlTowerRunSummary
   actions: AssistantControlTowerActionSummary
+  work_packages: AssistantControlTowerWorkPackageSummary
   trust_signals: AssistantControlTowerAgentTrustSignal[]
 }
 
@@ -2750,8 +4637,18 @@ export type AssistantAgentWorkPackage = {
   rationale: string
   acceptance_checks: string[]
   knowledge_base_titles: string[]
+  implementation_evidence: {
+    pr_url?: string | null
+    commit_sha?: string | null
+    eval_ids: number[]
+    test_names: string[]
+    doc_paths: string[]
+    owner?: string | null
+  }
   accepted_at?: string | null
   accepted_by?: string | null
+  implemented_at?: string | null
+  implemented_by?: string | null
   notes?: string | null
   created_at: string
   created_by: string
@@ -2787,9 +4684,41 @@ export type AssistantPromptContextRequest = {
   agent_id?: string
   provider?: AssistantProvider
   workspace?: ViewKey
+  persona?: AssistantPersona
   context?: string
+  summary_targets?: AssistantWorkspaceSummaryTarget[]
   use_live_tools?: boolean
 }
+
+export type AssistantPersona =
+  | 'operator'
+  | 'trader'
+  | 'risk'
+  | 'admin'
+  | 'operations'
+  | 'settlement'
+  | 'reference_data'
+
+export type AssistantPersonaDefinition = {
+  key: AssistantPersona
+  label: string
+  description: string
+  default_for_roles: string[]
+  guidance: string[]
+}
+
+export type AssistantWorkspaceSummaryTarget =
+  | 'dashboard.attention.confirmation_backlog_count'
+  | 'dashboard.attention.nomination_backlog_count'
+  | 'dashboard.attention.allocation_backlog_count'
+  | 'dashboard.attention.invoice_backlog_count'
+  | 'dashboard.attention.overdue_payment_count'
+  | 'dashboard.attention.stale_pricing_count'
+  | 'dashboard.attention.incomplete_ops_data_count'
+  | 'settlement.invoice_pending_count'
+  | 'settlement.payment_due_count'
+  | 'settlement.trade_exception_count'
+  | 'trades.pending_settlement_count'
 
 export type AssistantPromptSectionSource =
   | 'system'
@@ -2804,9 +4733,18 @@ export type AssistantPromptSectionSource =
   | 'agent'
 
 export type AssistantPromptSection = {
+  contract_key?: string | null
+  contract_version?: number
   key: string
   title: string
   source: AssistantPromptSectionSource
+  scope?: 'SYSTEM' | 'GLOBAL' | 'USER' | 'AGENT' | 'REQUEST' | 'RUNTIME'
+  kind?: 'IMMUTABLE' | 'GENERATED' | 'CONFIGURABLE'
+  owner?: string
+  owner_reference?: string | null
+  freshness?: 'STATIC' | 'SESSION' | 'REQUEST' | 'LIVE'
+  merge_strategy?: 'APPEND' | 'APPEND_IF_PRESENT'
+  uses_fallback?: boolean
   content: string
 }
 
@@ -2944,8 +4882,6 @@ export type AssistantConversation = AssistantConversationSummary & {
 export type ViewKey =
   | 'prompt'
   | 'dashboard'
-  | 'guide'
-  | 'demo'
   | 'pretrade'
   | 'trades'
   | 'events'
@@ -2955,10 +4891,14 @@ export type ViewKey =
   | 'scheduling'
   | 'operations'
   | 'settlement'
+  | 'messages'
   | 'reports'
+  | 'library'
+  | 'map'
   | 'reference'
   | 'admin'
   | 'settings'
+  | 'token-analysis'
   | 'assistant'
 export type InspectorTab = 'overview' | 'events' | 'amend' | 'risk'
 export type ReferenceTab =
@@ -2968,6 +4908,9 @@ export type ReferenceTab =
   | 'currencies'
   | 'units'
   | 'locations'
+  | 'rail-routes'
+  | 'spatial-features'
+  | 'assets'
   | 'counterparties'
   | 'portfolios'
 
@@ -2982,6 +4925,7 @@ export type CommodityForm = {
   name: string
   description: string
   commodity_class: string
+  allowed_transport_modes: Array<Exclude<DeliveryRecord['transport_mode'], 'UNSPECIFIED'>>
 }
 
 export type PriceIndexForm = {
@@ -2992,6 +4936,7 @@ export type PriceIndexForm = {
   currency_code: string
   unit_code: string
   provider: string
+  quote_type: PriceIndexQuoteType
   market: string
   location_code: string
   calendar_code: string
@@ -3030,6 +4975,53 @@ export type LocationForm = {
   longitude: string
   region: string
   timezone: string
+  description: string
+}
+
+export type RailRouteForm = {
+  code: string
+  name: string
+  rail_line_code: string
+  origin_location_code: string
+  destination_location_code: string
+  service_calendar_code: string
+  route_direction: string
+  schedule_timezone: string
+  placement_cutoff_time_local: string
+  release_cutoff_time_local: string
+  placement_free_time_hours: string
+  release_free_time_hours: string
+  description: string
+}
+
+export type AssetForm = {
+  code: string
+  name: string
+  asset_class: string
+  asset_type: string
+  asset_reality: string
+  commodity_code: string
+  location_code: string
+  latitude: string
+  longitude: string
+  geometry_geojson: string
+  capacity_value: string
+  capacity_unit_code: string
+  operator_name: string
+  operating_status: string
+  description: string
+}
+
+export type SpatialFeatureForm = {
+  code: string
+  name: string
+  feature_kind: string
+  entity_type: string
+  entity_code: string
+  label_latitude: string
+  label_longitude: string
+  is_primary: boolean
+  geometry_geojson: string
   description: string
 }
 

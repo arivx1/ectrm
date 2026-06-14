@@ -11,6 +11,8 @@ import {
 } from '../../entities/users/api'
 import { appConfig } from '../../shared/config'
 import { type StoredAuthSession } from '../../shared/mutation'
+import type { AssistantPersona } from '../../shared/models'
+import { listTimeDisplayTimeZoneOptions } from '../../shared/timeDisplaySettings'
 
 type FlashMessage = {
   tone: 'success' | 'error'
@@ -21,14 +23,24 @@ type UserCreateForm = {
   userId: string
   email: string
   displayName: string
+  firstName: string
+  lastName: string
+  preferredTimeZone: string
+  primaryLocation: string
   role: string
+  defaultAssistantPersona: AssistantPersona | ''
   password: string
 }
 
 type UserEditForm = {
   email: string
   displayName: string
+  firstName: string
+  lastName: string
+  preferredTimeZone: string
+  primaryLocation: string
   role: string
+  defaultAssistantPersona: AssistantPersona
   password: string
 }
 
@@ -41,19 +53,39 @@ type UserManagementPanelProps = {
 }
 
 const USER_ROLE_SUGGESTIONS = ['OPS_ADMIN', 'ADMIN', 'CREDIT_APPROVER', 'TRADER', 'OPERATIONS', 'ACCOUNTING', 'VIEWER']
+const USER_PERSONA_OPTIONS: { value: AssistantPersona; label: string }[] = [
+  { value: 'operator', label: 'Operator' },
+  { value: 'trader', label: 'Trader' },
+  { value: 'risk', label: 'Risk' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'operations', label: 'Operations' },
+  { value: 'settlement', label: 'Settlement' },
+  { value: 'reference_data', label: 'Reference Data' },
+]
+const USER_TIME_ZONE_OPTIONS = listTimeDisplayTimeZoneOptions().filter((option) => option.value !== 'system')
 
 const EMPTY_CREATE_FORM: UserCreateForm = {
   userId: '',
   email: '',
   displayName: '',
+  firstName: '',
+  lastName: '',
+  preferredTimeZone: '',
+  primaryLocation: '',
   role: 'TRADER',
+  defaultAssistantPersona: '',
   password: '',
 }
 
 const EMPTY_EDIT_FORM: UserEditForm = {
   email: '',
   displayName: '',
+  firstName: '',
+  lastName: '',
+  preferredTimeZone: '',
+  primaryLocation: '',
   role: '',
+  defaultAssistantPersona: 'operator',
   password: '',
 }
 
@@ -71,9 +103,28 @@ function buildEditForm(user: UserAccountRecord): UserEditForm {
   return {
     email: user.email,
     displayName: user.display_name,
+    firstName: user.first_name ?? '',
+    lastName: user.last_name ?? '',
+    preferredTimeZone: user.preferred_timezone ?? '',
+    primaryLocation: user.primary_location ?? '',
     role: user.role,
+    defaultAssistantPersona: user.default_assistant_persona,
     password: '',
   }
+}
+
+function formatAssistantPersona(persona: AssistantPersona | string | null | undefined): string {
+  return USER_PERSONA_OPTIONS.find((option) => option.value === persona)?.label ?? 'Operator'
+}
+
+function optionalProfileValue(value: string | null | undefined, fallback = 'Not set'): string {
+  const normalizedValue = value?.trim()
+  return normalizedValue || fallback
+}
+
+function formatTimeZoneName(value: string | null | undefined): string {
+  const normalizedValue = value?.trim()
+  return normalizedValue ? normalizedValue.replaceAll('_', ' ') : 'No preference'
 }
 
 function UserMetaRow({
@@ -285,6 +336,10 @@ export function UserManagementPanel({
     const userId = createForm.userId.trim()
     const email = createForm.email.trim().toLowerCase()
     const displayName = createForm.displayName.trim()
+    const firstName = createForm.firstName.trim()
+    const lastName = createForm.lastName.trim()
+    const preferredTimeZone = createForm.preferredTimeZone.trim()
+    const primaryLocation = createForm.primaryLocation.trim()
     const role = createForm.role.trim().toUpperCase()
     const password = createForm.password.trim()
 
@@ -303,7 +358,14 @@ export function UserManagementPanel({
         user_id: userId,
         email,
         display_name: displayName,
+        ...(firstName ? { first_name: firstName } : {}),
+        ...(lastName ? { last_name: lastName } : {}),
+        ...(preferredTimeZone ? { preferred_timezone: preferredTimeZone } : {}),
+        ...(primaryLocation ? { primary_location: primaryLocation } : {}),
         role,
+        ...(createForm.defaultAssistantPersona
+          ? { default_assistant_persona: createForm.defaultAssistantPersona }
+          : {}),
         password,
       })
 
@@ -338,6 +400,10 @@ export function UserManagementPanel({
 
     const email = editForm.email.trim().toLowerCase()
     const displayName = editForm.displayName.trim()
+    const firstName = editForm.firstName.trim()
+    const lastName = editForm.lastName.trim()
+    const preferredTimeZone = editForm.preferredTimeZone.trim()
+    const primaryLocation = editForm.primaryLocation.trim()
     const role = editForm.role.trim().toUpperCase()
     const password = editForm.password.trim()
 
@@ -355,7 +421,12 @@ export function UserManagementPanel({
       await updateUserAccount(appConfig.apiBase, selectedUser.user_id, {
         email,
         display_name: displayName,
+        first_name: firstName || null,
+        last_name: lastName || null,
+        preferred_timezone: preferredTimeZone || null,
+        primary_location: primaryLocation || null,
         role,
+        default_assistant_persona: editForm.defaultAssistantPersona,
         ...(password ? { password } : {}),
       })
 
@@ -566,6 +637,7 @@ export function UserManagementPanel({
                   <p>{user.email}</p>
                   <div className="user-account-meta">
                     <span>{user.role}</span>
+                    <span>{formatAssistantPersona(user.default_assistant_persona)} persona</span>
                     <span>{user.password_set ? 'Password set' : 'No password'}</span>
                     <span>Updated {formatDate(user.updated_at)}</span>
                   </div>
@@ -593,6 +665,23 @@ export function UserManagementPanel({
               <>
                 <div className="settings-kv">
                   <UserMetaRow label="User ID" value={selectedUser.user_id} />
+                  <UserMetaRow
+                    label="First name"
+                    value={optionalProfileValue(selectedUser.first_name)}
+                  />
+                  <UserMetaRow
+                    label="Last name"
+                    value={optionalProfileValue(selectedUser.last_name)}
+                  />
+                  <UserMetaRow
+                    label="Preferred timezone"
+                    value={formatTimeZoneName(selectedUser.preferred_timezone)}
+                  />
+                  <UserMetaRow
+                    label="Primary location"
+                    value={optionalProfileValue(selectedUser.primary_location)}
+                  />
+                  <UserMetaRow label="Default persona" value={formatAssistantPersona(selectedUser.default_assistant_persona)} />
                   <UserMetaRow label="Created" value={formatDate(selectedUser.created_at)} detail={`By ${selectedUser.created_by}`} />
                   <UserMetaRow label="Last login" value={selectedUser.last_login_at ? formatDate(selectedUser.last_login_at) : 'Never'} />
                   <UserMetaRow label="Version" value={String(selectedUser.version)} detail={`Updated ${formatDate(selectedUser.updated_at)} by ${selectedUser.updated_by}`} />
@@ -626,6 +715,63 @@ export function UserManagementPanel({
                       />
                     </label>
                     <label className="field">
+                      <span>First Name</span>
+                      <input
+                        className="control"
+                        value={editForm.firstName}
+                        maxLength={80}
+                        onChange={(event) => {
+                          setUserFlash(null)
+                          setEditForm((current) => ({ ...current, firstName: event.target.value }))
+                        }}
+                        placeholder="Operations"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Last Name</span>
+                      <input
+                        className="control"
+                        value={editForm.lastName}
+                        maxLength={80}
+                        onChange={(event) => {
+                          setUserFlash(null)
+                          setEditForm((current) => ({ ...current, lastName: event.target.value }))
+                        }}
+                        placeholder="Lead"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Preferred Time Zone</span>
+                      <select
+                        className="control"
+                        value={editForm.preferredTimeZone}
+                        onChange={(event) => {
+                          setUserFlash(null)
+                          setEditForm((current) => ({ ...current, preferredTimeZone: event.target.value }))
+                        }}
+                      >
+                        <option value="">No preference</option>
+                        {USER_TIME_ZONE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Primary Location</span>
+                      <input
+                        className="control"
+                        value={editForm.primaryLocation}
+                        maxLength={160}
+                        onChange={(event) => {
+                          setUserFlash(null)
+                          setEditForm((current) => ({ ...current, primaryLocation: event.target.value }))
+                        }}
+                        placeholder="Houston desk"
+                      />
+                    </label>
+                    <label className="field">
                       <span>Role</span>
                       <input
                         className="control"
@@ -637,6 +783,26 @@ export function UserManagementPanel({
                         }}
                         placeholder="TRADER"
                       />
+                    </label>
+                    <label className="field">
+                      <span>Default Persona</span>
+                      <select
+                        className="control"
+                        value={editForm.defaultAssistantPersona}
+                        onChange={(event) => {
+                          setUserFlash(null)
+                          setEditForm((current) => ({
+                            ...current,
+                            defaultAssistantPersona: event.target.value as AssistantPersona,
+                          }))
+                        }}
+                      >
+                        {USER_PERSONA_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                     <label className="field">
                       <span>Reset Password</span>
@@ -743,6 +909,63 @@ export function UserManagementPanel({
                   />
                 </label>
                 <label className="field">
+                  <span>First Name</span>
+                  <input
+                    className="control"
+                    value={createForm.firstName}
+                    maxLength={80}
+                    onChange={(event) => {
+                      setUserFlash(null)
+                      setCreateForm((current) => ({ ...current, firstName: event.target.value }))
+                    }}
+                    placeholder="Operations"
+                  />
+                </label>
+                <label className="field">
+                  <span>Last Name</span>
+                  <input
+                    className="control"
+                    value={createForm.lastName}
+                    maxLength={80}
+                    onChange={(event) => {
+                      setUserFlash(null)
+                      setCreateForm((current) => ({ ...current, lastName: event.target.value }))
+                    }}
+                    placeholder="Lead"
+                  />
+                </label>
+                <label className="field">
+                  <span>Preferred Time Zone</span>
+                  <select
+                    className="control"
+                    value={createForm.preferredTimeZone}
+                    onChange={(event) => {
+                      setUserFlash(null)
+                      setCreateForm((current) => ({ ...current, preferredTimeZone: event.target.value }))
+                    }}
+                  >
+                    <option value="">No preference</option>
+                    {USER_TIME_ZONE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Primary Location</span>
+                  <input
+                    className="control"
+                    value={createForm.primaryLocation}
+                    maxLength={160}
+                    onChange={(event) => {
+                      setUserFlash(null)
+                      setCreateForm((current) => ({ ...current, primaryLocation: event.target.value }))
+                    }}
+                    placeholder="Houston desk"
+                  />
+                </label>
+                <label className="field">
                   <span>Role</span>
                   <input
                     className="control"
@@ -754,6 +977,27 @@ export function UserManagementPanel({
                     }}
                     placeholder="TRADER"
                   />
+                </label>
+                <label className="field">
+                  <span>Default Persona</span>
+                  <select
+                    className="control"
+                    value={createForm.defaultAssistantPersona}
+                    onChange={(event) => {
+                      setUserFlash(null)
+                      setCreateForm((current) => ({
+                        ...current,
+                        defaultAssistantPersona: event.target.value as AssistantPersona | '',
+                      }))
+                    }}
+                  >
+                    <option value="">Role default</option>
+                    {USER_PERSONA_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label className="field field-wide">
                   <span>Initial Password</span>

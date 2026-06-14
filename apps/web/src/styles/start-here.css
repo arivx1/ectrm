@@ -78,3 +78,16 @@
   line-height: 1.6;
 }
 
+:root[data-workspace-mode='terminal'] .start-here-dialog {
+  width: min(62rem, calc(100vw - 2.5rem));
+  max-height: min(84vh, 52rem);
+  padding: 1rem;
+}
+
+:root[data-workspace-mode='terminal'] .start-here-copy h3 {
+  font-size: clamp(1.7rem, 3vw, 2.5rem);
+}
+
+:root[data-workspace-mode='terminal'] .start-here-copy p {
+  max-width: 40rem;
+}

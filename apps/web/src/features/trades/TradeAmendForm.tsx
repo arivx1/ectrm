@@ -423,6 +423,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
         </label>
 
         <TradeFormDisclosure
+          persistenceKey="trade-amend.desk-metadata"
           title="Desk Metadata"
           summary="External linkage and trader attribution"
           description="Most amendments do not need source-system IDs or trader re-assignment. Open this only when desk metadata is part of the change."
@@ -449,6 +450,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
         </TradeFormDisclosure>
 
         <TradeFormDisclosure
+          persistenceKey="trade-amend.schedule-overrides"
           title="Schedule Overrides"
           summary="Trade date and effective window"
           description="Execution timing usually carries the amendment. Open this only when the trade date or effective range is changing too."
@@ -847,6 +849,7 @@ export function TradeAmendForm(props: TradeAmendFormProps) {
       </div>
 
       <TradeFormDisclosure
+        persistenceKey="trade-amend.workflow-statuses"
         title="Workflow Statuses"
         summary="Pricing, confirmation, and settlement state"
         description="Leave this collapsed for commercial edits. Open it when the amendment is explicitly changing downstream workflow posture."

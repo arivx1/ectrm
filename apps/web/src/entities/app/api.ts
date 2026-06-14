@@ -1,8 +1,15 @@
 import { fetchJson } from '../../shared/api'
 import { bootstrapQueryLimits } from '../../shared/config'
 import type { TradeMetadata } from '../../shared/tradeMetadata'
-import { loadWeatherLocations } from '../weather/api'
+import {
+  loadAdminWeatherSyncStatus,
+  loadTrackedWeatherLocations,
+  loadWeatherLocations,
+  loadWeatherSyncStatus,
+} from '../weather/api'
 import type {
+  AssetRecord,
+  AssetStandards,
   AssistantRuntimeSettings,
   CounterpartyRecord,
   CounterpartyCreditProfileRecord,
@@ -11,6 +18,7 @@ import type {
   CounterpartyStandards,
   CurrencyRecord,
   DeliveryRecord,
+  DocumentRecordCreationWorkItemRecord,
   EventRow,
   ExternalDataRunRecord,
   ExternalDataSyncStatusRecord,
@@ -19,8 +27,12 @@ import type {
   OptionExposureRow,
   PortfolioRecord,
   PositionRow,
+  PriceSourceReviewRecord,
   PriceIndexRecord,
+  RailRouteRecord,
   ReferenceRecord,
+  SpatialFeatureRecord,
+  SpatialFeatureStandards,
   Trade,
   TradeConfirmationRecord,
   TradeInvoiceRecord,
@@ -88,6 +100,13 @@ export type WorkspaceDashboardSummary = {
   attention: WorkspaceDashboardAttentionSummary
 }
 
+export type AssetMapScopeSummary = {
+  total_count: number
+  total_map_ready_count: number
+  filtered_total_count: number
+  filtered_map_ready_count: number
+}
+
 export type WorkspaceSettlementBreakdownSummaryRow = {
   status: string
   count: number
@@ -103,9 +122,99 @@ export type WorkspaceSettlementSummary = {
   breakdown: WorkspaceSettlementBreakdownSummaryRow[]
 }
 
+export type TradeAttentionCandidateType =
+  | 'confirmation_backlog'
+  | 'nomination_backlog'
+  | 'allocation_backlog'
+  | 'invoice_backlog'
+  | 'overdue_payment'
+  | 'stale_pricing'
+  | 'incomplete_ops_data'
+  | 'payment_due'
+  | 'pending_settlement'
+  | 'settlement_exception'
+
+export type TradeAttentionCandidateRecord = {
+  trade_id: string
+  candidate_types: string[]
+  source_count_keys: string[]
+  priority_reason: string
+  trade_nature: string
+  book: string
+  portfolio: string | null
+  counterparty: string | null
+  commodity_class: string
+  commodity: string
+  trader_user: string | null
+  trade_date: string | null
+  execution_timestamp: string | null
+  delivery_start: string | null
+  delivery_end: string | null
+  confirmation_status: string
+  nomination_status: string
+  allocation_status: string
+  pricing_status: string
+  invoice_status: string
+  payment_status: string
+  settlement_status: string
+  age_days: number | null
+  supporting_records: Record<string, unknown>
+  suggested_next_tool: string | null
+  next_steps: string[]
+  blocking_reasons: string[]
+  recommended_action: Record<string, unknown> | null
+}
+
+export type TradeAttentionCandidateList = {
+  count: number
+  total_count: number
+  items: TradeAttentionCandidateRecord[]
+  candidate_type_counts: Record<string, number>
+  candidate_type?: TradeAttentionCandidateType | null
+  source_count_key?: string | null
+  description?: string | null
+  candidate_types: TradeAttentionCandidateType[]
+}
+
+export type InvoiceIssueCandidateRecord = {
+  trade_id: string
+  trade_nature: string
+  book: string
+  portfolio: string | null
+  counterparty: string | null
+  commodity_class: string
+  commodity: string
+  trader_user: string | null
+  trade_date: string | null
+  execution_timestamp: string | null
+  delivery_start: string | null
+  delivery_end: string | null
+  trade_currency_code: string | null
+  invoice_status: string
+  payment_status: string
+  settlement_status: string
+  notional_amount: number | null
+  age_days: number | null
+  readiness_status: string
+  priority_reason: string
+  preview_summary: string
+  blocking_reasons: string[]
+  assumptions: string[]
+  recommended_action: Record<string, unknown>
+}
+
+export type InvoiceIssueCandidateList = {
+  count: number
+  total_count: number
+  ready_count: number
+  blocked_count: number
+  items: InvoiceIssueCandidateRecord[]
+}
+
 export type OperationalResourceKey =
   | 'confirmations'
   | 'deliveries'
+  | 'document_record_creation_requests'
   | 'shipments'
   | 'invoices'
   | 'payments'
@@ -209,6 +318,8 @@ export type OperationsWorkspaceBootstrap = {
   confirmationsWindow: WorkspaceCollectionWindow
   workItems: TradeWorkflowItemRecord[]
   workItemsWindow: WorkspaceCollectionWindow
+  operationsDocumentRecordCreationRequests: DocumentRecordCreationWorkItemRecord[]
+  operationsDocumentRecordCreationRequestsWindow: WorkspaceCollectionWindow
 }
 
 export type SettlementWorkspaceBootstrap = {
@@ -218,6 +329,8 @@ export type SettlementWorkspaceBootstrap = {
   paymentsWindow: WorkspaceCollectionWindow
   workItems: TradeWorkflowItemRecord[]
   workItemsWindow: WorkspaceCollectionWindow
+  settlementDocumentRecordCreationRequests: DocumentRecordCreationWorkItemRecord[]
+  settlementDocumentRecordCreationRequestsWindow: WorkspaceCollectionWindow
 }
 
 export type ReferenceWorkspaceBootstrap = {
@@ -228,6 +341,11 @@ export type ReferenceWorkspaceBootstrap = {
   units: UnitRecord[]
   locations: LocationRecord[]
   locationStandards: LocationStandards
+  railRoutes: RailRouteRecord[]
+  spatialFeatures: SpatialFeatureRecord[]
+  spatialFeatureStandards: SpatialFeatureStandards
+  assets: AssetRecord[]
+  assetStandards: AssetStandards
   counterparties: CounterpartyRecord[]
   counterpartyCreditProfiles: CounterpartyCreditProfileRecord[]
   counterpartyExternalCreditSnapshots: CounterpartyExternalCreditSnapshotRecord[]
@@ -239,9 +357,15 @@ export type ReportsWorkspaceBootstrap = {
   counterpartyCreditReport: CounterpartyCreditReportRow[]
 }
 
+export type WeatherWorkspaceBootstrap = {
+  weatherLocations: WeatherLocationRecord[]
+  weatherSyncStatus: WeatherSyncStatusRecord | null
+}
+
 export type AdminWorkspaceBootstrap = {
   externalDataRuns: ExternalDataRunRecord[]
   externalDataSyncStatus: ExternalDataSyncStatusRecord | null
+  externalDataPriceSources: PriceSourceReviewRecord[]
   tradingSources: TradingSourceRecord[]
   weatherLocations: WeatherLocationRecord[]
   weatherSyncStatus: WeatherSyncStatusRecord | null
@@ -312,6 +436,15 @@ export type PublicRuntimeSettings = {
     client_id: string | null
     auto_create_users: boolean
   }
+  projection_monitoring_email: {
+    transport: 'local_archive' | 'smtp'
+    provider_hint: 'none' | 'gmail' | 'generic_smtp'
+    smtp_host: string | null
+    smtp_port: number | null
+    sender: string
+    recipient_count: number
+    auth_status: 'none' | 'partial' | 'configured'
+  }
   session_ttl_hours: number
   eia_base_url: string
   eia_timeout_seconds: number
@@ -325,8 +458,13 @@ export type PublicRuntimeSettings = {
 }
 
 type ReadWorkspaceOptions = {
+  adminHeaders?: HeadersInit | null
   readHeaders?: HeadersInit | null
 }
+
+// Mirror the API pagination contract so client-side bootstrap requests fail closed.
+const STANDARD_LIST_LIMIT_MAX = 2000
+const ADMIN_LIST_LIMIT_MAX = 1000
 
 function withLimit(path: string, limit: number): string {
   return `${path}${path.includes('?') ? '&' : '?'}limit=${limit}`
@@ -338,6 +476,65 @@ function withOffset(path: string, offset: number): string {
 
 function withQueue(path: string, queue: WorkflowQueue): string {
   return `${path}${path.includes('?') ? '&' : '?'}queue=${queue}`
+}
+
+function withQueryString(
+  path: string,
+  params: Record<string, string | number | boolean | null | undefined>,
+): string {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') {
+      continue
+    }
+    query.set(key, String(value))
+  }
+  const queryString = query.toString()
+  if (!queryString) {
+    return path
+  }
+  return `${path}${path.includes('?') ? '&' : '?'}${queryString}`
+}
+
+function withAssetMapScopeSummaryQuery(args?: {
+  hiddenGeographies?: string[]
+  selectedCountryCode?: string | null
+  selectedSubdivisionCode?: string | null
+  hiddenActivities?: string[]
+  hiddenSubtypes?: string[]
+}): string {
+  const query = new URLSearchParams()
+
+  for (const geography of args?.hiddenGeographies ?? []) {
+    if (geography.trim()) {
+      query.append('hidden_geography', geography)
+    }
+  }
+
+  if (args?.selectedCountryCode?.trim()) {
+    query.set('selected_country_code', args.selectedCountryCode)
+  }
+
+  if (args?.selectedSubdivisionCode?.trim()) {
+    query.set('selected_subdivision_code', args.selectedSubdivisionCode)
+  }
+
+  for (const activity of args?.hiddenActivities ?? []) {
+    if (activity.trim()) {
+      query.append('hidden_activity', activity)
+    }
+  }
+
+  for (const subtype of args?.hiddenSubtypes ?? []) {
+    if (subtype.trim()) {
+      query.append('hidden_subtype', subtype)
+    }
+  }
+
+  const queryString = query.toString()
+  return queryString
+    ? `/reference/assets/map-scope-summary?${queryString}`
+    : '/reference/assets/map-scope-summary'
 }
 
 function withReadHeaders(
@@ -354,6 +551,39 @@ function withReadHeaders(
   }
 }
 
+function isMissingPublicWeatherRoute(error: unknown): boolean {
+  return (
+    (typeof error === 'object' &&
+      error !== null &&
+      'status' in error &&
+      (error as { status?: unknown }).status === 404) ||
+    (error instanceof Error && /request failed:\s*404|not found/i.test(error.message))
+  )
+}
+
+async function loadWeatherWithAdminFallback<T>(
+  primaryLoader: () => Promise<T>,
+  adminFallbackLoader?: (() => Promise<T>) | null,
+): Promise<T> {
+  try {
+    return await primaryLoader()
+  } catch (error) {
+    if (!adminFallbackLoader || !isMissingPublicWeatherRoute(error)) {
+      throw error
+    }
+
+    return adminFallbackLoader()
+  }
+}
+
+function clampListLimit(limit: number, max: number): number {
+  if (!Number.isFinite(limit)) {
+    return 1
+  }
+
+  return Math.min(Math.max(1, Math.floor(limit)), max)
+}
+
 function toSizedWindowedPage<T>(rows: T[], windowSize: number): WindowedPage<T> {
   const normalizedWindowSize = Math.max(1, windowSize)
   const hasMore = rows.length > normalizedWindowSize
@@ -367,6 +597,16 @@ function toSizedWindowedPage<T>(rows: T[], windowSize: number): WindowedPage<T> 
   }
 }
 
+function emptyWindowedPage<T>(): WindowedPage<T> {
+  return {
+    rows: [],
+    window: {
+      loadedCount: 0,
+      hasMore: false,
+    },
+  }
+}
+
 async function fetchWindowedPage<T>(
   apiBase: string,
   path: string,
@@ -374,12 +614,13 @@ async function fetchWindowedPage<T>(
   init?: RequestInit,
   windowSize = bootstrapQueryLimits.workspaceRecords,
 ): Promise<WindowedPage<T>> {
-  const requestLimit = Math.max(1, windowSize) + 1
+  const normalizedWindowSize = clampListLimit(windowSize, STANDARD_LIST_LIMIT_MAX - 1)
+  const requestLimit = normalizedWindowSize + 1
   const rows = await fetchJson<T[]>(
     `${apiBase}${withLimit(path, requestLimit)}`,
     withReadHeaders(init, options),
   )
-  return toSizedWindowedPage(rows, windowSize)
+  return toSizedWindowedPage(rows, normalizedWindowSize)
 }
 
 export async function loadTradesWindow(
@@ -475,6 +716,24 @@ export async function loadTradeWorkflowItemsWindow(
   )
 }
 
+export async function loadDocumentRecordCreationWorkItemsWindow(
+  apiBase: string,
+  queue: WorkflowQueue,
+  options?: ReadWorkspaceOptions,
+  offset = 0,
+  windowSize = bootstrapQueryLimits.workspaceRecords,
+): Promise<WindowedPage<DocumentRecordCreationWorkItemRecord>> {
+  const workItemsPath = withQueue('/operations/document-record-creation-requests', queue)
+
+  return fetchWindowedPage<DocumentRecordCreationWorkItemRecord>(
+    apiBase,
+    offset > 0 ? withOffset(workItemsPath, offset) : workItemsPath,
+    options,
+    { cache: 'no-store' },
+    windowSize,
+  )
+}
+
 export async function loadTradeInvoicesWindow(
   apiBase: string,
   options?: ReadWorkspaceOptions,
@@ -502,6 +761,59 @@ export async function loadTradePaymentsWindow(
     options,
     { cache: 'no-store' },
     windowSize,
+  )
+}
+
+export async function loadTradeAttentionCandidates(
+  apiBase: string,
+  args?: {
+    candidateType?: TradeAttentionCandidateType | null
+    limit?: number
+  },
+  options?: ReadWorkspaceOptions,
+): Promise<TradeAttentionCandidateList> {
+  const path = withQueryString('/operations/trade-attention-candidates', {
+    candidate_type: args?.candidateType ?? null,
+    limit: args?.limit ?? null,
+  })
+  return fetchJson<TradeAttentionCandidateList>(
+    `${apiBase}${path}`,
+    withReadHeaders({ cache: 'no-store' }, options),
+  )
+}
+
+export async function loadInvoiceIssueCandidates(
+  apiBase: string,
+  args?: {
+    readyOnly?: boolean
+    limit?: number
+  },
+  options?: ReadWorkspaceOptions,
+): Promise<InvoiceIssueCandidateList> {
+  const path = withQueryString('/settlement/invoice-issue-candidates', {
+    ready_only: args?.readyOnly ?? null,
+    limit: args?.limit ?? null,
+  })
+  return fetchJson<InvoiceIssueCandidateList>(
+    `${apiBase}${path}`,
+    withReadHeaders({ cache: 'no-store' }, options),
+  )
+}
+
+export async function loadAssetMapScopeSummary(
+  apiBase: string,
+  args?: {
+    hiddenGeographies?: string[]
+    selectedCountryCode?: string | null
+    selectedSubdivisionCode?: string | null
+    hiddenActivities?: string[]
+    hiddenSubtypes?: string[]
+  },
+  options?: ReadWorkspaceOptions,
+): Promise<AssetMapScopeSummary> {
+  return fetchJson<AssetMapScopeSummary>(
+    `${apiBase}${withAssetMapScopeSummaryQuery(args)}`,
+    withReadHeaders({ cache: 'no-store' }, options),
   )
 }
 
@@ -578,8 +890,9 @@ export async function loadEventsWorkspaceBootstrap(
   apiBase: string,
   options?: ReadWorkspaceOptions,
 ): Promise<EventsWorkspaceBootstrap> {
+  const eventsLimit = clampListLimit(bootstrapQueryLimits.events, STANDARD_LIST_LIMIT_MAX)
   const events = await fetchJson<EventRow[]>(
-    `${apiBase}${withLimit('/events', bootstrapQueryLimits.events)}`,
+    `${apiBase}${withLimit('/events', eventsLimit)}`,
     withReadHeaders(undefined, options),
   )
 
@@ -626,9 +939,12 @@ export async function loadOperationsWorkspaceBootstrap(
   apiBase: string,
   options?: ReadWorkspaceOptions,
 ): Promise<OperationsWorkspaceBootstrap> {
-  const [confirmationsPage, workItemsPage] = await Promise.all([
+  const [confirmationsPage, workItemsPage, documentRecordCreationRequestsPage] = await Promise.all([
     loadTradeConfirmationsWindow(apiBase, options),
     loadTradeWorkflowItemsWindow(apiBase, 'operations', options),
+    loadDocumentRecordCreationWorkItemsWindow(apiBase, 'operations', options).catch(() =>
+      emptyWindowedPage<DocumentRecordCreationWorkItemRecord>(),
+    ),
   ])
 
   return {
@@ -636,6 +952,8 @@ export async function loadOperationsWorkspaceBootstrap(
     confirmationsWindow: confirmationsPage.window,
     workItems: workItemsPage.rows,
     workItemsWindow: workItemsPage.window,
+    operationsDocumentRecordCreationRequests: documentRecordCreationRequestsPage.rows,
+    operationsDocumentRecordCreationRequestsWindow: documentRecordCreationRequestsPage.window,
   }
 }
 
@@ -643,10 +961,13 @@ export async function loadSettlementWorkspaceBootstrap(
   apiBase: string,
   options?: ReadWorkspaceOptions,
 ): Promise<SettlementWorkspaceBootstrap> {
-  const [invoicesPage, paymentsPage, workItemsPage] = await Promise.all([
+  const [invoicesPage, paymentsPage, workItemsPage, documentRecordCreationRequestsPage] = await Promise.all([
     loadTradeInvoicesWindow(apiBase, options),
     loadTradePaymentsWindow(apiBase, options),
     loadTradeWorkflowItemsWindow(apiBase, 'settlement', options),
+    loadDocumentRecordCreationWorkItemsWindow(apiBase, 'settlement', options).catch(() =>
+      emptyWindowedPage<DocumentRecordCreationWorkItemRecord>(),
+    ),
   ])
 
   return {
@@ -656,6 +977,8 @@ export async function loadSettlementWorkspaceBootstrap(
     paymentsWindow: paymentsPage.window,
     workItems: workItemsPage.rows,
     workItemsWindow: workItemsPage.window,
+    settlementDocumentRecordCreationRequests: documentRecordCreationRequestsPage.rows,
+    settlementDocumentRecordCreationRequestsWindow: documentRecordCreationRequestsPage.window,
   }
 }
 
@@ -663,6 +986,11 @@ export async function loadReferenceWorkspaceBootstrap(
   apiBase: string,
   options?: ReadWorkspaceOptions,
 ): Promise<ReferenceWorkspaceBootstrap> {
+  const referenceBootstrapLimit = clampListLimit(
+    bootstrapQueryLimits.referenceData,
+    STANDARD_LIST_LIMIT_MAX,
+  )
+  const locationBootstrapLimit = STANDARD_LIST_LIMIT_MAX
   const [
     books,
     commodities,
@@ -671,40 +999,65 @@ export async function loadReferenceWorkspaceBootstrap(
     units,
     locations,
     locationStandards,
+    railRoutes,
+    spatialFeatures,
+    spatialFeatureStandards,
+    assets,
+    assetStandards,
     counterparties,
     counterpartyStandards,
     portfolios,
   ] = await Promise.all([
     fetchJson<ReferenceRecord[]>(
-      `${apiBase}${withLimit('/reference/books', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/books', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<ReferenceRecord[]>(
-      `${apiBase}${withLimit('/reference/commodities', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/commodities', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<PriceIndexRecord[]>(
-      `${apiBase}${withLimit('/reference/price-indices', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/price-indices', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<CurrencyRecord[]>(
-      `${apiBase}${withLimit('/reference/currencies', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/currencies', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<UnitRecord[]>(
-      `${apiBase}${withLimit('/reference/units', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/units', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<LocationRecord[]>(
-      `${apiBase}${withLimit('/reference/locations', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/locations', locationBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<LocationStandards>(
       `${apiBase}/reference/locations/standards`,
       withReadHeaders(undefined, options),
     ),
+    fetchJson<RailRouteRecord[]>(
+      `${apiBase}${withLimit('/reference/rail-routes', referenceBootstrapLimit)}`,
+      withReadHeaders(undefined, options),
+    ),
+    fetchJson<SpatialFeatureRecord[]>(
+      `${apiBase}${withLimit('/reference/spatial-features', referenceBootstrapLimit)}`,
+      withReadHeaders(undefined, options),
+    ),
+    fetchJson<SpatialFeatureStandards>(
+      `${apiBase}/reference/spatial-features/standards`,
+      withReadHeaders(undefined, options),
+    ),
+    fetchJson<AssetRecord[]>(
+      `${apiBase}${withLimit('/reference/assets', referenceBootstrapLimit)}`,
+      withReadHeaders(undefined, options),
+    ),
+    fetchJson<AssetStandards>(
+      `${apiBase}/reference/assets/standards`,
+      withReadHeaders(undefined, options),
+    ),
     fetchJson<CounterpartyRecord[]>(
-      `${apiBase}${withLimit('/reference/counterparties', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/counterparties', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
     fetchJson<CounterpartyStandards>(
@@ -712,7 +1065,7 @@ export async function loadReferenceWorkspaceBootstrap(
       withReadHeaders(undefined, options),
     ),
     fetchJson<PortfolioRecord[]>(
-      `${apiBase}${withLimit('/reference/portfolios', bootstrapQueryLimits.referenceData)}`,
+      `${apiBase}${withLimit('/reference/portfolios', referenceBootstrapLimit)}`,
       withReadHeaders(undefined, options),
     ),
   ])
@@ -720,13 +1073,14 @@ export async function loadReferenceWorkspaceBootstrap(
   let counterpartyCreditProfiles: CounterpartyCreditProfileRecord[] = []
   let counterpartyExternalCreditSnapshots: CounterpartyExternalCreditSnapshotRecord[] = []
 
-  const [counterpartyCreditProfilesResult, counterpartyExternalCreditSnapshotsResult] = await Promise.allSettled([
+  const [counterpartyCreditProfilesResult, counterpartyExternalCreditSnapshotsResult] =
+    await Promise.allSettled([
       fetchJson<CounterpartyCreditProfileRecord[]>(
-        `${apiBase}${withLimit('/reference/counterparties/credit-profiles', bootstrapQueryLimits.referenceData)}`,
+        `${apiBase}${withLimit('/reference/counterparties/credit-profiles', referenceBootstrapLimit)}`,
         withReadHeaders(undefined, options),
       ),
       fetchJson<CounterpartyExternalCreditSnapshotRecord[]>(
-        `${apiBase}${withLimit('/reference/counterparties/external-credit-snapshots', bootstrapQueryLimits.referenceData)}`,
+        `${apiBase}${withLimit('/reference/counterparties/external-credit-snapshots', referenceBootstrapLimit)}`,
         withReadHeaders(undefined, options),
       ),
     ])
@@ -747,6 +1101,11 @@ export async function loadReferenceWorkspaceBootstrap(
     units,
     locations,
     locationStandards,
+    railRoutes,
+    spatialFeatures,
+    spatialFeatureStandards,
+    assets,
+    assetStandards,
     counterparties,
     counterpartyCreditProfiles,
     counterpartyExternalCreditSnapshots,
@@ -767,6 +1126,66 @@ export async function loadReportsWorkspaceBootstrap(
   }
 }
 
+export async function loadWeatherWorkspaceBootstrap(
+  apiBase: string,
+  options?: ReadWorkspaceOptions,
+): Promise<WeatherWorkspaceBootstrap> {
+  let weatherLocations: WeatherLocationRecord[] = []
+  let weatherSyncStatus: WeatherSyncStatusRecord | null = null
+  const readHeaders = options?.readHeaders ?? undefined
+  const adminHeaders = options?.adminHeaders ?? undefined
+
+  const [weatherLocationsResult, weatherSyncStatusResult] = await Promise.allSettled([
+    loadWeatherWithAdminFallback(
+      () =>
+        loadTrackedWeatherLocations(apiBase, {
+          headers: readHeaders,
+        }),
+      adminHeaders
+        ? () =>
+            loadWeatherLocations(apiBase, {
+              headers: adminHeaders,
+              isActive: true,
+            })
+        : null,
+    ),
+    loadWeatherWithAdminFallback(
+      () =>
+        loadWeatherSyncStatus(apiBase, {
+          headers: readHeaders,
+        }),
+      adminHeaders
+        ? () =>
+            loadAdminWeatherSyncStatus(apiBase, {
+              headers: adminHeaders,
+              includeInactive: false,
+            })
+        : null,
+    ),
+  ])
+
+  if (weatherLocationsResult.status === 'rejected' && weatherSyncStatusResult.status === 'rejected') {
+    throw weatherLocationsResult.reason instanceof Error
+      ? weatherLocationsResult.reason
+      : weatherSyncStatusResult.reason instanceof Error
+        ? weatherSyncStatusResult.reason
+        : new Error('Could not load weather workspace data.')
+  }
+
+  if (weatherLocationsResult.status === 'fulfilled') {
+    weatherLocations = weatherLocationsResult.value
+  }
+
+  if (weatherSyncStatusResult.status === 'fulfilled') {
+    weatherSyncStatus = weatherSyncStatusResult.value
+  }
+
+  return {
+    weatherLocations,
+    weatherSyncStatus,
+  }
+}
+
 export async function loadAdminWorkspaceBootstrap(
   apiBase: string,
   options?: { adminHeaders?: HeadersInit | null },
@@ -775,6 +1194,7 @@ export async function loadAdminWorkspaceBootstrap(
     return {
       externalDataRuns: [],
       externalDataSyncStatus: null,
+      externalDataPriceSources: [],
       tradingSources: [],
       weatherLocations: [],
       weatherSyncStatus: null,
@@ -783,22 +1203,40 @@ export async function loadAdminWorkspaceBootstrap(
 
   let externalDataRuns: ExternalDataRunRecord[] = []
   let externalDataSyncStatus: ExternalDataSyncStatusRecord | null = null
+  let externalDataPriceSources: PriceSourceReviewRecord[] = []
   let tradingSources: TradingSourceRecord[] = []
   let weatherLocations: WeatherLocationRecord[] = []
   let weatherSyncStatus: WeatherSyncStatusRecord | null = null
+  const externalDataRunsLimit = clampListLimit(
+    bootstrapQueryLimits.externalDataRuns,
+    STANDARD_LIST_LIMIT_MAX,
+  )
+  const tradingSourcesLimit = clampListLimit(
+    bootstrapQueryLimits.tradingSources,
+    ADMIN_LIST_LIMIT_MAX,
+  )
 
-  const [externalDataRunsResult, externalDataSyncStatusResult, tradingSourcesResult, weatherLocationsResult, weatherSyncStatusResult] =
+  const priceSourcesLimit = ADMIN_LIST_LIMIT_MAX
+
+  const [externalDataRunsResult, externalDataSyncStatusResult, priceSourcesResult, tradingSourcesResult, weatherLocationsResult, weatherSyncStatusResult] =
     await Promise.allSettled([
       fetchJson<ExternalDataRunRecord[]>(
-        `${apiBase}${withLimit('/admin/external-data/runs', bootstrapQueryLimits.externalDataRuns)}`,
+        `${apiBase}${withLimit('/admin/external-data/runs', externalDataRunsLimit)}`,
         { headers: options.adminHeaders },
       ),
       fetchJson<ExternalDataSyncStatusRecord>(`${apiBase}/admin/external-data/status`, {
         headers: options.adminHeaders,
         cache: 'no-store',
       }),
+      fetchJson<PriceSourceReviewRecord[]>(
+        `${apiBase}${withLimit('/admin/external-data/price-sources', priceSourcesLimit)}`,
+        {
+          headers: options.adminHeaders,
+          cache: 'no-store',
+        },
+      ),
       fetchJson<TradingSourceRecord[]>(
-        `${apiBase}${withLimit('/admin/trading-sources', bootstrapQueryLimits.tradingSources)}`,
+        `${apiBase}${withLimit('/admin/trading-sources', tradingSourcesLimit)}`,
         { headers: options.adminHeaders },
       ),
       loadWeatherLocations(apiBase, {
@@ -818,6 +1256,10 @@ export async function loadAdminWorkspaceBootstrap(
     externalDataSyncStatus = externalDataSyncStatusResult.value
   }
 
+  if (priceSourcesResult.status === 'fulfilled') {
+    externalDataPriceSources = priceSourcesResult.value
+  }
+
   if (tradingSourcesResult.status === 'fulfilled') {
     tradingSources = tradingSourcesResult.value
   }
@@ -833,6 +1275,7 @@ export async function loadAdminWorkspaceBootstrap(
   return {
     externalDataRuns,
     externalDataSyncStatus,
+    externalDataPriceSources,
     tradingSources,
     weatherLocations,
     weatherSyncStatus,

@@ -357,7 +357,7 @@ class LayoutDefinitionsApiTests(unittest.TestCase):
         self.assertEqual(save_settlement.json()["sections"], settlement_payload["sections"])
 
         reports_payload = {
-            "order": ["reports-overview", "reports-exposure", "reports-activity", "reports-credit"],
+            "order": list(WORKSPACE_TILE_IDS["reports"]),
             "hidden": [],
             "spans": {
                 "reports-exposure": "wide",

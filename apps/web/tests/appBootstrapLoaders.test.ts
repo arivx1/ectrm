@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { beforeEach, test, vi } from 'vitest'
 import type {
+  AssetRecord,
+  AssetStandards,
   CounterpartyRecord,
   CurrencyRecord,
   EventRow,
@@ -8,7 +10,11 @@ import type {
   LocationRecord,
   PortfolioRecord,
   PriceIndexRecord,
+  PriceSourceReviewRecord,
+  RailRouteRecord,
   ReferenceRecord,
+  SpatialFeatureRecord,
+  SpatialFeatureStandards,
   TradingSourceRecord,
   UnitRecord,
 } from '../src/shared/models.ts'
@@ -33,10 +39,12 @@ vi.mock('../src/shared/config.ts', () => ({
 }))
 
 import {
+  loadAssetMapScopeSummary,
   loadAdminWorkspaceBootstrap,
   loadCoreWorkspaceBootstrap,
   loadDeliveriesWorkspaceBootstrap,
   loadDeliveriesWindow,
+  loadDocumentRecordCreationWorkItemsWindow,
   loadEventsWorkspaceBootstrap,
   loadOptionExposuresWindow,
   loadPositionsWorkspaceBootstrap,
@@ -52,6 +60,7 @@ import {
   loadReferenceWorkspaceBootstrap,
   loadRiskWorkspaceBootstrap,
   loadSettlementWorkspaceBootstrap,
+  loadWeatherWorkspaceBootstrap,
 } from '../src/entities/app/api.ts'
 
 beforeEach(() => {
@@ -103,6 +112,77 @@ const bootstrapCommodity: ReferenceRecord = {
   commodity_class: 'POWER',
 }
 
+const bootstrapAsset: AssetRecord = {
+  code: 'HSC_PIPE',
+  name: 'Houston Ship Channel Pipe',
+  is_active: true,
+  asset_class: 'PIPELINE',
+  asset_type: 'TRANSMISSION',
+  asset_reality: 'REAL',
+  commodity_code: 'POWER',
+  location_code: 'PJM-WEST',
+  latitude: 40.4406,
+  longitude: -79.9959,
+  capacity_value: 150000,
+  capacity_unit_code: 'MWH',
+  operator_name: 'Desk Ops',
+  operating_status: 'OPERATING',
+}
+
+const bootstrapAssetStandards: AssetStandards = {
+  default_asset_class: 'PIPELINE',
+  default_asset_type_by_class: { PIPELINE: 'TRANSMISSION' },
+  asset_classes: ['PIPELINE'],
+  asset_types_by_class: { PIPELINE: ['TRANSMISSION'] },
+  default_asset_reality: 'REAL',
+  asset_realities: ['REAL', 'SIMULATED'],
+  default_operating_status: 'OPERATING',
+  operating_statuses: ['OPERATING'],
+}
+
+const bootstrapSpatialFeature: SpatialFeatureRecord = {
+  code: 'GULF_ROUTE',
+  name: 'Gulf Route',
+  is_active: true,
+  feature_kind: 'ROUTE',
+  geometry_type: 'LINE',
+  geometry_geojson: {
+    type: 'LineString',
+    coordinates: [
+      [-95.3698, 29.7604],
+      [-95.1, 29.9],
+    ],
+  },
+  entity_type: 'ASSET',
+  entity_code: 'HSC_PIPE',
+  label_latitude: 29.8,
+  label_longitude: -95.2,
+  is_primary: true,
+}
+
+const bootstrapSpatialFeatureStandards: SpatialFeatureStandards = {
+  default_feature_kind: 'REGION',
+  feature_kinds: ['PIPELINE', 'REGION', 'ROUTE'],
+  geometry_types: ['AREA', 'LINE', 'POINT'],
+  entity_types: ['ASSET', 'LOCATION', 'RAIL_ROUTE'],
+}
+
+const bootstrapRailRoute: RailRouteRecord = {
+  code: 'BNSF_WAHA_TO_HSC',
+  name: 'BNSF Waha to Houston Ship Channel',
+  is_active: true,
+  rail_line_code: 'BNSF_SOUTHERN_TRANSCON',
+  origin_location_code: 'WAHA',
+  destination_location_code: 'HOUSTON_SHIP_CHANNEL',
+  service_calendar_code: 'USGC_PORT',
+  route_direction: 'FORWARD',
+  schedule_timezone: 'America/Chicago',
+  placement_cutoff_time_local: '15:00',
+  release_cutoff_time_local: '11:00',
+  placement_free_time_hours: 48,
+  release_free_time_hours: 24,
+}
+
 const bootstrapPriceIndex: PriceIndexRecord = {
   code: 'PJM_DA',
   name: 'PJM Day Ahead',
@@ -137,6 +217,8 @@ const bootstrapLocation: LocationRecord = {
   location_kind: 'POINT',
   location_type: 'HUB',
   market: 'PJM',
+  latitude: 40.4406,
+  longitude: -79.9959,
 }
 
 const bootstrapCounterparty: CounterpartyRecord = {
@@ -166,6 +248,55 @@ const bootstrapExternalDataRun: ExternalDataRunRecord = {
   observation_count: 128,
   error_summary: null,
   created_at: '2026-04-06T00:00:00Z',
+}
+
+const bootstrapPriceSource: PriceSourceReviewRecord = {
+  id: 301,
+  price_index_code: 'WTI_CUSHING_D',
+  price_index_name: 'WTI Cushing Spot Daily',
+  commodity_code: 'WTI',
+  quote_type: 'SPOT',
+  market: 'CUSHING',
+  location_code: null,
+  price_unit_code: 'BBL',
+  price_currency_code: 'USD',
+  price_index_is_active: true,
+  provider: 'EIA',
+  dataset_code: null,
+  series_id: 'PET.RWTC.D',
+  frequency: 'daily',
+  source_unit: 'BBL',
+  source_currency_code: 'USD',
+  transform_rule: null,
+  ingestion_method: 'EIA API pull',
+  ingestion_mode: 'Admin manual sync or login-triggered due check',
+  source_system: 'U.S. Energy Information Administration',
+  source_endpoint: 'https://api.eia.gov/v2',
+  sync_job_name: 'sync_eia_price_data',
+  default_lookback_days: 30,
+  is_active: true,
+  review_status: 'current',
+  provider_health_status: 'healthy',
+  scheduler_interval_minutes: 60,
+  success_sla_hours: 48,
+  due_for_sync: false,
+  provider_latest_observation_at: '2026-04-06T00:05:00Z',
+  provider_observation_age_hours: 0.5,
+  latest_run_status: 'SUCCEEDED',
+  latest_run_id: 101,
+  last_success_at: '2026-04-06T00:05:00Z',
+  provider_error_summary: null,
+  latest_observation_date: '2026-04-05',
+  latest_value: 66.1,
+  latest_unit_code: 'BBL',
+  latest_currency_code: 'USD',
+  latest_source_revision: 'rev-1',
+  latest_source_published_at: '2026-04-05T17:00:00Z',
+  latest_downloaded_at: '2026-04-06T00:05:00Z',
+  latest_observation_run_id: 101,
+  created_at: '2026-04-06T00:00:00Z',
+  updated_at: '2026-04-06T00:00:00Z',
+  version: 1,
 }
 
 const bootstrapTradingSource: TradingSourceRecord = {
@@ -489,6 +620,42 @@ test('loadCoreWorkspaceBootstrap fetches only the shell-critical datasets', asyn
   )
 })
 
+test('loadAssetMapScopeSummary sends the current Home map filters to the reference API', async () => {
+  fetchJsonMock.mockResolvedValue({
+    total_count: 2523,
+    total_map_ready_count: 2401,
+    filtered_total_count: 612,
+    filtered_map_ready_count: 587,
+  })
+
+  const payload = await loadAssetMapScopeSummary(
+    'https://example.test/api',
+    {
+      hiddenGeographies: ['North America', 'EMEA'],
+      selectedCountryCode: 'US',
+      selectedSubdivisionCode: 'US-TX',
+      hiddenActivities: ['Positions'],
+      hiddenSubtypes: ['Pipeline', 'Storage'],
+    },
+    authenticatedReadOptions,
+  )
+
+  assert.deepEqual(payload, {
+    total_count: 2523,
+    total_map_ready_count: 2401,
+    filtered_total_count: 612,
+    filtered_map_ready_count: 587,
+  })
+  assert.equal(
+    fetchJsonMock.mock.calls[0]?.[0],
+    'https://example.test/api/reference/assets/map-scope-summary?hidden_geography=North+America&hidden_geography=EMEA&selected_country_code=US&selected_subdivision_code=US-TX&hidden_activity=Positions&hidden_subtype=Pipeline&hidden_subtype=Storage',
+  )
+  assert.deepEqual(fetchJsonMock.mock.calls[0]?.[1], {
+    cache: 'no-store',
+    headers: authenticatedReadOptions.readHeaders,
+  })
+})
+
 test('loadTradeMetadata fetches the server-owned trade contract through typed helpers', async () => {
   fetchJsonMock.mockResolvedValue({
     contract_version: 1,
@@ -718,7 +885,15 @@ test('workspace loaders apply bounded bootstrap windows to large operational dat
       ['https://example.test/api/deliveries?limit=251', [{ delivery_id: 'DLV-1' }]],
       ['https://example.test/api/confirmations?limit=251', [{ confirmation_id: 1 }]],
       ['https://example.test/api/operations/work-items?queue=operations&limit=251', [{ item_id: 1 }]],
+      [
+        'https://example.test/api/operations/document-record-creation-requests?queue=operations&limit=251',
+        [{ request_id: 101 }],
+      ],
       ['https://example.test/api/operations/work-items?queue=settlement&limit=251', [{ item_id: 2 }]],
+      [
+        'https://example.test/api/operations/document-record-creation-requests?queue=settlement&limit=251',
+        [{ request_id: 201 }],
+      ],
       ['https://example.test/api/settlement/invoices?limit=251', [{ invoice_id: 11 }]],
       ['https://example.test/api/settlement/payments?limit=251', [{ payment_id: 21 }]],
     ])
@@ -745,12 +920,16 @@ test('workspace loaders apply bounded bootstrap windows to large operational dat
   assert.deepEqual(operations.confirmationsWindow, { loadedCount: 1, hasMore: false })
   assert.deepEqual(operations.workItems, [{ item_id: 1 }])
   assert.deepEqual(operations.workItemsWindow, { loadedCount: 1, hasMore: false })
+  assert.deepEqual(operations.operationsDocumentRecordCreationRequests, [{ request_id: 101 }])
+  assert.deepEqual(operations.operationsDocumentRecordCreationRequestsWindow, { loadedCount: 1, hasMore: false })
   assert.deepEqual(settlement.invoices, [{ invoice_id: 11 }])
   assert.deepEqual(settlement.invoicesWindow, { loadedCount: 1, hasMore: false })
   assert.deepEqual(settlement.payments, [{ payment_id: 21 }])
   assert.deepEqual(settlement.paymentsWindow, { loadedCount: 1, hasMore: false })
   assert.deepEqual(settlement.workItems, [{ item_id: 2 }])
   assert.deepEqual(settlement.workItemsWindow, { loadedCount: 1, hasMore: false })
+  assert.deepEqual(settlement.settlementDocumentRecordCreationRequests, [{ request_id: 201 }])
+  assert.deepEqual(settlement.settlementDocumentRecordCreationRequestsWindow, { loadedCount: 1, hasMore: false })
 })
 
 test('windowed trade loaders trim the extra row and use offset for follow-on pages', async () => {
@@ -783,7 +962,15 @@ test('large faux-book loaders stay bounded on the first page across every bootst
       ['https://example.test/api/deliveries?limit=251', makeStringRows('delivery_id', 'DLV', 251)],
       ['https://example.test/api/confirmations?limit=251', makeNumberRows('confirmation_id', 251)],
       ['https://example.test/api/operations/work-items?queue=operations&limit=251', makeNumberRows('item_id', 251)],
+      [
+        'https://example.test/api/operations/document-record-creation-requests?queue=operations&limit=251',
+        makeNumberRows('request_id', 251),
+      ],
       ['https://example.test/api/operations/work-items?queue=settlement&limit=251', makeNumberRows('item_id', 251, 1000)],
+      [
+        'https://example.test/api/operations/document-record-creation-requests?queue=settlement&limit=251',
+        makeNumberRows('request_id', 251, 1000),
+      ],
       ['https://example.test/api/settlement/invoices?limit=251', makeNumberRows('invoice_id', 251)],
       ['https://example.test/api/settlement/payments?limit=251', makeNumberRows('payment_id', 251)],
     ])
@@ -802,7 +989,9 @@ test('large faux-book loaders stay bounded on the first page across every bootst
     deliveries,
     confirmations,
     operationsWorkItems,
+    operationsDocumentRecordCreationRequests,
     settlementWorkItems,
+    settlementDocumentRecordCreationRequests,
     invoices,
     payments,
   ] = await Promise.all([
@@ -812,7 +1001,9 @@ test('large faux-book loaders stay bounded on the first page across every bootst
     loadDeliveriesWindow('https://example.test/api'),
     loadTradeConfirmationsWindow('https://example.test/api'),
     loadTradeWorkflowItemsWindow('https://example.test/api', 'operations'),
+    loadDocumentRecordCreationWorkItemsWindow('https://example.test/api', 'operations'),
     loadTradeWorkflowItemsWindow('https://example.test/api', 'settlement'),
+    loadDocumentRecordCreationWorkItemsWindow('https://example.test/api', 'settlement'),
     loadTradeInvoicesWindow('https://example.test/api'),
     loadTradePaymentsWindow('https://example.test/api'),
   ])
@@ -841,9 +1032,17 @@ test('large faux-book loaders stay bounded on the first page across every bootst
   assert.equal(operationsWorkItems.rows.at(-1)?.item_id, 250)
   assert.deepEqual(operationsWorkItems.window, { loadedCount: 250, hasMore: true })
 
+  assert.equal(operationsDocumentRecordCreationRequests.rows.length, 250)
+  assert.equal(operationsDocumentRecordCreationRequests.rows.at(-1)?.request_id, 250)
+  assert.deepEqual(operationsDocumentRecordCreationRequests.window, { loadedCount: 250, hasMore: true })
+
   assert.equal(settlementWorkItems.rows.length, 250)
   assert.equal(settlementWorkItems.rows.at(-1)?.item_id, 1249)
   assert.deepEqual(settlementWorkItems.window, { loadedCount: 250, hasMore: true })
+
+  assert.equal(settlementDocumentRecordCreationRequests.rows.length, 250)
+  assert.equal(settlementDocumentRecordCreationRequests.rows.at(-1)?.request_id, 1249)
+  assert.deepEqual(settlementDocumentRecordCreationRequests.window, { loadedCount: 250, hasMore: true })
 
   assert.equal(invoices.rows.length, 250)
   assert.equal(invoices.rows.at(-1)?.invoice_id, 250)
@@ -894,6 +1093,11 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
       ['https://example.test/api/reference/units?limit=2000', [bootstrapUnit]],
       ['https://example.test/api/reference/locations?limit=2000', [bootstrapLocation]],
       ['https://example.test/api/reference/locations/standards', { location_kinds: ['HUB'] }],
+      ['https://example.test/api/reference/rail-routes?limit=2000', [bootstrapRailRoute]],
+      ['https://example.test/api/reference/spatial-features?limit=2000', [bootstrapSpatialFeature]],
+      ['https://example.test/api/reference/spatial-features/standards', bootstrapSpatialFeatureStandards],
+      ['https://example.test/api/reference/assets?limit=2000', [bootstrapAsset]],
+      ['https://example.test/api/reference/assets/standards', bootstrapAssetStandards],
       ['https://example.test/api/reference/counterparties?limit=2000', [bootstrapCounterparty]],
       ['https://example.test/api/reference/counterparties/standards', { credit_statuses: ['APPROVED'] }],
       ['https://example.test/api/reference/portfolios?limit=2000', [bootstrapPortfolio]],
@@ -911,6 +1115,11 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
   assert.deepEqual(payload.books, [bootstrapBook])
   assert.deepEqual(payload.commodities, [bootstrapCommodity])
   assert.deepEqual(payload.locationStandards, { location_kinds: ['HUB'] })
+  assert.deepEqual(payload.railRoutes, [bootstrapRailRoute])
+  assert.deepEqual(payload.spatialFeatures, [bootstrapSpatialFeature])
+  assert.deepEqual(payload.spatialFeatureStandards, bootstrapSpatialFeatureStandards)
+  assert.deepEqual(payload.assets, [bootstrapAsset])
+  assert.deepEqual(payload.assetStandards, bootstrapAssetStandards)
   assert.deepEqual(payload.counterpartyStandards, { credit_statuses: ['APPROVED'] })
   assert.deepEqual(payload.counterpartyCreditProfiles, [])
   assert.deepEqual(payload.counterpartyExternalCreditSnapshots, [])
@@ -920,6 +1129,9 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
   const firstCurrency: CurrencyRecord = payload.currencies[0]!
   const firstUnit: UnitRecord = payload.units[0]!
   const firstLocation: LocationRecord = payload.locations[0]!
+  const firstRailRoute: RailRouteRecord = payload.railRoutes[0]!
+  const firstSpatialFeature: SpatialFeatureRecord = payload.spatialFeatures[0]!
+  const firstAsset: AssetRecord = payload.assets[0]!
   const firstCounterparty: CounterpartyRecord = payload.counterparties[0]!
   const firstPortfolio: PortfolioRecord = payload.portfolios[0]!
 
@@ -928,8 +1140,28 @@ test('loadReferenceWorkspaceBootstrap keeps core reference data even when option
   assert.equal(firstCurrency.code, 'USD')
   assert.equal(firstUnit.code, 'MWH')
   assert.equal(firstLocation.code, 'PJM-WEST')
+  assert.equal(firstRailRoute.code, 'BNSF_WAHA_TO_HSC')
+  assert.equal(firstSpatialFeature.code, 'GULF_ROUTE')
+  assert.equal(firstAsset.code, 'HSC_PIPE')
+  assert.equal(firstAsset.asset_reality, 'REAL')
   assert.equal(firstCounterparty.code, 'CP-1')
   assert.equal(firstPortfolio.code, 'PTF-1')
+})
+
+test('windowed loaders cap oversized bootstrap requests at the API list contract', async () => {
+  fetchJsonMock.mockImplementation(async (url: string) => {
+    if (url.endsWith('/trades?limit=2000')) {
+      return makeStringRows('trade_id', 'TRD', 2000)
+    }
+
+    throw new Error(`Unexpected URL: ${url}`)
+  })
+
+  const page = await loadTradesWindow('https://example.test/api', undefined, 0, 5000)
+
+  assert.equal(page.rows.length, 1999)
+  assert.equal(page.rows.at(-1)?.trade_id, 'TRD-1999')
+  assert.deepEqual(page.window, { loadedCount: 1999, hasMore: true })
 })
 
 test('loadAdminWorkspaceBootstrap returns empty admin data without an authenticated header set', async () => {
@@ -940,11 +1172,81 @@ test('loadAdminWorkspaceBootstrap returns empty admin data without an authentica
   assert.deepEqual(payload, {
     externalDataRuns: [],
     externalDataSyncStatus: null,
+    externalDataPriceSources: [],
     tradingSources: [],
     weatherLocations: [],
     weatherSyncStatus: null,
   })
   assert.equal(fetchJsonMock.mock.calls.length, 0)
+})
+
+test('loadWeatherWorkspaceBootstrap tolerates partial public weather endpoint failures', async () => {
+  fetchJsonMock.mockImplementation(async (url: string) => {
+    if (url.endsWith('/weather/locations')) {
+      return [{ code: 'HOUSTON_GC' }]
+    }
+    if (url.endsWith('/weather/sync/status')) {
+      throw new Error('sync unavailable')
+    }
+    throw new Error(`Unexpected URL: ${url}`)
+  })
+
+  const payload = await loadWeatherWorkspaceBootstrap('https://example.test/api', {
+    adminHeaders: authenticatedReadOptions.readHeaders,
+    readHeaders: authenticatedReadOptions.readHeaders,
+  })
+
+  assert.deepEqual(payload, {
+    weatherLocations: [{ code: 'HOUSTON_GC' }],
+    weatherSyncStatus: null,
+  })
+  assert.equal(fetchJsonMock.mock.calls.length, 2)
+})
+
+test('loadWeatherWorkspaceBootstrap falls back to admin weather routes when the public routes are missing', async () => {
+  fetchJsonMock.mockImplementation(async (url: string) => {
+    if (url.endsWith('/weather/locations')) {
+      const error = new Error('Request failed: 404')
+      ;(error as Error & { status?: number }).status = 404
+      error.name = 'ApiError'
+      throw error
+    }
+    if (url.endsWith('/weather/sync/status')) {
+      const error = new Error('Request failed: 404')
+      ;(error as Error & { status?: number }).status = 404
+      error.name = 'ApiError'
+      throw error
+    }
+    if (url.endsWith('/admin/weather/locations?is_active=true')) {
+      return [{ code: 'HOUSTON_GC' }]
+    }
+    if (url.endsWith('/admin/weather/sync/status?include_inactive=false')) {
+      return { locations: [{ code: 'HOUSTON_GC', health_status: 'HEALTHY' }] }
+    }
+    throw new Error(`Unexpected URL: ${url}`)
+  })
+
+  const payload = await loadWeatherWorkspaceBootstrap('https://example.test/api', {
+    adminHeaders: authenticatedReadOptions.readHeaders,
+    readHeaders: authenticatedReadOptions.readHeaders,
+  })
+
+  assert.deepEqual(payload, {
+    weatherLocations: [{ code: 'HOUSTON_GC' }],
+    weatherSyncStatus: { locations: [{ code: 'HOUSTON_GC', health_status: 'HEALTHY' }] },
+  })
+  assert.equal(fetchJsonMock.mock.calls.length, 4)
+})
+
+test('loadWeatherWorkspaceBootstrap surfaces a weather group failure when every endpoint fails', async () => {
+  fetchJsonMock.mockRejectedValue(new Error('weather unavailable'))
+
+  await assert.rejects(() =>
+    loadWeatherWorkspaceBootstrap('https://example.test/api', {
+      adminHeaders: authenticatedReadOptions.readHeaders,
+      readHeaders: authenticatedReadOptions.readHeaders,
+    }),
+  )
 })
 
 test('loadAdminWorkspaceBootstrap tolerates partial admin endpoint failures', async () => {
@@ -954,6 +1256,9 @@ test('loadAdminWorkspaceBootstrap tolerates partial admin endpoint failures', as
     }
     if (url.endsWith('/admin/external-data/status')) {
       throw new Error('status unavailable')
+    }
+    if (url.endsWith('/admin/external-data/price-sources?limit=1000')) {
+      return [bootstrapPriceSource]
     }
     if (url.endsWith('/admin/trading-sources?limit=500')) {
       return [bootstrapTradingSource]
@@ -975,16 +1280,19 @@ test('loadAdminWorkspaceBootstrap tolerates partial admin endpoint failures', as
   assert.deepEqual(payload, {
     externalDataRuns: [bootstrapExternalDataRun],
     externalDataSyncStatus: null,
+    externalDataPriceSources: [bootstrapPriceSource],
     tradingSources: [bootstrapTradingSource],
     weatherLocations: [{ code: 'HOUSTON_GC' }],
     weatherSyncStatus: { latest_run: '2026-04-06T00:00:00Z' },
   })
-  assert.equal(fetchJsonMock.mock.calls.length, 5)
+  assert.equal(fetchJsonMock.mock.calls.length, 6)
   assert.strictEqual(fetchJsonMock.mock.calls[0]?.[1]?.headers, headers)
 
   const firstRun: ExternalDataRunRecord = payload.externalDataRuns[0]!
   const firstSource: TradingSourceRecord = payload.tradingSources[0]!
+  const firstPriceSource: PriceSourceReviewRecord = payload.externalDataPriceSources[0]!
 
   assert.equal(firstRun.id, 101)
   assert.equal(firstSource.source_id, 'SRC-1')
+  assert.equal(firstPriceSource.price_index_code, 'WTI_CUSHING_D')
 })

@@ -11,18 +11,22 @@ import {
   type AssistantActionType,
   type AssistantAgentProfileKind,
   type AssistantOutcomeMetrics,
+  type AssistantPromptNavigationOutcomeInsight,
   type AssistantRunFeedbackInsight,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import {
   buildAssistantActionTypeOutcomeRows,
   buildAssistantAgentOutcomeRows,
+  buildAssistantPromptNavigationOutcomeRows,
+  buildAssistantPromptNavigationTargetRows,
   buildAssistantProfileOutcomeRows,
   buildAssistantRoleOutcomeRows,
   buildAssistantWorkspaceFeedbackRows,
   formatAssistantActionTypeLabel,
   formatAssistantOutcomeDuration,
   formatAssistantOutcomeRate,
+  type AssistantPromptNavigationOutcomeDisplayRow,
   type AssistantOutcomeMetricDisplayRow,
   type AssistantOutcomeMetricTone,
   type AssistantWorkspaceFeedbackDisplayRow,
@@ -225,6 +229,55 @@ function renderRecentFeedbackRows(
   })
 }
 
+function renderRecentPromptNavigationRows(
+  rows: AssistantPromptNavigationOutcomeDisplayRow[],
+  loading: boolean,
+  formatDate: (value: string | null | undefined) => string,
+  rawRows: AssistantPromptNavigationOutcomeInsight[],
+) {
+  if (loading && rows.length === 0) {
+    return (
+      <>
+        <div className="skeleton-block" />
+        <div className="skeleton-block" />
+      </>
+    )
+  }
+
+  if (rows.length === 0) {
+    return (
+      <div className="empty-state">
+        <strong>No prompt-routing outcomes</strong>
+        <p>Accepted, dismissed, and failed Home handoffs will appear here.</p>
+      </div>
+    )
+  }
+
+  return rows.map((row, index) => {
+    const rawRow = rawRows[index]
+    return (
+      <article key={row.key} className={`assistant-feedback-insight is-${row.tone}`}>
+        <div className="assistant-feedback-insight-head">
+          <div>
+            <strong>{row.title}</strong>
+            <span>{row.subtitle}</span>
+          </div>
+          <span className={`status-pill ${statusClassForTone(row.tone)}`}>
+            {rawRow?.target_view ?? 'invalid'}
+          </span>
+        </div>
+        <p>{row.detail}</p>
+        <div className="assistant-feedback-insight-meta">
+          {row.meta.map((item) => (
+            <span key={item}>{item}</span>
+          ))}
+          <span>{formatDate(rawRow?.updated_at)}</span>
+        </div>
+      </article>
+    )
+  })
+}
+
 export function AssistantOutcomeMetricsPanel({
   authSession,
   formatDate,
@@ -268,6 +321,18 @@ export function AssistantOutcomeMetricsPanel({
     [metrics],
   )
   const recentFeedbackRows = metrics?.recent_feedback ?? []
+  const promptTargetRows = useMemo(
+    () => buildAssistantPromptNavigationTargetRows(metrics?.by_prompt_target ?? []),
+    [metrics],
+  )
+  const recentPromptNavigationRawRows = useMemo(
+    () => metrics?.recent_prompt_navigation_outcomes ?? [],
+    [metrics],
+  )
+  const recentPromptNavigationRows = useMemo(
+    () => buildAssistantPromptNavigationOutcomeRows(recentPromptNavigationRawRows),
+    [recentPromptNavigationRawRows],
+  )
   const advisoryRows = useMemo(
     () => [
       ...(metrics?.by_agent ?? []),
@@ -298,6 +363,21 @@ export function AssistantOutcomeMetricsPanel({
   const totalFeedbackCount = metrics?.total_feedback_count ?? 0
   const helpfulFeedbackCount = metrics?.helpful_feedback_count ?? 0
   const needsWorkFeedbackCount = metrics?.needs_work_feedback_count ?? 0
+  const promptNavigationSummary = metrics?.prompt_navigation_summary ?? {
+    total_outcome_count: 0,
+    accepted_count: 0,
+    dismissed_count: 0,
+    failed_count: 0,
+    acceptance_rate: null,
+    dismiss_rate: null,
+    failure_rate: null,
+  }
+  const promptRuleCandidates = (metrics?.by_prompt_target ?? []).filter(
+    (row) => row.signal === 'CANDIDATE_FOR_RULE',
+  ).length
+  const promptNarrowSignals = (metrics?.by_prompt_target ?? []).filter(
+    (row) => row.signal === 'NARROW' || row.signal === 'RETIRE',
+  ).length
   const oldestPendingAgeSeconds = advisoryRows.reduce<number | null>((currentMax, row) => {
     const nextAge = row.oldest_pending_age_seconds
     if (typeof nextAge !== 'number' || !Number.isFinite(nextAge)) {
@@ -403,7 +483,7 @@ export function AssistantOutcomeMetricsPanel({
           <span className="eyebrow">Assistant Governance</span>
           <h3>Outcome Metrics</h3>
         </div>
-        <p>Advisory promotion and pause signals based on approved, rejected, failed, and stale staged actions.</p>
+        <p>Track answer feedback, prompt-routing outcomes, and staged-action signals without changing authority automatically.</p>
       </div>
 
       {!authSession ? (
@@ -441,6 +521,16 @@ export function AssistantOutcomeMetricsPanel({
               <span>Needs work</span>
               <strong>{needsWorkFeedbackCount}</strong>
               <small>Responses flagged for prompt, evidence, or product follow-up.</small>
+            </article>
+            <article className="assistant-run-summary-card">
+              <span>Prompt handoffs</span>
+              <strong>{promptNavigationSummary.accepted_count}/{promptNavigationSummary.total_outcome_count}</strong>
+              <small>{formatAssistantOutcomeRate(promptNavigationSummary.acceptance_rate)} accepted routing rate.</small>
+            </article>
+            <article className="assistant-run-summary-card">
+              <span>Prompt signals</span>
+              <strong>{promptRuleCandidates}</strong>
+              <small>{promptNarrowSignals} route{promptNarrowSignals === 1 ? '' : 's'} need narrowing or pause.</small>
             </article>
             <article className="assistant-run-summary-card">
               <span>Bounded-review candidates</span>
@@ -563,6 +653,45 @@ export function AssistantOutcomeMetricsPanel({
               </div>
               <div className="assistant-feedback-insight-list">
                 {renderRecentFeedbackRows(recentFeedbackRows, loading, formatDate)}
+              </div>
+            </div>
+
+            <div className="assistant-outcome-column">
+              <div className="assistant-admin-section-head">
+                <div>
+                  <span className="eyebrow">Prompt Routing</span>
+                  <h4>Destination Signals</h4>
+                </div>
+                <span>{promptTargetRows.length} row{promptTargetRows.length === 1 ? '' : 's'}</span>
+              </div>
+              <div className="assistant-outcome-list">
+                {renderOutcomeRows(
+                  promptTargetRows,
+                  loading,
+                  'No prompt-routing destinations',
+                  'Home route outcomes will surface candidate, narrow, and pause signals here.',
+                )}
+              </div>
+            </div>
+
+            <div className="assistant-outcome-column">
+              <div className="assistant-admin-section-head">
+                <div>
+                  <span className="eyebrow">Prompt Routing</span>
+                  <h4>Recent Handoff Outcomes</h4>
+                </div>
+                <span>
+                  {recentPromptNavigationRows.length} item
+                  {recentPromptNavigationRows.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div className="assistant-feedback-insight-list">
+                {renderRecentPromptNavigationRows(
+                  recentPromptNavigationRows,
+                  loading,
+                  formatDate,
+                  recentPromptNavigationRawRows,
+                )}
               </div>
             </div>
           </div>

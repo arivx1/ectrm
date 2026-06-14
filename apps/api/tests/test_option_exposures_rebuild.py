@@ -21,6 +21,7 @@ from apps.api.app.models.event import Event
 from apps.api.app.models.option_exposure import OptionExposure
 from apps.api.app.models.reference_book import ReferenceBook
 from apps.api.app.models.reference_commodity import ReferenceCommodity
+from apps.api.app.models.reference_unit import ReferenceUnit
 from apps.api.app.models.trade import Trade
 from apps.api.app.routes.events import append_event
 from apps.api.app.schemas.event import EventCreate
@@ -49,6 +50,7 @@ class OptionExposuresRebuildScriptTests(unittest.TestCase):
             session.query(OptionExposure).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
+            session.query(ReferenceUnit).delete()
             session.query(ReferenceCommodity).delete()
             session.query(ReferenceBook).delete()
             session.commit()
@@ -76,6 +78,26 @@ class OptionExposuresRebuildScriptTests(unittest.TestCase):
                 commodity_class="CRUDE_OIL",
                 name="WTI Commodity",
                 description="Test commodity",
+                is_active=True,
+                effective_from=None,
+                effective_to=None,
+                created_at=self.base_time,
+                created_by="test-user",
+                updated_at=self.base_time,
+                updated_by="test-user",
+                version=1,
+            )
+        )
+        session.add(
+            ReferenceUnit(
+                code="BBL",
+                name="Barrel",
+                commodity_class="CRUDE_OIL",
+                dimension="VOLUME",
+                base_unit_code=None,
+                conversion_factor=None,
+                precision=3,
+                description="Test barrel unit",
                 is_active=True,
                 effective_from=None,
                 effective_to=None,

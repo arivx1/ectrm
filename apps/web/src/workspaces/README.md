@@ -2,8 +2,9 @@
 
 Top-level product areas should live here:
 
-- guide
 - dashboard
+- home
+- prompt
 - trading
 - deliveries
 - scheduling
@@ -11,6 +12,7 @@ Top-level product areas should live here:
 - operations
 - settlement
 - reports
+- map
 - reference-data
 - admin
 - settings

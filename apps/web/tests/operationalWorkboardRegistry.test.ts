@@ -12,7 +12,15 @@ describe('operational workboard registry', () => {
     )
 
     expect(resourceKeys).toEqual(
-      new Set(['confirmations', 'deliveries', 'shipments', 'invoices', 'payments', 'work_items']),
+      new Set([
+        'confirmations',
+        'deliveries',
+        'document_record_creation_requests',
+        'shipments',
+        'invoices',
+        'payments',
+        'work_items',
+      ]),
     )
   })
 

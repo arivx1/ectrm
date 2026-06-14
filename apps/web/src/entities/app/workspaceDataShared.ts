@@ -8,9 +8,16 @@ export type ExternalDataSyncProvider =
   | 'EIA'
   | 'EIA_FUNDAMENTALS'
   | 'FRED'
+  | 'ALPHA_VANTAGE'
+  | 'BLS_PPI'
+  | 'WORLD_BANK'
+  | 'USDA_NASS'
+  | 'EIA_WHOLESALE_POWER'
   | 'CFTC'
   | 'CAISO'
   | 'ERCOT'
+  | 'MISO'
+  | 'NYISO'
   | 'KALSHI'
 
 export function hasAdministrativeAccess(session: StoredAuthSession | null): boolean {

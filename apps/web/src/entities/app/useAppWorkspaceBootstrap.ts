@@ -6,6 +6,7 @@ import {
   loadCoreWorkspaceBootstrap,
   loadDeliveriesWindow,
   loadDeliveriesWorkspaceBootstrap,
+  loadDocumentRecordCreationWorkItemsWindow,
   loadEventsWorkspaceBootstrap,
   loadOptionExposuresWindow,
   loadOperationsWorkspaceBootstrap,
@@ -22,6 +23,7 @@ import {
   loadTradeWorkflowItemsWindow,
   loadRiskWorkspaceBootstrap,
   loadSettlementWorkspaceBootstrap,
+  loadWeatherWorkspaceBootstrap,
   type WorkspaceBootstrapSummary,
   type WorkspaceCollectionWindow,
   type OperationalResourceDescriptor,
@@ -34,6 +36,7 @@ import {
 } from './workspaceRefresh'
 import {
   buildRequestedGroups,
+  deriveRetryableWorkspaceGroups,
   EMPTY_GROUP_ERRORS,
   EMPTY_GROUP_FLAGS,
   VIEW_DATA_GROUPS,
@@ -58,10 +61,14 @@ import {
 } from '../../shared/mutation'
 import { buildFallbackTradeMetadata, type TradeMetadata } from '../../shared/tradeMetadata'
 import {
+  DEFAULT_ASSET_STANDARDS,
   DEFAULT_COUNTERPARTY_STANDARDS,
   DEFAULT_LOCATION_STANDARDS,
+  DEFAULT_SPATIAL_FEATURE_STANDARDS,
 } from '../../shared/models'
 import type {
+  AssetRecord,
+  AssetStandards,
   CounterpartyCreditProfileRecord,
   CounterpartyCreditReportRow,
   CounterpartyExternalCreditSnapshotRecord,
@@ -76,9 +83,14 @@ import type {
   OptionExposureRow,
   PositionRow,
   DeliveryRecord,
+  DocumentRecordCreationWorkItemRecord,
   PortfolioRecord,
   PriceIndexRecord,
+  PriceSourceReviewRecord,
+  RailRouteRecord,
   ReferenceRecord,
+  SpatialFeatureRecord,
+  SpatialFeatureStandards,
   Trade,
   TradeConfirmationRecord,
   TradeInvoiceRecord,
@@ -110,7 +122,9 @@ function createEmptyCollectionWindows(): WorkspaceCollectionWindows {
     deliveries: { loadedCount: 0, hasMore: false },
     confirmations: { loadedCount: 0, hasMore: false },
     operationsWorkItems: { loadedCount: 0, hasMore: false },
+    operationsDocumentRecordCreationRequests: { loadedCount: 0, hasMore: false },
     settlementWorkItems: { loadedCount: 0, hasMore: false },
+    settlementDocumentRecordCreationRequests: { loadedCount: 0, hasMore: false },
     invoices: { loadedCount: 0, hasMore: false },
     payments: { loadedCount: 0, hasMore: false },
   }
@@ -123,7 +137,9 @@ const EMPTY_COLLECTION_LOADING: WorkspaceCollectionLoadingFlags = {
   deliveries: false,
   confirmations: false,
   operationsWorkItems: false,
+  operationsDocumentRecordCreationRequests: false,
   settlementWorkItems: false,
+  settlementDocumentRecordCreationRequests: false,
   invoices: false,
   payments: false,
 }
@@ -135,7 +151,9 @@ const EMPTY_COLLECTION_ERRORS: WorkspaceCollectionErrors = {
   deliveries: '',
   confirmations: '',
   operationsWorkItems: '',
+  operationsDocumentRecordCreationRequests: '',
   settlementWorkItems: '',
+  settlementDocumentRecordCreationRequests: '',
   invoices: '',
   payments: '',
 }
@@ -167,7 +185,13 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([])
   const [tradeConfirmations, setTradeConfirmations] = useState<TradeConfirmationRecord[]>([])
   const [operationsTradeWorkflowItems, setOperationsTradeWorkflowItems] = useState<TradeWorkflowItemRecord[]>([])
+  const [operationsDocumentRecordCreationRequests, setOperationsDocumentRecordCreationRequests] = useState<
+    DocumentRecordCreationWorkItemRecord[]
+  >([])
   const [settlementTradeWorkflowItems, setSettlementTradeWorkflowItems] = useState<TradeWorkflowItemRecord[]>([])
+  const [settlementDocumentRecordCreationRequests, setSettlementDocumentRecordCreationRequests] = useState<
+    DocumentRecordCreationWorkItemRecord[]
+  >([])
   const [tradeWorkflowItems, setTradeWorkflowItems] = useState<TradeWorkflowItemRecord[]>([])
   const [tradeInvoices, setTradeInvoices] = useState<TradeInvoiceRecord[]>([])
   const [tradePayments, setTradePayments] = useState<TradePaymentRecord[]>([])
@@ -178,6 +202,13 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const [units, setUnits] = useState<UnitRecord[]>([])
   const [locations, setLocations] = useState<LocationRecord[]>([])
   const [locationStandards, setLocationStandards] = useState<LocationStandards>(DEFAULT_LOCATION_STANDARDS)
+  const [railRoutes, setRailRoutes] = useState<RailRouteRecord[]>([])
+  const [spatialFeatures, setSpatialFeatures] = useState<SpatialFeatureRecord[]>([])
+  const [spatialFeatureStandards, setSpatialFeatureStandards] = useState<SpatialFeatureStandards>(
+    DEFAULT_SPATIAL_FEATURE_STANDARDS,
+  )
+  const [assets, setAssets] = useState<AssetRecord[]>([])
+  const [assetStandards, setAssetStandards] = useState<AssetStandards>(DEFAULT_ASSET_STANDARDS)
   const [counterpartyStandards, setCounterpartyStandards] = useState<CounterpartyStandards>(
     DEFAULT_COUNTERPARTY_STANDARDS,
   )
@@ -188,6 +219,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const [portfolios, setPortfolios] = useState<PortfolioRecord[]>([])
   const [externalDataRuns, setExternalDataRuns] = useState<ExternalDataRunRecord[]>([])
   const [externalDataSyncStatus, setExternalDataSyncStatus] = useState<ExternalDataSyncStatusRecord | null>(null)
+  const [externalDataPriceSources, setExternalDataPriceSources] = useState<PriceSourceReviewRecord[]>([])
   const [tradingSources, setTradingSources] = useState<TradingSourceRecord[]>([])
   const [weatherLocations, setWeatherLocations] = useState<WeatherLocationRecord[]>([])
   const [weatherSyncStatus, setWeatherSyncStatus] = useState<WeatherSyncStatusRecord | null>(null)
@@ -219,8 +251,14 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
   const operationsTradeWorkflowItemsRef = useRef(operationsTradeWorkflowItems)
   operationsTradeWorkflowItemsRef.current = operationsTradeWorkflowItems
 
+  const operationsDocumentRecordCreationRequestsRef = useRef(operationsDocumentRecordCreationRequests)
+  operationsDocumentRecordCreationRequestsRef.current = operationsDocumentRecordCreationRequests
+
   const settlementTradeWorkflowItemsRef = useRef(settlementTradeWorkflowItems)
   settlementTradeWorkflowItemsRef.current = settlementTradeWorkflowItems
+
+  const settlementDocumentRecordCreationRequestsRef = useRef(settlementDocumentRecordCreationRequests)
+  settlementDocumentRecordCreationRequestsRef.current = settlementDocumentRecordCreationRequests
 
   const tradeWorkflowItemsRef = useRef(tradeWorkflowItems)
   tradeWorkflowItemsRef.current = tradeWorkflowItems
@@ -273,6 +311,14 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setGroupErrors((current) => ({ ...current, [group]: message }))
   }
 
+  function logWorkspaceGroupError(group: AppDataGroup, message: string) {
+    if (typeof console === 'undefined' || !message.trim()) {
+      return
+    }
+
+    console.error(`[WorkspaceData] ${group} group error: ${message}`)
+  }
+
   function setCollectionWindow(key: WorkspaceCollectionKey, window: WorkspaceCollectionWindow) {
     setCollectionWindows((current) => ({ ...current, [key]: window }))
   }
@@ -293,6 +339,10 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setDeliveries([])
     setTradeConfirmations([])
     syncTradeWorkflowItems([], [])
+    operationsDocumentRecordCreationRequestsRef.current = []
+    setOperationsDocumentRecordCreationRequests([])
+    settlementDocumentRecordCreationRequestsRef.current = []
+    setSettlementDocumentRecordCreationRequests([])
     setTradeInvoices([])
     setTradePayments([])
     setBooks([])
@@ -302,6 +352,11 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setUnits([])
     setLocations([])
     setLocationStandards(DEFAULT_LOCATION_STANDARDS)
+    setRailRoutes([])
+    setSpatialFeatures([])
+    setSpatialFeatureStandards(DEFAULT_SPATIAL_FEATURE_STANDARDS)
+    setAssets([])
+    setAssetStandards(DEFAULT_ASSET_STANDARDS)
     setCounterparties([])
     setCounterpartyCreditProfiles([])
     setCounterpartyExternalCreditSnapshots([])
@@ -310,6 +365,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     setPortfolios([])
     setExternalDataRuns([])
     setExternalDataSyncStatus(null)
+    setExternalDataPriceSources([])
     setTradingSources([])
     setWeatherLocations([])
     setWeatherSyncStatus(null)
@@ -432,6 +488,11 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         setUnits(payload.units as UnitRecord[])
         setLocations(payload.locations as LocationRecord[])
         setLocationStandards(payload.locationStandards as LocationStandards)
+        setRailRoutes(payload.railRoutes as RailRouteRecord[])
+        setSpatialFeatures(payload.spatialFeatures as SpatialFeatureRecord[])
+        setSpatialFeatureStandards(payload.spatialFeatureStandards as SpatialFeatureStandards)
+        setAssets(payload.assets as AssetRecord[])
+        setAssetStandards(payload.assetStandards as AssetStandards)
         setCounterparties(payload.counterparties as CounterpartyRecord[])
         setCounterpartyCreditProfiles(payload.counterpartyCreditProfiles as CounterpartyCreditProfileRecord[])
         setCounterpartyExternalCreditSnapshots(
@@ -466,6 +527,10 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
           hasMore: payload.workItemsWindow.hasMore,
         })
         setCollectionError('operationsWorkItems', '')
+        operationsDocumentRecordCreationRequestsRef.current = payload.operationsDocumentRecordCreationRequests
+        setOperationsDocumentRecordCreationRequests(payload.operationsDocumentRecordCreationRequests)
+        setCollectionWindow('operationsDocumentRecordCreationRequests', payload.operationsDocumentRecordCreationRequestsWindow)
+        setCollectionError('operationsDocumentRecordCreationRequests', '')
         markGroupLoaded('operations', true)
       },
       settlement: async () => {
@@ -482,6 +547,10 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
           hasMore: payload.workItemsWindow.hasMore,
         })
         setCollectionError('settlementWorkItems', '')
+        settlementDocumentRecordCreationRequestsRef.current = payload.settlementDocumentRecordCreationRequests
+        setSettlementDocumentRecordCreationRequests(payload.settlementDocumentRecordCreationRequests)
+        setCollectionWindow('settlementDocumentRecordCreationRequests', payload.settlementDocumentRecordCreationRequestsWindow)
+        setCollectionError('settlementDocumentRecordCreationRequests', '')
         markGroupLoaded('settlement', true)
       },
       reports: async () => {
@@ -489,10 +558,20 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         setCounterpartyCreditReport(payload.counterpartyCreditReport as CounterpartyCreditReportRow[])
         markGroupLoaded('reports', true)
       },
+      weather: async () => {
+        const payload = await loadWeatherWorkspaceBootstrap(appConfig.apiBase, {
+          adminHeaders,
+          readHeaders,
+        })
+        setWeatherLocations(payload.weatherLocations as WeatherLocationRecord[])
+        setWeatherSyncStatus(payload.weatherSyncStatus as WeatherSyncStatusRecord | null)
+        markGroupLoaded('weather', true)
+      },
       admin: async () => {
         const payload = await loadAdminWorkspaceBootstrap(appConfig.apiBase, { adminHeaders })
         setExternalDataRuns(payload.externalDataRuns as ExternalDataRunRecord[])
         setExternalDataSyncStatus(payload.externalDataSyncStatus as ExternalDataSyncStatusRecord | null)
+        setExternalDataPriceSources(payload.externalDataPriceSources as PriceSourceReviewRecord[])
         setTradingSources(payload.tradingSources as TradingSourceRecord[])
         setWeatherLocations(payload.weatherLocations as WeatherLocationRecord[])
         setWeatherSyncStatus(payload.weatherSyncStatus as WeatherSyncStatusRecord | null)
@@ -516,6 +595,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
           nextError instanceof Error
             ? nextError.message
             : `Could not load ${group === 'core' ? 'the app shell' : `${group} workspace data`}.`
+        logWorkspaceGroupError(group, message)
         setGroupError(group, message)
         if (group === 'core') {
           setError(message)
@@ -614,6 +694,20 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         setCollectionError('operationsWorkItems', '')
         markGroupLoaded('operations', true)
       },
+      operationsDocumentRecordCreationRequests: async () => {
+        const payload = await loadDocumentRecordCreationWorkItemsWindow(
+          appConfig.apiBase,
+          'operations',
+          { readHeaders },
+          0,
+          refreshWindowSize('operationsDocumentRecordCreationRequests'),
+        )
+        operationsDocumentRecordCreationRequestsRef.current = payload.rows
+        setOperationsDocumentRecordCreationRequests(payload.rows)
+        setCollectionWindow('operationsDocumentRecordCreationRequests', payload.window)
+        setCollectionError('operationsDocumentRecordCreationRequests', '')
+        markGroupLoaded('operations', true)
+      },
       settlementWorkItems: async () => {
         const payload = await loadTradeWorkflowItemsWindow(
           appConfig.apiBase,
@@ -625,6 +719,20 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         syncTradeWorkflowItems(operationsTradeWorkflowItemsRef.current, payload.rows)
         setCollectionWindow('settlementWorkItems', payload.window)
         setCollectionError('settlementWorkItems', '')
+        markGroupLoaded('settlement', true)
+      },
+      settlementDocumentRecordCreationRequests: async () => {
+        const payload = await loadDocumentRecordCreationWorkItemsWindow(
+          appConfig.apiBase,
+          'settlement',
+          { readHeaders },
+          0,
+          refreshWindowSize('settlementDocumentRecordCreationRequests'),
+        )
+        settlementDocumentRecordCreationRequestsRef.current = payload.rows
+        setSettlementDocumentRecordCreationRequests(payload.rows)
+        setCollectionWindow('settlementDocumentRecordCreationRequests', payload.window)
+        setCollectionError('settlementDocumentRecordCreationRequests', '')
         markGroupLoaded('settlement', true)
       },
       invoices: async () => {
@@ -758,6 +866,22 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
           hasMore: payload.window.hasMore,
         })
       },
+      operationsDocumentRecordCreationRequests: async () => {
+        const currentRows = operationsDocumentRecordCreationRequestsRef.current
+        const payload = await loadDocumentRecordCreationWorkItemsWindow(
+          appConfig.apiBase,
+          'operations',
+          { readHeaders },
+          currentRows.length,
+        )
+        const nextRows = mergeCollectionRows(currentRows, payload.rows, (item) => item.request_id)
+        operationsDocumentRecordCreationRequestsRef.current = nextRows
+        setOperationsDocumentRecordCreationRequests(nextRows)
+        setCollectionWindow('operationsDocumentRecordCreationRequests', {
+          loadedCount: nextRows.length,
+          hasMore: payload.window.hasMore,
+        })
+      },
       settlementWorkItems: async () => {
         const currentRows = settlementTradeWorkflowItemsRef.current
         const payload = await loadTradeWorkflowItemsWindow(
@@ -770,6 +894,22 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         syncTradeWorkflowItems(operationsTradeWorkflowItemsRef.current, nextQueueRows)
         setCollectionWindow('settlementWorkItems', {
           loadedCount: nextQueueRows.length,
+          hasMore: payload.window.hasMore,
+        })
+      },
+      settlementDocumentRecordCreationRequests: async () => {
+        const currentRows = settlementDocumentRecordCreationRequestsRef.current
+        const payload = await loadDocumentRecordCreationWorkItemsWindow(
+          appConfig.apiBase,
+          'settlement',
+          { readHeaders },
+          currentRows.length,
+        )
+        const nextRows = mergeCollectionRows(currentRows, payload.rows, (item) => item.request_id)
+        settlementDocumentRecordCreationRequestsRef.current = nextRows
+        setSettlementDocumentRecordCreationRequests(nextRows)
+        setCollectionWindow('settlementDocumentRecordCreationRequests', {
+          loadedCount: nextRows.length,
           hasMore: payload.window.hasMore,
         })
       },
@@ -861,6 +1001,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
         sessionId: current.session_id,
         accessToken: storedSession.accessToken,
         expiresAt: current.expires_at,
+        showStartHere: storedSession.showStartHere ?? false,
         user: current.user,
       }
       saveStoredAuthSession(nextSession)
@@ -881,6 +1022,17 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
 
   const refreshAuthSessionRef = useRef(refreshAuthSession)
   refreshAuthSessionRef.current = refreshAuthSession
+
+  async function handleSessionSync(nextSession: StoredAuthSession | null) {
+    if (nextSession) {
+      saveStoredAuthSession(nextSession)
+    } else {
+      clearStoredAuthSession()
+    }
+
+    setAuthSession(nextSession)
+    setAuthInterruptionReason(null)
+  }
 
   async function handleSessionChange(nextSession: StoredAuthSession | null) {
     if (nextSession) {
@@ -934,6 +1086,46 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     })
   }, [appLoading, authSession, currentView, error])
 
+  const autoRetriedWorkspaceErrorRef = useRef('')
+
+  useEffect(() => {
+    if (appLoading || error || !authSession) {
+      return
+    }
+
+    const retryableGroups = deriveRetryableWorkspaceGroups({
+      currentView,
+      groupErrors,
+      groupLoaded,
+    })
+
+    if (retryableGroups.length === 0) {
+      autoRetriedWorkspaceErrorRef.current = ''
+      return
+    }
+
+    const retrySignature = `${currentView}:${retryableGroups
+      .map((group) => `${group}:${groupErrors[group]}`)
+      .join('|')}`
+
+    if (autoRetriedWorkspaceErrorRef.current === retrySignature) {
+      return
+    }
+
+    autoRetriedWorkspaceErrorRef.current = retrySignature
+
+    const timeoutId = window.setTimeout(() => {
+      void loadDataRef.current({
+        groups: retryableGroups,
+        force: true,
+      })
+    }, 300)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [appLoading, authSession, currentView, error, groupErrors, groupLoaded])
+
   useEffect(() => {
     if (!authSession) {
       return
@@ -981,6 +1173,8 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     authInterruptionReason,
     authSession,
     appLoading,
+    assetStandards,
+    assets,
     books,
     collectionErrors,
     collectionLoadingMore,
@@ -995,12 +1189,14 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     deliveries,
     error,
     events,
+    externalDataPriceSources,
     externalDataRuns,
     externalDataSyncStatus,
     groupErrors,
     groupLoaded,
     groupLoading,
     handleSessionChange,
+    handleSessionSync,
     handleLoadMoreWorkspaceCollection,
     health,
     loadData,
@@ -1010,8 +1206,12 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     portfolios,
     positions,
     priceIndices,
+    railRoutes,
     refreshMutationData,
     operationalResourceDescriptors,
+    operationsDocumentRecordCreationRequests,
+    spatialFeatures,
+    spatialFeatureStandards,
     tradeMetadata,
     tradeMetadataError,
     tradeMetadataSource,
@@ -1021,6 +1221,7 @@ export function useAppWorkspaceBootstrap(currentView: ViewKey) {
     tradeConfirmations,
     tradePayments,
     tradeWorkflowItems,
+    settlementDocumentRecordCreationRequests,
     trades,
     tradingSources,
     units,

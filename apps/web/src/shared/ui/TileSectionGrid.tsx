@@ -78,10 +78,10 @@ export function TileSectionGrid({
   itemClassName = 'dashboard-report-card',
 }: TileSectionGridProps) {
   const itemIds = useMemo(() => items.map((item) => item.id), [items])
-  const { orderedIds, moveItem } = useTileLayoutSection(sectionId, itemIds)
+  const { isCustomizingLayout, orderedIds, moveItem } = useTileLayoutSection(sectionId, itemIds)
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item] as const)), [items])
   const orderedItems = orderedIds.map((itemId) => itemsById.get(itemId)).filter((item): item is TileSectionGridItem => Boolean(item))
-  const movable = orderedItems.length > 1
+  const movable = isCustomizingLayout && orderedItems.length > 1
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {

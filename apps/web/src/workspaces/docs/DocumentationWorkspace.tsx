@@ -1,18 +1,38 @@
-import { type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useMemo, useState } from 'react'
+import {
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 
 import { shouldHandleClientSideNavigation } from '../../app/navigation'
 import { loadRoadmapDocument, type RoadmapDocumentData } from '../../entities/roadmap/api'
+import type { WikiPageSummary } from '../../entities/wiki/api'
 import type { ViewKey } from '../../shared/models'
 import { appConfig } from '../../shared/config'
+import type { StoredAuthSession } from '../../shared/mutation'
 import userManualMarkdown from '../../../../../docs/user-manual.md?raw'
 import { filterGuideSections, parseMarkdownDocument } from './guideDocument'
 import { RoadmapDocument, RoadmapSidebar } from './RoadmapDocument'
+import {
+  type ActiveWikiPageMention,
+  findActiveWikiPageMention,
+  renderWikiMarkdownHtml,
+  replaceActiveWikiPageMention,
+} from './wikiMarkdown'
+import { useWikiDocumentController } from './useWikiDocumentController'
+import type { WikiPageTreeItem } from './wikiTree'
 
-export type DocumentationDocumentKey = 'guide' | 'roadmap'
+export type DocumentationDocumentKey = 'guide' | 'wiki' | 'roadmap'
 export const DEFAULT_DOCUMENTATION_DOCUMENT_KEY: DocumentationDocumentKey = 'guide'
 
 type DocumentationWorkspaceProps = {
   activeDocumentKey: DocumentationDocumentKey
+  authSession: StoredAuthSession | null
   getViewHref: (view: Exclude<ViewKey, 'guide'>) => string
   onDocumentKeyChange: (key: DocumentationDocumentKey) => void
   onOpenView: (view: Exclude<ViewKey, 'guide'>) => void
@@ -45,9 +65,9 @@ const QUICK_ACTIONS: Array<{
   view: Exclude<ViewKey, 'guide'>
 }> = [
   {
-    eyebrow: 'Start',
-    label: 'Open Dashboard',
-    detail: 'See the operating picture first.',
+    eyebrow: 'Home',
+    label: 'Open Home',
+    detail: 'Start with the operating brief.',
     view: 'dashboard',
   },
   {
@@ -116,13 +136,6 @@ const GUIDE_START_ACTIONS: Array<{
     detail: 'Open operations when the job is confirmations, blockers, approvals, or post-trade handoffs.',
     actionLabel: 'Open Work Queue',
     view: 'operations',
-  },
-  {
-    eyebrow: 'Practice',
-    title: 'Practice the workflow safely',
-    detail: 'Run the walkthrough when you want a local-only scenario that explains the lifecycle without touching live data.',
-    actionLabel: 'Open Walkthrough',
-    view: 'demo',
   },
 ] as const
 
@@ -210,7 +223,9 @@ const MANUAL_SEARCH_SUGGESTIONS = [
   'pricing mismatch',
 ] as const
 
-const DOCUMENT_ORDER: DocumentationDocumentKey[] = ['guide', 'roadmap']
+const MAX_WIKI_MENTION_SUGGESTIONS = 6
+
+const DOCUMENT_ORDER: DocumentationDocumentKey[] = ['guide', 'wiki', 'roadmap']
 
 const DOCUMENT_DEFINITIONS: Record<
   DocumentationDocumentKey,
@@ -229,6 +244,13 @@ const DOCUMENT_DEFINITIONS: Record<
     heroDetail: 'Use this as the dedicated in-product manual for onboarding, workflow questions, and choosing the right workspace for the job in front of you.',
     sidebarDetail: 'Start with the job cards, then search or browse the manual for deeper workflow context.',
   },
+  wiki: {
+    label: 'Wiki',
+    eyebrow: 'Team Knowledge',
+    title: 'Desk Wiki',
+    heroDetail: 'Capture living desk knowledge in nested pages with markdown editing, fast search, and revision history that stays reviewable inside the app.',
+    sidebarDetail: 'Create pages, browse the hierarchy, and jump straight into the page you need to update or reference.',
+  },
   roadmap: {
     label: 'Implementation Roadmap',
     eyebrow: 'Roadmap',
@@ -240,12 +262,14 @@ const DOCUMENT_DEFINITIONS: Record<
 
 export function DocumentationWorkspace({
   activeDocumentKey,
+  authSession,
   getViewHref,
   onDocumentKeyChange,
   onOpenView,
   roadmapRefreshVersion,
 }: DocumentationWorkspaceProps) {
   const guide = useMemo(() => parseMarkdownDocument(userManualMarkdown), [])
+  const wikiEditorTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const [activeSectionId, setActiveSectionId] = useState<string>(guide.sections[0]?.id ?? '')
   const [manualQuery, setManualQuery] = useState('')
   const [roadmap, setRoadmap] = useState<RoadmapDocumentData | null>(null)
@@ -265,6 +289,133 @@ export function DocumentationWorkspace({
   const manualStatusLabel = hasManualQuery
     ? `${visibleGuideSections.length.toLocaleString()} of ${guide.sections.length.toLocaleString()} sections match`
     : `All ${guide.sections.length.toLocaleString()} manual sections in view`
+  const wiki = useWikiDocumentController({
+    apiBase: appConfig.apiBase,
+    authSession,
+    enabled: activeDocumentKey === 'wiki',
+  })
+  const [wikiMentionCursorIndex, setWikiMentionCursorIndex] = useState(0)
+  const activeWikiMention = useMemo(
+    () =>
+      wiki.selectedPage?.is_archived
+        ? null
+        : findActiveWikiPageMention(wiki.contentDraft, wikiMentionCursorIndex),
+    [wiki.contentDraft, wiki.selectedPage?.is_archived, wikiMentionCursorIndex],
+  )
+  const wikiMentionSuggestions = useMemo(
+    () =>
+      activeWikiMention
+        ? filterWikiMentionSuggestions(wiki.mentionablePages, activeWikiMention.query).slice(
+            0,
+            MAX_WIKI_MENTION_SUGGESTIONS,
+          )
+        : [],
+    [activeWikiMention, wiki.mentionablePages],
+  )
+  const [selectedWikiMentionIndex, setSelectedWikiMentionIndex] = useState(0)
+
+  useEffect(() => {
+    setSelectedWikiMentionIndex(0)
+  }, [activeWikiMention?.query, activeWikiMention?.startIndex])
+
+  function handleWikiPreviewLinkClick(
+    event: ReactMouseEvent<HTMLDivElement>,
+  ) {
+    const nextTarget = event.target
+    if (!(nextTarget instanceof HTMLElement)) {
+      return
+    }
+
+    const wikiLink = nextTarget.closest<HTMLElement>('[data-wiki-page-id]')
+    const pageId = wikiLink?.dataset.wikiPageId?.trim()
+    if (!pageId) {
+      return
+    }
+
+    event.preventDefault()
+    void wiki.handleSelectPage(pageId)
+  }
+
+  function focusWikiEditorAt(cursorIndex: number) {
+    const textarea = wikiEditorTextareaRef.current
+    if (!textarea) {
+      return
+    }
+
+    window.requestAnimationFrame(() => {
+      textarea.focus()
+      textarea.setSelectionRange(cursorIndex, cursorIndex)
+      setWikiMentionCursorIndex(cursorIndex)
+    })
+  }
+
+  function insertWikiPageMention(page: WikiPageSummary, mention: ActiveWikiPageMention | null = activeWikiMention) {
+    const mentionMarkup = `[[${page.title}|${page.page_id}]]`
+    const textarea = wikiEditorTextareaRef.current
+    const currentValue = wiki.contentDraft
+
+    if (mention) {
+      const replacement = replaceActiveWikiPageMention(currentValue, mention, {
+        pageId: page.page_id,
+        title: page.title,
+      })
+      wiki.setContentDraft(replacement.markdown)
+      focusWikiEditorAt(replacement.cursorIndex)
+      return
+    }
+
+    if (!textarea) {
+      wiki.setContentDraft(
+        currentValue ? `${currentValue}\n${mentionMarkup}` : mentionMarkup,
+      )
+      return
+    }
+
+    const selectionStart = textarea.selectionStart
+    const selectionEnd = textarea.selectionEnd
+    const prefix = currentValue.slice(0, selectionStart)
+    const suffix = currentValue.slice(selectionEnd)
+    const needsPrefixSpace =
+      prefix.length > 0 && !/\s/.test(prefix[prefix.length - 1] ?? '')
+    const needsSuffixSpace =
+      suffix.length > 0 && !/[\s.,!?)]/.test(suffix[0] ?? '')
+    const insertedText = `${needsPrefixSpace ? ' ' : ''}${mentionMarkup}${needsSuffixSpace ? ' ' : ''}`
+    const nextValue = `${prefix}${insertedText}${suffix}`
+    const nextCursorPosition = prefix.length + insertedText.length
+
+    wiki.setContentDraft(nextValue)
+    focusWikiEditorAt(nextCursorPosition)
+  }
+
+  function handleWikiMarkdownKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (!activeWikiMention || wikiMentionSuggestions.length === 0) {
+      return
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setSelectedWikiMentionIndex((currentIndex) => (
+        currentIndex + 1 >= wikiMentionSuggestions.length ? 0 : currentIndex + 1
+      ))
+      return
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setSelectedWikiMentionIndex((currentIndex) => (
+        currentIndex - 1 < 0 ? wikiMentionSuggestions.length - 1 : currentIndex - 1
+      ))
+      return
+    }
+
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault()
+      insertWikiPageMention(
+        wikiMentionSuggestions[selectedWikiMentionIndex] ?? wikiMentionSuggestions[0],
+        activeWikiMention,
+      )
+    }
+  }
 
   function handleWorkspaceLinkClick(
     event: ReactMouseEvent<HTMLAnchorElement>,
@@ -569,13 +720,25 @@ export function DocumentationWorkspace({
               </p>
             </article>
           )
-        ) : (
+        ) : activeDocumentKey === 'roadmap' ? (
           renderRoadmapContent({
             getViewHref,
             roadmap,
             loading: roadmapLoading,
             error: roadmapError,
             onOpenView,
+          })
+        ) : (
+          renderWikiContent({
+            wiki,
+            activeWikiMention,
+            selectedWikiMentionIndex,
+            wikiMentionSuggestions,
+            wikiEditorTextareaRef,
+            onMarkdownKeyDown: handleWikiMarkdownKeyDown,
+            onMarkdownSelect: (textarea) => setWikiMentionCursorIndex(textarea.selectionStart),
+            onInsertWikiPageMention: insertWikiPageMention,
+            onPreviewLinkClick: handleWikiPreviewLinkClick,
           })
         )}
       </section>
@@ -607,8 +770,10 @@ export function DocumentationWorkspace({
               ))}
             </nav>
           </>
-        ) : (
+        ) : activeDocumentKey === 'roadmap' ? (
           <RoadmapSidebar roadmap={roadmap} loading={roadmapLoading} error={roadmapError} />
+        ) : (
+          renderWikiSidebar({ wiki })
         )}
 
         <div className="docs-actions">
@@ -640,6 +805,737 @@ export function DocumentationWorkspace({
       </aside>
     </div>
   )
+}
+
+function renderWikiContent({
+  wiki,
+  activeWikiMention,
+  selectedWikiMentionIndex,
+  wikiMentionSuggestions,
+  wikiEditorTextareaRef,
+  onMarkdownKeyDown,
+  onMarkdownSelect,
+  onInsertWikiPageMention,
+  onPreviewLinkClick,
+}: {
+  wiki: ReturnType<typeof useWikiDocumentController>
+  activeWikiMention: ActiveWikiPageMention | null
+  selectedWikiMentionIndex: number
+  wikiMentionSuggestions: WikiPageSummary[]
+  wikiEditorTextareaRef: {
+    current: HTMLTextAreaElement | null
+  }
+  onMarkdownKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void
+  onMarkdownSelect: (textarea: HTMLTextAreaElement) => void
+  onInsertWikiPageMention: (page: WikiPageSummary, mention?: ActiveWikiPageMention | null) => void
+  onPreviewLinkClick: (event: ReactMouseEvent<HTMLDivElement>) => void
+}) {
+  if (!wiki.hasAuth) {
+    return (
+      <article className="surface docs-section empty-state">
+        <strong>Sign in to open the collaborative wiki.</strong>
+        <p>The desk wiki is authenticated so page edits, moves, and restores always keep a user-level audit trail.</p>
+      </article>
+    )
+  }
+
+  if (
+    wiki.loading &&
+    wiki.activePages.length === 0 &&
+    wiki.archivedPages.length === 0 &&
+    wiki.selectedPage === null
+  ) {
+    return (
+      <article className="surface docs-section">
+        <div className="section-head">
+          <div>
+            <span className="eyebrow">Wiki</span>
+            <h3>Loading desk knowledge...</h3>
+          </div>
+          <p>Fetching the current page tree and latest revision history from the API.</p>
+        </div>
+      </article>
+    )
+  }
+
+  if (wiki.activePages.length === 0 && wiki.archivedPages.length === 0) {
+    return (
+      <article className="surface docs-section empty-state">
+        <strong>No wiki pages exist yet.</strong>
+        <p>Start with a root page for your desk handbook, process notes, or handoff runbooks.</p>
+        {renderWikiTemplatePicker({ wiki })}
+        <button
+          type="button"
+          className="button button-secondary"
+          disabled={wiki.creatingParentId === 'root'}
+          onClick={() => void wiki.handleCreatePage(null)}
+        >
+          {wiki.creatingParentId === 'root' ? 'Creating Page...' : 'Create First Page'}
+        </button>
+      </article>
+    )
+  }
+
+  if (!wiki.selectedPage) {
+    return (
+      <article className="surface docs-section empty-state">
+        <strong>Select a wiki page from the sidebar.</strong>
+        <p>Choose an existing page or create a new one to start editing desk knowledge.</p>
+      </article>
+    )
+  }
+
+  return (
+    <>
+      {wiki.notice ? <div className="feedback-banner feedback-banner-success">{wiki.notice}</div> : null}
+      {wiki.error ? <div className="feedback-banner feedback-banner-error">{wiki.error}</div> : null}
+      {wiki.selectedPage.is_archived ? (
+        <div className="feedback-banner wiki-archived-banner">
+          This page is archived and read-only until you restore it.
+        </div>
+      ) : null}
+
+      <article className="surface docs-section wiki-editor-surface">
+        <div className="section-head">
+          <div>
+            <span className="eyebrow">Wiki Page</span>
+            <h3>{wiki.selectedPage.title}</h3>
+          </div>
+          <p>Edit markdown on the left, review the rendered result on the right, and keep the page nested under the right parent.</p>
+        </div>
+
+        <div className="wiki-meta-row">
+          <span className="entity-chip entity-chip-soft">Version {wiki.selectedPage.version}</span>
+          <span className="entity-chip entity-chip-soft">{wiki.selectedPage.word_count.toLocaleString()} words</span>
+          <span className="entity-chip entity-chip-soft">Updated {formatWikiTimestamp(wiki.selectedPage.updated_at)}</span>
+          {wiki.selectedPage.is_archived ? (
+            <span className="entity-chip entity-chip-soft">
+              Archived {wiki.selectedPage.archived_at ? formatWikiTimestamp(wiki.selectedPage.archived_at) : 'Recently'}
+            </span>
+          ) : null}
+          {wiki.dirty ? <span className="entity-chip">Unsaved Changes</span> : null}
+        </div>
+
+        <div className="wiki-editor-toolbar">
+          {renderWikiTemplatePicker({ wiki, compact: true })}
+          <button
+            type="button"
+            className="button button-ghost"
+            disabled={wiki.creatingParentId === 'root'}
+            onClick={() => void wiki.handleCreatePage(null)}
+          >
+            {wiki.creatingParentId === 'root' ? 'Creating Root Page...' : 'New Root Page'}
+          </button>
+          {!wiki.selectedPage.is_archived ? (
+            <>
+              <button
+                type="button"
+                className="button button-ghost"
+                disabled={wiki.creatingParentId === wiki.selectedPage.page_id}
+                onClick={() => void wiki.handleCreatePage(wiki.selectedPage?.page_id ?? null)}
+              >
+                {wiki.creatingParentId === wiki.selectedPage.page_id ? 'Creating Child Page...' : 'New Child Page'}
+              </button>
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={!wiki.dirty || wiki.saving}
+                onClick={() => void wiki.handleSavePage()}
+              >
+                {wiki.saving ? 'Saving...' : 'Save Changes'}
+              </button>
+              <button
+                type="button"
+                className="button button-ghost"
+                disabled={!wiki.dirty}
+                onClick={() => wiki.handleResetDraft()}
+              >
+                Reset Draft
+              </button>
+              <button
+                type="button"
+                className="button button-ghost"
+                disabled={wiki.archivingPageId === wiki.selectedPage.page_id}
+                onClick={() => void wiki.handleArchivePage()}
+              >
+                {wiki.archivingPageId === wiki.selectedPage.page_id ? 'Archiving...' : 'Archive Page'}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={wiki.restoringArchivedPageId === wiki.selectedPage.page_id}
+              onClick={() => void wiki.handleRestoreArchivedPage()}
+            >
+              {wiki.restoringArchivedPageId === wiki.selectedPage.page_id ? 'Restoring Page...' : 'Restore Page'}
+            </button>
+          )}
+        </div>
+
+        <div className="wiki-editor-grid">
+          <section className="wiki-editor-panel">
+            <label className="field">
+              <span>Page Title</span>
+              <input
+                className="control"
+                type="text"
+                value={wiki.titleDraft}
+                disabled={wiki.selectedPage.is_archived}
+                onChange={(event) => wiki.setTitleDraft(event.target.value)}
+                placeholder="Desk Handbook"
+              />
+            </label>
+
+            <label className="field">
+              <span>Parent Page</span>
+              <select
+                className="control"
+                value={wiki.parentDraft}
+                disabled={wiki.selectedPage.is_archived}
+                onChange={(event) => wiki.setParentDraft(event.target.value)}
+              >
+                <option value="">Top level page</option>
+                {wiki.parentOptions.map((page) => (
+                  <option key={page.page_id} value={page.page_id}>
+                    {page.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Insert Page Mention</span>
+              <select
+                className="control"
+                defaultValue=""
+                disabled={wiki.selectedPage.is_archived || wiki.mentionablePages.length === 0}
+                onChange={(event) => {
+                  const nextPage = wiki.mentionablePages.find((page) => page.page_id === event.target.value)
+                  if (nextPage) {
+                    onInsertWikiPageMention(nextPage, null)
+                  }
+                  event.target.value = ''
+                }}
+              >
+                <option value="">Link another wiki page...</option>
+                {wiki.mentionablePages.map((page) => (
+                  <option key={page.page_id} value={page.page_id}>
+                    {page.title}
+                  </option>
+                ))}
+              </select>
+              <small className="wiki-editor-help">
+                Manual links still support <code>[[Confirmations]]</code> or <code>[[Counterparty checklist|Confirmations]]</code>.
+              </small>
+            </label>
+
+            <label className="field wiki-editor-field">
+              <span>Markdown</span>
+              <div className="wiki-editor-textarea-shell">
+                <textarea
+                  className="control wiki-editor-textarea"
+                  ref={wikiEditorTextareaRef}
+                  value={wiki.contentDraft}
+                  disabled={wiki.selectedPage.is_archived}
+                  onChange={(event) => {
+                    wiki.setContentDraft(event.target.value)
+                    onMarkdownSelect(event.target)
+                  }}
+                  onClick={(event) => onMarkdownSelect(event.currentTarget)}
+                  onKeyDown={onMarkdownKeyDown}
+                  onKeyUp={(event) => onMarkdownSelect(event.currentTarget)}
+                  onSelect={(event) => onMarkdownSelect(event.currentTarget)}
+                  rows={22}
+                  placeholder="# Confirmations&#10;&#10;- Review the incoming PDF&#10;- Compare economics to the booked trade&#10;- Log every mismatch before escalating"
+                />
+                {activeWikiMention ? (
+                  <div className="wiki-mention-menu" role="listbox" aria-label="Wiki page suggestions">
+                    <div className="wiki-mention-menu-head">
+                      <span className="eyebrow">Wiki Link</span>
+                      <strong>
+                        {activeWikiMention.query
+                          ? `Matches for "${activeWikiMention.query}"`
+                          : 'Link a page'}
+                      </strong>
+                    </div>
+                    {wikiMentionSuggestions.length > 0 ? (
+                      wikiMentionSuggestions.map((page, index) => (
+                        <button
+                          key={page.page_id}
+                          type="button"
+                          role="option"
+                          aria-selected={selectedWikiMentionIndex === index}
+                          className={`wiki-mention-option ${selectedWikiMentionIndex === index ? 'is-active' : ''}`}
+                          onMouseDown={(event) => {
+                            event.preventDefault()
+                            onInsertWikiPageMention(page)
+                          }}
+                        >
+                          <strong>{page.title}</strong>
+                          <small>{page.summary}</small>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="wiki-mention-empty">
+                        No page matches yet. Keep the draft link and use Create Page from unresolved links.
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </label>
+          </section>
+
+          <section className="wiki-editor-panel wiki-preview-panel">
+            <div className="section-head wiki-preview-head">
+              <div>
+                <span className="eyebrow">Preview</span>
+                <h4>Rendered Page</h4>
+              </div>
+              <p>Use this side to catch structure, readability, and link formatting before you save.</p>
+            </div>
+
+            <div
+              className="docs-prose wiki-preview"
+              onClick={onPreviewLinkClick}
+              dangerouslySetInnerHTML={{
+                __html: renderWikiMarkdownHtml(wiki.contentDraft, {
+                  resolvePageLink: (target) => {
+                    const linkedPage = wiki.resolvePageByLinkTarget(target)
+                    if (!linkedPage) {
+                      return null
+                    }
+
+                    return {
+                      pageId: linkedPage.page_id,
+                      title: linkedPage.title,
+                      isArchived: linkedPage.is_archived,
+                    }
+                  },
+                }),
+              }}
+            />
+          </section>
+        </div>
+      </article>
+
+      <article className="surface docs-section wiki-link-surface">
+        <div className="section-head">
+          <div>
+            <span className="eyebrow">Page Graph</span>
+            <h3>Links And Backlinks</h3>
+          </div>
+          <p>Check incoming references and unresolved page links before the page becomes part of a runbook.</p>
+        </div>
+
+        {wiki.selectedPageUnresolvedLinks.length > 0 ? (
+          <div className="feedback-banner feedback-banner-error wiki-link-warning">
+            <strong>Unresolved links</strong>
+            <p>Create the missing page to turn the draft reference into a stable page ID link.</p>
+            <div className="wiki-unresolved-link-list">
+              {wiki.selectedPageUnresolvedLinks.map((link) => (
+                <div key={wikiUnresolvedLinkKey(link)} className="wiki-unresolved-link-card">
+                  <span className="entity-chip entity-chip-soft">
+                    {link.label === link.target ? link.target : `${link.label} -> ${link.target}`}
+                  </span>
+                  <button
+                    type="button"
+                    className="button button-ghost"
+                    disabled={
+                      wiki.selectedPage?.is_archived ||
+                      wiki.creatingUnresolvedLinkKey === wikiUnresolvedLinkKey(link)
+                    }
+                    onClick={() => void wiki.handleCreatePageFromUnresolvedLink(link)}
+                  >
+                    {wiki.creatingUnresolvedLinkKey === wikiUnresolvedLinkKey(link)
+                      ? 'Creating Page...'
+                      : 'Create Page'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="wiki-backlink-list">
+          {wiki.selectedPageBacklinks.length > 0 ? (
+            wiki.selectedPageBacklinks.map((backlink) => (
+              <button
+                key={backlink.page.page_id}
+                type="button"
+                className="wiki-backlink-card"
+                onClick={() => void wiki.handleSelectPage(backlink.page.page_id)}
+              >
+                <span>{backlink.page.is_archived ? 'Archived backlink' : 'Backlink'}</span>
+                <strong>{backlink.page.title}</strong>
+                <div className="chip-row">
+                  {backlink.mentions.map((mention) => (
+                    <span
+                      key={`${backlink.page.page_id}-${mention.label}-${mention.target}-${mention.snippet}`}
+                      className="entity-chip entity-chip-soft"
+                    >
+                      {mention.label}
+                    </span>
+                  ))}
+                </div>
+                {backlink.mentions.slice(0, 2).map((mention) => (
+                  <small
+                    key={`${backlink.page.page_id}-${mention.label}-${mention.target}-${mention.snippet}-snippet`}
+                    className="wiki-backlink-snippet"
+                  >
+                    {mention.snippet}
+                  </small>
+                ))}
+              </button>
+            ))
+          ) : (
+            <div className="feedback-banner wiki-empty-link-state">
+              No backlinks yet.
+            </div>
+          )}
+        </div>
+      </article>
+
+      <article className="surface docs-section">
+        <div className="section-head">
+          <div>
+            <span className="eyebrow">Revision History</span>
+            <h3>Recent Restores And Saves</h3>
+          </div>
+          <p>Restore an earlier version when a note drifts or a runbook update should be rolled back without deleting the page outright.</p>
+        </div>
+
+        <div className="wiki-revision-list">
+          {wiki.selectedPage.recent_revisions.map((revision) => (
+            <article key={revision.revision_id} className="wiki-revision-card">
+              <div className="wiki-revision-head">
+                <div>
+                  <strong>Version {revision.version}</strong>
+                  <p>
+                    Saved by {revision.created_by} on {formatWikiTimestamp(revision.created_at)}.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="button button-ghost"
+                  disabled={
+                    (wiki.selectedPage?.is_archived ?? false) ||
+                    revision.version === wiki.selectedPage?.version ||
+                    wiki.restoringRevisionId === revision.revision_id
+                  }
+                  onClick={() => void wiki.handleRestoreRevision(revision.revision_id)}
+                >
+                  {wiki.restoringRevisionId === revision.revision_id ? 'Restoring...' : 'Restore'}
+                </button>
+              </div>
+
+              <div className="chip-row">
+                {revision.change_summary.map((entry) => (
+                  <span key={`${revision.revision_id}-${entry}`} className="entity-chip entity-chip-soft">
+                    {entry}
+                  </span>
+                ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      </article>
+    </>
+  )
+}
+
+function wikiUnresolvedLinkKey(link: { label: string; target: string }): string {
+  return `${link.target.trim().toLowerCase()}:${link.label.trim().toLowerCase()}`
+}
+
+function renderWikiTemplatePicker({
+  wiki,
+  compact = false,
+}: {
+  wiki: ReturnType<typeof useWikiDocumentController>
+  compact?: boolean
+}) {
+  return (
+    <label className={`field wiki-template-picker ${compact ? 'wiki-template-picker-compact' : ''}`}>
+      <span>New Page Template</span>
+      <select
+        className="control"
+        value={wiki.newPageTemplateKey}
+        onChange={(event) => wiki.setNewPageTemplateKey(event.target.value as typeof wiki.newPageTemplateKey)}
+      >
+        {wiki.newPageTemplates.map((template) => (
+          <option key={template.key} value={template.key}>
+            {template.label}
+          </option>
+        ))}
+      </select>
+      <small>{wiki.selectedNewPageTemplate.description}</small>
+    </label>
+  )
+}
+
+function normalizeWikiMentionSearch(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function filterWikiMentionSuggestions(pages: WikiPageSummary[], query: string): WikiPageSummary[] {
+  const normalizedQuery = normalizeWikiMentionSearch(query)
+  if (!normalizedQuery) {
+    return pages
+  }
+
+  return pages
+    .map((page) => {
+      const normalizedTitle = normalizeWikiMentionSearch(page.title)
+      const normalizedSummary = normalizeWikiMentionSearch(page.summary)
+      const normalizedPageId = normalizeWikiMentionSearch(page.page_id)
+
+      if (normalizedTitle.startsWith(normalizedQuery)) {
+        return { page, score: 0 }
+      }
+      if (normalizedTitle.includes(normalizedQuery)) {
+        return { page, score: 1 }
+      }
+      if (normalizedPageId.includes(normalizedQuery)) {
+        return { page, score: 2 }
+      }
+      if (normalizedSummary.includes(normalizedQuery)) {
+        return { page, score: 3 }
+      }
+      return null
+    })
+    .filter((match): match is { page: WikiPageSummary; score: number } => match !== null)
+    .sort((left, right) => left.score - right.score || left.page.title.localeCompare(right.page.title))
+    .map((match) => match.page)
+}
+
+function renderWikiSidebar({
+  wiki,
+}: {
+  wiki: ReturnType<typeof useWikiDocumentController>
+}) {
+  if (!wiki.hasAuth) {
+    return (
+      <div className="section-head">
+        <div>
+          <span className="eyebrow">Wiki</span>
+          <h3>Desk Wiki</h3>
+        </div>
+        <p>Sign in to browse nested pages, update markdown, or restore earlier knowledge snapshots.</p>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="section-head">
+        <div>
+          <span className="eyebrow">Page Tree</span>
+          <h3>Desk Wiki</h3>
+        </div>
+        <p>Create, search, and open nested wiki pages without leaving the documentation workspace.</p>
+      </div>
+
+      <label className="field wiki-search-field">
+        <span>Search Pages</span>
+        <input
+          className="control"
+          type="search"
+          value={wiki.searchQuery}
+          onChange={(event) => wiki.setSearchQuery(event.target.value)}
+          placeholder="Confirmations, settlement, mismatch..."
+        />
+      </label>
+
+      {renderWikiTemplatePicker({ wiki })}
+
+      <button
+        type="button"
+        className="button button-secondary"
+        disabled={wiki.creatingParentId === 'root'}
+        onClick={() => void wiki.handleCreatePage(null)}
+      >
+        {wiki.creatingParentId === 'root' ? 'Creating Root Page...' : 'Create Root Page'}
+      </button>
+
+      <button
+        type="button"
+        className="button button-ghost"
+        disabled={!wiki.hasArchivedPages}
+        onClick={() => wiki.setShowArchived(!wiki.showArchived)}
+      >
+        {wiki.showArchived ? 'Hide Archived Pages' : `Show Archived Pages${wiki.hasArchivedPages ? '' : ' (None Yet)'}`}
+      </button>
+
+      {renderWikiSearchResults({ wiki })}
+
+      <div className="docs-toc wiki-tree" aria-label="Active wiki page tree">
+        {wiki.filteredActiveTree.length > 0 ? (
+          wiki.filteredActiveTree.map((item) =>
+            renderWikiTreeItem({
+              activePageId: wiki.selectedPageId,
+              depth: 0,
+              item,
+              onSelectPage: wiki.handleSelectPage,
+            }),
+          )
+        ) : (
+          <div className="feedback-banner feedback-banner-error">
+            No wiki pages matched that search. Try a broader page title or summary term.
+          </div>
+        )}
+      </div>
+
+      {wiki.showArchived ? (
+        <div className="wiki-archive-section">
+          <div className="section-head wiki-archive-head">
+            <div>
+              <span className="eyebrow">Archive</span>
+              <h3>Archived Pages</h3>
+            </div>
+            <p>Archived pages stay searchable and restorable, but they stay out of the active page tree until you bring them back.</p>
+          </div>
+
+          <div className="docs-toc wiki-tree" aria-label="Archived wiki page tree">
+            {wiki.filteredArchivedTree.length > 0 ? (
+              wiki.filteredArchivedTree.map((item) =>
+                renderWikiTreeItem({
+                  activePageId: wiki.selectedPageId,
+                  depth: 0,
+                  item,
+                  onSelectPage: wiki.handleSelectPage,
+                }),
+              )
+            ) : (
+              <div className="feedback-banner">
+                No archived wiki pages matched that search.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+function renderWikiSearchResults({
+  wiki,
+}: {
+  wiki: ReturnType<typeof useWikiDocumentController>
+}) {
+  if (!wiki.hasRankedSearchQuery) {
+    return null
+  }
+
+  return (
+    <section className="wiki-search-results" aria-label="Ranked wiki search results">
+      <div className="section-head wiki-search-results-head">
+        <div>
+          <span className="eyebrow">Best Matches</span>
+          <h3>Search Results</h3>
+        </div>
+        <p>Ranked by page title, content, wiki links, recency, and archive state.</p>
+      </div>
+
+      {wiki.searching ? (
+        <div className="feedback-banner">Searching wiki knowledge...</div>
+      ) : null}
+
+      {wiki.searchError ? (
+        <div className="feedback-banner feedback-banner-error">
+          Ranked search is unavailable, so the page tree filter is still available below. {wiki.searchError}
+        </div>
+      ) : null}
+
+      {!wiki.searching && !wiki.searchError && wiki.searchResults.length === 0 ? (
+        <div className="feedback-banner">
+          No ranked matches yet. Try a title, workflow term, or link target.
+        </div>
+      ) : null}
+
+      {wiki.searchResults.length > 0 ? (
+        <div className="wiki-search-result-list">
+          {wiki.searchResults.map((result) => (
+            <button
+              key={result.page.page_id}
+              type="button"
+              className={`wiki-search-result-card ${wiki.selectedPageId === result.page.page_id ? 'is-active' : ''}`}
+              onClick={() => void wiki.handleSelectPage(result.page.page_id)}
+            >
+              <span>{result.page.is_archived ? 'Archived Match' : 'Match'}</span>
+              <strong>{result.page.title}</strong>
+              <small>{result.snippet || result.page.summary}</small>
+              <div className="chip-row">
+                {result.match_reasons.slice(0, 3).map((reason) => (
+                  <span key={`${result.page.page_id}-${reason}`} className="entity-chip entity-chip-soft">
+                    {reason}
+                  </span>
+                ))}
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function renderWikiTreeItem({
+  activePageId,
+  depth,
+  item,
+  onSelectPage,
+}: {
+  activePageId: string | null
+  depth: number
+  item: WikiPageTreeItem
+  onSelectPage: (pageId: string) => Promise<void>
+}) {
+  const style = {
+    marginLeft: `${depth * 0.85}rem`,
+  } satisfies CSSProperties
+
+  return (
+    <div key={item.page_id} className="wiki-tree-node" style={style}>
+      <button
+        type="button"
+        className={`docs-toc-link wiki-tree-button ${activePageId === item.page_id ? 'is-active' : ''}`}
+        onClick={() => void onSelectPage(item.page_id)}
+      >
+        <span>
+          {item.is_archived
+            ? 'Archived'
+            : item.child_count > 0
+              ? `${item.child_count} child`
+              : 'Page'}
+        </span>
+        <strong>{item.title}</strong>
+        <small>{item.summary}</small>
+      </button>
+
+      {item.children.length > 0 ? (
+        <div className="wiki-tree-children">
+          {item.children.map((child) =>
+            renderWikiTreeItem({
+              activePageId,
+              depth: depth + 1,
+              item: child,
+              onSelectPage,
+            }),
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function formatWikiTimestamp(value: string): string {
+  const parsed = Date.parse(value)
+  if (Number.isNaN(parsed)) {
+    return value
+  }
+  return new Date(parsed).toLocaleString()
 }
 
 function renderGuideSectionEnhancement({

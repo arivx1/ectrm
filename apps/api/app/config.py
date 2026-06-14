@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import Field
@@ -46,18 +47,25 @@ class Settings(BaseSettings):
     DOCUMENT_OCR_ENABLED: bool = True
     DOCUMENT_AI_ENABLED: bool = True
     DOCUMENT_AI_DEFAULT_PROVIDER: str = "openai"
+    DOCUMENT_AI_CONFIDENCE_THRESHOLD: float = Field(default=0.46, ge=0, le=1)
     DOCUMENT_AI_TIMEOUT_SECONDS: int = Field(default=120, ge=5, le=600)
     DOCUMENT_AI_MAX_OUTPUT_TOKENS: int = Field(default=3200, ge=256, le=8192)
     DOCUMENT_AI_OPENAI_INLINE_FILE_MAX_BYTES: int = Field(default=8 * 1024 * 1024, ge=0, le=50 * 1024 * 1024)
     DOCUMENT_AI_OPENAI_MODEL: str = ""
+    DOCUMENT_AI_OPENAI_MODEL_OPTIONS: str = ""
     DOCUMENT_AI_ANTHROPIC_MODEL: str = ""
+    DOCUMENT_AI_ANTHROPIC_MODEL_OPTIONS: str = ""
     DOCUMENT_AI_GOOGLE_MODEL: str = ""
+    DOCUMENT_AI_GOOGLE_MODEL_OPTIONS: str = ""
     ASSISTANT_ENABLED: bool = True
     ASSISTANT_DEFAULT_PROVIDER: str = "openai"
     ASSISTANT_SYSTEM_PROMPT: str = (
         "You are the E/CTRM assistant. Help operators understand trades, positions, "
         "events, reference data, and runtime settings. Use the provided application "
-        "context as the source of truth and say clearly when more context is needed."
+        "context as the source of truth and say clearly when more context is needed. "
+        "When a live tool returns a chart artifact for a requested visualization, "
+        "include the chart JSON in a fenced ectrm-chart block after a concise summary. "
+        "Supported chart_type values are pie, bar, line, area, scatter, and histogram."
     )
     ASSISTANT_COMPANY_NAME: str = "ECTRM"
     ASSISTANT_COMPANY_CONTEXT: str = (
@@ -74,6 +82,41 @@ class Settings(BaseSettings):
     ASSISTANT_TIMEOUT_SECONDS: int = Field(default=60, ge=5, le=300)
     ASSISTANT_MAX_OUTPUT_TOKENS: int = Field(default=3200, ge=128, le=8192)
     ASSISTANT_MAX_TOOL_ROUNDS: int = Field(default=4, ge=0, le=12)
+    ASSISTANT_VOICE_TRANSCRIPTION_ENABLED: bool = True
+    ASSISTANT_VOICE_TRANSCRIPTION_MAX_UPLOAD_BYTES: int = Field(
+        default=25 * 1024 * 1024,
+        ge=1,
+        le=25 * 1024 * 1024,
+    )
+    ASSISTANT_VOICE_GENERATION_ENABLED: bool = True
+    ASSISTANT_VOICE_GENERATION_MAX_INPUT_CHARS: int = Field(
+        default=4096,
+        ge=1,
+        le=4096,
+    )
+    MCP_ENABLED: bool = False
+    MCP_AUTH_MODE: Literal["none", "oauth"] = "none"
+    MCP_SERVER_NAME: str = "ECTRM MCP"
+    MCP_SERVER_INSTRUCTIONS: str = (
+        "Use search and fetch to inspect read-only ECTRM product and engineering documentation. "
+        "This MCP surface does not mutate business records."
+    )
+    MCP_DOCS_RESULT_LIMIT: int = Field(default=8, ge=1, le=25)
+    MCP_DOCS_REPO_URL_OVERRIDE: str = ""
+    MCP_OAUTH_ISSUER_URL: str = "http://127.0.0.1:8000/mcp"
+    MCP_OAUTH_SERVICE_DOCUMENTATION_URL: str = ""
+    MCP_OAUTH_SIGNING_SECRET: str = ""
+    MCP_OAUTH_REQUIRED_SCOPES: str = "mcp:tools"
+    MCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS: int = Field(default=3600, ge=300, le=86400)
+    MCP_OAUTH_REFRESH_TOKEN_TTL_SECONDS: int = Field(default=7 * 24 * 3600, ge=3600, le=30 * 24 * 3600)
+    MCP_OAUTH_AUTHORIZATION_CODE_TTL_SECONDS: int = Field(default=600, ge=60, le=3600)
+    MARKET_NEWS_RSS_BASE_URL: str = "https://news.google.com/rss/search"
+    MARKET_NEWS_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
+    MARKET_NEWS_AI_TAGGING_ENABLED: bool = True
+    MARKET_NEWS_AI_TAGGING_PROVIDER: str = "openai"
+    MARKET_NEWS_AI_TAGGING_MODEL: str = ""
+    MARKET_NEWS_AI_TAGGING_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    MARKET_NEWS_AI_TAGGING_MAX_OUTPUT_TOKENS: int = Field(default=1400, ge=256, le=4096)
     ASSISTANT_AGENT_DAILY_TOKEN_ALLOCATION: int = Field(default=100_000, ge=0, le=100_000_000)
     CODEX_TASKS_ENABLED: bool = False
     CODEX_GITHUB_REPOSITORY: str = ""
@@ -89,46 +132,145 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-5-mini"
+    OPENAI_AUDIO_TRANSCRIPTION_MODEL: str = "gpt-4o-mini-transcribe"
+    OPENAI_AUDIO_SPEECH_MODEL: str = "gpt-4o-mini-tts"
+    OPENAI_AUDIO_SPEECH_VOICE: str = "alloy"
     OPENAI_AGENT_BUILDER_MODEL: str = ""
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
     ANTHROPIC_MODEL: str = "claude-sonnet-4-5"
+    ANTHROPIC_AGENT_BUILDER_MODEL: str = ""
+    ANTHROPIC_ADMIN_ENABLED: bool = False
+    ANTHROPIC_ADMIN_API_KEY: str = ""
+    ANTHROPIC_ADMIN_API_KEY_ID: str = ""
+    ANTHROPIC_ADMIN_BASE_URL: str = "https://api.anthropic.com"
+    ANTHROPIC_ADMIN_API_VERSION: str = "2023-06-01"
+    ANTHROPIC_ADMIN_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
     GOOGLE_API_KEY: str = ""
     GOOGLE_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
     GOOGLE_MODEL: str = "gemini-2.5-flash"
+    GMAIL_INBOX_ENABLED: bool = False
+    GMAIL_INBOX_CLIENT_ID: str = ""
+    GMAIL_INBOX_CLIENT_SECRET: str = ""
+    GMAIL_INBOX_REFRESH_TOKEN: str = ""
+    GMAIL_INBOX_ACCOUNT_EMAIL: str = ""
+    GMAIL_INBOX_QUERY: str = "has:attachment filename:pdf in:inbox"
+    GMAIL_INBOX_MAX_MESSAGES_PER_IMPORT: int = Field(default=10, ge=1, le=100)
+    GMAIL_INBOX_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    GMAIL_INBOX_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
+    GMAIL_INBOX_API_BASE_URL: str = "https://gmail.googleapis.com/gmail/v1"
+    SLACK_MESSAGING_ENABLED: bool = False
+    SLACK_BOT_TOKEN: str = ""
+    SLACK_MESSAGING_CHANNEL_IDS: str = ""
+    SLACK_MESSAGING_CHANNEL_LIMIT: int = Field(default=10, ge=1, le=100)
+    SLACK_MESSAGING_HISTORY_LIMIT: int = Field(default=20, ge=1, le=200)
+    SLACK_MESSAGING_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    SLACK_API_BASE_URL: str = "https://slack.com/api"
+    ATTIO_ENABLED: bool = False
+    ATTIO_ACCESS_TOKEN: str = ""
+    ATTIO_API_KEY: str = ""
+    ATTIO_BASE_URL: str = "https://api.attio.com/v2"
+    ATTIO_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    ATTIO_OBJECT_LIMIT: int = Field(default=25, ge=1, le=100)
+    ATTIO_CLIENT_SYNC_LIMIT: int = Field(default=200, ge=1, le=500)
+    NOTION_ENABLED: bool = False
+    NOTION_ACCESS_TOKEN: str = ""
+    NOTION_API_KEY: str = ""
+    NOTION_BASE_URL: str = "https://api.notion.com/v1"
+    NOTION_VERSION: str = "2026-03-11"
+    NOTION_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    NOTION_SEARCH_LIMIT: int = Field(default=10, ge=1, le=100)
+    NOTION_CLIENT_PAGE_CONFIDENCE_THRESHOLD: float = Field(default=0.6, ge=0, le=1)
+    GRAIN_ENABLED: bool = False
+    GRAIN_ACCESS_TOKEN: str = ""
+    GRAIN_API_KEY: str = ""
+    GRAIN_BASE_URL: str = "https://api.grain.com"
+    GRAIN_PUBLIC_API_VERSION: str = "2025-10-31"
+    GRAIN_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    GRAIN_RECORDING_LIMIT: int = Field(default=10, ge=1, le=100)
+    LINEAR_ENABLED: bool = False
+    LINEAR_API_KEY: str = ""
+    LINEAR_ACCESS_TOKEN: str = ""
+    LINEAR_GRAPHQL_URL: str = "https://api.linear.app/graphql"
+    LINEAR_TIMEOUT_SECONDS: int = Field(default=20, ge=5, le=120)
+    LINEAR_ISSUE_LIMIT: int = Field(default=25, ge=1, le=100)
     EIA_API_KEY: str = ""
     EIA_BASE_URL: str = "https://api.eia.gov/v2"
     EIA_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
-    EIA_SYNC_INTERVAL_MINUTES: int = Field(default=360, ge=5, le=10080)
+    EIA_SYNC_INTERVAL_MINUTES: int = Field(default=60, ge=5, le=10080)
     EIA_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=30, ge=1, le=3650)
     EIA_SYNC_SUCCESS_SLA_HOURS: int = Field(default=48, ge=1, le=336)
-    EIA_FUNDAMENTALS_SYNC_INTERVAL_MINUTES: int = Field(default=1440, ge=5, le=10080)
+    EIA_FUNDAMENTALS_SYNC_INTERVAL_MINUTES: int = Field(default=360, ge=5, le=10080)
     EIA_FUNDAMENTALS_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=120, ge=1, le=3650)
     EIA_FUNDAMENTALS_SYNC_SUCCESS_SLA_HOURS: int = Field(default=240, ge=1, le=336)
     FRED_API_KEY: str = ""
     FRED_BASE_URL: str = "https://api.stlouisfed.org/fred"
+    FRED_GRAPH_BASE_URL: str = "https://fred.stlouisfed.org/graph"
     FRED_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
-    FRED_SYNC_INTERVAL_MINUTES: int = Field(default=360, ge=5, le=10080)
-    FRED_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=30, ge=1, le=3650)
+    FRED_SYNC_INTERVAL_MINUTES: int = Field(default=60, ge=5, le=10080)
+    FRED_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=365, ge=1, le=3650)
     FRED_SYNC_SUCCESS_SLA_HOURS: int = Field(default=48, ge=1, le=336)
+    ALPHA_VANTAGE_API_KEY: str = ""
+    ALPHA_VANTAGE_BASE_URL: str = "https://www.alphavantage.co/query"
+    ALPHA_VANTAGE_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    ALPHA_VANTAGE_SYNC_INTERVAL_MINUTES: int = Field(default=15, ge=5, le=10080)
+    ALPHA_VANTAGE_SYNC_SUCCESS_SLA_HOURS: int = Field(default=24, ge=1, le=336)
+    BLS_API_KEY: str = ""
+    BLS_BASE_URL: str = "https://api.bls.gov/publicAPI/v2"
+    BLS_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    BLS_PPI_SYNC_INTERVAL_MINUTES: int = Field(default=1440, ge=60, le=43200)
+    BLS_PPI_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=1460, ge=31, le=36500)
+    BLS_PPI_SYNC_SUCCESS_SLA_HOURS: int = Field(default=1200, ge=24, le=2160)
+    WORLD_BANK_PINK_SHEET_MONTHLY_URL: str = (
+        "https://thedocs.worldbank.org/en/doc/74e8be41ceb20fa0da750cda2f6b9e4e-0050012026/"
+        "related/CMO-Historical-Data-Monthly.xlsx"
+    )
+    WORLD_BANK_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    WORLD_BANK_SYNC_INTERVAL_MINUTES: int = Field(default=1440, ge=60, le=43200)
+    WORLD_BANK_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=900, ge=31, le=36500)
+    WORLD_BANK_SYNC_SUCCESS_SLA_HOURS: int = Field(default=1200, ge=24, le=2160)
+    USDA_NASS_API_KEY: str = ""
+    USDA_NASS_BASE_URL: str = "https://quickstats.nass.usda.gov/api"
+    USDA_NASS_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    USDA_NASS_SYNC_INTERVAL_MINUTES: int = Field(default=1440, ge=60, le=43200)
+    USDA_NASS_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=1095, ge=31, le=36500)
+    USDA_NASS_SYNC_SUCCESS_SLA_HOURS: int = Field(default=1200, ge=24, le=2160)
+    EIA_WHOLESALE_POWER_BASE_URL: str = "https://www.eia.gov/electricity/wholesale/xls"
+    EIA_WHOLESALE_POWER_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    EIA_WHOLESALE_POWER_SYNC_INTERVAL_MINUTES: int = Field(default=60, ge=5, le=10080)
+    EIA_WHOLESALE_POWER_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=30, ge=1, le=3650)
+    EIA_WHOLESALE_POWER_SYNC_SUCCESS_SLA_HOURS: int = Field(default=336, ge=1, le=336)
+    AISSTREAM_API_KEY: str = ""
+    AISSTREAM_URL: str = "wss://stream.aisstream.io/v0/stream"
+    AISSTREAM_REFRESH_TIMEOUT_SECONDS: int = Field(default=30, ge=5, le=120)
     CFTC_BASE_URL: str = "https://publicreporting.cftc.gov"
     CFTC_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
-    CFTC_SYNC_INTERVAL_MINUTES: int = Field(default=1440, ge=5, le=10080)
+    CFTC_SYNC_INTERVAL_MINUTES: int = Field(default=360, ge=5, le=10080)
     CFTC_SYNC_DEFAULT_LOOKBACK_DAYS: int = Field(default=60, ge=1, le=3650)
     CFTC_SYNC_SUCCESS_SLA_HOURS: int = Field(default=192, ge=1, le=336)
     CAISO_BASE_URL: str = "https://oasis.caiso.com/oasisapi"
     CAISO_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
-    CAISO_SYNC_INTERVAL_MINUTES: int = Field(default=15, ge=5, le=1440)
+    CAISO_SYNC_INTERVAL_MINUTES: int = Field(default=5, ge=5, le=1440)
     CAISO_SYNC_SUCCESS_SLA_HOURS: int = Field(default=2, ge=1, le=24)
     ERCOT_BASE_URL: str = "https://www.ercot.com/content/cdr/html"
     ERCOT_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
-    ERCOT_SYNC_INTERVAL_MINUTES: int = Field(default=15, ge=5, le=1440)
+    ERCOT_SYNC_INTERVAL_MINUTES: int = Field(default=5, ge=5, le=1440)
     ERCOT_SYNC_SUCCESS_SLA_HOURS: int = Field(default=2, ge=1, le=24)
+    MISO_BASE_URL: str = "https://public-api.misoenergy.org"
+    MISO_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    MISO_SYNC_INTERVAL_MINUTES: int = Field(default=5, ge=5, le=1440)
+    MISO_SYNC_SUCCESS_SLA_HOURS: int = Field(default=2, ge=1, le=24)
+    NYISO_BASE_URL: str = "https://mis.nyiso.com/public"
+    NYISO_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    NYISO_SYNC_INTERVAL_MINUTES: int = Field(default=5, ge=5, le=1440)
+    NYISO_SYNC_SUCCESS_SLA_HOURS: int = Field(default=2, ge=1, le=24)
     KALSHI_BASE_URL: str = "https://api.elections.kalshi.com/trade-api/v2"
     KALSHI_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
-    KALSHI_SYNC_INTERVAL_MINUTES: int = Field(default=360, ge=5, le=10080)
+    KALSHI_SYNC_INTERVAL_MINUTES: int = Field(default=60, ge=5, le=10080)
     KALSHI_DEFAULT_LOOKBACK_DAYS: int = Field(default=90, ge=1, le=3650)
     KALSHI_SYNC_SUCCESS_SLA_HOURS: int = Field(default=24, ge=1, le=336)
+    MARKET_DATA_LOGIN_SYNC_ENABLED: bool = True
+    MARKET_DATA_LOGIN_SYNC_PROVIDERS: str = "EIA,EIA_FUNDAMENTALS,FRED,BLS_PPI,WORLD_BANK,EIA_WHOLESALE_POWER,CFTC,CAISO,ERCOT,MISO,NYISO,KALSHI"
     NWS_BASE_URL: str = "https://api.weather.gov"
     NWS_USER_AGENT: str = ""
     NWS_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)

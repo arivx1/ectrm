@@ -1,26 +1,49 @@
 import { useState } from 'react'
 
 import type {
+  CancelDeliveryTruckMovementInput,
+  CancelDeliveryTruckStopInput,
   CreateDeliveryEventInput,
+  DeliveryTruckMovementCreateInput,
+  DeliveryTruckStopCreateInput,
+  RecordDeliveryTruckStopCheckpointInput,
+  ReverseDeliveryTruckStopCheckpointInput,
+  SkipDeliveryTruckStopInput,
   UpdateDeliveryInput,
   UpdateDeliveryLogisticsDetailInput,
   UpdateDeliveryPipelineDetailInput,
   UpdateDeliveryPowerDetailInput,
+  UpdateDeliveryTruckDetailInput,
+  UpdateDeliveryVesselDetailInput,
+  UpdateDeliveryTruckMovementInput,
+  UpdateDeliveryTruckStopInput,
 } from '../../entities/shipments/api'
 import type { OperationalResourceDescriptor } from '../../entities/app/api'
+import {
+  getAppRouteHandoffFilterValue,
+  normalizeAppRouteHandoff,
+  type AppRouteHandoff,
+} from '../../shared/appRouteHandoff'
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
-import type { DeliveryRecord } from '../../shared/models'
+import type { DeliveryRecord, ReferenceRecord } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import { TileSectionGrid, type TileSectionGridItem } from '../../shared/ui/TileSectionGrid'
+import { WorkspaceHandoffFocusBanner } from '../../shared/ui/WorkspaceHandoffFocusBanner'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import { OperationalBoardController } from '../operations/OperationalBoardController'
 import { renderOperationalActionPanel } from '../operations/operationalActionPanelRegistry'
 import { resolveOperationalWorkboardDefinition } from '../operations/operationalWorkboardRegistry'
+import {
+  formatTruckCheckpointLabel,
+  latestActiveTruckCheckpointEvent,
+} from './deliveryTruckWorkflowHelpers'
 
 type DeliveryWorkspaceProps = {
   authSession: StoredAuthSession | null
+  routeHandoff: AppRouteHandoff | null
   globalFilter: string
+  commodities: ReferenceRecord[]
   deliveries: DeliveryRecord[]
   operationalResourceDescriptors: OperationalResourceDescriptor[]
   formatCommodityClass: (value: string) => string
@@ -33,6 +56,7 @@ type DeliveryWorkspaceProps = {
   deliverySyncSuccess: string
   deliveriesSyncing: boolean
   onOpenTrade: (tradeId: string) => void
+  onClearHandoff: () => void
   onSyncDeliveriesFromTrades: () => Promise<void>
   onSaveDelivery: (deliveryId: string, payload: UpdateDeliveryInput) => Promise<void>
   onSaveDeliveryLogisticsDetails: (
@@ -47,6 +71,59 @@ type DeliveryWorkspaceProps = {
     deliveryId: string,
     payload: UpdateDeliveryPowerDetailInput,
   ) => Promise<void>
+  onSaveDeliveryTruckDetails: (
+    deliveryId: string,
+    payload: UpdateDeliveryTruckDetailInput,
+  ) => Promise<void>
+  onSaveDeliveryVesselDetails: (
+    deliveryId: string,
+    payload: UpdateDeliveryVesselDetailInput,
+  ) => Promise<void>
+  onCreateDeliveryTruckMovement: (
+    deliveryId: string,
+    payload: DeliveryTruckMovementCreateInput,
+  ) => Promise<void>
+  onSaveDeliveryTruckMovement: (
+    deliveryId: string,
+    movementId: string,
+    payload: UpdateDeliveryTruckMovementInput,
+  ) => Promise<void>
+  onCancelDeliveryTruckMovement: (
+    deliveryId: string,
+    movementId: string,
+    payload: CancelDeliveryTruckMovementInput,
+  ) => Promise<void>
+  onCreateDeliveryTruckStop: (
+    deliveryId: string,
+    movementId: string,
+    payload: DeliveryTruckStopCreateInput,
+  ) => Promise<void>
+  onSaveDeliveryTruckStop: (
+    deliveryId: string,
+    stopId: string,
+    payload: UpdateDeliveryTruckStopInput,
+  ) => Promise<void>
+  onSkipDeliveryTruckStop: (
+    deliveryId: string,
+    stopId: string,
+    payload: SkipDeliveryTruckStopInput,
+  ) => Promise<void>
+  onCancelDeliveryTruckStop: (
+    deliveryId: string,
+    stopId: string,
+    payload: CancelDeliveryTruckStopInput,
+  ) => Promise<void>
+  onRecordDeliveryTruckStopCheckpoint: (
+    deliveryId: string,
+    stopId: string,
+    payload: RecordDeliveryTruckStopCheckpointInput,
+  ) => Promise<string | null>
+  onReverseDeliveryTruckStopCheckpoint: (
+    deliveryId: string,
+    stopId: string,
+    eventId: number,
+    payload: ReverseDeliveryTruckStopCheckpointInput,
+  ) => Promise<string | null>
   onCreateDeliveryEvent: (deliveryId: string, payload: CreateDeliveryEventInput) => Promise<void>
 }
 
@@ -87,6 +164,41 @@ function volumeLabel(delivery: DeliveryRecord, formatNumber: DeliveryWorkspacePr
   }
 
   return `${formatNumber(delivery.volume, 0)} ${delivery.unit_of_measure ?? ''}`.trim()
+}
+
+function latestTruckCheckpointLabel(
+  delivery: DeliveryRecord,
+  formatDate: DeliveryWorkspaceProps['formatDate'],
+): string | null {
+  if (delivery.transport_mode !== 'TRUCK') {
+    return null
+  }
+  const checkpoint = latestActiveTruckCheckpointEvent(delivery)
+  if (!checkpoint) {
+    return null
+  }
+  return `${formatTruckCheckpointLabel(checkpoint.checkpoint_code)} at ${formatDate(checkpoint.occurred_at)}`
+}
+
+function latestVesselTrackingLabel(
+  delivery: DeliveryRecord,
+  formatDate: DeliveryWorkspaceProps['formatDate'],
+): string | null {
+  if (delivery.transport_mode !== 'VESSEL') {
+    return null
+  }
+
+  const detail = delivery.vessel_detail
+  if (!detail?.last_signal_at && !detail?.last_position_at) {
+    return null
+  }
+
+  const health = delivery.vessel_tracking_health ?? detail.tracking_health
+  const signalTime = detail.last_position_at ?? detail.last_signal_at
+  const vesselName = detail.vessel_name ?? detail.imo_number ?? detail.mmsi_number ?? 'Vessel'
+  const statusLabel = health?.primary_exception ?? health?.exception_severity ?? 'TRACKING'
+
+  return `${vesselName} ${statusLabel.replaceAll('_', ' ').toLowerCase()} at ${formatDate(signalTime)}`
 }
 
 function windowLabel(
@@ -167,6 +279,20 @@ function matchesDeliveryScreenFilter(delivery: DeliveryRecord, query: string): b
     delivery.location_code,
     delivery.origin_location_code,
     delivery.destination_location_code,
+    delivery.rail_route_code,
+    delivery.rail_line_code,
+    delivery.railroad_code,
+    delivery.rail_route_direction,
+    delivery.rail_service_calendar_code,
+    delivery.vessel_detail?.vessel_name,
+    delivery.vessel_detail?.imo_number,
+    delivery.vessel_detail?.mmsi_number,
+    delivery.vessel_detail?.call_sign,
+    delivery.vessel_detail?.voyage_number,
+    delivery.vessel_detail?.tracking_provider,
+    delivery.vessel_detail?.current_destination,
+    delivery.vessel_tracking_health?.primary_exception,
+    delivery.vessel_tracking_health?.exception_severity,
     delivery.receipt_location_code,
     delivery.delivery_location_code,
     delivery.pipeline_system,
@@ -188,7 +314,9 @@ function matchesDeliveryScreenFilter(delivery: DeliveryRecord, query: string): b
 
 export function DeliveryWorkspace({
   authSession,
+  routeHandoff,
   globalFilter,
+  commodities,
   deliveries,
   operationalResourceDescriptors,
   formatCommodityClass,
@@ -201,18 +329,38 @@ export function DeliveryWorkspace({
   deliverySyncSuccess,
   deliveriesSyncing,
   onOpenTrade,
+  onClearHandoff,
   onSyncDeliveriesFromTrades,
   onSaveDelivery,
   onSaveDeliveryLogisticsDetails,
   onSaveDeliveryPipelineDetails,
   onSaveDeliveryPowerDetails,
+  onSaveDeliveryTruckDetails,
+  onSaveDeliveryVesselDetails,
+  onCreateDeliveryTruckMovement,
+  onSaveDeliveryTruckMovement,
+  onCancelDeliveryTruckMovement,
+  onCreateDeliveryTruckStop,
+  onSaveDeliveryTruckStop,
+  onSkipDeliveryTruckStop,
+  onCancelDeliveryTruckStop,
+  onRecordDeliveryTruckStopCheckpoint,
+  onReverseDeliveryTruckStopCheckpoint,
   onCreateDeliveryEvent,
 }: DeliveryWorkspaceProps) {
   const [screenFilter, setScreenFilter] = useState('')
   const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(null)
-  const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
-  const visibleDeliveries = deliveries.filter((delivery) =>
-    matchesDeliveryScreenFilter(delivery, effectiveScreenFilter),
+  const normalizedRouteHandoff = normalizeAppRouteHandoff(routeHandoff)
+  const focusedRailRouteCode =
+    normalizedRouteHandoff?.focus.type === 'reference_record'
+      ? normalizedRouteHandoff.focus.id.trim().toUpperCase()
+      : null
+  const handoffScreenFilter = focusedRailRouteCode ? '' : getAppRouteHandoffFilterValue(normalizedRouteHandoff) ?? ''
+  const effectiveScreenFilter = combineTextFilters(globalFilter, handoffScreenFilter, screenFilter)
+  const visibleDeliveries = deliveries.filter(
+    (delivery) =>
+      (!focusedRailRouteCode || delivery.rail_route_code === focusedRailRouteCode) &&
+      matchesDeliveryScreenFilter(delivery, effectiveScreenFilter),
   )
 
   const openDeliveries = visibleDeliveries.filter((delivery) => delivery.status !== 'COMPLETED')
@@ -222,6 +370,7 @@ export function DeliveryWorkspace({
   const logisticsDeliveries = visibleDeliveries.filter((delivery) => delivery.mode_family === 'LOGISTICS')
   const networkDeliveries = visibleDeliveries.filter((delivery) => delivery.mode_family === 'NETWORK_FLOW')
   const powerDeliveries = visibleDeliveries.filter((delivery) => delivery.mode_family === 'POWER_SCHEDULE')
+  const vesselDeliveries = logisticsDeliveries.filter((delivery) => delivery.transport_mode === 'VESSEL')
   const pricingPendingOpen = openDeliveries.filter((delivery) => delivery.pricing_status !== 'PRICED').length
   const confirmationPendingOpen = openDeliveries.filter((delivery) => delivery.confirmation_status !== 'CONFIRMED').length
   const nominationPendingOpen = openDeliveries.filter(
@@ -262,6 +411,10 @@ export function DeliveryWorkspace({
     'deliveryBoard',
     operationalResourceDescriptors,
   )
+  function clearWorkspaceHandoff() {
+    setScreenFilter('')
+    onClearHandoff()
+  }
   const shipmentSummaryCards: TileSectionGridItem[] = [
     {
       id: 'tracked-deliveries',
@@ -282,6 +435,17 @@ export function DeliveryWorkspace({
           <span>Logistics Moves</span>
           <strong>{formatNumber(logisticsDeliveries.length, 0)}</strong>
           <p>Discrete physical deliveries that still need an explicit truck, rail, barge, or vessel mode.</p>
+        </>
+      ),
+    },
+    {
+      id: 'vessel-moves',
+      title: 'Vessel Moves',
+      content: (
+        <>
+          <span>Vessel Moves</span>
+          <strong>{formatNumber(vesselDeliveries.length, 0)}</strong>
+          <p>Waterborne obligations with vessel identity, AIS-style signals, and ETA health visible to ops.</p>
         </>
       ),
     },
@@ -326,16 +490,30 @@ export function DeliveryWorkspace({
       workspaceLabel="Deliveries"
       authSession={authSession}
       headerContent={
-        <WorkspaceLocalFilterBar
-          value={screenFilter}
-          onChange={setScreenFilter}
-          placeholder="Delivery ID, trade ID, commodity, book, mode, status, or location"
-          description="Keep delivery filtering local to this execution screen so you can tighten the queue without changing any other workspace."
-          totalCount={deliveries.length}
-          matchedCount={visibleDeliveries.length}
-          resultLabel="deliveries"
-          globalValue={globalFilter}
-        />
+        <>
+          <WorkspaceHandoffFocusBanner
+            handoff={routeHandoff}
+            currentView="shipments"
+            clearLabel="Show Full Board"
+            onClear={clearWorkspaceHandoff}
+          />
+          <WorkspaceLocalFilterBar
+            value={screenFilter}
+            onChange={setScreenFilter}
+            placeholder="Delivery ID, trade ID, commodity, book, mode, status, location, or rail route"
+            description="Keep delivery filtering local to this execution screen so you can tighten the queue without changing any other workspace."
+            totalCount={deliveries.length}
+            matchedCount={visibleDeliveries.length}
+            resultLabel="deliveries"
+            globalValue={globalFilter}
+            hasExternalFilter={focusedRailRouteCode !== null}
+            note={
+              focusedRailRouteCode
+                ? `Rail route ${focusedRailRouteCode} is currently in focus. Clear the route focus when you want to widen back to the full delivery board.`
+                : undefined
+            }
+          />
+        </>
       }
       sections={[
         {
@@ -515,6 +693,7 @@ export function DeliveryWorkspace({
                   selectedDelivery ? (
                     renderOperationalActionPanel('deliveryControl', operationalResourceDescriptors, {
                       authSession,
+                      commodities,
                       delivery: selectedDelivery,
                       saveError: deliveryMutationError,
                       savingDeliveryId: deliveryMutationPendingId,
@@ -524,6 +703,17 @@ export function DeliveryWorkspace({
                       onSaveLogisticsDetails: onSaveDeliveryLogisticsDetails,
                       onSavePipelineDetails: onSaveDeliveryPipelineDetails,
                       onSavePowerDetails: onSaveDeliveryPowerDetails,
+                      onSaveTruckDetails: onSaveDeliveryTruckDetails,
+                      onSaveVesselDetails: onSaveDeliveryVesselDetails,
+                      onCreateTruckMovement: onCreateDeliveryTruckMovement,
+                      onSaveTruckMovement: onSaveDeliveryTruckMovement,
+                      onCancelTruckMovement: onCancelDeliveryTruckMovement,
+                      onCreateTruckStop: onCreateDeliveryTruckStop,
+                      onSaveTruckStop: onSaveDeliveryTruckStop,
+                      onSkipTruckStop: onSkipDeliveryTruckStop,
+                      onCancelTruckStop: onCancelDeliveryTruckStop,
+                      onRecordTruckStopCheckpoint: onRecordDeliveryTruckStopCheckpoint,
+                      onReverseTruckStopCheckpoint: onReverseDeliveryTruckStopCheckpoint,
                       onCreateEvent: onCreateDeliveryEvent,
                     })
                   ) : (
@@ -540,6 +730,8 @@ export function DeliveryWorkspace({
               <div className="position-list">
                 {visibleDeliveries.map((delivery) => {
                   const isSelected = selectedDelivery?.delivery_id === delivery.delivery_id
+                  const latestTruckCheckpoint = latestTruckCheckpointLabel(delivery, formatDate)
+                  const latestVesselTracking = latestVesselTrackingLabel(delivery, formatDate)
 
                   return (
                     <article
@@ -572,6 +764,12 @@ export function DeliveryWorkspace({
                         {hasManualSharedOverrides(delivery) ? (
                           <span className="entity-chip entity-chip-soft">Manual Overrides</span>
                         ) : null}
+                        {latestTruckCheckpoint ? (
+                          <span className="entity-chip entity-chip-soft">Truck {latestTruckCheckpoint}</span>
+                        ) : null}
+                        {latestVesselTracking ? (
+                          <span className="entity-chip entity-chip-soft">Vessel {latestVesselTracking}</span>
+                        ) : null}
                         <span className="entity-chip entity-chip-soft">Pricing {delivery.pricing_status}</span>
                         <span className="entity-chip entity-chip-soft">Confirmation {delivery.confirmation_status}</span>
                         <span className="entity-chip entity-chip-soft">Nomination {delivery.nomination_status}</span>
@@ -595,6 +793,8 @@ export function DeliveryWorkspace({
                             ? `Actualized ${formatNumber(delivery.actualized_quantity, 2)} ${delivery.unit_of_measure ?? ''} on ${formatDate(delivery.actualized_at)}`
                             : 'Execution actuals have not been recorded yet.'}
                         </p>
+                        {latestTruckCheckpoint ? <p>Latest truck checkpoint: {latestTruckCheckpoint}</p> : null}
+                        {latestVesselTracking ? <p>Latest vessel tracking: {latestVesselTracking}</p> : null}
                         <p>
                           Booked {formatDate(delivery.booked_at)} • Updated {formatDate(delivery.last_updated_at)} • Open{' '}
                           {delivery.age_days}d

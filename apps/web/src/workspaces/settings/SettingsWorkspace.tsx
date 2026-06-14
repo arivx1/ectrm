@@ -1,13 +1,36 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 
-import { logoutCurrentSession } from '../../entities/auth/api'
+import { logoutCurrentSession, updateCurrentUserProfile } from '../../entities/auth/api'
 import { loadPublicRuntimeSettings, type PublicRuntimeSettings } from '../../entities/app/api'
+import {
+  getAnthropicIntegrationApiKey,
+  loadAnthropicIntegrationSettings,
+  loadGmailInboxIntegrationSettings,
+  loadSlackMessagingIntegrationSettings,
+  testGmailInboxIntegrationConnection,
+  testSlackMessagingIntegrationConnection,
+  type AnthropicApiKeyLookup,
+  type AnthropicRuntimeSettings,
+  type GmailInboxConnectionTest,
+  type GmailInboxIntegrationRuntimeSettings,
+  type SlackMessagingConnectionTest,
+  type SlackMessagingIntegrationRuntimeSettings,
+} from '../../entities/app/adminApi'
+import {
+  clearAssistantResponseSettingsSnapshot,
+  formatMessagingAgentBrevityPreference,
+  getAssistantResponseSettingsSnapshot,
+  MESSAGING_AGENT_BREVITY_OPTIONS,
+  saveAssistantResponseSettingsSnapshot,
+  type AssistantResponseSettings,
+} from '../../shared/assistantResponseSettings'
 import {
   resolveAppearancePalette,
   type AppearancePalette,
   type AppearanceSettings,
   type ColorModePreference,
   type ResolvedColorMode,
+  type WorkspaceModePreference,
 } from '../../shared/appearance'
 import {
   appConfig,
@@ -25,6 +48,16 @@ import {
   type TradeCaptureVisibilityMode,
 } from '../../shared/tradeCaptureSettings'
 import { type StoredAuthSession } from '../../shared/mutation'
+import { type AssistantPersona } from '../../shared/models'
+import {
+  clearTimeDisplaySettingsSnapshot,
+  formatTimeDisplayTimeZonePreferenceLabel,
+  getTimeDisplaySettingsSnapshot,
+  listTimeDisplayTimeZoneOptions,
+  resolveTimeDisplayTimeZone,
+  saveTimeDisplaySettingsSnapshot,
+  type TimeDisplaySettings,
+} from '../../shared/timeDisplaySettings'
 import {
   optionStyleOptions,
   optionTypeOptions,
@@ -37,6 +70,14 @@ import {
   tradeSideOptions,
   tradeStructureOptions,
 } from '../../shared/trading'
+import {
+  formatProjectionMonitoringEmailAuthLabel,
+  formatProjectionMonitoringEmailStatusLabel,
+  summarizeProjectionMonitoringEmail,
+} from './projectionMonitoringEmailRuntime'
+import { GoogleCalendarPanel } from './GoogleCalendarPanel'
+import { SettingsDisclosureCard } from './SettingsDisclosureCard'
+import { UserEventsPanel } from './UserEventsPanel'
 
 type SettingsWorkspaceProps = {
   health: string
@@ -58,7 +99,35 @@ type FlashMessage = {
   message: string
 }
 
-type AuthAction = 'logout' | null
+type AuthAction = 'logout' | 'profile' | null
+
+type AdminConnectionRuntimeSettings = {
+  enabled: boolean
+  configured: boolean
+  missing_configuration: string[]
+}
+
+type UserProfileForm = {
+  displayName: string
+  firstName: string
+  lastName: string
+  preferredTimeZone: string
+  primaryLocation: string
+  defaultAssistantPersona: AssistantPersona
+  assistantContextBlurb: string
+}
+
+const ASSISTANT_CONTEXT_BLURB_MAX_LENGTH = 4000
+
+const USER_PERSONA_OPTIONS: { value: AssistantPersona; label: string }[] = [
+  { value: 'operator', label: 'Operator' },
+  { value: 'trader', label: 'Trader' },
+  { value: 'risk', label: 'Risk' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'operations', label: 'Operations' },
+  { value: 'settlement', label: 'Settlement' },
+  { value: 'reference_data', label: 'Reference Data' },
+]
 
 const COLOR_MODE_OPTIONS: Array<{
   value: ColorModePreference
@@ -79,6 +148,23 @@ const COLOR_MODE_OPTIONS: Array<{
     value: 'dark',
     label: 'Dark',
     detail: 'Keep the terminal-style night treatment active.',
+  },
+]
+
+const WORKSPACE_MODE_OPTIONS: Array<{
+  value: WorkspaceModePreference
+  label: string
+  detail: string
+}> = [
+  {
+    value: 'default',
+    label: 'Guided workspace',
+    detail: 'Use the standard shell around the Home brief and Apps workspace.',
+  },
+  {
+    value: 'terminal',
+    label: 'Dense workspace',
+    detail: 'Use the denser shell treatment while keeping Home as the signed-in landing page.',
   },
 ]
 
@@ -106,6 +192,10 @@ function formatModeLabel(value: ColorModePreference | ResolvedColorMode): string
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
+function formatWorkspaceModeLabel(value: WorkspaceModePreference): string {
+  return value === 'terminal' ? 'Dense workspace' : 'Guided workspace'
+}
+
 function formatVisibilityModeLabel(value: TradeCaptureVisibilityMode): string {
   return value === 'always' ? 'Always visible' : 'Auto'
 }
@@ -127,6 +217,38 @@ function formatRuleVisibilityOverrideLabel(value: TradeCaptureRuleVisibilityOver
 
 function formatRuleValueLabel(value: string | null): string {
   return value ? value.split('_').join(' ') : 'Any'
+}
+
+function normalizeAssistantPersona(value: string | null | undefined): AssistantPersona {
+  return USER_PERSONA_OPTIONS.some((option) => option.value === value)
+    ? (value as AssistantPersona)
+    : 'operator'
+}
+
+function formatAssistantPersona(persona: AssistantPersona | string | null | undefined): string {
+  return USER_PERSONA_OPTIONS.find((option) => option.value === persona)?.label ?? 'Operator'
+}
+
+function formatOptionalProfileValue(value: string | null | undefined, fallback: string): string {
+  const normalizedValue = value?.trim()
+  return normalizedValue || fallback
+}
+
+function formatProfileTimeZone(value: string | null | undefined): string {
+  const normalizedValue = value?.trim()
+  return normalizedValue ? normalizedValue.replaceAll('_', ' ') : 'No timezone preference'
+}
+
+function buildUserProfileForm(user: StoredAuthSession['user'] | null | undefined): UserProfileForm {
+  return {
+    displayName: user?.display_name ?? '',
+    firstName: user?.first_name ?? '',
+    lastName: user?.last_name ?? '',
+    preferredTimeZone: user?.preferred_timezone ?? '',
+    primaryLocation: user?.primary_location ?? '',
+    defaultAssistantPersona: normalizeAssistantPersona(user?.default_assistant_persona),
+    assistantContextBlurb: user?.assistant_context_blurb ?? '',
+  }
 }
 
 function previewStyle(palette: AppearancePalette): CSSProperties {
@@ -187,6 +309,100 @@ function formatDatabaseType(value: string | null | undefined): string {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1)
 }
 
+function hasAdminIntegrationAccess(authSession: StoredAuthSession | null): boolean {
+  const role = authSession?.user.role?.trim().toUpperCase()
+  return role === 'OPS_ADMIN' || role === 'ADMIN'
+}
+
+function formatAnthropicAdminSummary(
+  settings: AnthropicRuntimeSettings | null,
+  loading: boolean,
+  error: string,
+): string {
+  if (loading) {
+    return 'Loading Anthropic admin status'
+  }
+  if (settings?.configured) {
+    return `Configured · ${settings.tracked_api_key_id ?? 'key id hidden'}`
+  }
+  if (settings?.enabled) {
+    return `Partial · ${settings.missing_configuration.join(', ') || 'missing setup'}`
+  }
+  return error || 'Not enabled'
+}
+
+function formatAdminConnectionStatus(
+  settings: AdminConnectionRuntimeSettings | null,
+  loading: boolean,
+  error: string,
+): string {
+  if (loading) {
+    return 'Loading'
+  }
+  if (settings?.configured) {
+    return 'Configured'
+  }
+  if (settings?.enabled) {
+    return 'Partial'
+  }
+  return error ? 'Unavailable' : 'Disabled'
+}
+
+function formatGmailConnectionSummary(
+  settings: GmailInboxIntegrationRuntimeSettings | null,
+  connectionTest: GmailInboxConnectionTest | null,
+  error: string,
+): string {
+  if (connectionTest) {
+    const identity = connectionTest.profile_email ?? connectionTest.account_email ?? 'Gmail'
+    return `${identity} · ${connectionTest.returned_message_count.toLocaleString()} message${connectionTest.returned_message_count === 1 ? '' : 's'} matched`
+  }
+  if (settings?.configured) {
+    const identity = settings.account_email ? ` for ${settings.account_email}` : ''
+    return `Ready${identity} · import limit ${settings.max_messages_per_import.toLocaleString()}`
+  }
+  if (settings?.enabled) {
+    return `Missing ${settings.missing_configuration.join(', ') || 'configuration'}`
+  }
+  return error || 'Gmail inbox import is disabled on the API.'
+}
+
+function formatSlackConnectionSummary(
+  settings: SlackMessagingIntegrationRuntimeSettings | null,
+  connectionTest: SlackMessagingConnectionTest | null,
+  error: string,
+): string {
+  if (connectionTest) {
+    return `${connectionTest.conversation_count.toLocaleString()} conversation${connectionTest.conversation_count === 1 ? '' : 's'} visible`
+  }
+  if (settings?.configured) {
+    const configuredChannels =
+      settings.configured_channel_count > 0
+        ? `${settings.configured_channel_count.toLocaleString()} pinned channel${settings.configured_channel_count === 1 ? '' : 's'}`
+        : `up to ${settings.channel_limit.toLocaleString()} discovered conversation${settings.channel_limit === 1 ? '' : 's'}`
+    return `${configuredChannels} · history limit ${settings.history_limit.toLocaleString()}`
+  }
+  if (settings?.enabled) {
+    return `Missing ${settings.missing_configuration.join(', ') || 'configuration'}`
+  }
+  return error || 'Slack messaging is disabled on the API.'
+}
+
+function formatApiKeyStatus(value: AnthropicApiKeyLookup | null): string {
+  return value ? value.api_key.status.toUpperCase() : 'Not checked'
+}
+
+function formatDateTime(value: string | null | undefined, fallback: string): string {
+  if (!value) {
+    return fallback
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return date.toLocaleString()
+}
+
 export function SettingsWorkspace({
   health,
   authSession,
@@ -204,16 +420,45 @@ export function SettingsWorkspace({
   const [runtimeOverrideForm, setRuntimeOverrideForm] = useState<ClientRuntimeOverrideSnapshot>(() =>
     getClientRuntimeOverrideSnapshot(),
   )
+  const [assistantResponseForm, setAssistantResponseForm] = useState<AssistantResponseSettings>(() =>
+    getAssistantResponseSettingsSnapshot(),
+  )
   const [appearanceForm, setAppearanceForm] = useState<AppearanceSettings>(() => appearanceSettings)
+  const [timeDisplayForm, setTimeDisplayForm] = useState<TimeDisplaySettings>(() =>
+    getTimeDisplaySettingsSnapshot(),
+  )
   const [tradeCaptureForm, setTradeCaptureForm] = useState<TradeCaptureSettings>(() => tradeCaptureSettings)
+  const [profileForm, setProfileForm] = useState<UserProfileForm>(() => buildUserProfileForm(authSession?.user))
   const [authFlash, setAuthFlash] = useState<FlashMessage | null>(null)
+  const [profileFlash, setProfileFlash] = useState<FlashMessage | null>(null)
   const [authAction, setAuthAction] = useState<AuthAction>(null)
   const [runtimeFlash, setRuntimeFlash] = useState<FlashMessage | null>(null)
+  const [assistantResponseFlash, setAssistantResponseFlash] = useState<FlashMessage | null>(null)
   const [appearanceFlash, setAppearanceFlash] = useState<FlashMessage | null>(null)
+  const [timeDisplayFlash, setTimeDisplayFlash] = useState<FlashMessage | null>(null)
   const [tradeCaptureFlash, setTradeCaptureFlash] = useState<FlashMessage | null>(null)
   const [serverSettings, setServerSettings] = useState<PublicRuntimeSettings | null>(null)
   const [serverSettingsError, setServerSettingsError] = useState('')
   const [serverSettingsLoading, setServerSettingsLoading] = useState(true)
+  const [anthropicSettings, setAnthropicSettings] = useState<AnthropicRuntimeSettings | null>(null)
+  const [anthropicApiKeyLookup, setAnthropicApiKeyLookup] = useState<AnthropicApiKeyLookup | null>(null)
+  const [anthropicSettingsLoading, setAnthropicSettingsLoading] = useState(false)
+  const [anthropicLookupLoading, setAnthropicLookupLoading] = useState(false)
+  const [anthropicError, setAnthropicError] = useState('')
+  const [gmailIntegrationSettings, setGmailIntegrationSettings] =
+    useState<GmailInboxIntegrationRuntimeSettings | null>(null)
+  const [gmailConnectionTest, setGmailConnectionTest] = useState<GmailInboxConnectionTest | null>(null)
+  const [gmailIntegrationLoading, setGmailIntegrationLoading] = useState(false)
+  const [gmailConnectionChecking, setGmailConnectionChecking] = useState(false)
+  const [gmailIntegrationError, setGmailIntegrationError] = useState('')
+  const [slackIntegrationSettings, setSlackIntegrationSettings] =
+    useState<SlackMessagingIntegrationRuntimeSettings | null>(null)
+  const [slackConnectionTest, setSlackConnectionTest] = useState<SlackMessagingConnectionTest | null>(null)
+  const [slackIntegrationLoading, setSlackIntegrationLoading] = useState(false)
+  const [slackConnectionChecking, setSlackConnectionChecking] = useState(false)
+  const [slackIntegrationError, setSlackIntegrationError] = useState('')
+  const [timeZoneOptions] = useState(() => listTimeDisplayTimeZoneOptions())
+  const adminIntegrationAccess = hasAdminIntegrationAccess(authSession)
 
   useEffect(() => {
     let cancelled = false
@@ -245,12 +490,118 @@ export function SettingsWorkspace({
   }, [])
 
   useEffect(() => {
+    let cancelled = false
+
+    async function loadAnthropicSettings() {
+      if (!adminIntegrationAccess || !authSession) {
+        setAnthropicSettings(null)
+        setAnthropicApiKeyLookup(null)
+        setAnthropicError('')
+        setAnthropicSettingsLoading(false)
+        return
+      }
+
+      setAnthropicSettingsLoading(true)
+      setAnthropicError('')
+      try {
+        const payload = await loadAnthropicIntegrationSettings(appConfig.apiBase, authSession.accessToken)
+        if (!cancelled) {
+          setAnthropicSettings(payload)
+          setAnthropicApiKeyLookup(null)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAnthropicSettings(null)
+          setAnthropicApiKeyLookup(null)
+          setAnthropicError(error instanceof Error ? error.message : 'Could not load Anthropic admin settings.')
+        }
+      } finally {
+        if (!cancelled) {
+          setAnthropicSettingsLoading(false)
+        }
+      }
+    }
+
+    void loadAnthropicSettings()
+
+    return () => {
+      cancelled = true
+    }
+  }, [adminIntegrationAccess, authSession])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadCommunicationIntegrationSettings() {
+      if (!adminIntegrationAccess || !authSession) {
+        setGmailIntegrationSettings(null)
+        setGmailConnectionTest(null)
+        setGmailIntegrationError('')
+        setGmailIntegrationLoading(false)
+        setSlackIntegrationSettings(null)
+        setSlackConnectionTest(null)
+        setSlackIntegrationError('')
+        setSlackIntegrationLoading(false)
+        return
+      }
+
+      setGmailIntegrationLoading(true)
+      setSlackIntegrationLoading(true)
+      setGmailIntegrationError('')
+      setSlackIntegrationError('')
+      setGmailConnectionTest(null)
+      setSlackConnectionTest(null)
+
+      const [gmailResult, slackResult] = await Promise.allSettled([
+        loadGmailInboxIntegrationSettings(appConfig.apiBase, authSession.accessToken),
+        loadSlackMessagingIntegrationSettings(appConfig.apiBase, authSession.accessToken),
+      ])
+
+      if (cancelled) {
+        return
+      }
+
+      if (gmailResult.status === 'fulfilled') {
+        setGmailIntegrationSettings(gmailResult.value)
+      } else {
+        setGmailIntegrationSettings(null)
+        setGmailIntegrationError(
+          gmailResult.reason instanceof Error ? gmailResult.reason.message : 'Could not load Gmail settings.',
+        )
+      }
+
+      if (slackResult.status === 'fulfilled') {
+        setSlackIntegrationSettings(slackResult.value)
+      } else {
+        setSlackIntegrationSettings(null)
+        setSlackIntegrationError(
+          slackResult.reason instanceof Error ? slackResult.reason.message : 'Could not load Slack settings.',
+        )
+      }
+
+      setGmailIntegrationLoading(false)
+      setSlackIntegrationLoading(false)
+    }
+
+    void loadCommunicationIntegrationSettings()
+
+    return () => {
+      cancelled = true
+    }
+  }, [adminIntegrationAccess, authSession])
+
+  useEffect(() => {
     setAppearanceForm(appearanceSettings)
   }, [appearanceSettings])
 
   useEffect(() => {
     setTradeCaptureForm(tradeCaptureSettings)
   }, [tradeCaptureSettings])
+
+  useEffect(() => {
+    setProfileForm(buildUserProfileForm(authSession?.user))
+    setProfileFlash(null)
+  }, [authSession?.user])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -281,6 +632,63 @@ export function SettingsWorkspace({
     return () => window.cancelAnimationFrame(frameId)
   }, [])
 
+  async function handleInspectAnthropicApiKey() {
+    if (!authSession || !adminIntegrationAccess) {
+      setAnthropicError('Sign in with an administrative session before checking Anthropic.')
+      return
+    }
+
+    setAnthropicLookupLoading(true)
+    setAnthropicError('')
+    try {
+      const payload = await getAnthropicIntegrationApiKey(appConfig.apiBase, authSession.accessToken)
+      setAnthropicApiKeyLookup(payload)
+    } catch (error) {
+      setAnthropicApiKeyLookup(null)
+      setAnthropicError(error instanceof Error ? error.message : 'Could not inspect the Anthropic API key.')
+    } finally {
+      setAnthropicLookupLoading(false)
+    }
+  }
+
+  async function handleTestGmailConnection() {
+    if (!authSession || !adminIntegrationAccess) {
+      setGmailIntegrationError('Sign in with an administrative session before checking Gmail.')
+      return
+    }
+
+    setGmailConnectionChecking(true)
+    setGmailIntegrationError('')
+    try {
+      const payload = await testGmailInboxIntegrationConnection(appConfig.apiBase, authSession.accessToken)
+      setGmailConnectionTest(payload)
+    } catch (error) {
+      setGmailConnectionTest(null)
+      setGmailIntegrationError(error instanceof Error ? error.message : 'Could not test the Gmail connection.')
+    } finally {
+      setGmailConnectionChecking(false)
+    }
+  }
+
+  async function handleTestSlackConnection() {
+    if (!authSession || !adminIntegrationAccess) {
+      setSlackIntegrationError('Sign in with an administrative session before checking Slack.')
+      return
+    }
+
+    setSlackConnectionChecking(true)
+    setSlackIntegrationError('')
+    try {
+      const payload = await testSlackMessagingIntegrationConnection(appConfig.apiBase, authSession.accessToken)
+      setSlackConnectionTest(payload)
+    } catch (error) {
+      setSlackConnectionTest(null)
+      setSlackIntegrationError(error instanceof Error ? error.message : 'Could not test the Slack connection.')
+    } finally {
+      setSlackConnectionChecking(false)
+    }
+  }
+
   async function handleLogout() {
     setAuthAction('logout')
     setAuthFlash(null)
@@ -306,6 +714,52 @@ export function SettingsWorkspace({
       } finally {
         setAuthAction(null)
       }
+    }
+  }
+
+  async function handleSaveUserProfile(event: React.FormEvent) {
+    event.preventDefault()
+    setProfileFlash(null)
+
+    if (!authSession) {
+      setProfileFlash({
+        tone: 'error',
+        message: 'Sign in before updating your user profile.',
+      })
+      return
+    }
+
+    setAuthAction('profile')
+    try {
+      const updatedUser = await updateCurrentUserProfile(appConfig.apiBase, {
+        display_name: profileForm.displayName,
+        first_name: profileForm.firstName,
+        last_name: profileForm.lastName,
+        preferred_timezone: profileForm.preferredTimeZone || null,
+        primary_location: profileForm.primaryLocation,
+        default_assistant_persona: profileForm.defaultAssistantPersona,
+        assistant_context_blurb: profileForm.assistantContextBlurb,
+      })
+      const nextSession: StoredAuthSession = {
+        ...authSession,
+        user: {
+          ...authSession.user,
+          ...updatedUser,
+        },
+      }
+      await onSessionChange(nextSession)
+      setProfileForm(buildUserProfileForm(nextSession.user))
+      setProfileFlash({
+        tone: 'success',
+        message: 'User profile saved. Assistant context will use this profile on new requests.',
+      })
+    } catch (error) {
+      setProfileFlash({
+        tone: 'error',
+        message: error instanceof Error ? error.message : 'Could not save the user profile.',
+      })
+    } finally {
+      setAuthAction(null)
     }
   }
 
@@ -365,13 +819,35 @@ export function SettingsWorkspace({
     window.location.reload()
   }
 
+  function handleSaveAssistantResponseSettings(event: React.FormEvent) {
+    event.preventDefault()
+    const savedSettings = saveAssistantResponseSettingsSnapshot(assistantResponseForm)
+    setAssistantResponseForm(savedSettings)
+    setAssistantResponseFlash({
+      tone: 'success',
+      message: 'Messaging agent reply style saved locally for this browser.',
+    })
+  }
+
+  function handleResetAssistantResponseSettings() {
+    const defaultSettings = clearAssistantResponseSettingsSnapshot()
+    setAssistantResponseForm(defaultSettings)
+    setAssistantResponseFlash({
+      tone: 'success',
+      message: 'Messaging agent reply style reset to Brief for this browser.',
+    })
+  }
+
   function handleSaveAppearance(event: React.FormEvent) {
     event.preventDefault()
     const savedSettings = onAppearanceSettingsChange(appearanceForm)
     setAppearanceForm(savedSettings)
     setAppearanceFlash({
       tone: 'success',
-      message: 'Appearance saved locally for this browser. A profile-backed API can replace this storage later without changing the UI.',
+      message:
+        savedSettings.workspaceMode === 'terminal'
+          ? 'Appearance saved locally for this browser. Dense workspace mode keeps Home as the signed-in root landing.'
+          : 'Appearance saved locally for this browser. Guided workspace mode keeps Home as the signed-in root landing.',
     })
   }
 
@@ -380,7 +856,26 @@ export function SettingsWorkspace({
     setAppearanceForm(defaultSettings)
     setAppearanceFlash({
       tone: 'success',
-      message: 'Appearance reset to the default console palette for this browser.',
+      message: 'Appearance reset to the default guided workspace mode and console palette for this browser.',
+    })
+  }
+
+  function handleSaveTimeDisplaySettings(event: React.FormEvent) {
+    event.preventDefault()
+    const savedSettings = saveTimeDisplaySettingsSnapshot(timeDisplayForm)
+    setTimeDisplayForm(savedSettings)
+    setTimeDisplayFlash({
+      tone: 'success',
+      message: 'Time zone saved locally for this browser. Home meters will use it right away.',
+    })
+  }
+
+  function handleResetTimeDisplaySettings() {
+    const defaultSettings = clearTimeDisplaySettingsSnapshot()
+    setTimeDisplayForm(defaultSettings)
+    setTimeDisplayFlash({
+      tone: 'success',
+      message: 'Time zone reset to the system default for this browser.',
     })
   }
 
@@ -451,24 +946,89 @@ export function SettingsWorkspace({
   const authLoading = authAction !== null
   const runtimeOverrideCount = Object.values(runtimeOverrideForm).filter((value) => value.trim() !== '').length
   const activePalette = resolveAppearancePalette(appearanceSettings, resolvedColorMode)
+  const resolvedTimeZone = resolveTimeDisplayTimeZone(timeDisplayForm)
+  const timeZonePreferenceLabel = formatTimeDisplayTimeZonePreferenceLabel(timeDisplayForm)
+  const resolvedTimeZoneLabel = formatTimeDisplayTimeZonePreferenceLabel({ timeZone: resolvedTimeZone })
   const enabledTradeCaptureRuleCount = tradeCaptureForm.rules.filter((rule) => rule.enabled).length
   const visibilityOverrideRuleCount = tradeCaptureForm.rules.filter(
     (rule) => rule.visibility.optionDetails !== 'inherit' || rule.visibility.priceIndex !== 'inherit',
   ).length
   const availableCommodityClassOptions = commodityClassOptions.length > 0 ? commodityClassOptions : [...commodityClassOrder]
+  const profileTimeZoneOptions = listTimeDisplayTimeZoneOptions().filter((option) => option.value !== 'system')
+  const appearancePreviewMode = appearanceForm.colorMode === 'system' ? resolvedColorMode : appearanceForm.colorMode
+  const appearancePreviewPalette = resolveAppearancePalette(appearanceForm, appearancePreviewMode)
+  const activeSessionSummary = authSession
+    ? `${authSession.user.role} session for ${authSession.user.user_id}`
+    : 'Signed out in this browser'
+  const profileSummary = authSession
+    ? `${formatAssistantPersona(authSession.user.default_assistant_persona)} persona · ${
+        authSession.user.primary_location?.trim() ? authSession.user.primary_location.trim() : 'No primary location'
+      } · ${
+        authSession.user.assistant_context_blurb?.trim() ? 'AI context saved' : 'No AI context saved'
+      }`
+    : 'Sign in to edit your profile'
+  const appearanceSummary = `${formatWorkspaceModeLabel(appearanceForm.workspaceMode)} · ${formatModeLabel(appearanceForm.colorMode)} preference · ${formatModeLabel(appearancePreviewMode)} preview`
+  const timeDisplaySummary = `${timeZonePreferenceLabel} saved · ${resolvedTimeZoneLabel} in effect`
+  const tradeDefaultsSummary =
+    `${enabledTradeCaptureRuleCount} of ${tradeCaptureForm.rules.length} rules enabled · ${tradeCaptureForm.defaults.instrumentType} baseline`
+  const runtimeOverrideSummary =
+    runtimeOverrideCount > 0
+      ? `${runtimeOverrideCount} browser override${runtimeOverrideCount === 1 ? '' : 's'} active`
+      : 'No browser overrides are active'
+  const assistantResponseBrevityLabel = formatMessagingAgentBrevityPreference(
+    assistantResponseForm.messagingAgentBrevity,
+  )
+  const assistantResponseSummary = `${assistantResponseBrevityLabel} messaging replies`
+  const clientSettingsSummary = `${health === 'ok' ? 'API reachable' : 'API attention'} · ${appConfig.apiBase}`
+  const serverSettingsSummary = serverSettingsLoading
+    ? 'Loading public API settings'
+    : serverSettings
+      ? `${serverSettings.app_version} · ${serverSettings.assistant.effective_default_provider ?? 'No assistant provider'} · ${formatProjectionMonitoringEmailStatusLabel(serverSettings.projection_monitoring_email)} email`
+      : serverSettingsError || 'Public API settings are unavailable'
+  const anthropicAdminSummary = formatAnthropicAdminSummary(
+    anthropicSettings,
+    anthropicSettingsLoading,
+    anthropicError,
+  )
+  const gmailAdminStatus = formatAdminConnectionStatus(
+    gmailIntegrationSettings,
+    gmailIntegrationLoading,
+    gmailIntegrationError,
+  )
+  const slackAdminStatus = formatAdminConnectionStatus(
+    slackIntegrationSettings,
+    slackIntegrationLoading,
+    slackIntegrationError,
+  )
+  const gmailAdminSummary = formatGmailConnectionSummary(
+    gmailIntegrationSettings,
+    gmailConnectionTest,
+    gmailIntegrationError,
+  )
+  const slackAdminSummary = formatSlackConnectionSummary(
+    slackIntegrationSettings,
+    slackConnectionTest,
+    slackIntegrationError,
+  )
+  const gmailConnectionWarning = gmailConnectionTest?.warnings.join(' ') || ''
+  const slackConnectionWarning = slackConnectionTest?.warnings.join(' ') || ''
+  const quickReadSummary =
+    health === 'ok'
+      ? runtimeOverrideCount > 0
+        ? `API reachable · ${runtimeOverrideCount} override${runtimeOverrideCount === 1 ? '' : 's'} active`
+        : 'API reachable · checked-in defaults'
+      : 'API needs attention before protected operations'
+  const profileSaving = authAction === 'profile'
 
   return (
     <div className="workspace-grid settings-grid">
       <section className="stack">
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Browser Settings</span>
-              <h3>Active Session</h3>
-            </div>
-            <p>The browser stores only the active session token locally. Protected writes derive actor identity from the signed-in session.</p>
-          </div>
-
+        <SettingsDisclosureCard
+          cardKey="settings.active-session-card"
+          eyebrow="Browser Settings"
+          title="Active Session"
+          summary={activeSessionSummary}
+        >
           <div className="settings-summary-grid">
             <article className="settings-summary-card">
               <span>Session status</span>
@@ -488,7 +1048,23 @@ export function SettingsWorkspace({
                 <div className="settings-kv">
                   <SettingsValueRow label="User ID" value={authSession.user.user_id} />
                   <SettingsValueRow label="Display name" value={authSession.user.display_name} />
+                  <SettingsValueRow
+                    label="First name"
+                    value={formatOptionalProfileValue(authSession.user.first_name, 'Not set')}
+                  />
+                  <SettingsValueRow
+                    label="Last name"
+                    value={formatOptionalProfileValue(authSession.user.last_name, 'Not set')}
+                  />
                   <SettingsValueRow label="Email" value={authSession.user.email} />
+                  <SettingsValueRow
+                    label="Preferred timezone"
+                    value={formatProfileTimeZone(authSession.user.preferred_timezone)}
+                  />
+                  <SettingsValueRow
+                    label="Primary location"
+                    value={formatOptionalProfileValue(authSession.user.primary_location, 'Not set')}
+                  />
                   <SettingsValueRow label="Role" value={authSession.user.role} />
                   <SettingsValueRow label="Session expires" value={new Date(authSession.expiresAt).toLocaleString()} />
                   <SettingsValueRow
@@ -523,18 +1099,258 @@ export function SettingsWorkspace({
                   : 'Sign in happens on the dedicated entry screen before the console opens.')}
             </p>
           </div>
-        </article>
+        </SettingsDisclosureCard>
 
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Browser Settings</span>
-              <h3>Appearance</h3>
-            </div>
-            <p>Pick how the console chooses light or dark mode, then tune the accent and highlight colors for each mode independently.</p>
+        <SettingsDisclosureCard
+          cardKey="settings.user-profile-card"
+          eyebrow="Account Settings"
+          title="User Profile"
+          summary={profileSummary}
+        >
+          {authSession ? (
+            <>
+              <div className="settings-summary-grid">
+                <article className="settings-summary-card">
+                  <span>Profile name</span>
+                  <strong>{formatOptionalProfileValue(authSession.user.display_name, 'Unnamed user')}</strong>
+                  <p>
+                    {[authSession.user.first_name, authSession.user.last_name]
+                      .map((value) => value?.trim())
+                      .filter(Boolean)
+                      .join(' ') || 'First and last name are not set.'}
+                  </p>
+                </article>
+                <article className="settings-summary-card">
+                  <span>Desk context</span>
+                  <strong>{formatOptionalProfileValue(authSession.user.primary_location, 'No primary location')}</strong>
+                  <p>{formatProfileTimeZone(authSession.user.preferred_timezone)}</p>
+                </article>
+                <article className="settings-summary-card">
+                  <span>Assistant persona</span>
+                  <strong>{formatAssistantPersona(authSession.user.default_assistant_persona)}</strong>
+                  <p>Default interpretation lens for new assistant requests.</p>
+                </article>
+                <article className="settings-summary-card">
+                  <span>AI context</span>
+                  <strong>{authSession.user.assistant_context_blurb?.trim() ? 'Saved' : 'Empty'}</strong>
+                  <p>Background and preferences attached to authenticated assistant context.</p>
+                </article>
+              </div>
+
+              <form className="stack-form settings-form" onSubmit={handleSaveUserProfile}>
+                <div className="mini-grid">
+                  <label className="field">
+                    <span>Display name</span>
+                    <input
+                      className="control"
+                      type="text"
+                      value={profileForm.displayName}
+                      maxLength={160}
+                      onChange={(event) => {
+                        setProfileFlash(null)
+                        setProfileForm((current) => ({ ...current, displayName: event.target.value }))
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>First name</span>
+                    <input
+                      className="control"
+                      type="text"
+                      value={profileForm.firstName}
+                      maxLength={80}
+                      onChange={(event) => {
+                        setProfileFlash(null)
+                        setProfileForm((current) => ({ ...current, firstName: event.target.value }))
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Last name</span>
+                    <input
+                      className="control"
+                      type="text"
+                      value={profileForm.lastName}
+                      maxLength={80}
+                      onChange={(event) => {
+                        setProfileFlash(null)
+                        setProfileForm((current) => ({ ...current, lastName: event.target.value }))
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Preferred time zone</span>
+                    <select
+                      className="control"
+                      value={profileForm.preferredTimeZone}
+                      onChange={(event) => {
+                        setProfileFlash(null)
+                        setProfileForm((current) => ({ ...current, preferredTimeZone: event.target.value }))
+                      }}
+                    >
+                      <option value="">No preference</option>
+                      {profileTimeZoneOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Primary location</span>
+                    <input
+                      className="control"
+                      type="text"
+                      value={profileForm.primaryLocation}
+                      maxLength={160}
+                      placeholder="Houston desk, London office, remote"
+                      onChange={(event) => {
+                        setProfileFlash(null)
+                        setProfileForm((current) => ({ ...current, primaryLocation: event.target.value }))
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Default persona</span>
+                    <select
+                      className="control"
+                      value={profileForm.defaultAssistantPersona}
+                      onChange={(event) => {
+                        setProfileFlash(null)
+                        setProfileForm((current) => ({
+                          ...current,
+                          defaultAssistantPersona: normalizeAssistantPersona(event.target.value),
+                        }))
+                      }}
+                    >
+                      {USER_PERSONA_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <label className="field">
+                  <span>AI context</span>
+                  <textarea
+                    className="control settings-profile-textarea"
+                    value={profileForm.assistantContextBlurb}
+                    maxLength={ASSISTANT_CONTEXT_BLURB_MAX_LENGTH}
+                    placeholder="Role, working style, desk coverage, recurring preferences, and context the assistant should keep in mind."
+                    onChange={(event) => {
+                      setProfileFlash(null)
+                      setProfileForm((current) => ({ ...current, assistantContextBlurb: event.target.value }))
+                    }}
+                  />
+                </label>
+
+                <div className="toolbar settings-actions">
+                  <button
+                    type="submit"
+                    className="button button-primary"
+                    disabled={profileSaving || !profileForm.displayName.trim()}
+                  >
+                    {profileSaving ? 'Saving Profile...' : 'Save Profile'}
+                  </button>
+                </div>
+
+                <p className="settings-profile-count">
+                  {profileForm.assistantContextBlurb.length} / {ASSISTANT_CONTEXT_BLURB_MAX_LENGTH}
+                </p>
+                <p className={`form-note ${profileFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
+                  {profileFlash?.message ??
+                    'Assistant context is treated as preference and background only. It does not change permissions or approval policy.'}
+                </p>
+              </form>
+            </>
+          ) : (
+            <div className="feedback-banner">Sign in to edit your user profile.</div>
+          )}
+        </SettingsDisclosureCard>
+
+        <SettingsDisclosureCard
+          cardKey="settings.assistant-response-card"
+          eyebrow="Browser Settings"
+          title="Messaging Agent Replies"
+          summary={assistantResponseSummary}
+        >
+          <div className="settings-summary-grid">
+            <article className="settings-summary-card">
+              <span>Conciseness</span>
+              <strong>{assistantResponseBrevityLabel}</strong>
+              <p>Applied to agent replies drafted from the Messages workspace.</p>
+            </article>
+            <article className="settings-summary-card">
+              <span>Authority</span>
+              <strong>Unchanged</strong>
+              <p>Agents still draft, explain, or stage governed follow-up only.</p>
+            </article>
           </div>
 
+          <form className="stack-form settings-form" onSubmit={handleSaveAssistantResponseSettings}>
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Messaging agents</span>
+                <h3>Reply Conciseness</h3>
+              </div>
+              <p>Choose the default length for assistant replies inside desk message threads.</p>
+            </div>
+
+            <div className="appearance-mode-options" aria-label="Messaging agent reply conciseness">
+              {MESSAGING_AGENT_BREVITY_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`appearance-mode-option ${assistantResponseForm.messagingAgentBrevity === option.value ? 'is-active' : ''}`}
+                  aria-pressed={assistantResponseForm.messagingAgentBrevity === option.value}
+                  onClick={() => {
+                    setAssistantResponseFlash(null)
+                    setAssistantResponseForm((current) => ({
+                      ...current,
+                      messagingAgentBrevity: option.value,
+                    }))
+                  }}
+                >
+                  <span>{option.label}</span>
+                  <strong>{option.detail}</strong>
+                </button>
+              ))}
+            </div>
+
+            <div className="toolbar settings-actions">
+              <button type="submit" className="button button-primary">
+                Apply Reply Style
+              </button>
+              <button type="button" className="button button-ghost" onClick={handleResetAssistantResponseSettings}>
+                Reset to Brief
+              </button>
+            </div>
+
+            <p className={`form-note ${assistantResponseFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
+              {assistantResponseFlash?.message ??
+                'This preference is stored in this browser and does not change agent authority, permissions, tools, or approval policy.'}
+            </p>
+          </form>
+        </SettingsDisclosureCard>
+
+        <SettingsDisclosureCard
+          cardKey="settings.appearance-card"
+          eyebrow="Browser Settings"
+          title="Appearance"
+          summary={`${appearanceSummary} · ${appearancePreviewPalette.accent.toUpperCase()} accent`}
+        >
           <div className="settings-summary-grid">
+            <article className="settings-summary-card">
+              <span>Workspace mode</span>
+              <strong>{formatWorkspaceModeLabel(appearanceSettings.workspaceMode)}</strong>
+              <p>
+                {appearanceSettings.workspaceMode === 'terminal'
+                  ? 'Signed-in root opens Home with the denser shell treatment.'
+                  : 'Signed-in root opens Home with the standard shell treatment.'}
+              </p>
+            </article>
             <article className="settings-summary-card">
               <span>Mode preference</span>
               <strong>{formatModeLabel(appearanceSettings.colorMode)}</strong>
@@ -550,6 +1366,40 @@ export function SettingsWorkspace({
           </div>
 
           <form className="stack-form settings-form" onSubmit={handleSaveAppearance}>
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Workspace shell</span>
+                <h3>Landing and density mode</h3>
+              </div>
+              <p>Choose the shell density for this browser. Home remains the signed-in landing page.</p>
+            </div>
+
+            <div className="appearance-mode-options" aria-label="Workspace mode preference">
+              {WORKSPACE_MODE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`appearance-mode-option ${appearanceForm.workspaceMode === option.value ? 'is-active' : ''}`}
+                  aria-pressed={appearanceForm.workspaceMode === option.value}
+                  onClick={() => {
+                    setAppearanceFlash(null)
+                    setAppearanceForm((current) => ({ ...current, workspaceMode: option.value }))
+                  }}
+                >
+                  <span>{option.label}</span>
+                  <strong>{option.detail}</strong>
+                </button>
+              ))}
+            </div>
+
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Color treatment</span>
+                <h3>Theme and palette</h3>
+              </div>
+              <p>Keep the broader console palette in sync with the desk environment while preserving the shell mode above.</p>
+            </div>
+
             <div className="appearance-mode-options" aria-label="Color mode preference">
               {COLOR_MODE_OPTIONS.map((option) => (
                 <button
@@ -667,26 +1517,77 @@ export function SettingsWorkspace({
                 Apply Appearance
               </button>
               <button type="button" className="button button-ghost" onClick={handleResetAppearance}>
-                Reset Palette
+                Reset Appearance
               </button>
             </div>
 
             <p className={`form-note ${appearanceFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
               {appearanceFlash?.message ??
-                'Appearance settings are stored in this browser today. That gives us a solid first slice while we prepare user-profile persistence on the API.'}
+                'Appearance settings are stored in this browser today. That includes the shell mode, landing preference, and palette while we prepare user-profile persistence on the API.'}
             </p>
           </form>
-        </article>
+        </SettingsDisclosureCard>
 
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Browser Settings</span>
-              <h3>Trade Ticket Defaults</h3>
-            </div>
-            <p>Set the baseline ticket here, then build an ordered rule stack that can react to instrument, structure, pricing, commodity class, and book.</p>
+        <SettingsDisclosureCard
+          cardKey="settings.time-display-card"
+          eyebrow="Browser Settings"
+          title="Time Display"
+          summary={timeDisplaySummary}
+        >
+          <div className="settings-summary-grid">
+            <article className="settings-summary-card">
+              <span>Saved preference</span>
+              <strong>{timeZonePreferenceLabel}</strong>
+              <p>Stored locally in this browser until the profile-backed settings API is ready.</p>
+            </article>
+            <article className="settings-summary-card">
+              <span>Effective timezone</span>
+              <strong>{resolvedTimeZoneLabel}</strong>
+              <p>Home uses this timezone for the day, week, and month meters.</p>
+            </article>
           </div>
 
+          <form className="stack-form settings-form" onSubmit={handleSaveTimeDisplaySettings}>
+            <label className="field">
+              <span>Timezone</span>
+              <select
+                className="control"
+                value={timeDisplayForm.timeZone}
+                onChange={(event) => {
+                  setTimeDisplayFlash(null)
+                  setTimeDisplayForm((current) => ({ ...current, timeZone: event.target.value }))
+                }}
+              >
+                {timeZoneOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="toolbar settings-actions">
+              <button type="submit" className="button button-primary">
+                Apply Timezone
+              </button>
+              <button type="button" className="button button-ghost" onClick={handleResetTimeDisplaySettings}>
+                Use System Default
+              </button>
+            </div>
+
+            <p className={`form-note ${timeDisplayFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
+              {timeDisplayFlash?.message ??
+                'This timezone setting is stored in this browser today so each user can keep Home aligned to their own desk clock.'}
+            </p>
+          </form>
+        </SettingsDisclosureCard>
+
+        <SettingsDisclosureCard
+          cardKey="settings.trade-ticket-defaults-card"
+          eyebrow="Browser Settings"
+          title="Trade Ticket Defaults"
+          summary={tradeDefaultsSummary}
+        >
           <div className="settings-summary-grid">
             <article className="settings-summary-card">
               <span>New ticket baseline</span>
@@ -1487,17 +2388,14 @@ export function SettingsWorkspace({
                 'Trade ticket defaults are browser-local today. The form now reads baseline values, evaluates the ordered rule stack, and explains active matches directly in Trade Entry.'}
             </p>
           </form>
-        </article>
+        </SettingsDisclosureCard>
 
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Browser Settings</span>
-              <h3>Client Overrides</h3>
-            </div>
-            <p>Leave fields blank to fall back to the checked-in defaults. Changes apply after a page reload.</p>
-          </div>
-
+        <SettingsDisclosureCard
+          cardKey="settings.client-overrides-card"
+          eyebrow="Browser Settings"
+          title="Client Overrides"
+          summary={runtimeOverrideSummary}
+        >
           <div className="settings-summary-grid">
             <article className="settings-summary-card">
               <span>Effective API Base</span>
@@ -1618,19 +2516,16 @@ export function SettingsWorkspace({
               {runtimeFlash?.message ?? 'These overrides are browser-local and reload the page when applied.'}
             </p>
           </form>
-        </article>
+        </SettingsDisclosureCard>
       </section>
 
       <section className="stack">
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Effective Runtime</span>
-              <h3>Current Client Settings</h3>
-            </div>
-            <p>This is the configuration the running UI is currently using after env resolution and browser overrides.</p>
-          </div>
-
+        <SettingsDisclosureCard
+          cardKey="settings.current-client-settings-card"
+          eyebrow="Effective Runtime"
+          title="Current Client Settings"
+          summary={clientSettingsSummary}
+        >
           <div className="settings-kv">
             <SettingsValueRow label="API health" value={health} detail="From the currently loaded `/health` response." />
             <SettingsValueRow label="API base" value={appConfig.apiBase} />
@@ -1649,17 +2544,14 @@ export function SettingsWorkspace({
               value={String(bootstrapQueryLimits.tradingSources)}
             />
           </div>
-        </article>
+        </SettingsDisclosureCard>
 
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Server Runtime</span>
-              <h3>Public API Settings</h3>
-            </div>
-            <p>Safe server-owned settings surfaced through a read-only endpoint. Secrets are intentionally excluded.</p>
-          </div>
-
+        <SettingsDisclosureCard
+          cardKey="settings.public-api-settings-card"
+          eyebrow="Server Runtime"
+          title="Public API Settings"
+          summary={serverSettingsSummary}
+        >
           {serverSettingsLoading ? (
             <div className="skeleton-stack">
               <div className="skeleton-block" />
@@ -1702,8 +2594,15 @@ export function SettingsWorkspace({
                       ? serverSettings.google_auth.auto_create_users
                         ? 'Google sign-in is enabled and can auto-provision local users.'
                         : 'Google sign-in is enabled for linked local users.'
-                      : 'Google sign-in is not enabled on the server.'}
+                      : serverSettings.google_auth.client_id
+                        ? 'Google sign-in is off, but the browser still has a Google client ID for optional readonly calendar access.'
+                        : 'Google sign-in is not enabled on the server.'}
                   </p>
+                </article>
+                <article className="settings-summary-card">
+                  <span>Email delivery</span>
+                  <strong>{formatProjectionMonitoringEmailStatusLabel(serverSettings.projection_monitoring_email)}</strong>
+                  <p>{summarizeProjectionMonitoringEmail(serverSettings.projection_monitoring_email)}</p>
                 </article>
                 <article className="settings-summary-card">
                   <span>Assistant default</span>
@@ -1737,6 +2636,42 @@ export function SettingsWorkspace({
                 <SettingsValueRow
                   label="Session TTL"
                   value={`${serverSettings.session_ttl_hours}h`}
+                />
+                <SettingsValueRow
+                  label="Email transport"
+                  value={formatProjectionMonitoringEmailStatusLabel(serverSettings.projection_monitoring_email)}
+                  detail="Projection monitoring uses this path whenever the EMAIL alert channel is enabled."
+                />
+                <SettingsValueRow
+                  label="Email recipients"
+                  value={String(serverSettings.projection_monitoring_email.recipient_count)}
+                  detail="Resolved from the configured recipient list or the active admin accounts."
+                />
+                <SettingsValueRow
+                  label="Email sender"
+                  value={serverSettings.projection_monitoring_email.sender}
+                />
+                <SettingsValueRow
+                  label="SMTP host"
+                  value={
+                    serverSettings.projection_monitoring_email.smtp_host
+                      ? `${serverSettings.projection_monitoring_email.smtp_host}:${serverSettings.projection_monitoring_email.smtp_port ?? ''}`
+                      : 'Local archive fallback'
+                  }
+                  detail={
+                    serverSettings.projection_monitoring_email.provider_hint === 'gmail'
+                      ? 'Gmail delivery uses the server-owned SMTP path rather than browser-side mail access.'
+                      : 'Without an SMTP host, email alerts are archived locally for review.'
+                  }
+                />
+                <SettingsValueRow
+                  label="SMTP auth"
+                  value={formatProjectionMonitoringEmailAuthLabel(serverSettings.projection_monitoring_email)}
+                  detail={
+                    serverSettings.projection_monitoring_email.provider_hint === 'gmail'
+                      ? 'Gmail usually needs a full Google email address plus an app password on the API.'
+                      : 'Only readiness is surfaced here; secrets stay hidden on the server.'
+                  }
                 />
                 <SettingsValueRow label="EIA base URL" value={serverSettings.eia_base_url} />
                 <SettingsValueRow
@@ -1790,6 +2725,156 @@ export function SettingsWorkspace({
                   ))}
                 </div>
               </div>
+
+              {adminIntegrationAccess ? (
+                <>
+                  <div className="settings-chip-block">
+                    <div className="section-head">
+                      <div>
+                        <span className="eyebrow">Connections</span>
+                        <h3>Gmail and Slack</h3>
+                      </div>
+                    </div>
+
+                    <div className="settings-summary-grid">
+                      <article className="settings-summary-card">
+                        <span>Gmail inbox</span>
+                        <strong>{gmailAdminStatus}</strong>
+                        <p>{gmailAdminSummary}</p>
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => void handleTestGmailConnection()}
+                          disabled={
+                            gmailConnectionChecking ||
+                            gmailIntegrationLoading ||
+                            !gmailIntegrationSettings?.configured
+                          }
+                        >
+                          {gmailConnectionChecking ? 'Testing...' : 'Test Connection'}
+                        </button>
+                      </article>
+                      <article className="settings-summary-card">
+                        <span>Slack messaging</span>
+                        <strong>{slackAdminStatus}</strong>
+                        <p>{slackAdminSummary}</p>
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => void handleTestSlackConnection()}
+                          disabled={
+                            slackConnectionChecking ||
+                            slackIntegrationLoading ||
+                            !slackIntegrationSettings?.configured
+                          }
+                        >
+                          {slackConnectionChecking ? 'Testing...' : 'Test Connection'}
+                        </button>
+                      </article>
+                    </div>
+
+                    {gmailIntegrationError || slackIntegrationError ? (
+                      <div className="feedback-banner feedback-banner-error">
+                        {[gmailIntegrationError, slackIntegrationError].filter(Boolean).join(' ')}
+                      </div>
+                    ) : null}
+                    {gmailConnectionWarning || slackConnectionWarning ? (
+                      <div className="feedback-banner">
+                        {[gmailConnectionWarning, slackConnectionWarning].filter(Boolean).join(' ')}
+                      </div>
+                    ) : null}
+                    {gmailIntegrationSettings?.missing_configuration.length ||
+                    slackIntegrationSettings?.missing_configuration.length ? (
+                      <div className="chip-row">
+                        {[
+                          ...(gmailIntegrationSettings?.missing_configuration ?? []),
+                          ...(slackIntegrationSettings?.missing_configuration ?? []),
+                        ].map((item) => (
+                          <span key={item} className="entity-chip">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="settings-chip-block">
+                    <div className="section-head">
+                      <div>
+                        <span className="eyebrow">Provider Admin</span>
+                        <h3>Anthropic API Key</h3>
+                      </div>
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={() => void handleInspectAnthropicApiKey()}
+                        disabled={anthropicLookupLoading || anthropicSettingsLoading || !anthropicSettings?.configured}
+                      >
+                        {anthropicLookupLoading ? 'Checking...' : 'Inspect Key'}
+                      </button>
+                    </div>
+
+                    <div className="settings-summary-grid">
+                      <article className="settings-summary-card">
+                        <span>Admin lookup</span>
+                        <strong>
+                          {anthropicSettingsLoading
+                            ? 'Loading'
+                            : anthropicSettings?.configured
+                              ? 'Configured'
+                              : anthropicSettings?.enabled
+                                ? 'Partial'
+                                : 'Disabled'}
+                        </strong>
+                        <p>{anthropicAdminSummary}</p>
+                      </article>
+                      <article className="settings-summary-card">
+                        <span>Key status</span>
+                        <strong>{formatApiKeyStatus(anthropicApiKeyLookup)}</strong>
+                        <p>
+                          {anthropicApiKeyLookup
+                            ? `${anthropicApiKeyLookup.api_key.name} · ${anthropicApiKeyLookup.api_key.partial_key_hint}`
+                            : 'Run the lookup to fetch redacted key metadata from Anthropic.'}
+                        </p>
+                      </article>
+                      <article className="settings-summary-card">
+                        <span>Workspace</span>
+                        <strong>{anthropicApiKeyLookup?.api_key.workspace_id ?? 'Not checked'}</strong>
+                        <p>
+                          {anthropicApiKeyLookup
+                            ? `Created by ${anthropicApiKeyLookup.api_key.created_by.type} ${anthropicApiKeyLookup.api_key.created_by.id}.`
+                            : `Version ${anthropicSettings?.api_version ?? '2023-06-01'} · ${anthropicSettings?.base_url ?? 'https://api.anthropic.com'}`}
+                        </p>
+                      </article>
+                      <article className="settings-summary-card">
+                        <span>Expires</span>
+                        <strong>{formatDateTime(anthropicApiKeyLookup?.api_key.expires_at, 'Never or not checked')}</strong>
+                        <p>
+                          Created {formatDateTime(anthropicApiKeyLookup?.api_key.created_at, 'after a successful lookup')}.
+                        </p>
+                      </article>
+                    </div>
+
+                    {anthropicError ? (
+                      <div className="feedback-banner feedback-banner-error">{anthropicError}</div>
+                    ) : null}
+                    {anthropicSettings?.missing_configuration.length ? (
+                      <div className="chip-row">
+                        {anthropicSettings.missing_configuration.map((item) => (
+                          <span key={item} className="entity-chip">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {anthropicApiKeyLookup?.warnings.length ? (
+                      <div className="feedback-banner">
+                        {anthropicApiKeyLookup.warnings.join(' ')}
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
             </>
           ) : (
             <div className="empty-state">
@@ -1797,17 +2882,23 @@ export function SettingsWorkspace({
               <p>{serverSettingsError || 'The running API did not return public runtime settings.'}</p>
             </div>
           )}
-        </article>
+        </SettingsDisclosureCard>
 
-        <article className="surface">
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">Status</span>
-              <h3>Quick Read</h3>
-            </div>
-            <p>A fast signal for whether the browser and API configuration look usable before you try protected operations.</p>
-          </div>
+        <GoogleCalendarPanel
+          googleClientId={serverSettings?.google_auth.client_id ?? null}
+          googleAuthEnabled={Boolean(serverSettings?.google_auth.enabled)}
+          runtimeSettingsLoading={serverSettingsLoading}
+          runtimeSettingsError={serverSettingsError}
+        />
 
+        <UserEventsPanel authSession={authSession} />
+
+        <SettingsDisclosureCard
+          cardKey="settings.quick-read-card"
+          eyebrow="Status"
+          title="Quick Read"
+          summary={quickReadSummary}
+        >
           <div className="settings-summary-grid">
             <article className="settings-summary-card">
               <span>API</span>
@@ -1820,7 +2911,7 @@ export function SettingsWorkspace({
               <p>{runtimeOverrideCount > 0 ? `${runtimeOverrideCount} override values stored locally.` : 'No local runtime overrides are stored.'}</p>
             </article>
           </div>
-        </article>
+        </SettingsDisclosureCard>
       </section>
     </div>
   )

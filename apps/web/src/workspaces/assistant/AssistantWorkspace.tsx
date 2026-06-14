@@ -13,17 +13,20 @@ import {
   previewAssistantPromptContext,
   streamAssistantResponse,
   submitAssistantRunFeedback,
+  synthesizeAssistantVoice,
+  transcribeAssistantVoice,
 } from '../../entities/assistant/api'
 import {
   AssistantActionRequestList,
   type AssistantActionDecisionPayload,
 } from '../../entities/assistant/AssistantActionRequestList'
+import { AssistantPromptSectionList } from '../../entities/assistant/AssistantPromptSectionList'
+import { AssistantToolCallList } from '../../entities/assistant/AssistantToolCallList'
+import { AssistantEvidenceList } from '../../entities/assistant/AssistantEvidenceList'
 import {
   assistantBudgetSignalClass,
-  assistantBudgetSignalLabel,
   budgetMeterWidth,
   describeAssistantTokenBudget,
-  formatBudgetPercent,
   formatTokenCount,
   isAgentBudgetDepleted,
   isAgentBudgetNearLimit,
@@ -36,6 +39,9 @@ import type {
   AssistantConversation,
   AssistantConversationSummary,
   AssistantPromptContext,
+  AssistantPromptSection,
+  AssistantPersona,
+  AssistantPersonaDefinition,
   AssistantPromptRequest,
   AssistantProvider,
   AssistantRun,
@@ -43,12 +49,23 @@ import type {
   AssistantRunFeedbackRating,
   AssistantRunSummary,
   AssistantRuntimeSettings,
+  AssistantToolCall,
+  AssistantToolEvidence,
   EventRow,
   PositionRow,
   Trade,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import {
+  resolveVoicePlaybackButtonLabel,
+  useVoicePlayback,
+} from '../../shared/voicePlayback'
+import { useVoiceComposer } from '../../shared/voiceComposer'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
+import { AssistantAgentDirectoryPanel } from './AssistantAgentDirectoryPanel'
+import { AssistantAgentChangeRequestPanel } from './AssistantAgentChangeRequestPanel'
+import { AssistantConstructionExplainerPanel } from './AssistantConstructionExplainerPanel'
+import { buildAssistantAgentAccessSummary } from './assistantWorkspaceAccessSummary'
 
 type AssistantWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -69,6 +86,8 @@ type ChatMessage = {
   content: string
   provider?: AssistantProvider
   model?: string
+  agentId?: string | null
+  agentName?: string | null
   runId?: number | null
   runRecordedAt?: string | null
   usage?: {
@@ -76,18 +95,95 @@ type ChatMessage = {
     output_tokens: number | null
   }
   warnings?: string[]
-  toolCalls?: {
-    tool_name: string
-    summary: string
-    arguments: Record<string, unknown>
-    record_count: number | null
-  }[]
+  toolCalls?: AssistantToolCall[]
   actionRequests?: AssistantActionRequest[]
   feedback?: AssistantRunFeedback | null
 }
 
+const FALLBACK_ASSISTANT_PERSONAS: AssistantPersonaDefinition[] = [
+  {
+    key: 'operator',
+    label: 'Operator',
+    description: 'General operator-console lens for triage, routing, workflow state, and manual fallback.',
+    default_for_roles: ['OPS_USER', 'VIEWER'],
+    guidance: [],
+  },
+  {
+    key: 'trader',
+    label: 'Trader',
+    description: 'Commercial lens for trade economics, book exposure, market context, and pre-trade drafting.',
+    default_for_roles: ['TRADER', 'DESK_LEAD'],
+    guidance: [],
+  },
+  {
+    key: 'risk',
+    label: 'Risk',
+    description: 'Risk and credit lens for exposure, limits, stale evidence, sensitivities, and escalation posture.',
+    default_for_roles: ['RISK', 'RISK_MANAGER', 'CREDIT_APPROVER', 'CREDIT'],
+    guidance: [],
+  },
+  {
+    key: 'admin',
+    label: 'Admin',
+    description: 'Platform-stewardship lens for configuration, audit, permissions, agents, policy, and controls.',
+    default_for_roles: ['OPS_ADMIN', 'ADMIN'],
+    guidance: [],
+  },
+  {
+    key: 'operations',
+    label: 'Operations',
+    description: 'Operations lens for confirmations, scheduling, delivery readiness, blockers, and handoffs.',
+    default_for_roles: ['OPERATIONS'],
+    guidance: [],
+  },
+  {
+    key: 'settlement',
+    label: 'Settlement',
+    description: 'Settlement and accounting lens for invoices, payments, accruals, exceptions, and finance follow-up.',
+    default_for_roles: ['SETTLEMENT', 'ACCOUNTING', 'ACCOUNTANT', 'CONTROLLER'],
+    guidance: [],
+  },
+  {
+    key: 'reference_data',
+    label: 'Reference Data',
+    description: 'Reference-data stewardship lens for governed lists, codes, lifecycle status, and data quality.',
+    default_for_roles: ['REFERENCE_DATA', 'DATA_STEWARD'],
+    guidance: [],
+  },
+]
+
+function resolveAssistantPersonaFromRole(
+  personas: AssistantPersonaDefinition[],
+  role: string | undefined,
+): AssistantPersona {
+  const normalizedRole = role?.trim().toUpperCase()
+  if (normalizedRole) {
+    const matchedPersona = personas.find((persona) => persona.default_for_roles.includes(normalizedRole))
+    if (matchedPersona) {
+      return matchedPersona.key
+    }
+  }
+  return 'operator'
+}
+
 function createChatMessageId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function buildMessageInitials(label: string, fallback: string): string {
+  const parts = label
+    .trim()
+    .split(/\s+/)
+    .filter((part) => part.length > 0)
+
+  if (parts.length === 0) {
+    return fallback
+  }
+
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('')
 }
 
 function buildAssistantContext({
@@ -171,11 +267,85 @@ function renderPromptPreview(preview: AssistantPromptContext | null): string {
 
   preview.sections.forEach((section) => {
     lines.push('')
-    lines.push(`[${section.title}]`)
+    const sectionMetadata = [section.source, section.scope, section.owner].filter(
+      (value): value is string => typeof value === 'string' && value.trim().length > 0,
+    )
+    lines.push(
+      `[${section.title}${sectionMetadata.length > 0 ? ` · ${sectionMetadata.join(' · ')}` : ''}]`,
+    )
     lines.push(section.content)
   })
 
   return lines.join('\n')
+}
+
+function normalizeAssistantToolEvidence(value: unknown): AssistantToolEvidence | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.kind !== 'string' ||
+    typeof record.title !== 'string' ||
+    typeof record.summary !== 'string'
+  ) {
+    return null
+  }
+
+  return {
+    kind: record.kind as AssistantToolEvidence['kind'],
+    title: record.title,
+    summary: record.summary,
+    locator: typeof record.locator === 'string' ? record.locator : null,
+    excerpt: typeof record.excerpt === 'string' ? record.excerpt : null,
+    badges: Array.isArray(record.badges)
+      ? record.badges.filter((badge): badge is string => typeof badge === 'string' && badge.trim().length > 0)
+      : [],
+    metadata:
+      record.metadata && typeof record.metadata === 'object'
+        ? (record.metadata as Record<string, unknown>)
+        : {},
+  }
+}
+
+function normalizeAssistantToolCall(value: Record<string, unknown>): AssistantToolCall {
+  return {
+    tool_name: typeof value.tool_name === 'string' ? value.tool_name : 'tool',
+    summary: typeof value.summary === 'string' ? value.summary : '',
+    arguments:
+      value.arguments && typeof value.arguments === 'object'
+        ? (value.arguments as Record<string, unknown>)
+        : {},
+    record_count: typeof value.record_count === 'number' ? value.record_count : null,
+    output_preview:
+      value.output_preview && typeof value.output_preview === 'object'
+        ? (value.output_preview as Record<string, unknown>)
+        : {},
+    evidence_items: Array.isArray(value.evidence_items)
+      ? value.evidence_items
+          .map((item) => normalizeAssistantToolEvidence(item))
+          .filter((item): item is AssistantToolEvidence => item !== null)
+      : [],
+  }
+}
+
+function collectAssistantToolEvidence(toolCalls: AssistantToolCall[]): AssistantToolEvidence[] {
+  const seen = new Set<string>()
+  const evidenceItems: AssistantToolEvidence[] = []
+
+  toolCalls.forEach((toolCall) => {
+    ;(toolCall.evidence_items ?? []).forEach((item) => {
+      const key = [item.kind, item.title, item.locator ?? '', item.summary].join('::')
+      if (seen.has(key)) {
+        return
+      }
+      seen.add(key)
+      evidenceItems.push(item)
+    })
+  })
+
+  return evidenceItems
 }
 
 function formatTraceTimestamp(value: string | null | undefined): string {
@@ -191,16 +361,64 @@ function formatTraceTimestamp(value: string | null | undefined): string {
   return date.toLocaleString()
 }
 
+function formatChatTimestamp(value: string | null | undefined): string | null {
+  if (!value) {
+    return null
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function formatChatDayLabel(value: string | null | undefined): string | null {
+  if (!value) {
+    return null
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+
+  return date.toLocaleDateString([], {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
 function matchesAssistantMessageFilter(message: ChatMessage, query: string): boolean {
   return matchesTextFilter(query, [
     message.role,
     message.content,
     message.provider,
     message.model,
+    message.agentId,
+    message.agentName,
     message.runId,
     message.runRecordedAt,
     ...(message.warnings ?? []),
-    ...(message.toolCalls?.flatMap((toolCall) => [toolCall.tool_name, toolCall.summary]) ?? []),
+    ...(message.toolCalls?.flatMap((toolCall) => [
+      toolCall.tool_name,
+      toolCall.summary,
+      JSON.stringify(toolCall.arguments),
+      JSON.stringify(toolCall.output_preview ?? {}),
+      ...(toolCall.evidence_items?.flatMap((item) => [
+        item.kind,
+        item.title,
+        item.summary,
+        item.locator,
+        item.excerpt,
+        ...item.badges,
+      ]) ?? []),
+    ]) ?? []),
     message.feedback?.rating,
     message.feedback?.comment,
     ...(message.actionRequests?.flatMap((actionRequest) => [
@@ -285,19 +503,6 @@ function summarizeConversationCard(conversation: AssistantConversationSummary): 
   return pieces.join(' · ')
 }
 
-function budgetCardToneClass(budgetClass: string): string {
-  if (budgetClass === 'is-red') {
-    return 'is-budget-red'
-  }
-  if (budgetClass === 'is-amber') {
-    return 'is-budget-amber'
-  }
-  if (budgetClass === 'is-green') {
-    return 'is-budget-green'
-  }
-  return 'is-budget-pending'
-}
-
 function toChatMessagesFromConversation(conversation: AssistantConversation): ChatMessage[] {
   return conversation.messages.map((message) => ({
     id: createChatMessageId(),
@@ -305,6 +510,8 @@ function toChatMessagesFromConversation(conversation: AssistantConversation): Ch
     content: message.content,
     provider: message.provider ?? undefined,
     model: message.model ?? undefined,
+    agentId: conversation.agent_id ?? undefined,
+    agentName: conversation.agent_name ?? undefined,
     runId: message.run_id ?? undefined,
     runRecordedAt: message.recorded_at,
     warnings: message.warnings,
@@ -464,6 +671,7 @@ export function AssistantWorkspace({
   const [agentBudgetRefreshing, setAgentBudgetRefreshing] = useState(false)
   const [selectedProvider, setSelectedProvider] = useState<AssistantProvider | ''>('')
   const [selectedAgentId, setSelectedAgentId] = useState('')
+  const [selectedPersona, setSelectedPersona] = useState<AssistantPersona | ''>('')
   const [includeContext, setIncludeContext] = useState(true)
   const [useLiveTools, setUseLiveTools] = useState(true)
   const [draft, setDraft] = useState('')
@@ -493,6 +701,54 @@ export function AssistantWorkspace({
   const [runDetailLoading, setRunDetailLoading] = useState(false)
   const [runDetailError, setRunDetailError] = useState('')
   const [screenFilter, setScreenFilter] = useState('')
+  const transcribeVoiceNote = useCallback(
+    async (audioFile: File) => {
+      if (!authSession) {
+        throw new Error('Sign in to use recorded voice transcription.')
+      }
+
+      const transcript = await transcribeAssistantVoice(appConfig.apiBase, audioFile, {
+        accessToken: authSession.accessToken,
+        filename: audioFile.name,
+      })
+      return transcript.text
+    },
+    [authSession],
+  )
+  const synthesizeVoicePlayback = useCallback(
+    async (text: string) => {
+      if (!authSession) {
+        throw new Error('Sign in to use generated voice playback.')
+      }
+
+      return synthesizeAssistantVoice(appConfig.apiBase, text, {
+        accessToken: authSession.accessToken,
+      })
+    },
+    [authSession],
+  )
+  const voiceComposer = useVoiceComposer({
+    draft,
+    onDraftChange: setDraft,
+    backendTranscription: {
+      enabled: Boolean(authSession && runtimeSettings?.voice_transcription.enabled),
+      supportedContentTypes: runtimeSettings?.voice_transcription.supported_content_types ?? [],
+      transcribeAudio: transcribeVoiceNote,
+      unavailableMessage: !authSession
+        ? 'Sign in to use recorded voice transcription when browser dictation is unavailable.'
+        : runtimeSettings
+          ? runtimeSettings.voice_transcription.enabled
+            ? ''
+            : 'Backend voice transcription is not configured on this API.'
+          : 'Checking whether backend voice transcription is available.',
+    },
+  })
+  const voicePlayback = useVoicePlayback({
+    backendSynthesis: {
+      enabled: Boolean(authSession && runtimeSettings?.voice_generation.enabled),
+      synthesizeAudio: synthesizeVoicePlayback,
+    },
+  })
   const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
 
   const contextSummary = buildAssistantContext({
@@ -524,8 +780,36 @@ export function AssistantWorkspace({
     () => recentRuns.filter((run) => matchesAssistantRunFilter(run, effectiveScreenFilter)),
     [effectiveScreenFilter, recentRuns],
   )
+  const resolveAssistantMessageAuthorLabel = useCallback(
+    (message: ChatMessage): string =>
+      message.role === 'assistant'
+        ? message.agentName?.trim() || 'Assistant'
+        : authSession?.user.display_name?.trim() || 'You',
+    [authSession?.user.display_name],
+  )
+  const resolveAssistantMessageAvatarLabel = useCallback(
+    (message: ChatMessage): string =>
+      buildMessageInitials(
+        resolveAssistantMessageAuthorLabel(message),
+        message.role === 'assistant' ? 'AI' : 'YU',
+      ),
+    [resolveAssistantMessageAuthorLabel],
+  )
+
+  useEffect(() => {
+    if (!voicePlayback.activePlaybackId) {
+      return
+    }
+
+    if (visibleMessages.some((message) => message.id === voicePlayback.activePlaybackId)) {
+      return
+    }
+
+    voicePlayback.stopPlayback()
+  }, [voicePlayback, visibleMessages])
 
   function clearConversationSelection() {
+    voicePlayback.stopPlayback()
     setSelectedConversationId(null)
     setSelectedConversation(null)
     setConversationDetailError('')
@@ -765,6 +1049,13 @@ export function AssistantWorkspace({
   }, [agents, selectedAgentId])
 
   useEffect(() => {
+    const available = runtimeSettings?.available_personas
+    if (selectedPersona && available?.length && !available.some((persona) => persona.key === selectedPersona)) {
+      setSelectedPersona('')
+    }
+  }, [runtimeSettings, selectedPersona])
+
+  useEffect(() => {
     let cancelled = false
 
     async function loadSelectedConversation() {
@@ -838,6 +1129,7 @@ export function AssistantWorkspace({
             agent_id: selectedAgentId || undefined,
             provider: selectedProvider,
             workspace: 'assistant',
+            persona: selectedPersona || undefined,
             context: includeContext ? contextSummary : undefined,
             use_live_tools: useLiveTools,
           },
@@ -867,7 +1159,7 @@ export function AssistantWorkspace({
     return () => {
       cancelled = true
     }
-  }, [authSession, contextSummary, includeContext, runtimeSettings, selectedAgentId, selectedProvider, useLiveTools])
+  }, [authSession, contextSummary, includeContext, runtimeSettings, selectedAgentId, selectedPersona, selectedProvider, useLiveTools])
 
   useEffect(() => {
     let cancelled = false
@@ -912,6 +1204,8 @@ export function AssistantWorkspace({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    voicePlayback.stopPlayback()
+    voiceComposer.cancelListening()
     const trimmedDraft = draft.trim()
     if (!trimmedDraft || !selectedProvider || !authSession) {
       return
@@ -923,6 +1217,7 @@ export function AssistantWorkspace({
         id: createChatMessageId(),
         role: 'user',
         content: trimmedDraft,
+        runRecordedAt: new Date().toISOString(),
       },
     ]
 
@@ -938,6 +1233,7 @@ export function AssistantWorkspace({
         agent_id: selectedAgentId || undefined,
         provider: selectedProvider,
         workspace: 'assistant',
+        persona: selectedPersona || undefined,
         context: includeContext ? contextSummary : undefined,
         use_live_tools: useLiveTools,
         messages: nextMessages.map((message) => ({
@@ -973,6 +1269,8 @@ export function AssistantWorkspace({
                     summary?: unknown
                     arguments?: unknown
                     record_count?: unknown
+                    output_preview?: unknown
+                    evidence_items?: unknown
                   } => typeof toolCall === 'object' && toolCall !== null,
                 )
               : []
@@ -1012,9 +1310,13 @@ export function AssistantWorkspace({
                     ? (metadata.provider as AssistantProvider)
                     : undefined,
                 model: typeof metadata.model === 'string' ? metadata.model : undefined,
+                agentId: typeof metadata.agent_id === 'string' ? metadata.agent_id : undefined,
+                agentName: typeof metadata.agent_name === 'string' ? metadata.agent_name : undefined,
                 runId: runId && Number.isFinite(runId) ? runId : undefined,
                 runRecordedAt:
-                  typeof metadata.run_recorded_at === 'string' ? metadata.run_recorded_at : undefined,
+                  typeof metadata.run_recorded_at === 'string'
+                    ? metadata.run_recorded_at
+                    : new Date().toISOString(),
                 usage: usage
                   ? {
                       input_tokens:
@@ -1026,16 +1328,7 @@ export function AssistantWorkspace({
                 warnings: Array.isArray(metadata.warnings)
                   ? metadata.warnings.filter((warning): warning is string => typeof warning === 'string')
                   : [],
-                toolCalls: rawToolCalls.map((toolCall) => ({
-                  tool_name: typeof toolCall.tool_name === 'string' ? toolCall.tool_name : 'tool',
-                  summary: typeof toolCall.summary === 'string' ? toolCall.summary : '',
-                  arguments:
-                    toolCall.arguments && typeof toolCall.arguments === 'object'
-                      ? (toolCall.arguments as Record<string, unknown>)
-                      : {},
-                  record_count:
-                    typeof toolCall.record_count === 'number' ? toolCall.record_count : null,
-                })),
+                toolCalls: rawToolCalls.map((toolCall) => normalizeAssistantToolCall(toolCall)),
                 actionRequests: Array.isArray(metadata.action_requests)
                   ? metadata.action_requests.filter(
                       (actionRequest): actionRequest is AssistantActionRequest =>
@@ -1197,12 +1490,45 @@ export function AssistantWorkspace({
   const selectedProviderDetails =
     runtimeSettings?.providers.find((provider) => provider.provider === selectedProvider) ?? null
   const selectedAgent = agents.find((agent) => agent.agent_id === selectedAgentId) ?? null
+  const availablePersonas = runtimeSettings?.available_personas?.length
+    ? runtimeSettings.available_personas
+    : FALLBACK_ASSISTANT_PERSONAS
+  const defaultPersonaKey =
+    authSession?.user.default_assistant_persona ||
+    resolveAssistantPersonaFromRole(availablePersonas, authSession?.user.role)
+  const effectivePersonaKey = selectedPersona || defaultPersonaKey
+  const selectedPersonaDetails =
+    availablePersonas.find((persona) => persona.key === effectivePersonaKey) ??
+    availablePersonas.find((persona) => persona.key === 'operator') ??
+    null
+  const defaultPersonaDetails =
+    availablePersonas.find((persona) => persona.key === defaultPersonaKey) ??
+    availablePersonas.find((persona) => persona.key === 'operator') ??
+    null
+  const personaSelectionSource = selectedPersona ? 'Override' : 'User default'
+  const activeConstructionAgent = useMemo(() => {
+    if (selectedRun?.agent_id) {
+      return agents.find((agent) => agent.agent_id === selectedRun.agent_id) ?? null
+    }
+    return selectedAgent
+  }, [agents, selectedAgent, selectedRun])
+  const selectedAgentAccessSummary = buildAssistantAgentAccessSummary(
+    activeConstructionAgent,
+    runtimeSettings,
+  )
   const selectedAgentBudgetDepleted = isAgentBudgetDepleted(selectedAgent)
   const depletedAgentCount = agents.filter((agent) => isAgentBudgetDepleted(agent)).length
   const watchAgentCount = agents.filter((agent) => isAgentBudgetNearLimit(agent)).length
   const selectedConversationSummary =
     recentConversations.find((conversation) => conversation.conversation_id === selectedConversationId) ?? null
   const selectedRunSummary = recentRuns.find((run) => run.run_id === selectedRunId) ?? null
+  const latestAssistantMessage =
+    [...messages].reverse().find((message) => message.role === 'assistant') ?? null
+  const activeGroundingSections: AssistantPromptSection[] =
+    selectedRun?.prompt_sections ?? promptPreview?.sections ?? []
+  const activeToolCalls: AssistantToolCall[] =
+    selectedRun?.tool_calls ?? latestAssistantMessage?.toolCalls ?? []
+  const activeEvidenceItems = collectAssistantToolEvidence(activeToolCalls)
   const assistantArtifactTotalCount =
     messages.length + recentConversations.length + pendingActionRequests.length + recentRuns.length
   const assistantArtifactMatchedCount =
@@ -1281,7 +1607,7 @@ export function AssistantWorkspace({
             </div>
             <p>
               Use this secondary console for provider selection, managed agents, prompt preview,
-              run traces, feedback, and approval review. Operators can stay in Prompt Home for
+              run traces, feedback, and approval review. Operators can stay on Home for
               normal prompt-led work.
             </p>
           </div>
@@ -1368,57 +1694,20 @@ export function AssistantWorkspace({
                 })}
               </div>
 
-              <div className="assistant-agent-grid">
-                <button
-                  type="button"
-                  className={`assistant-agent-card ${selectedAgentId ? '' : 'is-selected'}`}
-                  onClick={() => setSelectedAgentId('')}
-                >
-                  <div className="assistant-provider-head">
-                    <strong>Platform Foundation</strong>
-                    <span className="status-pill status-pill-active">Default</span>
-                  </div>
-                  <p>Use the shared org, user, data, and world context without a named agent override.</p>
-                  <small>Good for general operator questions and prompt review.</small>
-                </button>
+              <AssistantAgentDirectoryPanel
+                agents={agents}
+                runtimeSettings={runtimeSettings}
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={setSelectedAgentId}
+              />
 
-                {agents.map((agent) => {
-                  const budgetClass = assistantBudgetSignalClass(agent.token_budget)
-                  return (
-                    <button
-                      key={agent.agent_id}
-                      type="button"
-                      className={[
-                        'assistant-agent-card',
-                        selectedAgentId === agent.agent_id ? 'is-selected' : '',
-                        budgetCardToneClass(budgetClass),
-                      ].join(' ')}
-                      onClick={() => setSelectedAgentId(agent.agent_id)}
-                    >
-                      <div className="assistant-provider-head">
-                        <strong>{agent.name}</strong>
-                        <span className={`assistant-budget-signal ${budgetClass}`}>
-                          {assistantBudgetSignalLabel(agent.token_budget)}
-                        </span>
-                      </div>
-                      <p>{agent.description}</p>
-                      <div className="assistant-agent-budget-row">
-                        <span>{agent.scope}</span>
-                        <span>{formatBudgetPercent(agent.token_budget)} used</span>
-                      </div>
-                      <div className={`assistant-budget-meter ${budgetClass}`} aria-hidden="true">
-                        <span style={{ width: budgetMeterWidth(agent.token_budget) }} />
-                      </div>
-                      <small>{describeAssistantTokenBudget(agent.token_budget)}</small>
-                      <small>
-                        {agent.provider ?? 'inherits provider'} {agent.model ? `· ${agent.model}` : ''}{' '}
-                        {agent.allowed_tools.length > 0 ? `· ${agent.allowed_tools.length} live tools` : ''}
-                        {agent.allowed_action_types.length > 0 ? ` · ${agent.allowed_action_types.length} actions` : ''}
-                      </small>
-                    </button>
-                  )
-                })}
-              </div>
+              <AssistantAgentChangeRequestPanel
+                authSession={authSession}
+                agents={agents}
+                runtimeSettings={runtimeSettings}
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={setSelectedAgentId}
+              />
             </>
           ) : (
             <div className="empty-state assistant-empty-state">
@@ -1476,107 +1765,144 @@ export function AssistantWorkspace({
                 </p>
               </div>
             ) : (
-              visibleMessages.map((message) => (
-                <article
-                  key={message.id}
-                  className={`assistant-message assistant-message-${message.role}`}
-                >
-                  <div className="assistant-message-head">
-                    <strong>{message.role === 'assistant' ? 'Assistant' : 'You'}</strong>
-                    {message.provider && message.model ? (
-                      <span>{message.provider} · {message.model}</span>
+              visibleMessages.map((message, index) => {
+                const canReadAloud =
+                  message.role === 'assistant' && voicePlayback.canPlay(message.content)
+                const readingMessage = voicePlayback.isPlaying(message.id)
+                const authorLabel = resolveAssistantMessageAuthorLabel(message)
+                const timestampLabel = formatChatTimestamp(message.runRecordedAt)
+                const currentDayLabel = formatChatDayLabel(message.runRecordedAt)
+                const previousDayLabel =
+                  index > 0 ? formatChatDayLabel(visibleMessages[index - 1]?.runRecordedAt) : null
+                const showDayDivider =
+                  currentDayLabel !== null && currentDayLabel !== previousDayLabel
+
+                return (
+                  <div key={message.id} className="assistant-message-stack">
+                    {showDayDivider ? (
+                      <div className="assistant-message-divider">
+                        <span>{currentDayLabel}</span>
+                      </div>
                     ) : null}
-                  </div>
-                  <p>{message.content}</p>
-                  {message.usage ? (
-                    <div className="assistant-message-meta">
-                      <span>
-                        Input tokens:{' '}
-                        {message.usage.input_tokens !== null
-                          ? formatTokenCount(message.usage.input_tokens)
-                          : 'n/a'}
-                      </span>
-                      <span>
-                        Output tokens:{' '}
-                        {message.usage.output_tokens !== null
-                          ? formatTokenCount(message.usage.output_tokens)
-                          : 'n/a'}
-                      </span>
-                      {message.runId ? <span>Run #{message.runId}</span> : null}
-                      {message.runId ? (
-                        <button
-                          type="button"
-                          className={`assistant-run-link ${selectedRunId === message.runId ? 'is-selected' : ''}`}
-                          onClick={() => setSelectedRunId(message.runId ?? null)}
-                        >
-                          {selectedRunId === message.runId ? 'Viewing trace' : 'Open trace'}
-                        </button>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {!message.usage && message.runId ? (
-                    <div className="assistant-message-meta">
-                      <span>Run #{message.runId}</span>
-                      <button
-                        type="button"
-                        className={`assistant-run-link ${selectedRunId === message.runId ? 'is-selected' : ''}`}
-                        onClick={() => setSelectedRunId(message.runId ?? null)}
-                      >
-                        {selectedRunId === message.runId ? 'Viewing trace' : 'Open trace'}
-                      </button>
-                    </div>
-                  ) : null}
-                  <AssistantMessageFeedback
-                    key={`${message.id}-${message.feedback?.updated_at ?? 'new'}`}
-                    message={message}
-                    disabled={!authSession}
-                    inFlight={
-                      Boolean(message.runId) &&
-                      feedbackRunIdsInFlight.includes(message.runId as number)
-                    }
-                    onSubmit={handleAssistantRunFeedback}
-                  />
-                  {message.toolCalls && message.toolCalls.length > 0 ? (
-                    <div className="assistant-tool-list">
-                      {message.toolCalls.map((toolCall, index) => (
-                        <article
-                          key={`${message.id}-${toolCall.tool_name}-${index}`}
-                          className="assistant-tool-card"
-                        >
-                          <div className="assistant-tool-head">
-                            <strong>{toolCall.tool_name}</strong>
-                            <span>
-                              {toolCall.record_count === null
-                                ? 'Record count: n/a'
-                                : `Record count: ${toolCall.record_count}`}
-                            </span>
+                    <article
+                      className={`assistant-message assistant-message-${message.role}`}
+                    >
+                      <div className="assistant-message-avatar" aria-hidden="true">
+                        {resolveAssistantMessageAvatarLabel(message)}
+                      </div>
+                      <div className="assistant-message-body">
+                        <div className="assistant-message-head">
+                          <div className="assistant-message-head-main">
+                            <strong>{authorLabel}</strong>
+                            {timestampLabel ? <span>{timestampLabel}</span> : null}
                           </div>
-                          <p>{toolCall.summary}</p>
-                          {Object.keys(toolCall.arguments).length > 0 ? (
-                            <code>{JSON.stringify(toolCall.arguments)}</code>
+                          {message.provider && message.model ? (
+                            <span>{message.provider} · {message.model}</span>
                           ) : null}
-                        </article>
-                      ))}
-                    </div>
-                  ) : null}
-                  {message.actionRequests && message.actionRequests.length > 0 ? (
-                    <AssistantActionRequestList
-                      actionRequests={message.actionRequests}
-                      actionRequestIdsInFlight={actionRequestIdsInFlight}
-                      formatDate={formatTraceTimestamp}
-                      onDecision={handleActionRequestDecision}
-                      onOpenRun={setSelectedRunId}
-                    />
-                  ) : null}
-                  {message.warnings && message.warnings.length > 0 ? (
-                    <div className="assistant-message-meta">
-                      {message.warnings.map((warning) => (
-                        <span key={warning}>{warning}</span>
-                      ))}
-                    </div>
-                  ) : null}
-                </article>
-              ))
+                        </div>
+                        <div className="assistant-message-bubble">
+                          <p>{message.content}</p>
+                        </div>
+                        {canReadAloud ? (
+                          <div className="assistant-message-meta">
+                            <button
+                              type="button"
+                              className={`assistant-run-link ${readingMessage ? 'is-selected' : ''}`}
+                              aria-pressed={readingMessage}
+                              disabled={!voicePlayback.supported}
+                              title={
+                                voicePlayback.supported
+                                  ? readingMessage
+                                    ? 'Stop reading this assistant response aloud.'
+                                    : 'Read this assistant response aloud.'
+                                  : 'Read aloud is not supported in this browser.'
+                              }
+                              onClick={() => {
+                                voiceComposer.cancelListening()
+                                voicePlayback.togglePlayback(message.id, message.content)
+                              }}
+                            >
+                              {resolveVoicePlaybackButtonLabel(readingMessage)}
+                            </button>
+                          </div>
+                        ) : null}
+                        {message.usage ? (
+                          <div className="assistant-message-meta">
+                            <span>
+                              Input tokens:{' '}
+                              {message.usage.input_tokens !== null
+                                ? formatTokenCount(message.usage.input_tokens)
+                                : 'n/a'}
+                            </span>
+                            <span>
+                              Output tokens:{' '}
+                              {message.usage.output_tokens !== null
+                                ? formatTokenCount(message.usage.output_tokens)
+                                : 'n/a'}
+                            </span>
+                            {message.runId ? <span>Run #{message.runId}</span> : null}
+                            {message.runId ? (
+                              <button
+                                type="button"
+                                className={`assistant-run-link ${selectedRunId === message.runId ? 'is-selected' : ''}`}
+                                onClick={() => setSelectedRunId(message.runId ?? null)}
+                              >
+                                {selectedRunId === message.runId ? 'Viewing trace' : 'Open trace'}
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {!message.usage && message.runId ? (
+                          <div className="assistant-message-meta">
+                            <span>Run #{message.runId}</span>
+                            <button
+                              type="button"
+                              className={`assistant-run-link ${selectedRunId === message.runId ? 'is-selected' : ''}`}
+                              onClick={() => setSelectedRunId(message.runId ?? null)}
+                            >
+                              {selectedRunId === message.runId ? 'Viewing trace' : 'Open trace'}
+                            </button>
+                          </div>
+                        ) : null}
+                        <AssistantMessageFeedback
+                          key={`${message.id}-${message.feedback?.updated_at ?? 'new'}`}
+                          message={message}
+                          disabled={!authSession}
+                          inFlight={
+                            Boolean(message.runId) &&
+                            feedbackRunIdsInFlight.includes(message.runId as number)
+                          }
+                          onSubmit={handleAssistantRunFeedback}
+                        />
+                        {message.toolCalls && message.toolCalls.length > 0 ? (
+                          <AssistantToolCallList
+                            toolCalls={message.toolCalls}
+                            callerAgentName={message.agentName}
+                            selectedRunId={selectedRunId}
+                            onOpenRun={setSelectedRunId}
+                          />
+                        ) : null}
+                        {message.actionRequests && message.actionRequests.length > 0 ? (
+                          <AssistantActionRequestList
+                            actionRequests={message.actionRequests}
+                            actionRequestIdsInFlight={actionRequestIdsInFlight}
+                            formatDate={formatTraceTimestamp}
+                            onDecision={handleActionRequestDecision}
+                            onOpenRun={setSelectedRunId}
+                          />
+                        ) : null}
+                        {message.warnings && message.warnings.length > 0 ? (
+                          <div className="assistant-message-meta">
+                            {message.warnings.map((warning) => (
+                              <span key={warning}>{warning}</span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </article>
+                  </div>
+                )
+              })
             )}
           </div>
 
@@ -1623,6 +1949,27 @@ export function AssistantWorkspace({
                 </select>
               </label>
 
+              <label className="field">
+                <span>Persona</span>
+                <select
+                  className="control"
+                  value={selectedPersona}
+                  onChange={(event) => {
+                    setSubmitError('')
+                    setSelectedPersona(event.target.value as AssistantPersona | '')
+                  }}
+                >
+                  <option value="">
+                    {defaultPersonaDetails ? `User default (${defaultPersonaDetails.label})` : 'User default'}
+                  </option>
+                  {availablePersonas.map((persona) => (
+                    <option key={persona.key} value={persona.key}>
+                      {persona.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               <label className="assistant-toggle">
                 <input
                   type="checkbox"
@@ -1648,6 +1995,15 @@ export function AssistantWorkspace({
               <div className="assistant-sidebar-block">
                 <strong>Selected agent</strong>
                 <small>{selectedAgent ? selectedAgent.description : 'Platform foundation with no named agent override.'}</small>
+              </div>
+
+              <div className="assistant-sidebar-block">
+                <strong>Active persona</strong>
+                <small>
+                  {selectedPersonaDetails
+                    ? `${personaSelectionSource}: ${selectedPersonaDetails.label}. ${selectedPersonaDetails.description}`
+                    : 'Persona context will be resolved by the API.'}
+                </small>
               </div>
 
               <div className="assistant-sidebar-block">
@@ -1695,6 +2051,7 @@ export function AssistantWorkspace({
                 className="control assistant-textarea"
                 value={draft}
                 onChange={(event) => {
+                  voiceComposer.cancelListening()
                   setSubmitError('')
                   setDraft(event.target.value)
                 }}
@@ -1704,9 +2061,21 @@ export function AssistantWorkspace({
 
             <div className="toolbar settings-actions">
               <button
+                type="button"
+                className="button button-ghost"
+                onClick={() => {
+                  setSubmitError('')
+                  voiceComposer.toggleListening()
+                }}
+                disabled={!voiceComposer.canToggle || submitting}
+                aria-pressed={voiceComposer.listening}
+              >
+                {voiceComposer.buttonLabel}
+              </button>
+              <button
                 type="submit"
                 className="button button-primary"
-                disabled={!assistantReady || !draft.trim() || submitting}
+                disabled={!assistantReady || !draft.trim() || submitting || voiceComposer.listening}
               >
                 {submitting ? 'Sending...' : 'Send Prompt'}
               </button>
@@ -1717,6 +2086,9 @@ export function AssistantWorkspace({
 
             <p className={`form-note ${submitError ? 'form-note-error' : ''}`}>
               {submitError || assistantReadinessNote}
+            </p>
+            <p className={`form-note ${voiceComposer.statusTone === 'error' ? 'form-note-error' : ''}`}>
+              {voiceComposer.statusMessage}
             </p>
           </form>
         </article>
@@ -1737,33 +2109,93 @@ export function AssistantWorkspace({
         <div className="assistant-sidebar-block">
           <strong>Current mode</strong>
           <p>
-            {includeContext
-              ? 'App context is attached to the prompt preview.'
-              : 'Only server-owned org and user context is attached to the prompt preview.'}
+            {selectedRun
+              ? 'A stored run trace is selected. The explainer below reflects that trace, while the composer still controls your next request.'
+              : includeContext
+                ? 'App context is attached to the prompt preview.'
+                : 'Only server-owned org and user context is attached to the prompt preview.'}
           </p>
-          <small>{useLiveTools ? 'Live tools are enabled for the next request.' : 'Live tools are disabled for the next request.'}</small>
+          <small>
+            {selectedRun
+              ? selectedRun.use_live_tools
+                ? 'That stored run used live tools.'
+                : 'That stored run did not use live tools.'
+              : useLiveTools
+                ? 'Live tools are enabled for the next request.'
+                : 'Live tools are disabled for the next request.'}
+          </small>
         </div>
 
         <div className="assistant-sidebar-block">
-          <strong>Published tools</strong>
-          <p>
-            {runtimeSettings?.available_tools.length
-              ? runtimeSettings.available_tools.map((tool) => tool.name).join(' · ')
-              : 'No tools published'}
-          </p>
+          <strong>{selectedAgentAccessSummary.heading}</strong>
+          <p>{selectedAgentAccessSummary.summary}</p>
+          <small>{selectedAgentAccessSummary.detail}</small>
         </div>
+
+        <details className="assistant-trace-details" open>
+          <summary>Construction explainer</summary>
+          <AssistantConstructionExplainerPanel
+            activeAgent={activeConstructionAgent}
+            activeGroundingSections={activeGroundingSections}
+            agents={agents}
+            promptPreview={promptPreview}
+            runtimeSettings={runtimeSettings}
+            selectedRun={selectedRun}
+            includeContext={includeContext}
+            useLiveTools={useLiveTools}
+            onSelectAgent={setSelectedAgentId}
+          />
+        </details>
 
         <div className="assistant-sidebar-block">
           <strong>Prompt status</strong>
           <p>
-            {previewLoading
-              ? 'Refreshing preview...'
-              : previewError
-                ? previewError
-                : promptPreview
-                  ? `${promptPreview.sections.length} sections are currently grounding the prompt.`
-                  : 'Preview not available'}
+            {selectedRun
+              ? `${selectedRun.prompt_sections.length} stored sections grounded run #${selectedRun.run_id}.`
+              : previewLoading
+                ? 'Refreshing preview...'
+                : previewError
+                  ? previewError
+                  : promptPreview
+                    ? `${promptPreview.sections.length} sections are currently grounding the prompt.`
+                    : 'Preview not available'}
           </p>
+        </div>
+
+        <div className="assistant-sidebar-block">
+          <div className="assistant-provider-head">
+            <strong>Grounding sections</strong>
+            <span>{activeGroundingSections.length}</span>
+          </div>
+          <p>
+            {selectedRun
+              ? 'Showing the stored prompt sections that grounded the selected run.'
+              : promptPreview
+                ? 'Showing the prompt sections that will ground the next request.'
+                : 'No prompt sections are loaded yet.'}
+          </p>
+          <AssistantPromptSectionList
+            sections={activeGroundingSections}
+            emptyMessage="No prompt sections are available yet."
+          />
+        </div>
+
+        <div className="assistant-sidebar-block">
+          <div className="assistant-provider-head">
+            <strong>Tool evidence</strong>
+            <span>{activeEvidenceItems.length}</span>
+          </div>
+          <p>
+            {selectedRun
+              ? 'Structured source cards captured from the selected run.'
+              : latestAssistantMessage?.toolCalls?.length
+                ? 'Structured source cards from the latest assistant reply in this chat.'
+                : 'Source cards appear here after tool-backed answers inspect the app.'}
+          </p>
+          <AssistantEvidenceList
+            evidenceItems={activeEvidenceItems}
+            emptyMessage="No structured tool evidence has been captured yet."
+          />
         </div>
 
         <div className="assistant-sidebar-block">
@@ -1957,32 +2389,17 @@ export function AssistantWorkspace({
             ) : null}
 
             {selectedRun.tool_calls.length > 0 ? (
-              <div className="assistant-tool-list">
-                {selectedRun.tool_calls.map((toolCall, index) => (
-                  <article key={`selected-run-tool-${toolCall.tool_name}-${index}`} className="assistant-tool-card">
-                    <div className="assistant-tool-head">
-                      <strong>{toolCall.tool_name}</strong>
-                      <span>
-                        {toolCall.record_count === null ? 'Record count: n/a' : `Record count: ${toolCall.record_count}`}
-                      </span>
-                    </div>
-                    <p>{toolCall.summary}</p>
-                    {Object.keys(toolCall.arguments).length > 0 ? <code>{JSON.stringify(toolCall.arguments)}</code> : null}
-                  </article>
-                ))}
-              </div>
+              <AssistantToolCallList
+                toolCalls={selectedRun.tool_calls}
+                callerAgentName={selectedRun.agent_name}
+                selectedRunId={selectedRunId}
+                onOpenRun={setSelectedRunId}
+              />
             ) : null}
 
             <details className="assistant-trace-details" open>
               <summary>Prompt sections ({selectedRun.prompt_sections.length})</summary>
-              <div className="assistant-trace-section-list">
-                {selectedRun.prompt_sections.map((section) => (
-                  <div key={section.key} className="assistant-context-preview">
-                    <strong>{section.title}</strong>
-                    <pre>{section.content}</pre>
-                  </div>
-                ))}
-              </div>
+              <AssistantPromptSectionList sections={selectedRun.prompt_sections} />
             </details>
 
             <details className="assistant-trace-details">

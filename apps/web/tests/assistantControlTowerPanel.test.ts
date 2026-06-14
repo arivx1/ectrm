@@ -57,6 +57,22 @@ const seededSummary = {
       age_seconds: 18_000,
     },
   },
+  work_packages: {
+    total_count: 4,
+    accepted_count: 1,
+    in_progress_count: 1,
+    implemented_count: 2,
+    dismissed_count: 0,
+    stale_count: 1,
+    stale_accepted_count: 1,
+    stale_in_progress_count: 0,
+    implemented_with_pr_count: 1,
+    implemented_with_commit_count: 1,
+    implemented_with_eval_count: 1,
+    implemented_with_tests_count: 2,
+    implemented_with_docs_count: 1,
+    implemented_missing_evidence_count: 0,
+  },
   trust_signals: [
     {
       agent_id: 'risky-agent',
@@ -88,6 +104,21 @@ const seededSummary = {
       warning_run_count: 1,
       eval_status: 'NOT_REQUIRED',
     },
+    {
+      agent_id: 'ops-agent',
+      agent_name: 'Ops Agent',
+      status: 'ACTIVE',
+      role_key: null,
+      profile_kind: 'CUSTOM',
+      signal_type: 'STALE_WORK_PACKAGE',
+      severity: 'warning',
+      summary: '1 work package is stale without shipped proof.',
+      details: ['Accepted package has been idle for more than 72 hours.'],
+      pending_action_count: 0,
+      failed_action_count: 0,
+      warning_run_count: 0,
+      eval_status: 'NOT_REQUIRED',
+    },
   ],
 } satisfies AssistantControlTowerSummary
 
@@ -107,14 +138,25 @@ describe('AssistantControlTowerPanel', () => {
     expect(markup).toContain('Agent Roster')
     expect(markup).toContain('2 active · 1 paused · 1 draft')
     expect(markup).toContain('Pending Actions')
+    expect(markup).toContain('Tracked Packages')
+    expect(markup).toContain('2 implemented · 1 in progress · 1 accepted')
+    expect(markup).toContain('Stale Packages')
+    expect(markup).toContain('0 in progress · 1 accepted · 72h+ without shipped proof')
+    expect(markup).toContain('Implemented Proof')
+    expect(markup).toContain('1 PR · 1 eval · 2 test · 1 doc')
     expect(markup).toContain('Issue invoice')
     expect(markup).toContain('issue trade invoice')
     expect(markup).toContain('5.0h waiting')
     expect(markup).toContain('Risky Agent')
     expect(markup).toContain('Policy warning')
     expect(markup).toContain('Watch Agent')
+    expect(markup).toContain('Ops Agent')
+    expect(markup).toContain('Review Stale Packages')
     expect(markup).toContain('href="#assistant-agent-management"')
+    expect(markup).toContain('href="#assistant-agent-work-packages"')
     expect(markup).toContain('href="#assistant-approval-inbox"')
+    expect(markup).toContain('Narrow Scope')
+    expect(markup).toContain('Pause Agent')
   })
 
   it('does not reveal protected control data to non-admin users', () => {

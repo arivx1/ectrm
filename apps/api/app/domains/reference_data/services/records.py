@@ -24,15 +24,16 @@ def list_reference_records(
     limit: int,
     offset: int,
     extra_filters: Optional[list[Any]] = None,
+    search_columns: Optional[list[Any]] = None,
 ) -> list[ModelT]:
     stmt = select(model).order_by(model.code.asc()).limit(limit).offset(offset)
 
     if q:
         pattern = f"%{q.strip()}%"
+        searchable_columns = search_columns or [model.code, model.name]
         stmt = stmt.where(
             or_(
-                model.code.ilike(pattern),
-                model.name.ilike(pattern),
+                *(column.ilike(pattern) for column in searchable_columns),
             )
         )
     if is_active is not None:

@@ -1,14 +1,22 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
+import authGateCornLogoUrl from '../../assets/auth-gate-logo-corn.png'
+import authGateLogoUrl from '../../assets/auth-gate-logo.png'
+import authGateRocksLogoUrl from '../../assets/auth-gate-logo-rocks.png'
+import authGateTransmissionLogoUrl from '../../assets/auth-gate-logo-transmission.png'
+import tonysSkunkworksLogoUrl from '../../assets/tonys-skunkworks-logo.png'
 import {
   bootstrapAdminSession,
   createAuthSession,
-  createGoogleAuthSession,
   createSingleUserAuthSession,
   type SessionResponse,
 } from './api'
-import { loadGoogleIdentityScript } from './googleIdentity'
+import { formatAuthErrorMessage } from './errorMessage'
 import { loadPublicRuntimeSettings, type PublicRuntimeSettings } from '../app/api'
+import {
+  saveCollapsibleCardStateValue,
+  usePersistentCollapsibleCardState,
+} from '../../shared/collapsibleCardState'
 import { appConfig } from '../../shared/config'
 import { type StoredAuthSession } from '../../shared/mutation'
 
@@ -25,13 +33,48 @@ type FlashMessage = {
   message: string
 }
 
-type AuthAction = 'login' | 'single-user' | 'bootstrap' | 'google' | null
+type AuthAction = 'login' | 'single-user' | 'bootstrap' | null
+type AuthGateTimeOfDay = 'sunrise' | 'daytime' | 'sunset' | 'night'
+
+const AUTH_GATE_BACKGROUND_REFRESH_MS = 60 * 1000
+const AUTH_GATE_BACKGROUND_TRANSITION_MS = 1200
+const AUTH_GATE_BACKGROUND_SEQUENCE: AuthGateTimeOfDay[] = ['sunrise', 'daytime', 'sunset', 'night']
+const AUTH_GATE_LOGO_FLIP_INTERVAL_MS = 5 * 1000
+const AUTH_GATE_LOGO_FLIP_DURATION_MS = 760
+const AUTH_GATE_LOGO_QUEUE = [
+  authGateLogoUrl,
+  authGateCornLogoUrl,
+  authGateTransmissionLogoUrl,
+  authGateRocksLogoUrl,
+]
+
+function getAuthGateTimeOfDay(date = new Date()): AuthGateTimeOfDay {
+  const hour = date.getHours()
+
+  if (hour >= 5 && hour < 9) {
+    return 'sunrise'
+  }
+  if (hour >= 9 && hour < 17) {
+    return 'daytime'
+  }
+  if (hour >= 17 && hour < 20) {
+    return 'sunset'
+  }
+  return 'night'
+}
+
+function getNextAuthGateTimeOfDay(timeOfDay: AuthGateTimeOfDay): AuthGateTimeOfDay {
+  const currentIndex = AUTH_GATE_BACKGROUND_SEQUENCE.indexOf(timeOfDay)
+  const nextIndex = (currentIndex + 1) % AUTH_GATE_BACKGROUND_SEQUENCE.length
+  return AUTH_GATE_BACKGROUND_SEQUENCE[nextIndex]
+}
 
 function mapSession(session: SessionResponse): StoredAuthSession {
   return {
     sessionId: session.session_id,
     accessToken: session.access_token,
     expiresAt: session.expires_at,
+    showStartHere: session.show_start_here,
     user: session.user,
   }
 }
@@ -55,10 +98,49 @@ export function AuthGate({
   const [authAction, setAuthAction] = useState<AuthAction>(null)
   const [serverSettings, setServerSettings] = useState<PublicRuntimeSettings | null>(null)
   const [serverSettingsError, setServerSettingsError] = useState('')
-  const [serverSettingsLoading, setServerSettingsLoading] = useState(true)
-  const [googleSignInReady, setGoogleSignInReady] = useState(false)
-  const [bootstrapExpanded, setBootstrapExpanded] = useState(false)
-  const googleSignInContainerRef = useRef<HTMLDivElement | null>(null)
+  const [timeOfDay, setTimeOfDay] = useState<AuthGateTimeOfDay>(() => getAuthGateTimeOfDay())
+  const [previousTimeOfDay, setPreviousTimeOfDay] = useState<AuthGateTimeOfDay | null>(null)
+  const [backgroundCycleActive, setBackgroundCycleActive] = useState(false)
+  const [currentLogoIndex, setCurrentLogoIndex] = useState(0)
+  const [logoFlipActive, setLogoFlipActive] = useState(false)
+  const authPanelRef = useRef<HTMLElement | null>(null)
+  const backgroundTransitionTimeoutRef = useRef<number | null>(null)
+  const logoFlipTimeoutRef = useRef<number | null>(null)
+  const bootstrapAdminHashTargeted =
+    typeof window !== 'undefined' &&
+    window.location.hash.replace(/^#/, '').trim() === 'bootstrap-admin'
+  const {
+    expanded: bootstrapExpanded,
+    setExpanded: setBootstrapExpanded,
+  } = usePersistentCollapsibleCardState('auth-gate.bootstrap-admin', bootstrapAdminHashTargeted)
+  const startLogoFlip = useCallback(() => {
+    if (logoFlipTimeoutRef.current !== null) {
+      return
+    }
+
+    setLogoFlipActive(true)
+    logoFlipTimeoutRef.current = window.setTimeout(() => {
+      setCurrentLogoIndex((current) => (current + 1) % AUTH_GATE_LOGO_QUEUE.length)
+      setLogoFlipActive(false)
+      logoFlipTimeoutRef.current = null
+    }, AUTH_GATE_LOGO_FLIP_DURATION_MS)
+  }, [])
+  const transitionBackground = useCallback((nextTimeOfDay: AuthGateTimeOfDay) => {
+    if (nextTimeOfDay === timeOfDay) {
+      return
+    }
+
+    setPreviousTimeOfDay(timeOfDay)
+    setTimeOfDay(nextTimeOfDay)
+
+    if (backgroundTransitionTimeoutRef.current !== null) {
+      window.clearTimeout(backgroundTransitionTimeoutRef.current)
+    }
+    backgroundTransitionTimeoutRef.current = window.setTimeout(() => {
+      setPreviousTimeOfDay(null)
+      backgroundTransitionTimeoutRef.current = null
+    }, AUTH_GATE_BACKGROUND_TRANSITION_MS)
+  }, [timeOfDay])
 
   useEffect(() => {
     let cancelled = false
@@ -73,11 +155,7 @@ export function AuthGate({
       } catch (error) {
         if (!cancelled) {
           setServerSettings(null)
-          setServerSettingsError(error instanceof Error ? error.message : 'Could not load server settings.')
-        }
-      } finally {
-        if (!cancelled) {
-          setServerSettingsLoading(false)
+          setServerSettingsError(formatAuthErrorMessage(error, 'Could not load server settings.'))
         }
       }
     }
@@ -90,6 +168,37 @@ export function AuthGate({
   }, [])
 
   useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      if (!backgroundCycleActive) {
+        transitionBackground(getAuthGateTimeOfDay())
+      }
+    }, AUTH_GATE_BACKGROUND_REFRESH_MS)
+
+    return () => window.clearInterval(intervalId)
+  }, [backgroundCycleActive, transitionBackground])
+
+  useEffect(() => {
+    return () => {
+      if (backgroundTransitionTimeoutRef.current !== null) {
+        window.clearTimeout(backgroundTransitionTimeoutRef.current)
+        backgroundTransitionTimeoutRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const intervalId = window.setInterval(startLogoFlip, AUTH_GATE_LOGO_FLIP_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(intervalId)
+      if (logoFlipTimeoutRef.current !== null) {
+        window.clearTimeout(logoFlipTimeoutRef.current)
+        logoFlipTimeoutRef.current = null
+      }
+    }
+  }, [startLogoFlip])
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return
     }
@@ -97,7 +206,7 @@ export function AuthGate({
     const targetId = window.location.hash.replace(/^#/, '').trim()
     const shouldScrollToTarget = targetId.length > 0
     if (targetId === 'bootstrap-admin') {
-      setBootstrapExpanded(true)
+      saveCollapsibleCardStateValue('auth-gate.bootstrap-admin', true)
     }
 
     const frameId = window.requestAnimationFrame(() => {
@@ -133,7 +242,7 @@ export function AuthGate({
     } catch (error) {
       setAuthFlash({
         tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not sign in.',
+        message: formatAuthErrorMessage(error, 'Could not sign in.'),
       })
     } finally {
       setAuthAction(null)
@@ -150,29 +259,12 @@ export function AuthGate({
     } catch (error) {
       setAuthFlash({
         tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not sign in with single-user access.',
+        message: formatAuthErrorMessage(error, 'Could not sign in with single-user access.'),
       })
     } finally {
       setAuthAction(null)
     }
   }
-
-  const handleGoogleCredential = useEffectEvent(async (idToken: string) => {
-    setAuthAction('google')
-    setAuthFlash(null)
-
-    try {
-      const session = await createGoogleAuthSession(appConfig.apiBase, { id_token: idToken })
-      await onSessionChange(mapSession(session))
-    } catch (error) {
-      setAuthFlash({
-        tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not sign in with Google.',
-      })
-    } finally {
-      setAuthAction(null)
-    }
-  })
 
   async function handleBootstrapAdmin(event: React.FormEvent) {
     event.preventDefault()
@@ -190,198 +282,82 @@ export function AuthGate({
     } catch (error) {
       setAuthFlash({
         tone: 'error',
-        message: error instanceof Error ? error.message : 'Could not bootstrap the initial admin account.',
+        message: formatAuthErrorMessage(error, 'Could not bootstrap the initial admin account.'),
       })
     } finally {
       setAuthAction(null)
     }
   }
 
-  const googleClientId = serverSettings?.google_auth.client_id?.trim() ?? ''
   const authLoading = authAction !== null
   const singleUserAuthEnabled = Boolean(serverSettings?.single_user_auth_enabled)
-  const googleAuthEnabled = Boolean(serverSettings?.google_auth.enabled && googleClientId)
-  const googleAutoCreateUsers = Boolean(serverSettings?.google_auth.auto_create_users)
-
-  useEffect(() => {
-    const container = googleSignInContainerRef.current
-    if (!container || !googleAuthEnabled) {
+  async function handleSingleSignOn() {
+    if (singleUserAuthEnabled) {
+      await handleSingleUserLogin()
       return
     }
-    const signInContainer = container
 
-    let cancelled = false
-    signInContainer.innerHTML = ''
-    setGoogleSignInReady(false)
+    setAuthFlash({
+      tone: 'error',
+      message: 'Single Sign On is not enabled for this server.',
+    })
+  }
 
-    async function initializeGoogleSignIn() {
-      try {
-        await loadGoogleIdentityScript()
-        if (cancelled) {
-          return
-        }
+  function advanceBackground() {
+    setBackgroundCycleActive(true)
+    transitionBackground(getNextAuthGateTimeOfDay(timeOfDay))
+  }
 
-        const googleIdentityApi = window.google?.accounts?.id
-        if (!googleIdentityApi) {
-          throw new Error('Google sign-in is unavailable in this browser.')
-        }
-
-        googleIdentityApi.initialize({
-          client_id: googleClientId,
-          callback: (response) => {
-            if (cancelled) {
-              return
-            }
-            if (!response.credential) {
-              setAuthFlash({
-                tone: 'error',
-                message: 'Google did not return a sign-in token.',
-              })
-              return
-            }
-            void handleGoogleCredential(response.credential)
-          },
-          cancel_on_tap_outside: true,
-        })
-
-        googleIdentityApi.renderButton(signInContainer, {
-          theme: 'outline',
-          size: 'large',
-          shape: 'pill',
-          text: 'continue_with',
-          width: Math.max(240, Math.min(signInContainer.clientWidth || 320, 360)),
-        })
-        setGoogleSignInReady(true)
-      } catch (error) {
-        if (cancelled) {
-          return
-        }
-
-        setAuthFlash((current) =>
-          current ?? {
-            tone: 'error',
-            message: error instanceof Error ? error.message : 'Could not initialize Google sign-in.',
-          },
-        )
-      }
+  function handleStageClick(event: React.MouseEvent<HTMLElement>) {
+    const target = event.target
+    if (target instanceof Node && authPanelRef.current?.contains(target)) {
+      return
     }
 
-    void initializeGoogleSignIn()
+    advanceBackground()
+  }
 
-    return () => {
-      cancelled = true
-      signInContainer.innerHTML = ''
-    }
-  }, [googleAuthEnabled, googleClientId])
-
-  const availableMethods = [
-    'Password',
-    ...(singleUserAuthEnabled ? ['Single-user'] : []),
-    ...(googleAuthEnabled ? ['Google'] : []),
-  ]
-  const sessionTtlLabel = serverSettings ? `${serverSettings.session_ttl_hours}h` : 'Unknown'
-  const mutationProtectionLabel = serverSettings?.mutation_protection_enabled ? 'Protected' : 'Open'
-  const bootstrapAvailabilityLabel = serverSettings?.bootstrap_admin_enabled ? 'Ready' : 'Closed'
+  const nextLogoIndex = (currentLogoIndex + 1) % AUTH_GATE_LOGO_QUEUE.length
 
   return (
-    <main className="auth-gate-stage">
+    <main className={`auth-gate-stage auth-gate-stage-${timeOfDay}`} onClick={handleStageClick}>
+      <div className="auth-gate-background-stack" aria-hidden="true">
+        {previousTimeOfDay ? (
+          <div
+            key={`previous-${previousTimeOfDay}`}
+            className={`auth-gate-background-layer auth-gate-background-layer-previous auth-gate-stage-${previousTimeOfDay}`}
+          />
+        ) : null}
+        <div
+          key={`current-${timeOfDay}`}
+          className={`auth-gate-background-layer auth-gate-background-layer-current auth-gate-stage-${timeOfDay}`}
+        />
+      </div>
+      <img className="auth-gate-corner-logo" src={tonysSkunkworksLogoUrl} alt="Tony's Skunkworks" />
       <section className="auth-gate-frame">
-        <section className="auth-gate-hero">
-          <div className="auth-gate-hero-top">
-            <div className="auth-gate-brand-row">
-              <span className="brand-mark">E/CTRM</span>
-              <span className="auth-gate-status">Authentication Required</span>
-            </div>
-
-            <div className="auth-gate-title-block">
-              <span className="eyebrow">Desk Access Checkpoint</span>
-              <h1>Open the operator console with a live session.</h1>
-              <p>
-                Authenticate once, then continue into trading, operations, settlement, and admin
-                workspaces with role-aware access carried across every protected action.
-              </p>
-            </div>
-
-            <div className="auth-gate-chip-row" aria-label="Protected console areas">
-              <span className="auth-gate-chip">Trade capture</span>
-              <span className="auth-gate-chip">Risk and positions</span>
-              <span className="auth-gate-chip">Workflow queues</span>
-              <span className="auth-gate-chip">Admin controls</span>
-            </div>
+        <header className="auth-gate-wordmark" aria-label="Strata and Nexus">
+          <div className="brand-mark-row">
+            <span className="brand-mark">Strata</span>
+            <span className="brand-mark">Nexus</span>
           </div>
+        </header>
 
-          {serverSettingsLoading ? (
-            <div className="auth-gate-signal-grid">
-              <div className="skeleton-block" />
-              <div className="skeleton-block" />
-              <div className="skeleton-block" />
-              <div className="skeleton-block" />
-            </div>
-          ) : (
-            <div className="auth-gate-signal-grid">
-              <article className="auth-gate-signal-card">
-                <span>Available methods</span>
-                <strong>{availableMethods.join(' · ')}</strong>
-                <p>The screen adapts to the API configuration instead of advertising unavailable flows.</p>
-              </article>
-              <article className="auth-gate-signal-card">
-                <span>Session TTL</span>
-                <strong>{sessionTtlLabel}</strong>
-                <p>Successful sign-in stores a local browser session for this configured lifetime.</p>
-              </article>
-              <article className="auth-gate-signal-card">
-                <span>Write protection</span>
-                <strong>{mutationProtectionLabel}</strong>
-                <p>
-                  {serverSettings?.mutation_protection_enabled
-                    ? 'Protected mutations require an authenticated actor.'
-                    : 'The API currently allows write calls without a token.'}
-                </p>
-              </article>
-              <article className="auth-gate-signal-card">
-                <span>Bootstrap admin</span>
-                <strong>{bootstrapAvailabilityLabel}</strong>
-                <p>
-                  {serverSettings?.bootstrap_admin_enabled
-                    ? 'First-run OPS_ADMIN setup can be opened from this screen.'
-                    : 'Bootstrap is hidden once the initial administrative account already exists.'}
-                </p>
-              </article>
-            </div>
-          )}
-
-          <div className="auth-gate-step-rail">
-            <article className="auth-gate-step">
-              <span className="auth-gate-step-index">1</span>
-              <div>
-                <strong>Authenticate</strong>
-                <p>Use password access first, or fall back to Google or single-user access when enabled.</p>
-              </div>
-            </article>
-            <article className="auth-gate-step">
-              <span className="auth-gate-step-index">2</span>
-              <div>
-                <strong>Hydrate the shell</strong>
-                <p>The console restores workspace data, navigation, and your role-scoped controls after sign-in.</p>
-              </div>
-            </article>
-            <article className="auth-gate-step">
-              <span className="auth-gate-step-index">3</span>
-              <div>
-                <strong>Resume work</strong>
-                <p>Trade capture, queues, settlement, and admin actions inherit the active actor identity.</p>
-              </div>
-            </article>
-          </div>
-        </section>
-
-        <section className="surface auth-gate-panel">
+        <section ref={authPanelRef} className="surface auth-gate-panel">
           <div className="auth-gate-panel-head">
-            <div>
-              <span className="eyebrow">Sign In</span>
-              <h3>Enter the console</h3>
+            <div className="auth-gate-orb" aria-hidden="true" onPointerEnter={startLogoFlip}>
+              <div className={`auth-gate-logo-flip${logoFlipActive ? ' is-flipping' : ''}`}>
+                <img
+                  className="auth-gate-orb-logo auth-gate-logo-face"
+                  src={AUTH_GATE_LOGO_QUEUE[currentLogoIndex]}
+                  alt=""
+                />
+                <img
+                  className="auth-gate-orb-logo auth-gate-logo-face auth-gate-logo-face-back"
+                  src={AUTH_GATE_LOGO_QUEUE[nextLogoIndex]}
+                  alt=""
+                />
+              </div>
             </div>
-            <p>Start with password access. Secondary methods appear only when the running API is ready for them.</p>
           </div>
 
           {serverSettingsError ? <div className="feedback-banner feedback-banner-error">{serverSettingsError}</div> : null}
@@ -399,16 +375,16 @@ export function AuthGate({
             <div className="feedback-banner feedback-banner-success">
               {pendingPromptResumeWillSubmit
                 ? `After sign-in, sending ${pendingPromptResumeLabel}. Protected context stays private until authentication succeeds.`
-                : `After sign-in, reopening Prompt Home with ${pendingPromptResumeLabel}. Protected context stays private until authentication succeeds.`}
+                : `After sign-in, reopening Home with ${pendingPromptResumeLabel}. Protected context stays private until authentication succeeds.`}
             </div>
           ) : null}
 
           <form id="session-login" className="auth-gate-entry-form" onSubmit={handleLogin}>
             <div className="auth-gate-entry-grid">
               <label className="field">
-                <span>User ID or Email</span>
                 <input
                   className="control auth-gate-control"
+                  aria-label="User ID or Email"
                   value={loginForm.identifier}
                   onChange={(event) => {
                     setAuthFlash(null)
@@ -418,9 +394,9 @@ export function AuthGate({
                 />
               </label>
               <label className="field">
-                <span>Password</span>
                 <input
                   className="control auth-gate-control"
+                  aria-label="Password"
                   type="password"
                   value={loginForm.password}
                   onChange={(event) => {
@@ -431,62 +407,32 @@ export function AuthGate({
                 />
               </label>
             </div>
-
             <div className="auth-gate-primary-actions">
               <button type="submit" className="button button-primary" disabled={authLoading}>
-                {authAction === 'login' ? 'Signing In...' : 'Enter Console'}
+                {authAction === 'login' ? 'Signing In...' : 'Log In'}
               </button>
-              <p className="auth-gate-primary-note">
-                Password access works with either user ID or email and issues the same local session token
-                used by the rest of the console.
-              </p>
             </div>
           </form>
 
-          {singleUserAuthEnabled || googleAuthEnabled ? (
-            <div className="auth-gate-method-grid">
-              {singleUserAuthEnabled ? (
-                <button
-                  id="single-user-sign-in"
-                  type="button"
-                  className="auth-gate-method-card"
-                  onClick={() => void handleSingleUserLogin()}
-                  disabled={authLoading}
-                >
-                  <span>Single-user access</span>
-                  <strong>{authAction === 'single-user' ? 'Signing In...' : 'Use local OPS_ADMIN session'}</strong>
-                  <p>Fast local entry when the API exposes the configured one-click operator account.</p>
-                </button>
-              ) : null}
-
-              {googleAuthEnabled ? (
-                <div className="auth-gate-method-card auth-gate-method-card-google">
-                  <span>Google sign-in</span>
-                  <strong>Continue with Google</strong>
-                  <p>
-                    {googleAutoCreateUsers
-                      ? 'New Google identities can create a local account automatically with the server default role.'
-                      : 'Your Google email must already map to a local account on the API.'}
-                  </p>
-                  <div ref={googleSignInContainerRef} className="google-sign-in-button auth-gate-google-slot" />
-                  <small className="auth-gate-method-note">
-                    {authAction === 'google'
-                      ? 'Completing Google sign-in...'
-                      : googleSignInReady
-                        ? 'Google returns an identity token in the browser, then the API exchanges it for the same session token used by password access.'
-                        : 'Loading Google sign-in...'}
-                  </small>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+          <div className="auth-gate-primary-actions">
+            <button
+              id="single-user-sign-in"
+              type="button"
+              className="button button-primary auth-gate-sso-button"
+              onClick={() => void handleSingleSignOn()}
+              disabled={authLoading}
+            >
+              <span className="auth-gate-keyhole" aria-hidden="true" />
+              <span>Single Sign On</span>
+            </button>
+          </div>
 
           {serverSettings?.bootstrap_admin_enabled ? (
             <section id="bootstrap-admin" className={`auth-gate-bootstrap ${bootstrapExpanded ? 'is-open' : ''}`}>
               <button
                 type="button"
                 className="auth-gate-bootstrap-toggle"
-                onClick={() => setBootstrapExpanded((current) => !current)}
+                onClick={() => setBootstrapExpanded(!bootstrapExpanded)}
                 aria-expanded={bootstrapExpanded}
                 aria-controls="auth-gate-bootstrap-form"
               >
@@ -582,12 +528,12 @@ export function AuthGate({
             </section>
           ) : null}
 
-          <p className={`form-note ${authFlash?.tone === 'error' ? 'form-note-error' : ''}`}>
-            {authFlash?.message ??
-              'Sign in to unlock the console. Protected writes will derive actor identity from the active session.'}
-          </p>
+          {authFlash ? (
+            <p className={`form-note ${authFlash.tone === 'error' ? 'form-note-error' : ''}`}>{authFlash.message}</p>
+          ) : null}
         </section>
       </section>
+
     </main>
   )
 }

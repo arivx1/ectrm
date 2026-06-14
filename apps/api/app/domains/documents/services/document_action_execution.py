@@ -5,21 +5,33 @@ from datetime import datetime, time, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.domains.operations.services.actualizations import build_delivery_obligation_id
+from apps.api.app.domains.operations.services.actualizations import upsert_trade_actualization
 from apps.api.app.domains.operations.services.settlement_invoices import issue_trade_invoice
 from apps.api.app.domains.operations.services.settlement_payments import create_trade_payment
+from apps.api.app.domains.operations.services.shipments import append_delivery_event
+from apps.api.app.domains.operations.services.shipments import create_delivery_from_document
+from apps.api.app.domains.operations.services.shipments import update_delivery_pipeline_detail
 from apps.api.app.domains.operations.services.trade_confirmations import create_trade_confirmation
 from apps.api.app.domains.operations.services.trade_confirmations import update_trade_confirmation
+from apps.api.app.models.delivery_event import DeliveryEvent
 from apps.api.app.models.delivery_obligation import DeliveryObligation
 from apps.api.app.models.document_ingestion import DocumentIngestion
+from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade_confirmation import TradeConfirmation
 from apps.api.app.schemas.document import DocumentActionPlanOut
+from apps.api.app.schemas.document import DocumentLinkageAssessmentOut
 from apps.api.app.schemas.document import DocumentIngestionOut
 
+from .document_action_governance import DocumentActionGovernance
+from .document_action_governance import build_document_action_governance
 from .document_action_planning import build_document_action_plan
 from .document_ingestion_serialization import load_document_and_pages
 from .document_ingestion_serialization import serialize_documents
 from .document_linkage import build_document_linkage_assessment
 from .document_record_links import create_document_record_link
+from .document_record_links import list_document_record_links
+from .document_record_links import to_document_record_link_out
 
 SUPPORTED_DOCUMENT_ACTION_OPERATIONS: frozenset[str] = frozenset(
     {
@@ -27,6 +39,10 @@ SUPPORTED_DOCUMENT_ACTION_OPERATIONS: frozenset[str] = frozenset(
         "create_trade_confirmation",
         "issue_trade_invoice",
         "create_trade_payment",
+        "create_delivery_from_document",
+        "update_delivery_schedule_from_document",
+        "record_delivery_event_from_document",
+        "record_trade_actualization_from_document",
     }
 )
 
@@ -36,6 +52,8 @@ def execute_document_action_plan(
     *,
     document_id: str,
     actor_id: str,
+    require_safe_direct_execution: bool = True,
+    action_plan_override: DocumentActionPlanOut | None = None,
 ) -> DocumentIngestionOut:
     reference_time = datetime.now(timezone.utc)
     document, pages = load_document_and_pages(db, document_id=document_id)
@@ -48,7 +66,7 @@ def execute_document_action_plan(
         review_status=document.review_status,
         document_id=document.document_id,
     )
-    action_plan = build_document_action_plan(
+    action_plan = action_plan_override or build_document_action_plan(
         document_id=document.document_id,
         pages=pages,
         review_status=document.review_status,
@@ -60,6 +78,15 @@ def execute_document_action_plan(
         raise ValueError(
             f"Document action operation '{action_plan.operation_type}' is not supported for execution yet."
         )
+
+    governance = _build_action_governance(
+        db,
+        document_id=document.document_id,
+        action_plan=action_plan,
+        linkage_assessment=linkage_assessment,
+    )
+    if require_safe_direct_execution:
+        _ensure_safe_direct_execution(action_plan=action_plan, governance=governance)
 
     changed = _apply_document_action(
         db,
@@ -75,6 +102,56 @@ def execute_document_action_plan(
         db.flush()
 
     return serialize_documents(db, [document], preloaded_pages=pages)[0]
+
+
+def _build_action_governance(
+    db: Session,
+    *,
+    document_id: str,
+    action_plan: DocumentActionPlanOut,
+    linkage_assessment: DocumentLinkageAssessmentOut,
+) -> DocumentActionGovernance:
+    record_links = [
+        to_document_record_link_out(link)
+        for link in list_document_record_links(db, document_id=document_id)
+    ]
+    return build_document_action_governance(
+        action_plan=action_plan,
+        linkage_assessment=linkage_assessment,
+        record_links=record_links,
+    )
+
+
+def _ensure_safe_direct_execution(
+    *,
+    action_plan: DocumentActionPlanOut,
+    governance: DocumentActionGovernance,
+) -> None:
+    if governance.status == "ALREADY_APPLIED":
+        raise ValueError("The planned document action has already been applied.")
+
+    if (
+        action_plan.action_type != "ATTACH_EXISTING_RECORD"
+        or action_plan.operation_type != "link_document_to_record"
+    ):
+        raise ValueError(
+            "Direct document action execution is limited to high-confidence attachments to existing records. "
+            "Create or financial actions must be staged for approval before execution."
+        )
+
+    target = action_plan.target
+    if target is None or not target.record_id or not target.existing_record:
+        raise ValueError("Attach actions require a concrete existing target record.")
+
+    if governance.approval_required or not governance.auto_execution_allowed:
+        detail = (
+            governance.reasons[0]
+            if governance.reasons
+            else "The action plan is not eligible for direct execution."
+        )
+        raise ValueError(
+            f"Only high-confidence existing-record attach plans can execute directly. {detail}"
+        )
 
 
 def _apply_document_action(
@@ -131,6 +208,7 @@ def _apply_document_action(
             invoice_amount=action_plan.payload.get("invoice_amount"),
             issued_at=_parse_datetime_candidate(action_plan.payload.get("invoice_date")),
             due_at=_parse_datetime_candidate(action_plan.payload.get("due_at")),
+            due_calendar_code=_optional_payload_value(action_plan.payload, "due_calendar_code"),
             notes=_execution_note(document),
             now=now,
         )
@@ -152,8 +230,11 @@ def _apply_document_action(
             invoice_id=int(invoice_id),
             actor_id=actor_id,
             payment_reference=_optional_payload_value(action_plan.payload, "payment_reference"),
+            payment_currency_code=_optional_payload_value(action_plan.payload, "payment_currency_code"),
             payment_amount=action_plan.payload.get("payment_amount"),
             due_at=_parse_datetime_candidate(action_plan.payload.get("due_at")),
+            due_calendar_code=_optional_payload_value(action_plan.payload, "due_calendar_code"),
+            received_at=_parse_datetime_candidate(action_plan.payload.get("received_at")),
             notes=_execution_note(document),
             now=now,
         )
@@ -166,6 +247,186 @@ def _apply_document_action(
             role="PRIMARY",
         )
         _link_owner_record(db, document=document, actor_id=actor_id, action_plan=action_plan)
+        return True
+
+    if action_plan.operation_type == "create_delivery_from_document":
+        created_delivery = create_delivery_from_document(
+            db,
+            trade_id=_require_payload_value(action_plan.payload, "trade_id"),
+            actor_id=actor_id,
+            source_document_id=document.document_id,
+            delivery_id=_optional_payload_value(action_plan.payload, "delivery_id"),
+            leg_no=action_plan.payload.get("leg_no"),
+            now=now,
+        )
+        create_document_record_link(
+            db,
+            document_id=document.document_id,
+            record_type="DELIVERY",
+            record_id=created_delivery.delivery_id,
+            actor_id=actor_id,
+            role="PRIMARY",
+        )
+        _link_owner_record(db, document=document, actor_id=actor_id, action_plan=action_plan)
+        return True
+
+    if action_plan.operation_type == "update_delivery_schedule_from_document":
+        delivery_id = _require_payload_value(action_plan.payload, "delivery_id")
+        delivery = db.get(DeliveryObligation, delivery_id)
+        if delivery is None:
+            raise LookupError(f"Delivery '{delivery_id}' was not found.")
+        payload_trade_id = _optional_payload_value(action_plan.payload, "trade_id")
+        if payload_trade_id is not None and payload_trade_id != delivery.trade_id:
+            raise ValueError(
+                f"Document action trade '{payload_trade_id}' does not match delivery trade '{delivery.trade_id}'."
+            )
+        pipeline_changes = _payload_mapping(action_plan.payload, "pipeline_detail_changes")
+        if not pipeline_changes:
+            raise ValueError("Document action payload is missing pipeline detail changes.")
+        update_delivery_pipeline_detail(
+            db,
+            delivery_id=delivery_id,
+            actor_id=actor_id,
+            changes=pipeline_changes,
+            now=now,
+        )
+        create_document_record_link(
+            db,
+            document_id=document.document_id,
+            record_type="DELIVERY",
+            record_id=delivery_id,
+            actor_id=actor_id,
+            role="PRIMARY",
+        )
+        create_document_record_link(
+            db,
+            document_id=document.document_id,
+            record_type="TRADE",
+            record_id=delivery.trade_id,
+            actor_id=actor_id,
+            role="SECONDARY",
+        )
+        return True
+
+    if action_plan.operation_type == "record_delivery_event_from_document":
+        delivery_id = _require_payload_value(action_plan.payload, "delivery_id")
+        event_type = _require_payload_value(action_plan.payload, "event_type")
+        occurred_at = _parse_datetime_candidate(action_plan.payload.get("occurred_at"))
+        if occurred_at is None:
+            raise ValueError("Document action payload is missing 'occurred_at'.")
+        source = _optional_payload_value(action_plan.payload, "source") or "DOCUMENT_LIBRARY"
+        reference_code = _optional_payload_value(action_plan.payload, "reference_code") or document.document_id
+        existing_event = _find_document_delivery_event(
+            db,
+            delivery_id=delivery_id,
+            event_type=event_type,
+            source=source,
+            reference_code=reference_code,
+        )
+        if existing_event is not None:
+            raise ValueError(
+                f"Delivery event '{event_type}' has already been recorded for document reference '{reference_code}'."
+            )
+        delivery = append_delivery_event(
+            db,
+            delivery_id=delivery_id,
+            actor_id=actor_id,
+            event_type=event_type,
+            occurred_at=occurred_at,
+            location_code=_optional_payload_value(action_plan.payload, "location_code"),
+            reference_code=reference_code,
+            source=source,
+            notes=_execution_note(document),
+            now=now,
+        )
+        created_event = _find_document_delivery_event(
+            db,
+            delivery_id=delivery_id,
+            event_type=event_type,
+            source=source,
+            reference_code=reference_code,
+        )
+        if created_event is None:
+            raise LookupError("Delivery event was recorded, but its audit row could not be resolved.")
+        create_document_record_link(
+            db,
+            document_id=document.document_id,
+            record_type="DELIVERY_EVENT",
+            record_id=str(created_event.id),
+            actor_id=actor_id,
+            role="PRIMARY",
+        )
+        _link_owner_record(db, document=document, actor_id=actor_id, action_plan=action_plan)
+        if delivery.trade_id:
+            create_document_record_link(
+                db,
+                document_id=document.document_id,
+                record_type="TRADE",
+                record_id=delivery.trade_id,
+                actor_id=actor_id,
+                role="SECONDARY",
+            )
+        return True
+
+    if action_plan.operation_type == "record_trade_actualization_from_document":
+        delivery_id = _require_payload_value(action_plan.payload, "delivery_id")
+        trade_id, leg_no, delivery = _resolve_actualization_delivery_target(
+            db,
+            payload=action_plan.payload,
+            delivery_id=delivery_id,
+        )
+        canonical_delivery_id = build_delivery_obligation_id(trade_id, leg_no)
+        if delivery.delivery_id != canonical_delivery_id:
+            raise ValueError(
+                f"Delivery '{delivery.delivery_id}' is not the canonical actualization target '{canonical_delivery_id}'."
+            )
+        existing_actualization = _find_active_trade_actualization(
+            db,
+            delivery_id=canonical_delivery_id,
+        )
+        if existing_actualization is not None:
+            raise ValueError(
+                f"Delivery '{canonical_delivery_id}' already has active actualization record "
+                f"'{existing_actualization.id}'."
+            )
+        actualized_at = _parse_datetime_candidate(action_plan.payload.get("actualized_at"))
+        if actualized_at is None:
+            raise ValueError("Document action payload is missing 'actualized_at'.")
+        actualization = upsert_trade_actualization(
+            db,
+            trade_id=trade_id,
+            leg_no=leg_no,
+            actual_quantity=_require_payload_value(action_plan.payload, "actual_quantity"),
+            actualized_at=actualized_at,
+            source=_optional_payload_value(action_plan.payload, "source") or "DOCUMENT_LIBRARY",
+            notes=_actualization_execution_note(document, action_plan.payload),
+            actor_id=actor_id,
+            now=now,
+        )
+        create_document_record_link(
+            db,
+            document_id=document.document_id,
+            record_type="TRADE_ACTUALIZATION",
+            record_id=str(actualization.actualization_id),
+            actor_id=actor_id,
+            role="PRIMARY",
+        )
+        create_document_record_link(
+            db,
+            document_id=document.document_id,
+            record_type="DELIVERY",
+            record_id=delivery.delivery_id,
+            actor_id=actor_id,
+            role="SECONDARY",
+        )
+        create_document_record_link(
+            db,
+            document_id=document.document_id,
+            record_type="TRADE",
+            record_id=trade_id,
+            actor_id=actor_id,
+            role="SECONDARY",
+        )
         return True
 
     raise ValueError(f"Document action operation '{action_plan.operation_type}' is not supported.")
@@ -245,6 +506,28 @@ def _resolve_leg_no_from_action_payload(
     return delivery.leg_no
 
 
+def _resolve_actualization_delivery_target(
+    db: Session,
+    *,
+    payload: dict[str, object],
+    delivery_id: str,
+) -> tuple[str, int | None, DeliveryObligation]:
+    delivery = db.execute(
+        select(DeliveryObligation).where(DeliveryObligation.delivery_id == delivery_id)
+    ).scalars().first()
+    if delivery is None:
+        raise LookupError(f"Delivery '{delivery_id}' was not found.")
+
+    payload_trade_id = _optional_payload_value(payload, "trade_id")
+    if payload_trade_id is not None and payload_trade_id != delivery.trade_id:
+        raise ValueError(
+            f"Document action trade '{payload_trade_id}' does not match delivery trade '{delivery.trade_id}'."
+        )
+
+    payload_leg_no = _optional_int_payload_value(payload, "leg_no")
+    return delivery.trade_id, payload_leg_no if payload_leg_no is not None else delivery.leg_no, delivery
+
+
 def _parse_datetime_candidate(value: object | None) -> datetime | None:
     text = str(value or "").strip()
     if not text:
@@ -268,6 +551,54 @@ def _execution_note(document: DocumentIngestion) -> str:
     return f"Created from verified document {document.display_name} ({document.document_id})."
 
 
+def _actualization_execution_note(document: DocumentIngestion, payload: dict[str, object]) -> str:
+    details = [_execution_note(document)]
+    reference_code = _optional_payload_value(payload, "reference_code")
+    if reference_code is not None:
+        details.append(f"Source reference {reference_code}.")
+    quantity_basis = _optional_payload_value(payload, "quantity_basis")
+    if quantity_basis is not None:
+        details.append(f"Quantity basis {quantity_basis}.")
+    return " ".join(details)
+
+
+def _find_document_delivery_event(
+    db: Session,
+    *,
+    delivery_id: str,
+    event_type: str,
+    source: str,
+    reference_code: str,
+) -> DeliveryEvent | None:
+    return db.execute(
+        select(DeliveryEvent)
+        .where(
+            DeliveryEvent.delivery_id == delivery_id,
+            DeliveryEvent.event_type == event_type,
+            DeliveryEvent.source == source,
+            DeliveryEvent.reference_code == reference_code,
+        )
+        .order_by(DeliveryEvent.id.desc())
+        .limit(1)
+    ).scalars().first()
+
+
+def _find_active_trade_actualization(
+    db: Session,
+    *,
+    delivery_id: str,
+) -> TradeActualization | None:
+    return db.execute(
+        select(TradeActualization)
+        .where(
+            TradeActualization.delivery_id == delivery_id,
+            TradeActualization.voided_at.is_(None),
+        )
+        .order_by(TradeActualization.id.desc())
+        .limit(1)
+    ).scalars().first()
+
+
 def _require_payload_value(payload: dict[str, object], key: str) -> str:
     value = _optional_payload_value(payload, key)
     if value is None:
@@ -278,3 +609,30 @@ def _require_payload_value(payload: dict[str, object], key: str) -> str:
 def _optional_payload_value(payload: dict[str, object], key: str) -> str | None:
     text = str(payload.get(key) or "").strip()
     return text or None
+
+
+def _optional_int_payload_value(payload: dict[str, object], key: str) -> int | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        normalized = int(text)
+    except ValueError as exc:
+        raise ValueError(f"Document action payload field '{key}' must be an integer.") from exc
+    if normalized <= 0:
+        raise ValueError(f"Document action payload field '{key}' must be greater than zero.")
+    return normalized
+
+
+def _payload_mapping(payload: dict[str, object], key: str) -> dict[str, object | None]:
+    value = payload.get(key)
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(field_key): field_value
+        for field_key, field_value in value.items()
+        if str(field_key).strip()
+    }

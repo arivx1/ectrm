@@ -1,4 +1,8 @@
 import { DataSheet } from '../../../shared/ui/DataSheet'
+import {
+  CONFIGURABLE_TRANSPORT_MODES,
+  formatTransportModeLabel,
+} from '../../../shared/transportModes'
 import { EditorStateBadge } from '../ReferenceDataShared'
 import { createStatusColumn, type ReferenceDataTabProps } from '../referenceDataTabShared'
 
@@ -21,6 +25,15 @@ export function ReferenceDataCommoditiesDirectory({
           label: 'Class',
           width: '10rem',
           renderCell: (commodity) => formatCommodityClass(commodity.commodity_class ?? ''),
+        },
+        {
+          id: 'allowed-transport-modes',
+          label: 'Transport',
+          width: '18rem',
+          renderCell: (commodity) =>
+            commodity.allowed_transport_modes?.length
+              ? commodity.allowed_transport_modes.map(formatTransportModeLabel).join(', ')
+              : 'Default',
         },
         createStatusColumn<(typeof commoditySheetRows)[number]>(),
       ]}
@@ -150,6 +163,36 @@ export function ReferenceDataCommoditiesEditor({
           />
         </label>
 
+        <div className="field">
+          <span>Allowed Transport Modes</span>
+          <div className="toolbar">
+            {CONFIGURABLE_TRANSPORT_MODES.map((transportMode) => {
+              const selected = commodityForm.allowed_transport_modes.includes(transportMode)
+              return (
+                <button
+                  key={transportMode}
+                  type="button"
+                  className={`button ${selected ? 'button-secondary' : 'button-ghost'}`}
+                  onClick={() =>
+                    setCommodityForm((current) => ({
+                      ...current,
+                      allowed_transport_modes: selected
+                        ? current.allowed_transport_modes.filter((value) => value !== transportMode)
+                        : [...current.allowed_transport_modes, transportMode],
+                    }))
+                  }
+                  disabled={savingReference}
+                >
+                  {formatTransportModeLabel(transportMode)}
+                </button>
+              )
+            })}
+          </div>
+          <small className="form-note">
+            Delivery controls and scheduling transport filters will only offer the selected modes for this product.
+          </small>
+        </div>
+
         <button
           type="submit"
           className="button button-primary"
@@ -176,6 +219,14 @@ export function ReferenceDataCommoditiesEditor({
           <div className="detail-row">
             <span>Class</span>
             <strong>{formatCommodityClass(selectedCommodity.commodity_class ?? 'OTHER')}</strong>
+          </div>
+          <div className="detail-row">
+            <span>Transport</span>
+            <strong>
+              {selectedCommodity.allowed_transport_modes?.length
+                ? selectedCommodity.allowed_transport_modes.map(formatTransportModeLabel).join(', ')
+                : 'Default'}
+            </strong>
           </div>
           <div className="detail-row">
             <span>Updated</span>

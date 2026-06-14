@@ -38,3 +38,105 @@ test('workspace handoff focus banner exposes source, focus, filter, and reset ac
   assert.match(markup, /Inspector: events/)
   assert.match(markup, /Show Full Queue/)
 })
+
+test('workspace handoff focus banner labels map-sourced route focus clearly', () => {
+  const markup = renderToStaticMarkup(
+    createElement(WorkspaceHandoffFocusBanner, {
+      currentView: 'shipments',
+      handoff: {
+        source: 'map',
+        tradeId: 'BNSF_WAHA_TO_HSC',
+        focus: {
+          type: 'reference_record',
+          id: 'BNSF_WAHA_TO_HSC',
+          label: 'BNSF Waha to Houston Ship Channel',
+        },
+        tradeInspectorTab: null,
+        eventType: null,
+        label: 'Open deliveries for BNSF_WAHA_TO_HSC',
+        rationale:
+          'This workspace started focused on the selected rail route so you can review the matching deliveries before widening back to the full board.',
+        filter: 'BNSF_WAHA_TO_HSC',
+        sourceRunId: null,
+        sourceConversationId: null,
+        sourceActionRequestId: null,
+      },
+      onClear: () => {},
+      clearLabel: 'Show Full Board',
+    }),
+  )
+
+  assert.match(markup, /Open deliveries for BNSF_WAHA_TO_HSC/)
+  assert.match(markup, /Map/)
+  assert.match(markup, /Reference record: BNSF Waha to Houston Ship Channel/)
+  assert.match(markup, /Filter: BNSF_WAHA_TO_HSC/)
+  assert.match(markup, /Show Full Board/)
+})
+
+test('workspace handoff focus banner labels reference-sourced route focus clearly', () => {
+  const markup = renderToStaticMarkup(
+    createElement(WorkspaceHandoffFocusBanner, {
+      currentView: 'scheduling',
+      handoff: {
+        source: 'reference',
+        tradeId: 'BNSF_WAHA_TO_HSC',
+        focus: {
+          type: 'reference_record',
+          id: 'BNSF_WAHA_TO_HSC',
+          label: 'BNSF Waha to Houston Ship Channel',
+        },
+        tradeInspectorTab: null,
+        eventType: null,
+        label: 'Open scheduling for BNSF_WAHA_TO_HSC',
+        rationale:
+          'This workspace started focused on the selected reference-data rail route so you can review the matching scheduling rows before widening back to the full board.',
+        filter: 'BNSF_WAHA_TO_HSC',
+        sourceRunId: null,
+        sourceConversationId: null,
+        sourceActionRequestId: null,
+      },
+      onClear: () => {},
+      clearLabel: 'Show Full Board',
+    }),
+  )
+
+  assert.match(markup, /Open scheduling for BNSF_WAHA_TO_HSC/)
+  assert.match(markup, /Reference Data/)
+  assert.match(markup, /Reference record: BNSF Waha to Houston Ship Channel/)
+  assert.match(markup, /Filter: BNSF_WAHA_TO_HSC/)
+  assert.match(markup, /Show Full Board/)
+})
+
+test('workspace handoff focus banner labels terminal search context clearly', () => {
+  const markup = renderToStaticMarkup(
+    createElement(WorkspaceHandoffFocusBanner, {
+      currentView: 'reports',
+      handoff: {
+        source: 'terminal',
+        tradeId: 'reports-credit',
+        focus: {
+          type: 'report',
+          id: 'reports-credit',
+          label: 'Counterparty Credit Report',
+        },
+        tradeInspectorTab: null,
+        eventType: null,
+        label: 'Open Counterparty Credit Report',
+        rationale:
+          'Terminal search opened the Reports workspace on this module so you can review the matching analysis without hunting through the full report grid.',
+        filter: 'reports-credit',
+        sourceRunId: null,
+        sourceConversationId: null,
+        sourceActionRequestId: null,
+      },
+      onClear: () => {},
+      clearLabel: 'Show Full Workspace',
+    }),
+  )
+
+  assert.match(markup, /Open Counterparty Credit Report/)
+  assert.match(markup, /Terminal Search/)
+  assert.match(markup, /Report: Counterparty Credit Report/)
+  assert.match(markup, /Filter: reports-credit/)
+  assert.match(markup, /Show Full Workspace/)
+})

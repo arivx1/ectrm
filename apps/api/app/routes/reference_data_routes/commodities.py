@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.reference_data.services.commodity_transport_modes import (
+    normalize_allowed_transport_modes,
+)
 from apps.api.app.domains.reference_data.services.records import normalize_code
 from apps.api.app.models.reference_commodity import ReferenceCommodity
 from apps.api.app.schemas.reference_data import (
@@ -28,12 +31,28 @@ router = APIRouter()
 
 
 def _build_commodity_create_values(_db: Session, payload: CommodityCreate) -> dict[str, object]:
-    return {"commodity_class": normalize_code(payload.commodity_class)}
+    normalized_class = normalize_code(payload.commodity_class)
+    return {
+        "commodity_class": normalized_class,
+        "allowed_transport_modes": normalize_allowed_transport_modes(
+            payload.allowed_transport_modes,
+            commodity_code=payload.code,
+            commodity_class=normalized_class,
+        ),
+    }
 
 
 def _update_commodity_fields(_db: Session, record, payload, provided_fields: set[str]) -> None:
+    next_commodity_class = record.commodity_class
     if "commodity_class" in provided_fields and payload.commodity_class is not None:
-        record.commodity_class = normalize_code(payload.commodity_class)
+        next_commodity_class = normalize_code(payload.commodity_class)
+        record.commodity_class = next_commodity_class
+    if "allowed_transport_modes" in provided_fields:
+        record.allowed_transport_modes = normalize_allowed_transport_modes(
+            payload.allowed_transport_modes,
+            commodity_code=record.code,
+            commodity_class=next_commodity_class,
+        )
 
 
 COMMODITY_SPEC = ReferenceDataCrudSpec(

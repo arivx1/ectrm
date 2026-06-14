@@ -1,4 +1,7 @@
 import type {
+  AssetForm,
+  AssetRecord,
+  AssetStandards,
   BookForm,
   CommodityForm,
   CounterpartyCreditProfileForm,
@@ -12,11 +15,357 @@ import type {
   LocationStandards,
   PriceIndexForm,
   PriceIndexRecord,
+  RailRouteForm,
+  RailRouteRecord,
   ReferenceRecord,
+  SpatialFeatureForm,
+  SpatialFeatureRecord,
+  SpatialFeatureStandards,
   UnitForm,
   UnitRecord,
 } from '../../shared/models'
 import { buildCounterpartyCreditProfileForm, sameText } from './referenceDataHelpers'
+
+const ASSET_GEOJSON_ALLOWED_TYPES = new Set([
+  'Feature',
+  'FeatureCollection',
+  'GeometryCollection',
+  'LineString',
+  'MultiLineString',
+  'MultiPoint',
+  'MultiPolygon',
+  'Point',
+  'Polygon',
+])
+const RAIL_ROUTE_DIRECTIONS = ['BIDIRECTIONAL', 'FORWARD', 'REVERSE'] as const
+
+function isValidRailLocalTime(value: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value)
+}
+
+function isValidNonNegativeInteger(value: string): boolean {
+  return /^\d+$/.test(value)
+}
+
+function sameTextArray(left: string[], right: string[]): boolean {
+  const sortedLeft = [...left].sort()
+  const sortedRight = [...right].sort()
+  return sameText(sortedLeft.join('|'), sortedRight.join('|'))
+}
+
+export function parseAssetCoordinatePair(args: {
+  latitudeText: string
+  longitudeText: string
+}): { latitude: number | null; longitude: number | null; error: string | null } {
+  const latitudeText = args.latitudeText.trim()
+  const longitudeText = args.longitudeText.trim()
+
+  if ((latitudeText.length > 0) !== (longitudeText.length > 0)) {
+    return {
+      latitude: null,
+      longitude: null,
+      error: 'Latitude and longitude must be provided together.',
+    }
+  }
+
+  if (!latitudeText) {
+    return { latitude: null, longitude: null, error: null }
+  }
+
+  const latitude = Number(latitudeText)
+  const longitude = Number(longitudeText)
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return {
+      latitude: null,
+      longitude: null,
+      error: 'Latitude and longitude must be numeric.',
+    }
+  }
+
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+    return {
+      latitude: null,
+      longitude: null,
+      error: 'Latitude must be between -90 and 90, and longitude must be between -180 and 180.',
+    }
+  }
+
+  return { latitude, longitude, error: null }
+}
+
+export function parseAssetGeometryInput(
+  rawValue: string,
+): { value: Record<string, unknown> | null; error: string | null } {
+  const trimmedValue = rawValue.trim()
+  if (!trimmedValue) {
+    return { value: null, error: null }
+  }
+
+  let parsedValue: unknown
+  try {
+    parsedValue = JSON.parse(trimmedValue)
+  } catch {
+    return { value: null, error: 'Geometry GeoJSON must be valid JSON.' }
+  }
+
+  if (!parsedValue || typeof parsedValue !== 'object' || Array.isArray(parsedValue)) {
+    return { value: null, error: 'Geometry GeoJSON must be a GeoJSON object.' }
+  }
+
+  const parsedGeoJson = parsedValue as Record<string, unknown>
+  const geometryType = parsedGeoJson.type
+  if (typeof geometryType !== 'string' || !ASSET_GEOJSON_ALLOWED_TYPES.has(geometryType)) {
+    return {
+      value: null,
+      error: `Geometry GeoJSON type must be one of ${Array.from(ASSET_GEOJSON_ALLOWED_TYPES).join(', ')}.`,
+    }
+  }
+
+  return { value: parsedGeoJson, error: null }
+}
+
+export function formatAssetGeometryInput(
+  value: Record<string, unknown> | null | undefined,
+): string {
+  return value ? JSON.stringify(value, null, 2) : ''
+}
+
+export function buildAssetFieldErrors(
+  assetForm: AssetForm,
+  assetFormMode: 'create' | 'edit',
+  assets: AssetRecord[],
+  assetStandards: AssetStandards,
+): Partial<
+  Record<
+    | 'code'
+    | 'name'
+    | 'asset_class'
+    | 'asset_type'
+    | 'asset_reality'
+    | 'operating_status'
+    | 'coordinates'
+    | 'geometry_geojson'
+    | 'capacity'
+    | 'capacity_unit_code',
+    string
+  >
+> {
+  const errors: Partial<
+    Record<
+      | 'code'
+      | 'name'
+      | 'asset_class'
+      | 'asset_type'
+      | 'asset_reality'
+      | 'operating_status'
+      | 'coordinates'
+      | 'geometry_geojson'
+      | 'capacity'
+      | 'capacity_unit_code',
+      string
+    >
+  > = {}
+  const normalizedAssetClass = assetForm.asset_class.trim().toUpperCase()
+  const normalizedAssetType = assetForm.asset_type.trim().toUpperCase()
+  const normalizedAssetReality = assetForm.asset_reality.trim().toUpperCase()
+  const normalizedOperatingStatus = assetForm.operating_status.trim().toUpperCase()
+  const allowedAssetTypes = assetStandards.asset_types_by_class[normalizedAssetClass] ?? []
+
+  if (!assetForm.code.trim()) {
+    errors.code = 'Code is required.'
+  } else if (
+    assetFormMode === 'create' &&
+    assets.some((asset) => asset.code === assetForm.code.trim().toUpperCase())
+  ) {
+    errors.code = 'Code already exists.'
+  }
+  if (!assetForm.name.trim()) errors.name = 'Name is required.'
+  if (!normalizedAssetClass) {
+    errors.asset_class = 'Asset class is required.'
+  } else if (!assetStandards.asset_classes.includes(normalizedAssetClass)) {
+    errors.asset_class = 'Asset class is invalid.'
+  }
+  if (!normalizedAssetType) {
+    errors.asset_type = 'Asset type is required.'
+  } else if (allowedAssetTypes.length > 0 && !allowedAssetTypes.includes(normalizedAssetType)) {
+    errors.asset_type = `Asset type must be one of ${allowedAssetTypes.join(', ')}.`
+  }
+  if (!normalizedAssetReality) {
+    errors.asset_reality = 'Asset reality is required.'
+  } else if (!assetStandards.asset_realities.includes(normalizedAssetReality)) {
+    errors.asset_reality = 'Asset reality is invalid.'
+  }
+  if (!normalizedOperatingStatus) {
+    errors.operating_status = 'Operating status is required.'
+  } else if (!assetStandards.operating_statuses.includes(normalizedOperatingStatus)) {
+    errors.operating_status = 'Operating status is invalid.'
+  }
+
+  const parsedCoordinates = parseAssetCoordinatePair({
+    latitudeText: assetForm.latitude,
+    longitudeText: assetForm.longitude,
+  })
+  if (parsedCoordinates.error) {
+    errors.coordinates = parsedCoordinates.error
+  }
+
+  const parsedGeometry = parseAssetGeometryInput(assetForm.geometry_geojson)
+  if (parsedGeometry.error) {
+    errors.geometry_geojson = parsedGeometry.error
+  }
+
+  const hasCapacityValue = assetForm.capacity_value.trim().length > 0
+  const hasCapacityUnitCode = assetForm.capacity_unit_code.trim().length > 0
+  if (hasCapacityValue !== hasCapacityUnitCode) {
+    errors.capacity = 'Capacity value and unit must be provided together.'
+    errors.capacity_unit_code = 'Capacity value and unit must be provided together.'
+  } else if (hasCapacityValue && Number.isNaN(Number(assetForm.capacity_value.trim()))) {
+    errors.capacity = 'Capacity must be numeric.'
+  }
+
+  return errors
+}
+
+export function buildSpatialFeatureFieldErrors(
+  spatialFeatureForm: SpatialFeatureForm,
+  spatialFeatureFormMode: 'create' | 'edit',
+  spatialFeatures: SpatialFeatureRecord[],
+  spatialFeatureStandards: SpatialFeatureStandards,
+): Partial<Record<'code' | 'name' | 'feature_kind' | 'entity_link' | 'label_coordinates' | 'geometry_geojson', string>> {
+  const errors: Partial<
+    Record<'code' | 'name' | 'feature_kind' | 'entity_link' | 'label_coordinates' | 'geometry_geojson', string>
+  > = {}
+  const normalizedFeatureKind = spatialFeatureForm.feature_kind.trim().toUpperCase()
+  const normalizedEntityType = spatialFeatureForm.entity_type.trim().toUpperCase()
+  const hasEntityType = normalizedEntityType.length > 0
+  const hasEntityCode = spatialFeatureForm.entity_code.trim().length > 0
+
+  if (!spatialFeatureForm.code.trim()) {
+    errors.code = 'Code is required.'
+  } else if (
+    spatialFeatureFormMode === 'create' &&
+    spatialFeatures.some((feature) => feature.code === spatialFeatureForm.code.trim().toUpperCase())
+  ) {
+    errors.code = 'Code already exists.'
+  }
+  if (!spatialFeatureForm.name.trim()) {
+    errors.name = 'Name is required.'
+  }
+  if (!normalizedFeatureKind) {
+    errors.feature_kind = 'Feature kind is required.'
+  } else if (!spatialFeatureStandards.feature_kinds.includes(normalizedFeatureKind)) {
+    errors.feature_kind = 'Feature kind is invalid.'
+  }
+
+  if (hasEntityType !== hasEntityCode) {
+    errors.entity_link = 'Entity type and linked code must be provided together.'
+  } else if (hasEntityType && !spatialFeatureStandards.entity_types.includes(normalizedEntityType)) {
+    errors.entity_link = 'Entity type is invalid.'
+  }
+
+  const parsedLabelCoordinates = parseAssetCoordinatePair({
+    latitudeText: spatialFeatureForm.label_latitude,
+    longitudeText: spatialFeatureForm.label_longitude,
+  })
+  if (parsedLabelCoordinates.error) {
+    errors.label_coordinates = parsedLabelCoordinates.error
+  }
+
+  const parsedGeometry = parseAssetGeometryInput(spatialFeatureForm.geometry_geojson)
+  if (parsedGeometry.error) {
+    errors.geometry_geojson = parsedGeometry.error
+  } else if (parsedGeometry.value === null) {
+    errors.geometry_geojson = 'Geometry GeoJSON is required.'
+  }
+
+  return errors
+}
+
+export function buildRailRouteFieldErrors(
+  railRouteForm: RailRouteForm,
+  railRouteFormMode: 'create' | 'edit',
+  railRoutes: RailRouteRecord[],
+): Partial<
+  Record<
+    | 'code'
+    | 'name'
+    | 'rail_line_code'
+    | 'route_direction'
+    | 'placement_cutoff_time_local'
+    | 'release_cutoff_time_local'
+    | 'placement_free_time_hours'
+    | 'release_free_time_hours',
+    string
+  >
+> {
+  const errors: Partial<
+    Record<
+      | 'code'
+      | 'name'
+      | 'rail_line_code'
+      | 'route_direction'
+      | 'placement_cutoff_time_local'
+      | 'release_cutoff_time_local'
+      | 'placement_free_time_hours'
+      | 'release_free_time_hours',
+      string
+    >
+  > = {}
+  const normalizedRouteDirection = railRouteForm.route_direction.trim().toUpperCase()
+
+  if (!railRouteForm.code.trim()) {
+    errors.code = 'Code is required.'
+  } else if (
+    railRouteFormMode === 'create' &&
+    railRoutes.some((route) => route.code === railRouteForm.code.trim().toUpperCase())
+  ) {
+    errors.code = 'Code already exists.'
+  }
+
+  if (!railRouteForm.name.trim()) {
+    errors.name = 'Name is required.'
+  }
+
+  if (!railRouteForm.rail_line_code.trim()) {
+    errors.rail_line_code = 'Rail line code is required.'
+  }
+
+  if (!normalizedRouteDirection) {
+    errors.route_direction = 'Route direction is required.'
+  } else if (!RAIL_ROUTE_DIRECTIONS.includes(normalizedRouteDirection as (typeof RAIL_ROUTE_DIRECTIONS)[number])) {
+    errors.route_direction = `Route direction must be one of ${RAIL_ROUTE_DIRECTIONS.join(', ')}.`
+  }
+
+  if (
+    railRouteForm.placement_cutoff_time_local.trim() &&
+    !isValidRailLocalTime(railRouteForm.placement_cutoff_time_local.trim())
+  ) {
+    errors.placement_cutoff_time_local = 'Placement cutoff must use 24-hour HH:MM format.'
+  }
+
+  if (
+    railRouteForm.release_cutoff_time_local.trim() &&
+    !isValidRailLocalTime(railRouteForm.release_cutoff_time_local.trim())
+  ) {
+    errors.release_cutoff_time_local = 'Release cutoff must use 24-hour HH:MM format.'
+  }
+
+  if (
+    railRouteForm.placement_free_time_hours.trim() &&
+    !isValidNonNegativeInteger(railRouteForm.placement_free_time_hours.trim())
+  ) {
+    errors.placement_free_time_hours = 'Placement free time must be a whole number of hours.'
+  }
+
+  if (
+    railRouteForm.release_free_time_hours.trim() &&
+    !isValidNonNegativeInteger(railRouteForm.release_free_time_hours.trim())
+  ) {
+    errors.release_free_time_hours = 'Release free time must be a whole number of hours.'
+  }
+
+  return errors
+}
 
 export function buildBookFieldErrors(
   bookForm: BookForm,
@@ -207,6 +556,103 @@ export function isBookFormDirty(
   )
 }
 
+export function isAssetFormDirty(
+  assetForm: AssetForm,
+  assetFormMode: 'create' | 'edit',
+  selectedAsset: AssetRecord | null,
+  assetStandards: AssetStandards,
+): boolean {
+  const defaultAssetClass = assetStandards.default_asset_class
+  const defaultAssetType =
+    assetStandards.default_asset_type_by_class[defaultAssetClass] ??
+    assetStandards.asset_types_by_class[defaultAssetClass]?.[0] ??
+    ''
+
+  if (assetFormMode === 'create') {
+    return (
+      !sameText(assetForm.code, '') ||
+      !sameText(assetForm.name, '') ||
+      !sameText(assetForm.asset_class, defaultAssetClass) ||
+      !sameText(assetForm.asset_type, defaultAssetType) ||
+      !sameText(assetForm.asset_reality, assetStandards.default_asset_reality) ||
+      !sameText(assetForm.commodity_code, '') ||
+      !sameText(assetForm.location_code, '') ||
+      !sameText(assetForm.latitude, '') ||
+      !sameText(assetForm.longitude, '') ||
+      !sameText(assetForm.geometry_geojson, '') ||
+      !sameText(assetForm.capacity_value, '') ||
+      !sameText(assetForm.capacity_unit_code, '') ||
+      !sameText(assetForm.operator_name, '') ||
+      !sameText(assetForm.operating_status, assetStandards.default_operating_status) ||
+      !sameText(assetForm.description, '')
+    )
+  }
+
+  if (!selectedAsset) {
+    return false
+  }
+
+  return (
+    !sameText(assetForm.code, selectedAsset.code) ||
+    !sameText(assetForm.name, selectedAsset.name) ||
+    !sameText(assetForm.asset_class, selectedAsset.asset_class) ||
+    !sameText(assetForm.asset_type, selectedAsset.asset_type) ||
+    !sameText(assetForm.asset_reality, selectedAsset.asset_reality) ||
+    !sameText(assetForm.commodity_code, selectedAsset.commodity_code) ||
+    !sameText(assetForm.location_code, selectedAsset.location_code) ||
+    !sameText(assetForm.latitude, selectedAsset.latitude?.toString()) ||
+    !sameText(assetForm.longitude, selectedAsset.longitude?.toString()) ||
+    !sameText(assetForm.geometry_geojson, formatAssetGeometryInput(selectedAsset.geometry_geojson)) ||
+    !sameText(assetForm.capacity_value, selectedAsset.capacity_value?.toString()) ||
+    !sameText(assetForm.capacity_unit_code, selectedAsset.capacity_unit_code) ||
+    !sameText(assetForm.operator_name, selectedAsset.operator_name) ||
+    !sameText(assetForm.operating_status, selectedAsset.operating_status) ||
+    !sameText(assetForm.description, selectedAsset.description)
+  )
+}
+
+export function isSpatialFeatureFormDirty(
+  spatialFeatureForm: SpatialFeatureForm,
+  spatialFeatureFormMode: 'create' | 'edit',
+  selectedSpatialFeature: SpatialFeatureRecord | null,
+  spatialFeatureStandards: SpatialFeatureStandards,
+): boolean {
+  if (spatialFeatureFormMode === 'create') {
+    return (
+      !sameText(spatialFeatureForm.code, '') ||
+      !sameText(spatialFeatureForm.name, '') ||
+      !sameText(spatialFeatureForm.feature_kind, spatialFeatureStandards.default_feature_kind) ||
+      !sameText(spatialFeatureForm.entity_type, '') ||
+      !sameText(spatialFeatureForm.entity_code, '') ||
+      !sameText(spatialFeatureForm.label_latitude, '') ||
+      !sameText(spatialFeatureForm.label_longitude, '') ||
+      spatialFeatureForm.is_primary ||
+      !sameText(spatialFeatureForm.geometry_geojson, '') ||
+      !sameText(spatialFeatureForm.description, '')
+    )
+  }
+
+  if (!selectedSpatialFeature) {
+    return false
+  }
+
+  return (
+    !sameText(spatialFeatureForm.code, selectedSpatialFeature.code) ||
+    !sameText(spatialFeatureForm.name, selectedSpatialFeature.name) ||
+    !sameText(spatialFeatureForm.feature_kind, selectedSpatialFeature.feature_kind) ||
+    !sameText(spatialFeatureForm.entity_type, selectedSpatialFeature.entity_type) ||
+    !sameText(spatialFeatureForm.entity_code, selectedSpatialFeature.entity_code) ||
+    !sameText(spatialFeatureForm.label_latitude, selectedSpatialFeature.label_latitude?.toString()) ||
+    !sameText(spatialFeatureForm.label_longitude, selectedSpatialFeature.label_longitude?.toString()) ||
+    spatialFeatureForm.is_primary !== selectedSpatialFeature.is_primary ||
+    !sameText(
+      spatialFeatureForm.geometry_geojson,
+      formatAssetGeometryInput(selectedSpatialFeature.geometry_geojson),
+    ) ||
+    !sameText(spatialFeatureForm.description, selectedSpatialFeature.description)
+  )
+}
+
 export function isCommodityFormDirty(
   commodityForm: CommodityForm,
   commodityFormMode: 'create' | 'edit',
@@ -218,7 +664,8 @@ export function isCommodityFormDirty(
       !sameText(commodityForm.code, '') ||
       !sameText(commodityForm.name, '') ||
       !sameText(commodityForm.description, '') ||
-      commodityForm.commodity_class !== (selectedCommodity?.commodity_class ?? commodityClassOrder[0])
+      commodityForm.commodity_class !== (selectedCommodity?.commodity_class ?? commodityClassOrder[0]) ||
+      commodityForm.allowed_transport_modes.length > 0
     )
   }
 
@@ -230,7 +677,8 @@ export function isCommodityFormDirty(
     !sameText(commodityForm.code, selectedCommodity.code) ||
     !sameText(commodityForm.name, selectedCommodity.name) ||
     !sameText(commodityForm.description, selectedCommodity.description) ||
-    commodityForm.commodity_class !== (selectedCommodity.commodity_class ?? commodityClassOrder[0])
+    commodityForm.commodity_class !== (selectedCommodity.commodity_class ?? commodityClassOrder[0]) ||
+    !sameTextArray(commodityForm.allowed_transport_modes, selectedCommodity.allowed_transport_modes ?? [])
   )
 }
 
@@ -249,6 +697,7 @@ export function isPriceIndexFormDirty(
       !sameText(priceIndexForm.currency_code, 'USD') ||
       !sameText(priceIndexForm.unit_code, 'BBL') ||
       !sameText(priceIndexForm.provider, '') ||
+      !sameText(priceIndexForm.quote_type, 'SPOT') ||
       !sameText(priceIndexForm.market, '') ||
       !sameText(priceIndexForm.location_code, '') ||
       !sameText(priceIndexForm.calendar_code, '')
@@ -263,6 +712,7 @@ export function isPriceIndexFormDirty(
     !sameText(priceIndexForm.currency_code, selectedPriceIndex.currency_code) ||
     !sameText(priceIndexForm.unit_code, selectedPriceIndex.unit_code) ||
     !sameText(priceIndexForm.provider, selectedPriceIndex.provider) ||
+    !sameText(priceIndexForm.quote_type, selectedPriceIndex.quote_type ?? 'SPOT') ||
     !sameText(priceIndexForm.market, selectedPriceIndex.market) ||
     !sameText(priceIndexForm.location_code, selectedPriceIndex.location_code) ||
     !sameText(priceIndexForm.calendar_code, selectedPriceIndex.calendar_code)
@@ -363,6 +813,62 @@ export function isLocationFormDirty(
     !sameText(locationForm.region, selectedLocation.region) ||
     !sameText(locationForm.timezone, selectedLocation.timezone) ||
     !sameText(locationForm.description, selectedLocation.description)
+  )
+}
+
+export function isRailRouteFormDirty(
+  railRouteForm: RailRouteForm,
+  railRouteFormMode: 'create' | 'edit',
+  selectedRailRoute: RailRouteRecord | null,
+): boolean {
+  if (railRouteFormMode === 'create') {
+    return (
+      !sameText(railRouteForm.code, '') ||
+      !sameText(railRouteForm.name, '') ||
+      !sameText(railRouteForm.rail_line_code, '') ||
+      !sameText(railRouteForm.origin_location_code, '') ||
+      !sameText(railRouteForm.destination_location_code, '') ||
+      !sameText(railRouteForm.service_calendar_code, '') ||
+      !sameText(railRouteForm.route_direction, 'BIDIRECTIONAL') ||
+      !sameText(railRouteForm.schedule_timezone, '') ||
+      !sameText(railRouteForm.placement_cutoff_time_local, '') ||
+      !sameText(railRouteForm.release_cutoff_time_local, '') ||
+      !sameText(railRouteForm.placement_free_time_hours, '') ||
+      !sameText(railRouteForm.release_free_time_hours, '') ||
+      !sameText(railRouteForm.description, '')
+    )
+  }
+
+  if (!selectedRailRoute) {
+    return false
+  }
+
+  return (
+    !sameText(railRouteForm.code, selectedRailRoute.code) ||
+    !sameText(railRouteForm.name, selectedRailRoute.name) ||
+    !sameText(railRouteForm.rail_line_code, selectedRailRoute.rail_line_code) ||
+    !sameText(railRouteForm.origin_location_code, selectedRailRoute.origin_location_code) ||
+    !sameText(railRouteForm.destination_location_code, selectedRailRoute.destination_location_code) ||
+    !sameText(railRouteForm.service_calendar_code, selectedRailRoute.service_calendar_code) ||
+    !sameText(railRouteForm.route_direction, selectedRailRoute.route_direction) ||
+    !sameText(railRouteForm.schedule_timezone, selectedRailRoute.schedule_timezone) ||
+    !sameText(
+      railRouteForm.placement_cutoff_time_local,
+      selectedRailRoute.placement_cutoff_time_local,
+    ) ||
+    !sameText(
+      railRouteForm.release_cutoff_time_local,
+      selectedRailRoute.release_cutoff_time_local,
+    ) ||
+    !sameText(
+      railRouteForm.placement_free_time_hours,
+      selectedRailRoute.placement_free_time_hours?.toString(),
+    ) ||
+    !sameText(
+      railRouteForm.release_free_time_hours,
+      selectedRailRoute.release_free_time_hours?.toString(),
+    ) ||
+    !sameText(railRouteForm.description, selectedRailRoute.description)
   )
 }
 

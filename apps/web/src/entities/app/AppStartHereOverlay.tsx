@@ -73,18 +73,6 @@ const START_HERE_ACTIONS: StartHereAction[] = [
     signedOutChip: 'Requires sign-in',
     signedOutReturnIntentView: 'operations',
   },
-  {
-    title: 'Learn how this works',
-    detail: 'Open the in-product guide for onboarding, workflow orientation, and platform context.',
-    signedOutDetail: 'The guide is available right away, even before you connect a live session.',
-    signedInView: 'guide',
-    signedOutView: 'guide',
-    signedInActionLabel: 'Open How It Works',
-    signedOutActionLabel: 'Open How It Works',
-    signedInChip: 'Learn',
-    signedOutChip: 'Available now',
-    signedOutReturnIntentView: null,
-  },
 ]
 
 export function AppStartHereOverlay({
@@ -139,7 +127,7 @@ export function AppStartHereOverlay({
             <p>
               {hasAuthSession
                 ? 'Use these common paths to get oriented fast after sign-in, then jump straight into the right workspace.'
-                : 'You can open the guide right away. Trade capture, activity, exposure, and queue work will route you to the sign-in screen first.'}
+                : 'Trade capture, activity, exposure, and queue work will route you to the sign-in screen first.'}
             </p>
           </div>
 
@@ -150,8 +138,8 @@ export function AppStartHereOverlay({
 
         <div className="feedback-banner feedback-banner-success start-here-banner">
           {hasAuthSession
-            ? `Signed in as ${authSession.user.display_name}. We will keep this out of the way after you choose a path for this session.`
-            : 'Dismiss this if you already know where you are going. It will show again the next time you sign in.'}
+            ? `Signed in as ${authSession.user.display_name}. This first-sign-in chooser stays out of the way after you choose a path.`
+            : 'Dismiss this if you already know where you are going. Sign-in routes will still take you straight to the right workspace.'}
         </div>
 
         <div className="dashboard-report-grid start-here-grid">
@@ -190,8 +178,8 @@ export function AppStartHereOverlay({
         <div className="start-here-footnote">
           <p>
             {hasAuthSession
-              ? 'The overlay stays hidden for this session after you dismiss it or choose a job.'
-              : 'The signed-out version stays hidden after dismissal, and the signed-in version will appear once after your next successful sign-in.'}
+              ? 'After you dismiss this or choose a job, it stays hidden for the rest of this session and future sign-ins stay clear.'
+              : 'The signed-out version stays hidden after dismissal, and the signed-in version only appears on a user\'s first successful sign-in.'}
           </p>
         </div>
       </section>

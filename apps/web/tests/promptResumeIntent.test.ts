@@ -56,12 +56,16 @@ test('prompt resume intent round-trips a protected draft', () => {
 
   savePromptResumeIntent({
     draft: '  Where should I handle the invoice blocker?  ',
+    applicationContext: '  surface: settlement_report\nbook: CRUDE  ',
+    summaryTargets: ['settlement.invoice_pending_count'],
     submitAfterSignIn: true,
     createdAt: '2026-04-22T09:00:00Z',
   })
 
   assert.deepEqual(getPromptResumeIntent(), {
     draft: 'Where should I handle the invoice blocker?',
+    applicationContext: 'surface: settlement_report\nbook: CRUDE',
+    summaryTargets: ['settlement.invoice_pending_count'],
     submitAfterSignIn: true,
     createdAt: '2026-04-22T09:00:00Z',
   })

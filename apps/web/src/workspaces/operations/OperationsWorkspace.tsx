@@ -19,20 +19,24 @@ import { WorkspaceHandoffFocusBanner } from '../../shared/ui/WorkspaceHandoffFoc
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import type {
   DeliveryRecord,
+  DocumentRecordCreationWorkItemRecord,
   ExternalDataSyncStatusRecord,
   Trade,
   TradeConfirmationRecord,
   TradeWorkflowItemRecord,
   TradingSourceRecord,
+  ViewKey,
   WeatherSyncStatusRecord,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
 import type { OptionLifecycleEventType } from '../../shared/trading'
 import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
+import { DocumentRecordCreationQueuePanel } from './DocumentRecordCreationQueuePanel'
 import { DocumentIngestionPanel } from './DocumentIngestionPanel'
 import { OperationalBoardController } from './OperationalBoardController'
 import { renderOperationalInlineBoard } from './operationalInlineBoardRegistry'
 import { resolveOperationalWorkboardDefinition } from './operationalWorkboardRegistry'
+import { TruckTrackingExceptionQueue } from './TruckTrackingExceptionQueue'
 
 type OperationsWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -41,6 +45,7 @@ type OperationsWorkspaceProps = {
   activeTrades: Trade[]
   confirmations: TradeConfirmationRecord[]
   deliveries: DeliveryRecord[]
+  documentRecordCreationRequests: DocumentRecordCreationWorkItemRecord[]
   workItems: TradeWorkflowItemRecord[]
   externalDataSyncStatus: ExternalDataSyncStatusRecord | null
   weatherSyncStatus: WeatherSyncStatusRecord | null
@@ -63,6 +68,7 @@ type OperationsWorkspaceProps = {
     payload: Omit<CreateTradeWorkflowItemInput, 'trade_id'>,
   ) => Promise<void>
   onClearHandoff: () => void
+  onOpenView: (view: ViewKey, handoff?: AppRouteHandoff | null) => void
   onOpenTrade: (tradeId: string) => void
   onOptionLifecycleEvent: (tradeId: string, eventType: OptionLifecycleEventType) => Promise<void>
   optionLifecycleSubmittingEvent: OptionLifecycleEventType | null
@@ -245,6 +251,31 @@ function matchesWorkflowItemScreenFilter(item: TradeWorkflowItemRecord, query: s
   ])
 }
 
+function matchesDocumentRecordCreationWorkItemFilter(
+  item: DocumentRecordCreationWorkItemRecord,
+  query: string,
+): boolean {
+  return matchesTextFilter(query, [
+    item.request_id,
+    item.document_id,
+    item.queue,
+    item.handoff_type,
+    item.routing_label,
+    item.priority,
+    item.document_kind,
+    item.target_record_type,
+    item.target_record_label,
+    item.owner_record_type,
+    item.owner_record_id,
+    item.required_owner_record_types.join(' '),
+    item.matched_keys.join(' '),
+    item.missing_evidence.join(' '),
+    item.title,
+    item.description,
+    item.request_comment,
+  ])
+}
+
 function matchesTradingSourceScreenFilter(source: TradingSourceRecord, query: string): boolean {
   return matchesTextFilter(query, [
     source.source_id,
@@ -269,6 +300,7 @@ export function OperationsWorkspace({
   activeTrades,
   confirmations,
   deliveries,
+  documentRecordCreationRequests,
   workItems,
   externalDataSyncStatus,
   weatherSyncStatus,
@@ -288,6 +320,7 @@ export function OperationsWorkspace({
   onRespondConfirmation,
   onCreateWorkflowItem,
   onClearHandoff,
+  onOpenView,
   onOpenTrade,
   onOptionLifecycleEvent,
   optionLifecycleSubmittingEvent,
@@ -314,6 +347,13 @@ export function OperationsWorkspace({
   const directlyMatchedWorkItems = useMemo(
     () => workItems.filter((item) => matchesWorkflowItemScreenFilter(item, effectiveScreenFilter)),
     [effectiveScreenFilter, workItems],
+  )
+  const visibleDocumentRecordCreationRequests = useMemo(
+    () =>
+      documentRecordCreationRequests.filter((item) =>
+        matchesDocumentRecordCreationWorkItemFilter(item, effectiveScreenFilter),
+      ),
+    [documentRecordCreationRequests, effectiveScreenFilter],
   )
   const visibleTradeIds = useMemo(
     () =>
@@ -509,12 +549,20 @@ export function OperationsWorkspace({
               onChange={setScreenFilter}
               placeholder="Trade ID, workflow owner, queue status, delivery mode, or source"
               description="Filter the operations control loop locally so confirmations, deliveries, and queue work stay in sync on this screen only."
-              totalCount={activeTrades.length + confirmations.length + deliveries.length + workItems.length + tradingSources.length}
+              totalCount={
+                activeTrades.length +
+                confirmations.length +
+                deliveries.length +
+                workItems.length +
+                documentRecordCreationRequests.length +
+                tradingSources.length
+              }
               matchedCount={
                 visibleActiveTrades.length +
                 visibleConfirmations.length +
                 visibleDeliveries.length +
                 visibleWorkItems.length +
+                visibleDocumentRecordCreationRequests.length +
                 visibleTradingSources.length
               }
               resultLabel="operations records"
@@ -557,6 +605,23 @@ export function OperationsWorkspace({
                   <p>Once trades need confirmations, blocker clearing, or expiry decisions, the operational control loop will fill in here.</p>
                 </div>
               ),
+          },
+          {
+            id: 'operations-truck-tracking-exceptions',
+            eyebrow: 'Truck Tracking',
+            title: 'Truck Tracking Exceptions',
+            description: 'Read-only carrier freshness, ETA, and dwell exceptions for active truck runs.',
+            span: 'full',
+            availableSpans: ['full', 'wide'],
+            content: (
+              <TruckTrackingExceptionQueue
+                authSession={authSession}
+                formatDate={formatDate}
+                formatDateOnly={formatDateOnly}
+                formatNumber={formatNumber}
+                onOpenTrade={onOpenTrade}
+              />
+            ),
           },
           {
             id: 'operations-option-expiry',
@@ -730,6 +795,27 @@ export function OperationsWorkspace({
                   openOperationsWorkItems.map((item) => `${item.item_id}:${item.version}`).join('|'),
                 )}
               </OperationalBoardController>
+            ),
+          },
+          {
+            id: 'operations-document-record-creation',
+            eyebrow: 'Document Intake',
+            title:
+              visibleDocumentRecordCreationRequests.length > 0
+                ? 'Missing Record Intake'
+                : 'No missing record intake',
+            description:
+              'Verified Library documents that imply missing trades or deliveries now land in the operations queue for explicit creation and later linking.',
+            span: 'full',
+            availableSpans: ['full', 'wide'],
+            content: (
+              <DocumentRecordCreationQueuePanel
+                requests={visibleDocumentRecordCreationRequests}
+                emptyTitle="No operations intake"
+                emptyDetail="Trade and delivery creation requests from verified documents will appear here."
+                formatDate={formatDate}
+                onOpenLibrary={() => onOpenView('library')}
+              />
             ),
           },
           {

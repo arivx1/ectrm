@@ -8,13 +8,18 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.config import settings
 from apps.api.app.models.document_ingestion import DocumentIngestion
 from apps.api.app.models.document_ingestion_page import DocumentIngestionPage
+from apps.api.app.models.document_logical_document import DocumentLogicalDocument
+from apps.api.app.models.document_logical_document_page import DocumentLogicalDocumentPage
 from apps.api.app.schemas.document import DocumentActionPlanOut
 from apps.api.app.schemas.document import DocumentExtractedFieldOut
 from apps.api.app.schemas.document import DocumentIngestionOut
 from apps.api.app.schemas.document import DocumentLinkageAssessmentOut
 from apps.api.app.schemas.document import DocumentIngestionPageOut
+from apps.api.app.schemas.document import DocumentLogicalDocumentPageOut
+from apps.api.app.schemas.document import DocumentLogicalDocumentOut
 from apps.api.app.schemas.document import DocumentRecordLinkOut
 from apps.api.app.schemas.document import DocumentProcessorDocumentTraceOut
 from apps.api.app.schemas.document import DocumentProcessorPageTraceOut
@@ -22,17 +27,33 @@ from apps.api.app.schemas.document import DocumentProcessorProvider
 from apps.api.app.schemas.document import DocumentRoutingAssessmentOut
 from apps.api.app.schemas.document import DocumentTableBlockOut
 
+from .document_activity import load_document_activity_events_by_document_id
+from .document_activity import serialize_document_activity_events
 from .document_ingestion_common import build_raw_text_excerpt
 from .document_ingestion_common import clean_optional_text
 from .document_action_planning import build_document_action_plan
+from .document_facets import load_document_facet_values_by_document_id
+from .document_facets import to_document_facet_assignment_out
 from .document_linkage import build_document_linkage_assessment
+from .document_routing import build_document_routing_assessment
 from .document_routing import build_document_page_routing_assessment
 from .document_record_links import load_document_record_links_by_document_id
 from .document_record_links import to_document_record_link_out
 from .document_ingestion_review import build_document_summary
+from .document_ingestion_review import build_logical_document_estimates
 from .document_ingestion_review import page_text_source
 from .document_ingestion_storage import document_page_preview_absolute_path
 from .document_ingestion_storage import document_page_preview_exists
+from .document_ingestion_storage import stored_pdf_absolute_path
+from .document_logical_documents import load_document_logical_documents_by_document_id
+from .document_logical_documents import load_document_logical_document_memberships_by_document_id
+from .document_understanding import build_document_page_understanding
+from .document_understanding import build_document_understanding
+
+try:
+    import pymupdf
+except ImportError:  # pragma: no cover - dependency should be available in deployed environments
+    pymupdf = None
 
 VALID_DOCUMENT_PROCESSOR_PROVIDERS = {"openai", "anthropic", "google"}
 
@@ -63,14 +84,67 @@ def get_document_page_preview_path(
     document_id: str,
     page_id: int,
 ) -> Path:
-    _document, pages = load_document_and_pages(db, document_id=document_id)
+    document, pages = load_document_and_pages(db, document_id=document_id)
     page = next((candidate for candidate in pages if candidate.page_id == page_id), None)
     if page is None:
         raise LookupError(f"Page '{page_id}' was not found for document '{document_id}'")
     preview_path = document_page_preview_absolute_path(document_id=document_id, page_number=page.page_number)
     if not preview_path.exists():
-        raise LookupError(f"Preview image is not available for page '{page_id}' in document '{document_id}'")
+        preview_path = _render_missing_document_page_preview(document=document, page=page)
     return preview_path
+
+
+def _render_missing_document_page_preview(
+    *,
+    document: DocumentIngestion,
+    page: DocumentIngestionPage,
+) -> Path:
+    source_path = stored_pdf_absolute_path(document.storage_key)
+    if not source_path.exists():
+        raise LookupError(f"Stored source PDF is not available for document '{document.document_id}'")
+    if pymupdf is None:
+        raise LookupError(
+            f"Preview image is not available for page '{page.page_id}' in document '{document.document_id}'"
+        )
+
+    preview_path = document_page_preview_absolute_path(
+        document_id=document.document_id,
+        page_number=page.page_number,
+    )
+    try:
+        rendered_document = pymupdf.open(str(source_path))
+        try:
+            rendered_page = rendered_document.load_page(page.page_number - 1)
+            render_scale = settings.DOCUMENT_PAGE_RENDER_DPI / 72
+            pixmap = rendered_page.get_pixmap(
+                matrix=pymupdf.Matrix(render_scale, render_scale),
+                alpha=False,
+            )
+            preview_path.parent.mkdir(parents=True, exist_ok=True)
+            preview_path.write_bytes(pixmap.tobytes("png"))
+        finally:
+            rendered_document.close()
+    except Exception as exc:
+        raise LookupError(
+            f"Preview image is not available for page '{page.page_id}' in document '{document.document_id}'"
+        ) from exc
+    return preview_path
+
+
+def get_document_source_file_details(
+    db: Session,
+    *,
+    document_id: str,
+) -> tuple[Path, str, str]:
+    document = db.get(DocumentIngestion, document_id)
+    if document is None:
+        raise LookupError(f"Document '{document_id}' was not found")
+
+    source_path = stored_pdf_absolute_path(document.storage_key)
+    if not source_path.exists():
+        raise LookupError(f"Stored source PDF is not available for document '{document_id}'")
+
+    return source_path, document.content_type, document.original_filename
 
 
 def serialize_documents(
@@ -78,6 +152,8 @@ def serialize_documents(
     documents: list[DocumentIngestion],
     *,
     preloaded_pages: Optional[list[DocumentIngestionPage]] = None,
+    preloaded_logical_documents: Optional[list[DocumentLogicalDocument]] = None,
+    preloaded_logical_document_memberships: Optional[list[DocumentLogicalDocumentPage]] = None,
 ) -> list[DocumentIngestionOut]:
     document_ids = [document.document_id for document in documents]
     pages = preloaded_pages
@@ -95,13 +171,59 @@ def serialize_documents(
     pages_by_document: dict[str, list[DocumentIngestionPage]] = defaultdict(list)
     for page in pages:
         pages_by_document[page.document_id].append(page)
+    if preloaded_logical_documents is None:
+        logical_documents_by_document = load_document_logical_documents_by_document_id(
+            db,
+            document_ids=document_ids,
+        )
+    else:
+        logical_documents_by_document: dict[str, list[DocumentLogicalDocument]] = defaultdict(list)
+        for logical_document in preloaded_logical_documents:
+            logical_documents_by_document[logical_document.document_id].append(logical_document)
+    if preloaded_logical_document_memberships is None:
+        logical_document_memberships_by_document = load_document_logical_document_memberships_by_document_id(
+            db,
+            document_ids=document_ids,
+        )
+    else:
+        logical_document_memberships_by_document: dict[str, list[DocumentLogicalDocumentPage]] = defaultdict(list)
+        for membership in preloaded_logical_document_memberships:
+            logical_document_memberships_by_document[membership.document_id].append(membership)
     record_links_by_document = load_document_record_links_by_document_id(db, document_ids=document_ids)
+    facet_values_by_document = load_document_facet_values_by_document_id(db, document_ids=document_ids)
+    activity_events_by_document = load_document_activity_events_by_document_id(db, document_ids=document_ids)
 
     serialized: list[DocumentIngestionOut] = []
     for document in documents:
         document_pages = pages_by_document.get(document.document_id, [])
+        persisted_logical_documents = logical_documents_by_document.get(document.document_id, [])
+        persisted_logical_document_memberships = logical_document_memberships_by_document.get(document.document_id, [])
         document_record_links = record_links_by_document.get(document.document_id, [])
-        document_summary = build_document_summary(document_pages, review_status=document.review_status)
+        document_facet_values = facet_values_by_document.get(document.document_id, [])
+        document_activity_events = activity_events_by_document.get(document.document_id, [])
+        facet_values_by_page = {
+            page.page_id: [
+                to_document_facet_assignment_out(facet_value)
+                for facet_value in document_facet_values
+                if facet_value.page_id == page.page_id
+            ]
+            for page in document_pages
+        }
+        serialized_document_facet_values = [
+            to_document_facet_assignment_out(facet_value)
+            for facet_value in document_facet_values
+        ]
+        source_available = stored_pdf_absolute_path(document.storage_key).exists()
+        compact_logical_documents = (
+            persisted_logical_documents
+            if persisted_logical_documents
+            else build_logical_document_estimates(document_pages, document_id=document.document_id)
+        )
+        document_summary = build_document_summary(
+            document_pages,
+            review_status=document.review_status,
+            logical_documents=list(compact_logical_documents),
+        )
         document_routing_payload = document_summary.get("routing_assessment")
         document_routing_assessment = (
             DocumentRoutingAssessmentOut.model_validate(document_routing_payload)
@@ -146,50 +268,84 @@ def serialize_documents(
                 "record_link_count": len(document_record_links),
             }
         )
-        serialized_pages = [
-            DocumentIngestionPageOut(
-                page_id=page.page_id or 0,
+        serialized_pages: list[DocumentIngestionPageOut] = []
+        page_understandings = []
+        serialized_logical_documents = _serialize_logical_documents(
+            document_id=document.document_id,
+            logical_documents=persisted_logical_documents,
+            memberships=persisted_logical_document_memberships,
+            pages=document_pages,
+        )
+        logical_documents_by_page_number = _logical_documents_by_page_number(serialized_logical_documents)
+        for page_index, page in enumerate(document_pages):
+            preview_available = document_page_preview_exists(
+                document_id=page.document_id,
                 page_number=page.page_number,
-                classification_status=page.classification_status,
-                extraction_status=page.extraction_status,
-                document_kind=page.document_kind,
-                document_subtype=page.document_subtype,
-                classification_confidence=page.classification_confidence,
-                classification_payload=page.classification_payload or {},
-                header_fields=[
-                    DocumentExtractedFieldOut.model_validate(field)
-                    for field in (page.header_fields or [])
-                ],
-                table_blocks=[
-                    DocumentTableBlockOut.model_validate(block)
-                    for block in (page.table_blocks or [])
-                ],
-                raw_text_excerpt=build_raw_text_excerpt(page.raw_text),
-                text_source=page_text_source(page),
-                preview_available=document_page_preview_exists(
-                    document_id=page.document_id,
-                    page_number=page.page_number,
-                ),
-                processing_warnings=list(page.processing_warnings or []),
-                processing_errors=list(page.processing_errors or []),
-                review_status=page.review_status,
-                review_notes=page.review_notes,
-                reviewed_at=page.reviewed_at,
-                reviewed_by=page.reviewed_by,
-                processed_at=page.processed_at,
-                processor_trace=serialized_page_processor_traces[page_index],
-                routing_assessment=build_document_page_routing_assessment(
-                    document_kind=page.document_kind,
-                    header_fields=list(page.header_fields or []),
-                    table_blocks=list(page.table_blocks or []),
-                    review_status=page.review_status,
-                ),
             )
-            for page_index, page in enumerate(document_pages)
-        ]
+            page_understanding = build_document_page_understanding(
+                page,
+                preview_available=preview_available,
+            )
+            page_understandings.append(page_understanding)
+            page_logical_documents = logical_documents_by_page_number.get(page.page_number, [])
+            page_logical_document = page_logical_documents[0] if page_logical_documents else None
+            serialized_pages.append(
+                DocumentIngestionPageOut(
+                    page_id=page.page_id or 0,
+                    page_number=page.page_number,
+                    logical_document_id=(
+                        page_logical_document.logical_document_id if page_logical_document is not None else None
+                    ),
+                    logical_document_key=(
+                        page_logical_document.logical_document_key if page_logical_document is not None else None
+                    ),
+                    logical_document_ids=[
+                        logical_document.logical_document_id
+                        for logical_document in page_logical_documents
+                    ],
+                    logical_document_keys=[
+                        logical_document.logical_document_key
+                        for logical_document in page_logical_documents
+                    ],
+                    classification_status=page.classification_status,
+                    extraction_status=page.extraction_status,
+                    document_kind=page.document_kind,
+                    document_subtype=page.document_subtype,
+                    classification_confidence=page.classification_confidence,
+                    classification_payload=page.classification_payload or {},
+                    header_fields=[
+                        DocumentExtractedFieldOut.model_validate(field)
+                        for field in (page.header_fields or [])
+                    ],
+                    table_blocks=[
+                        DocumentTableBlockOut.model_validate(block)
+                        for block in (page.table_blocks or [])
+                    ],
+                    raw_text_excerpt=build_raw_text_excerpt(page.raw_text),
+                    text_source=page_text_source(page),
+                    preview_available=preview_available,
+                    processing_warnings=list(page.processing_warnings or []),
+                    processing_errors=list(page.processing_errors or []),
+                    review_status=page.review_status,
+                    review_notes=page.review_notes,
+                    reviewed_at=page.reviewed_at,
+                    reviewed_by=page.reviewed_by,
+                    processed_at=page.processed_at,
+                    facet_values=facet_values_by_page.get(page.page_id, []),
+                    processor_trace=serialized_page_processor_traces[page_index],
+                    routing_assessment=build_document_page_routing_assessment(
+                        document_kind=page.document_kind,
+                        header_fields=list(page.header_fields or []),
+                        table_blocks=list(page.table_blocks or []),
+                        review_status=page.review_status,
+                    ),
+                    understanding=page_understanding,
+                )
+            )
         serialized.append(
             DocumentIngestionOut(
                 document_id=document.document_id,
+                uploaded_file_id=document.document_id,
                 original_filename=document.original_filename,
                 display_name=document.display_name,
                 content_type=document.content_type,
@@ -197,6 +353,7 @@ def serialize_documents(
                 sha256=document.sha256,
                 size_bytes=document.size_bytes,
                 page_count=document.page_count,
+                source_available=source_available,
                 status=document.status,
                 processor_provider=document.processor_provider,
                 processor_model=document.processor_model,
@@ -221,10 +378,175 @@ def serialize_documents(
                     DocumentRecordLinkOut.model_validate(to_document_record_link_out(link))
                     for link in document_record_links
                 ],
+                facet_values=serialized_document_facet_values,
+                activity=serialize_document_activity_events(document_activity_events),
+                logical_documents=serialized_logical_documents,
                 pages=serialized_pages,
+                understanding=build_document_understanding(
+                    original_filename=document.original_filename,
+                    page_understandings=page_understandings,
+                ),
             )
         )
     return serialized
+
+
+def _serialize_logical_documents(
+    *,
+    document_id: str,
+    logical_documents: list[DocumentLogicalDocument],
+    memberships: list[DocumentLogicalDocumentPage],
+    pages: list[DocumentIngestionPage],
+) -> list[DocumentLogicalDocumentOut]:
+    if logical_documents:
+        memberships_by_logical_document: dict[str, list[DocumentLogicalDocumentPage]] = defaultdict(list)
+        for membership in memberships:
+            memberships_by_logical_document[membership.logical_document_id].append(membership)
+        page_by_id = {page.page_id: page for page in pages if page.page_id is not None}
+        serialized_rows: list[DocumentLogicalDocumentOut] = []
+        for row in sorted(logical_documents, key=lambda item: item.sequence_number):
+            row_memberships = sorted(
+                memberships_by_logical_document.get(row.logical_document_id, []),
+                key=lambda item: (item.sequence_number, item.page_number),
+            )
+            row_pages = [
+                page_by_id[membership.page_id]
+                for membership in row_memberships
+                if membership.page_id in page_by_id
+            ]
+            if not row_pages:
+                row_pages = [
+                    page
+                    for page in pages
+                    if row.page_start <= page.page_number <= row.page_end
+                ]
+            serialized_rows.append(
+                _logical_document_row_to_out(row, pages=row_pages, memberships=row_memberships)
+            )
+        return serialized_rows
+
+    now = datetime.now(timezone.utc)
+    estimates = build_logical_document_estimates(pages, document_id=document_id)
+    return [
+        DocumentLogicalDocumentOut(
+            logical_document_id=str(estimate["logical_document_id"]),
+            document_id=document_id,
+            logical_document_key=str(estimate["logical_document_key"]),
+            sequence_number=int(estimate["sequence_number"]),
+            page_start=int(estimate["page_start"]),
+            page_end=int(estimate["page_end"]),
+            page_count=int(estimate["page_count"]),
+            page_numbers=list(estimate.get("page_numbers") or []),
+            document_kind=str(estimate["document_kind"]),
+            document_subtype=clean_optional_text(estimate.get("document_subtype")),
+            classification_status=str(estimate["classification_status"]),
+            classification_confidence=_coerce_float(estimate.get("classification_confidence")),
+            review_status=str(estimate["review_status"]),
+            review_notes=None,
+            reviewed_at=estimate.get("reviewed_at") if isinstance(estimate.get("reviewed_at"), datetime) else None,
+            reviewed_by=clean_optional_text(estimate.get("reviewed_by")),
+            provenance=dict(estimate.get("provenance") or {}),
+            page_memberships=[],
+            routing_assessment=build_document_routing_assessment(
+                pages=[
+                    page
+                    for page in pages
+                    if int(estimate["page_start"]) <= page.page_number <= int(estimate["page_end"])
+                ],
+                review_status=str(estimate["review_status"]),
+            ),
+            created_at=now,
+            created_by="system_estimate",
+            updated_at=now,
+            updated_by="system_estimate",
+            version=0,
+        )
+        for estimate in estimates
+    ]
+
+
+def _logical_document_row_to_out(
+    row: DocumentLogicalDocument,
+    *,
+    pages: list[DocumentIngestionPage],
+    memberships: list[DocumentLogicalDocumentPage],
+) -> DocumentLogicalDocumentOut:
+    provenance = dict(row.provenance or {})
+    ordered_memberships = sorted(memberships, key=lambda item: (item.sequence_number, item.page_number))
+    membership_page_numbers = [membership.page_number for membership in ordered_memberships]
+    page_numbers = membership_page_numbers or provenance.get("source_page_numbers")
+    if not isinstance(page_numbers, list):
+        page_numbers = list(range(row.page_start, row.page_end + 1))
+    return DocumentLogicalDocumentOut(
+        logical_document_id=row.logical_document_id,
+        document_id=row.document_id,
+        logical_document_key=row.logical_document_key,
+        sequence_number=row.sequence_number,
+        page_start=row.page_start,
+        page_end=row.page_end,
+        page_count=row.page_count,
+        page_numbers=page_numbers,
+        document_kind=row.document_kind,
+        document_subtype=row.document_subtype,
+        classification_status=row.classification_status,
+        classification_confidence=row.classification_confidence,
+        review_status=row.review_status,
+        review_notes=row.review_notes,
+        reviewed_at=row.reviewed_at,
+        reviewed_by=row.reviewed_by,
+        provenance=provenance,
+        page_memberships=[
+            _logical_document_membership_to_out(membership)
+            for membership in ordered_memberships
+        ],
+        routing_assessment=build_document_routing_assessment(pages, review_status=row.review_status),
+        created_at=row.created_at,
+        created_by=row.created_by,
+        updated_at=row.updated_at,
+        updated_by=row.updated_by,
+        version=row.version,
+    )
+
+
+def _logical_documents_by_page_number(
+    logical_documents: list[DocumentLogicalDocumentOut],
+) -> dict[int, list[DocumentLogicalDocumentOut]]:
+    mapping: dict[int, list[DocumentLogicalDocumentOut]] = {}
+    for logical_document in logical_documents:
+        if logical_document.page_numbers:
+            page_numbers = logical_document.page_numbers
+        else:
+            page_numbers = list(range(logical_document.page_start, logical_document.page_end + 1))
+        for page_number in page_numbers:
+            mapping.setdefault(page_number, []).append(logical_document)
+    return mapping
+
+
+def _logical_document_membership_to_out(
+    membership: DocumentLogicalDocumentPage,
+) -> DocumentLogicalDocumentPageOut:
+    return DocumentLogicalDocumentPageOut(
+        membership_id=membership.membership_id,
+        logical_document_id=membership.logical_document_id,
+        document_id=membership.document_id,
+        page_id=membership.page_id,
+        page_number=membership.page_number,
+        sequence_number=membership.sequence_number,
+        span_type=membership.span_type,
+        region_payload=dict(membership.region_payload or {}),
+        provenance=dict(membership.provenance or {}),
+        created_at=membership.created_at,
+        created_by=membership.created_by,
+        updated_at=membership.updated_at,
+        updated_by=membership.updated_by,
+        version=membership.version,
+    )
+
+
+def _coerce_float(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
 
 
 def mark_document_processing_failed(

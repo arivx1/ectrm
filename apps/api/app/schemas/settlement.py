@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 from apps.api.app.schemas.operations import OperationalRowActionStateOut
@@ -21,6 +21,9 @@ class TradeInvoiceOut(BaseModel):
     issued_at: datetime
     due_at: datetime
     dispute_reason: Optional[str]
+    voided_at: Optional[datetime]
+    voided_by: Optional[str]
+    void_reason: Optional[str]
     notes: Optional[str]
     created_at: datetime
     created_by: str
@@ -57,6 +60,7 @@ class TradeInvoiceCreate(BaseModel):
     invoice_amount: Optional[float] = None
     issued_at: Optional[datetime] = None
     due_at: Optional[datetime] = None
+    due_calendar_code: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -67,7 +71,13 @@ class TradeInvoiceUpdate(BaseModel):
     status: Optional[str] = None
     issued_at: Optional[datetime] = None
     due_at: Optional[datetime] = None
+    due_calendar_code: Optional[str] = None
     dispute_reason: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class TradeInvoiceVoid(BaseModel):
+    void_reason: str
     notes: Optional[str] = None
 
 
@@ -82,6 +92,8 @@ class TradePaymentOut(BaseModel):
     status: str
     due_at: datetime
     received_at: Optional[datetime]
+    reversal_of_payment_id: Optional[int]
+    reversal_reason: Optional[str]
     notes: Optional[str]
     created_at: datetime
     created_by: str
@@ -110,6 +122,41 @@ class TradePaymentOut(BaseModel):
     action_states: list[OperationalRowActionStateOut] = Field(default_factory=list)
 
 
+class InvoiceIssueCandidateOut(BaseModel):
+    trade_id: str
+    trade_nature: str
+    book: str
+    portfolio: Optional[str]
+    counterparty: Optional[str]
+    commodity_class: str
+    commodity: str
+    trader_user: Optional[str]
+    trade_date: Optional[date]
+    execution_timestamp: Optional[datetime]
+    delivery_start: Optional[date]
+    delivery_end: Optional[date]
+    trade_currency_code: Optional[str]
+    invoice_status: str
+    payment_status: str
+    settlement_status: str
+    notional_amount: float | None
+    age_days: Optional[int]
+    readiness_status: str
+    priority_reason: str
+    preview_summary: str
+    blocking_reasons: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    recommended_action: dict[str, Any] = Field(default_factory=dict)
+
+
+class InvoiceIssueCandidateListOut(BaseModel):
+    count: int
+    total_count: int
+    ready_count: int
+    blocked_count: int
+    items: list[InvoiceIssueCandidateOut] = Field(default_factory=list)
+
+
 class TradePaymentCreate(BaseModel):
     invoice_id: int
     payment_reference: Optional[str] = None
@@ -117,6 +164,7 @@ class TradePaymentCreate(BaseModel):
     payment_amount: Optional[float] = None
     status: Optional[str] = None
     due_at: Optional[datetime] = None
+    due_calendar_code: Optional[str] = None
     received_at: Optional[datetime] = None
     notes: Optional[str] = None
 
@@ -127,5 +175,13 @@ class TradePaymentUpdate(BaseModel):
     payment_amount: Optional[float] = None
     status: Optional[str] = None
     due_at: Optional[datetime] = None
+    due_calendar_code: Optional[str] = None
     received_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class TradePaymentReverse(BaseModel):
+    reversal_reason: str
+    payment_reference: Optional[str] = None
+    reversed_at: Optional[datetime] = None
     notes: Optional[str] = None

@@ -47,12 +47,16 @@ const smokeAccessToken = 'smoke-access-token'
 const smokeSession = {
   sessionId: 'smoke-session-1',
   accessToken: smokeAccessToken,
-  expiresAt: '2026-04-20T18:00:00Z',
+  // Keep this comfortably in the future so the browser harness does not
+  // accidentally boot into a signed-out state as wall-clock time moves on.
+  expiresAt: '2099-01-01T00:00:00Z',
+  showStartHere: true,
   user: {
     user_id: 'ops_admin',
     email: 'ops@example.com',
     display_name: 'Ops Admin',
     role: 'OPS_ADMIN',
+    default_assistant_persona: 'admin',
   },
 } as const
 
@@ -74,6 +78,15 @@ const publicRuntimeSettings = {
     client_id: null,
     auto_create_users: false,
   },
+  projection_monitoring_email: {
+    transport: 'local_archive',
+    provider_hint: 'none',
+    smtp_host: null,
+    smtp_port: null,
+    sender: 'projection-monitoring@localhost',
+    recipient_count: 1,
+    auth_status: 'none',
+  },
   session_ttl_hours: 24,
   eia_base_url: 'https://api.eia.gov',
   eia_timeout_seconds: 30,
@@ -82,9 +95,12 @@ const publicRuntimeSettings = {
     default_provider: 'openai',
     effective_default_provider: null,
     configured_provider_count: 0,
+    default_daily_token_allocation: 100000,
     providers: [],
+    available_skills: [],
     available_tools: [],
     available_action_types: [],
+    available_personas: [],
   },
   pagination: {
     standard_default: 100,
@@ -540,6 +556,7 @@ async function startMockApiServer(
         session_id: smokeSession.sessionId,
         access_token: smokeSession.accessToken,
         expires_at: smokeSession.expiresAt,
+        show_start_here: smokeSession.showStartHere,
         user: smokeSession.user,
       })
       return
@@ -551,6 +568,7 @@ async function startMockApiServer(
         session_id: smokeSession.sessionId,
         access_token: smokeSession.accessToken,
         expires_at: smokeSession.expiresAt,
+        show_start_here: smokeSession.showStartHere,
         user: smokeSession.user,
       })
       return
@@ -574,6 +592,22 @@ async function startMockApiServer(
         return
       }
       writeNoContent(response)
+      return
+    }
+
+    if (url.pathname === '/assistant/action-requests' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/assistant/prompt-route-recommendations' && method === 'GET') {
+      if (!requireAuthorization(request, response, sessionExpired)) {
+        return
+      }
+      writeJson(response, [])
       return
     }
 
@@ -760,6 +794,11 @@ async function startMockApiServer(
       return
     }
 
+    if (url.pathname === '/operations/document-record-creation-requests' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
     if (url.pathname === '/settlement/invoices' && method === 'GET') {
       writeJson(response, [])
       return
@@ -858,6 +897,16 @@ async function startMockApiServer(
         return
       }
 
+      writeJson(response, null)
+      return
+    }
+
+    if (url.pathname === '/weather/locations' && method === 'GET') {
+      writeJson(response, [])
+      return
+    }
+
+    if (url.pathname === '/weather/sync/status' && method === 'GET') {
       writeJson(response, null)
       return
     }
@@ -1302,19 +1351,6 @@ async function waitForRecordedRequest(
   }
 }
 
-async function waitForGlobalWorkspaceFilter(page: Page, value: string): Promise<void> {
-  await page.waitForFunction((expectedValue) => {
-    const inputs = Array.from(document.querySelectorAll('input'))
-    const globalSearchInput = inputs.find(
-      (candidate) =>
-        candidate instanceof HTMLInputElement &&
-        candidate.placeholder === 'Workspace, trade, delivery, counterparty, book, or provider',
-    )
-
-    return globalSearchInput instanceof HTMLInputElement && globalSearchInput.value === expectedValue
-  }, value)
-}
-
 async function triggerSessionExpiry(page: Page, mockApi: MockApiServer): Promise<void> {
   const previousHeartbeatCount = mockApi.heartbeatRequests.length
   mockApi.expireSession()
@@ -1679,7 +1715,7 @@ test(
       await page.goto(`${appServer.origin}/?section=trading`, {
         waitUntil: 'domcontentloaded',
       })
-      await dismissStartHereOverlay(page)
+      await dismissStartHereOverlayIfPresent(page)
 
       await page.getByRole('heading', { name: 'Capture trades and understand exposure' }).waitFor()
       await page.getByText('Pick the job you are doing first').waitFor()
@@ -1697,6 +1733,7 @@ test(
       await page.goto(`${appServer.origin}/?view=dashboard`, {
         waitUntil: 'domcontentloaded',
       })
+      await dismissStartHereOverlayIfPresent(page)
 
       await page.getByText('Common Starting Points').waitFor()
       await page
@@ -1729,7 +1766,7 @@ test(
 )
 
 test(
-  'start-here onboarding appears once while signed out and once per authenticated session',
+  'start-here onboarding appears only on a user first authenticated login',
   { timeout: 120_000 },
   async () => {
     const mockApi = await startMockApiServer()
@@ -1746,17 +1783,10 @@ test(
         waitUntil: 'domcontentloaded',
       })
 
-      const signedOutOverlay = page.locator('.start-here-dialog')
-      await signedOutOverlay.waitFor()
-      await signedOutOverlay.getByRole('button', { name: 'Sign In for Trade Capture' }).waitFor()
-
-      await signedOutOverlay.getByRole('button', { name: 'Open How It Works' }).click()
-
-      await page.waitForFunction(() => window.location.search.includes('view=guide'))
-      await signedOutOverlay.waitFor({ state: 'hidden' })
-
-      await page.reload({ waitUntil: 'domcontentloaded' })
+      await page.locator('.auth-gate-stage').waitFor()
       await page.waitForFunction(() => !document.querySelector('.start-here-dialog'))
+      assert.equal(await page.locator('.side-rail').count(), 0)
+      assert.equal(await page.getByLabel('Operator prompt').count(), 0)
 
       await page.evaluate((session) => {
         window.localStorage.setItem('ectrm.auth-session', JSON.stringify(session))
@@ -1776,6 +1806,23 @@ test(
       await signedInOverlay.waitFor({ state: 'hidden' })
 
       await page.reload({ waitUntil: 'domcontentloaded' })
+      await page.waitForFunction(() => !document.querySelector('.start-here-dialog'))
+
+      await page.evaluate((session) => {
+        window.localStorage.setItem(
+          'ectrm.auth-session',
+          JSON.stringify({
+            ...session,
+            sessionId: 'smoke-session-2',
+            showStartHere: false,
+          }),
+        )
+      }, smokeSession)
+
+      await page.goto(`${appServer.origin}/?view=dashboard`, {
+        waitUntil: 'domcontentloaded',
+      })
+
       await page.waitForFunction(() => !document.querySelector('.start-here-dialog'))
 
       assert.match(page.url(), /\?view=risk(?:&|$)/)
@@ -1839,14 +1886,15 @@ test(
       await page.waitForFunction(() => window.location.search.includes('view=operations'))
       await page.getByRole('heading', { name: 'Clear post-trade blockers and handoffs' }).waitFor()
       await page.getByText('Opened from Activity Feed for T-AMEND-100').waitFor()
-      await page.getByText('Start with amendment follow-through for T-AMEND-100').waitFor()
-      await waitForGlobalWorkspaceFilter(page, 'T-AMEND-100')
+      await page
+        .getByText('This workspace started focused on that trade so you can clear the matching queue items before widening back to the full book.')
+        .waitFor()
 
       assert.match(page.url(), /\bview=operations\b/)
       assert.match(page.url(), /\bhandoff=events\b/)
       assert.match(page.url(), /\bfocusTrade=T-AMEND-100\b/)
       assert.match(page.url(), /\beventType=TradeAmended\b/)
-      assert.equal(await page.getByLabel('Search all workspaces').inputValue(), 'T-AMEND-100')
+      assert.equal(await page.locator('.nav-global-filter').count(), 0)
 
       assert.equal(
         mockApi.unexpectedRequests.length,
@@ -1905,14 +1953,15 @@ test(
       await page.waitForFunction(() => window.location.search.includes('view=settlement'))
       await page.getByRole('heading', { name: 'Issue invoices, track cash, and clear disputes' }).waitFor()
       await page.getByText('Opened from Activity Feed for T-AMEND-100').waitFor()
-      await page.getByText('Start with invoice follow-through for T-AMEND-100').waitFor()
-      await waitForGlobalWorkspaceFilter(page, 'T-AMEND-100')
+      await page
+        .getByText('This workspace started focused on that trade so invoice, payment, and dispute follow-through stay anchored to the same issue.')
+        .waitFor()
 
       assert.match(page.url(), /\bview=settlement\b/)
       assert.match(page.url(), /\bhandoff=events\b/)
       assert.match(page.url(), /\bfocusTrade=T-AMEND-100\b/)
       assert.match(page.url(), /\beventType=TradeInvoiceUpdated\b/)
-      assert.equal(await page.getByLabel('Search all workspaces').inputValue(), 'T-AMEND-100')
+      assert.equal(await page.locator('.nav-global-filter').count(), 0)
       assert.equal(
         mockApi.unexpectedRequests.length,
         0,
@@ -1932,7 +1981,7 @@ test(
 )
 
 test(
-  'signed-out start-here sign-in intent returns the user to trade capture',
+  'signed-out dashboard stays locked behind the auth gate',
   { timeout: 120_000 },
   async () => {
     const mockApi = await startMockApiServer()
@@ -1949,39 +1998,16 @@ test(
         waitUntil: 'domcontentloaded',
       })
 
-      const signedOutOverlay = page.locator('.start-here-dialog')
-      await signedOutOverlay.waitFor()
-      await signedOutOverlay.getByRole('button', { name: 'Sign In for Trade Capture' }).click()
-
-      await page.waitForFunction(() => window.location.search.includes('view=settings'))
-      await signedOutOverlay.waitFor({ state: 'hidden' })
-
       const authGate = page.locator('.auth-gate-stage')
       await authGate.waitFor()
-      await authGate
-        .getByText("After sign-in, opening Trade Capture. We'll take you straight there after authentication succeeds.")
-        .waitFor()
-
-      await page.getByLabel('User ID or Email').fill('ops_admin')
-      await page.getByLabel('Password').fill('demo-password')
-      await page.getByRole('button', { name: 'Enter Console' }).click()
-
-      await page.waitForFunction(() => window.location.search.includes('view=trades'))
-      await page.waitForFunction(() => {
-        const button = document.querySelector('form.trade-form.trade-form-feature button[type="submit"]')
-        return button instanceof HTMLButtonElement && !button.disabled
-      })
       await page.waitForFunction(() => !document.querySelector('.start-here-dialog'))
+      await authGate.getByLabel('User ID or Email').waitFor()
+      await authGate.getByRole('button', { name: 'Log In' }).waitFor()
 
-      await page.reload({ waitUntil: 'domcontentloaded' })
-      await page.waitForFunction(() => !document.querySelector('.start-here-dialog'))
-      await page.waitForFunction(() => {
-        const button = document.querySelector('form.trade-form.trade-form-feature button[type="submit"]')
-        return button instanceof HTMLButtonElement && !button.disabled
-      })
-
-      assert.match(page.url(), /\?view=trades(?:&|$)/)
-      assert.equal(await page.locator('form.trade-form.trade-form-feature').isVisible(), true)
+      assert.match(page.url(), /\?view=dashboard(?:&|$)/)
+      assert.equal(await page.locator('.side-rail').count(), 0)
+      assert.equal(await page.locator('.mobile-topbar').count(), 0)
+      assert.equal(await page.getByLabel('Operator prompt').count(), 0)
       assert.equal(
         mockApi.unexpectedRequests.length,
         0,
@@ -2109,17 +2135,15 @@ test(
         waitUntil: 'domcontentloaded',
       })
 
-      await page.getByText('Start with the job in front of you').waitFor()
-      await page.getByRole('button', { name: 'Sign In', exact: true }).click()
-
       const authGate = page.locator('.auth-gate-stage')
       await authGate.waitFor()
-      await authGate.getByText('Password · Single-user').waitFor()
+      assert.equal(await page.getByLabel('Operator prompt').count(), 0)
+      await authGate.getByRole('button', { name: 'Single Sign On' }).waitFor()
 
-      await page.getByRole('button', { name: 'Use local OPS_ADMIN session' }).click()
+      await page.getByRole('button', { name: 'Single Sign On' }).click()
 
       await page.waitForFunction(() => !document.querySelector('.auth-gate-stage'))
-      await page.getByText('Start with the job in front of you').waitFor()
+      await page.getByLabel('Operator prompt').waitFor()
       await page.getByText('Signed in as Ops Admin').waitFor()
 
       assert.ok(

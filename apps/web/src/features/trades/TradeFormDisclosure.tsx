@@ -1,6 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
+import { usePersistentCollapsibleCardState } from '../../shared/collapsibleCardState'
 
 type TradeFormDisclosureProps = {
+  persistenceKey?: string
   title: string
   summary: string
   description: string
@@ -9,20 +11,18 @@ type TradeFormDisclosureProps = {
 }
 
 export function TradeFormDisclosure({
+  persistenceKey,
   title,
   summary,
   description,
   defaultOpen = false,
   children,
 }: TradeFormDisclosureProps) {
-  const [open, setOpen] = useState(defaultOpen)
-
-  useEffect(() => {
-    if (defaultOpen) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Re-open the disclosure when parent defaults switch it on.
-      setOpen(true)
-    }
-  }, [defaultOpen])
+  const { expanded: open, setExpanded: setOpen } =
+    usePersistentCollapsibleCardState(
+      persistenceKey ?? `trade-form-disclosure:${title}`,
+      defaultOpen,
+    )
 
   return (
     <details

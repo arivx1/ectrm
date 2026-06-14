@@ -88,14 +88,30 @@ The web admin workspace now surfaces that operational view directly, including:
 - an on-demand `Run NWS Sync` control
 - location-by-location freshness rows for tracked weather points
 
+The asset map keeps radar imagery as its weather overlay. Tracked
+forecast/observation points remain in weather intelligence and admin surfaces,
+but they no longer plot as map markers or point overlays:
+
+- `Radar` resolves the latest RainViewer weather-maps frame at runtime so the
+  map can show non-US radar where global provider coverage is available.
+- If the global radar manifest is unavailable, the overlay falls back to the
+  existing NOAA/NCEP CONUS WMS layer rather than leaving U.S. operators with no
+  radar.
+- RainViewer attribution is surfaced in the map layer metadata and overlay
+  details; production use should confirm commercial terms or replace the public
+  source with the approved weather vendor feed from the trading-source register.
+
 ## Next Steps
 
 1. Add book, portfolio, and location mapping so weather signals can roll up to
    actual desks and risk views.
 2. Add NOAA alert ingestion plus ISO load and pipeline/storage joins so live
    regional weather signals include asset stress and operational context.
-3. Move from single-process scheduling to platform-native orchestration
+3. Add an approved commercial global weather-map provider configuration once
+   the weather vendor contract is selected, including provider-specific
+   attribution, zoom limits, cache expectations, and outage fallback behavior.
+4. Move from single-process scheduling to platform-native orchestration
    (cron/job runner/container scheduler) in deployment environments.
-4. Expand beyond `NWS` with the additional weather and market-data feeds in the
+5. Expand beyond `NWS` with the additional weather and market-data feeds in the
    trading-source register as the platform moves from baseline weather
    intelligence to full operational weather analytics.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 if not hasattr(enum, "StrEnum"):
     class _CompatStrEnum(str, enum.Enum):
@@ -23,6 +23,10 @@ from apps.api.app.models import Base
 from apps.api.app.models.event import Event
 from apps.api.app.models.trade_actualization import TradeActualization
 from apps.api.app.models.trade import Trade
+from apps.api.app.models.reference_calendar import ReferenceCalendar
+from apps.api.app.models.reference_calendar_holiday import ReferenceCalendarHoliday
+from apps.api.app.models.reference_calendar_overlay import ReferenceCalendarOverlay
+from apps.api.app.models.reference_calendar_rule import ReferenceCalendarRule
 from apps.api.app.models.trade_invoice import TradeInvoice
 from apps.api.app.models.trade_payment import TradePayment
 from apps.api.app.models.trade_workflow_item import TradeWorkflowItem
@@ -70,6 +74,10 @@ class SettlementInvoicesApiTests(unittest.TestCase):
             session.query(TradePayment).delete()
             session.query(TradeActualization).delete()
             session.query(TradeInvoice).delete()
+            session.query(ReferenceCalendarHoliday).delete()
+            session.query(ReferenceCalendarOverlay).delete()
+            session.query(ReferenceCalendarRule).delete()
+            session.query(ReferenceCalendar).delete()
             session.query(TradeWorkflowItem).delete()
             session.query(Trade).delete()
             session.query(Event).delete()
@@ -193,6 +201,76 @@ class SettlementInvoicesApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
 
+    def _seed_weekend_calendar(self, code: str = "US_SETTLE_TEST") -> None:
+        with self.SessionLocal() as session:
+            session.add(
+                ReferenceCalendar(
+                    code=code,
+                    name="US Settlement Test",
+                    calendar_type="PAYMENT_SYSTEM",
+                    market=None,
+                    timezone="UTC",
+                    description=None,
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=self.now,
+                    created_by="settlement_admin",
+                    updated_at=self.now,
+                    updated_by="settlement_admin",
+                    version=1,
+                )
+            )
+            session.add_all(
+                [
+                    ReferenceCalendarRule(
+                        calendar_code=code,
+                        name="Saturday Weekend",
+                        rule_type="WEEKLY",
+                        closure_type="FULL_CLOSED",
+                        month=None,
+                        day=None,
+                        weekday=5,
+                        occurrence=None,
+                        offset_days=None,
+                        observance_shift="NONE",
+                        is_provisional=False,
+                        description=None,
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=self.now,
+                        created_by="settlement_admin",
+                        updated_at=self.now,
+                        updated_by="settlement_admin",
+                        version=1,
+                    ),
+                    ReferenceCalendarRule(
+                        calendar_code=code,
+                        name="Sunday Weekend",
+                        rule_type="WEEKLY",
+                        closure_type="FULL_CLOSED",
+                        month=None,
+                        day=None,
+                        weekday=6,
+                        occurrence=None,
+                        offset_days=None,
+                        observance_shift="NONE",
+                        is_provisional=False,
+                        description=None,
+                        is_active=True,
+                        effective_from=None,
+                        effective_to=None,
+                        created_at=self.now,
+                        created_by="settlement_admin",
+                        updated_at=self.now,
+                        updated_by="settlement_admin",
+                        version=1,
+                    ),
+                ]
+            )
+            session.commit()
+
     def _seed_credit_approval_item(
         self,
         *,
@@ -275,6 +353,147 @@ class SettlementInvoicesApiTests(unittest.TestCase):
             self.assertEqual(audit_event.actor_id, "settlement_admin")
             self.assertEqual(audit_event.payload["request"]["trade_id"], "T-INV-1")
             self.assertEqual(audit_event.payload["invoice"]["invoice_number"], "INV-1001")
+
+    def test_issue_invoice_rolls_due_date_to_next_business_day_when_calendar_is_supplied(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-INV-CAL-1")
+        self._seed_weekend_calendar()
+        self._actualize_trade(admin_token, trade_id="T-INV-CAL-1", actual_quantity=1000)
+
+        response = self.client.post(
+            "/settlement/invoices",
+            json={
+                "trade_id": "T-INV-CAL-1",
+                "invoice_number": "INV-CAL-1001",
+                "invoice_amount": 79250,
+                "due_at": "2026-04-11T12:00:00Z",
+                "due_calendar_code": "US_SETTLE_TEST",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertEqual(body["due_at"], "2026-04-13T12:00:00Z")
+
+        with self.SessionLocal() as session:
+            invoice = session.get(TradeInvoice, body["invoice_id"])
+            assert invoice is not None
+            self.assertEqual(invoice.due_at.isoformat(), "2026-04-13T12:00:00")
+
+    def test_void_invoice_marks_not_required_and_clears_unpaid_payment_rows(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-INV-VOID-1")
+        self._actualize_trade(admin_token, trade_id="T-INV-VOID-1", actual_quantity=1000)
+
+        issue_response = self.client.post(
+            "/settlement/invoices",
+            json={
+                "trade_id": "T-INV-VOID-1",
+                "invoice_number": "INV-VOID-1001",
+                "invoice_amount": 79250,
+                "due_at": "2026-04-10T12:00:00Z",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(issue_response.status_code, 201)
+        invoice_id = issue_response.json()["invoice_id"]
+
+        payment_response = self.client.post(
+            "/settlement/payments",
+            json={
+                "invoice_id": invoice_id,
+                "payment_reference": "WIRE-PENDING-VOID-1",
+                "payment_amount": 79250,
+                "due_at": "2026-04-12T12:00:00Z",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(payment_response.status_code, 201)
+        self.assertEqual(payment_response.json()["status"], "OVERDUE")
+
+        response = self.client.post(
+            f"/settlement/invoices/{invoice_id}/void",
+            json={"void_reason": "Duplicate invoice captured in error."},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["invoice_id"], invoice_id)
+        self.assertEqual(body["status"], "NOT_REQUIRED")
+        self.assertEqual(body["void_reason"], "Duplicate invoice captured in error.")
+
+        with self.SessionLocal() as session:
+            invoice = session.get(TradeInvoice, invoice_id)
+            assert invoice is not None
+            payment = session.query(TradePayment).filter(TradePayment.invoice_id == invoice_id).one()
+            trade = session.query(Trade).filter(Trade.trade_id == "T-INV-VOID-1").one()
+
+            self.assertEqual(invoice.status, "NOT_REQUIRED")
+            self.assertEqual(invoice.voided_by, "settlement_admin")
+            self.assertEqual(invoice.void_reason, "Duplicate invoice captured in error.")
+            self.assertEqual(payment.status, "NOT_REQUIRED")
+            self.assertIn("Auto-cleared when invoice INV-VOID-1001 was voided.", payment.notes or "")
+            self.assertEqual(trade.invoice_status, "NOT_REQUIRED")
+            self.assertEqual(trade.payment_status, "NOT_REQUIRED")
+            self.assertEqual(trade.settlement_status, "SETTLED")
+
+    def test_invoice_issue_candidates_endpoint_lists_unissued_trade_candidates(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-INV-CANDIDATE")
+
+        response = self.client.get(
+            "/settlement/invoice-issue-candidates",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["total_count"], 1)
+        self.assertEqual(payload["count"], payload["ready_count"] + payload["blocked_count"])
+        self.assertEqual(payload["items"][0]["trade_id"], "T-INV-CANDIDATE")
+        self.assertIn(payload["items"][0]["readiness_status"], {"READY", "BLOCKED"})
+        self.assertIn("priority_reason", payload["items"][0])
+        self.assertEqual(payload["items"][0]["recommended_action"]["action_type"], "issue_trade_invoice")
+
+    def test_invoice_issue_candidates_prioritize_ready_rows_before_blocked_rows(self) -> None:
+        admin_token = self._bootstrap_admin()
+        self._seed_trade(trade_id="T-INV-READY")
+        self._seed_trade(trade_id="T-INV-BLOCKED")
+        self._actualize_trade(admin_token, trade_id="T-INV-READY", actual_quantity=1000)
+
+        with self.SessionLocal() as session:
+            ready_trade = session.query(Trade).filter(Trade.trade_id == "T-INV-READY").one()
+            blocked_trade = session.query(Trade).filter(Trade.trade_id == "T-INV-BLOCKED").one()
+            ready_trade.execution_timestamp = self.now - timedelta(days=2)
+            blocked_trade.execution_timestamp = self.now - timedelta(days=4)
+            blocked_trade.credit_hold_active = True
+            blocked_trade.credit_hold_reason = "Credit owner review still pending."
+            session.commit()
+
+        response = self.client.get(
+            "/settlement/invoice-issue-candidates",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            [item["trade_id"] for item in payload["items"]],
+            ["T-INV-READY", "T-INV-BLOCKED"],
+        )
+        self.assertEqual(payload["items"][0]["readiness_status"], "READY")
+        self.assertEqual(payload["items"][1]["readiness_status"], "BLOCKED")
+        self.assertEqual(
+            payload["items"][0]["priority_reason"],
+            "Ready-to-issue invoice candidates rise before blocked previews.",
+        )
+        self.assertEqual(
+            payload["items"][1]["priority_reason"],
+            "Blocked invoice previews follow ready rows; older blocked items rise first.",
+        )
 
     def test_accounting_role_can_issue_invoice(self) -> None:
         self._create_user(

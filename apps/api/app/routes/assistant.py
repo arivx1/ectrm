@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from datetime import datetime, timezone
+from typing import cast
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -34,6 +35,16 @@ from apps.api.app.domains.assistant.services.agent_evals import (
     to_agent_eval_run_out,
     update_agent_eval,
 )
+from apps.api.app.domains.assistant.services.agent_revisions import (
+    build_agent_revision_diff_summary,
+    create_agent_revision,
+    ensure_agent_publication_snapshot,
+    get_agent_revision,
+    list_agent_revisions,
+    next_agent_revision_version,
+    normalize_agent_revision_payload,
+    serialize_agent_revision_payload,
+)
 from apps.api.app.domains.assistant.services.autonomy_review import (
     build_assistant_agent_health_review,
     build_assistant_autonomy_review_brief,
@@ -43,6 +54,9 @@ from apps.api.app.domains.assistant.services.agent_work_packages import (
     list_agent_work_packages,
     to_agent_work_package_out,
     update_agent_work_package,
+)
+from apps.api.app.domains.assistant.services.agent_self_updates import (
+    generate_assistant_agent_self_update_draft,
 )
 from apps.api.app.domains.assistant.services.chat import (
     AssistantService,
@@ -62,6 +76,14 @@ from apps.api.app.domains.assistant.services.feedback import (
     to_assistant_run_feedback_out,
     upsert_assistant_run_feedback,
 )
+from apps.api.app.domains.assistant.services.prompt_navigation_outcomes import (
+    create_prompt_home_navigation_outcome,
+    to_assistant_prompt_navigation_outcome_out,
+    upsert_assistant_prompt_navigation_outcome,
+)
+from apps.api.app.domains.assistant.services.prompt_route_recommendations import (
+    list_prompt_route_recommendations,
+)
 from apps.api.app.domains.assistant.services.eval_gates import (
     build_agent_eval_gate,
     build_role_archetype_eval_gate,
@@ -69,6 +91,16 @@ from apps.api.app.domains.assistant.services.eval_gates import (
 from apps.api.app.domains.assistant.services.outcome_metrics import (
     summarize_assistant_outcome_metrics,
 )
+from apps.api.app.domains.assistant.services.organization_context_registry import (
+    OrganizationContextRegistryError,
+    create_organization_context_definition,
+    get_organization_context_definition,
+    list_organization_context_definitions,
+    publish_organization_context_definition,
+    retire_organization_context_definition,
+    update_organization_context_definition,
+)
+from apps.api.app.domains.assistant.personas import list_assistant_persona_definitions
 from apps.api.app.domains.assistant.services.execution import (
     approve_assistant_action_request_for_user,
     execute_assistant_execution,
@@ -98,7 +130,8 @@ from apps.api.app.domains.assistant.services.profile_requests import (
     list_profile_requests,
     mark_profile_request_activated,
     reject_profile_request,
-    to_profile_request_out,
+    submit_profile_request,
+    to_profile_request_out_with_diff,
     validate_agent_activation_requirements,
 )
 from apps.api.app.domains.assistant.services.runs import (
@@ -107,21 +140,31 @@ from apps.api.app.domains.assistant.services.runs import (
     to_assistant_run_out,
     to_assistant_run_summary_out,
 )
+from apps.api.app.domains.assistant.services.voice import (
+    AssistantVoiceGenerationError,
+    synthesize_assistant_voice_audio,
+    AssistantVoiceTranscriptionError,
+    transcribe_assistant_voice_audio,
+)
 from apps.api.app.domains.assistant.services.role_archetypes import (
     get_role_archetype,
     list_role_archetypes,
     to_role_archetype_out,
 )
 from apps.api.app.domains.assistant.services.registry import (
+    ManagedAssistantAgent,
     get_agent_record,
     list_admin_agent_records,
     list_public_agent_records,
     summarize_agent_token_budget,
     summarize_agent_token_budgets,
+    summarize_assistant_token_usage,
+    summarize_assistant_token_usage_tracker,
     to_admin_agent_out,
     to_public_agent_out,
 )
 from apps.api.app.models.assistant_agent import AssistantAgent
+from apps.api.app.models.assistant_agent_revision import AssistantAgentRevision
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
 from apps.api.app.schemas.assistant import (
     AssistantActionDecisionRequest,
@@ -129,6 +172,8 @@ from apps.api.app.schemas.assistant import (
     AssistantActionRequestOut,
     AssistantAgentAdminOut,
     AssistantAgentHealthReviewOut,
+    AssistantAgentRevisionPayloadOut,
+    AssistantAgentRevisionOut,
     AssistantAgentWorkPackageAcceptRequest,
     AssistantAgentWorkPackageOut,
     AssistantAgentWorkPackageUpdateRequest,
@@ -137,6 +182,11 @@ from apps.api.app.schemas.assistant import (
     AssistantAgentBuildSuggestionOut,
     AssistantAgentCreate,
     AssistantControlTowerSummaryOut,
+    AssistantOrganizationContextDefinitionCreate,
+    AssistantOrganizationContextDefinitionOut,
+    AssistantOrganizationContextDefinitionUpdate,
+    AssistantOrganizationContextSectionKey,
+    AssistantOrganizationContextStatus,
     AssistantAgentEvalCreate,
     AssistantAgentEvalOut,
     AssistantAgentEvalRunOut,
@@ -146,16 +196,23 @@ from apps.api.app.schemas.assistant import (
     AssistantAgentProfileRequestCreate,
     AssistantAgentProfileRequestDecision,
     AssistantAgentProfileRequestOut,
+    AssistantAgentProfileRequestSubmit,
     AssistantAgentRoleArchetypeOut,
+    AssistantAgentSelfUpdateDraftOut,
+    AssistantAgentSelfUpdateRequest,
     AssistantConversationOut,
     AssistantConversationSummaryOut,
     AssistantAgentUpdate,
     AssistantOutcomeMetricsOut,
+    AssistantPersonaDefinitionOut,
     AssistantPolicySimulationOut,
     AssistantPolicySimulationRequest,
     AssistantPromptContextOut,
     AssistantPromptContextRequest,
     AssistantPromptSectionOut,
+    AssistantPromptNavigationOutcomeCreate,
+    AssistantPromptNavigationOutcomeOut,
+    AssistantPromptRouteRecommendationOut,
     AssistantPromptRequest,
     AssistantPromptResponse,
     AssistantRunFeedbackCreate,
@@ -164,6 +221,11 @@ from apps.api.app.schemas.assistant import (
     AssistantRunOut,
     AssistantRunSummaryOut,
     AssistantRuntimeSettingsOut,
+    AssistantTokenUsageSummaryOut,
+    AssistantTokenUsageTrackerOut,
+    AssistantVoiceSpeechRequest,
+    AssistantVoiceTranscriptionOut,
+    AssistantWorkspace,
 )
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
@@ -181,13 +243,44 @@ def _action_decision_from_payload(payload: AssistantActionDecisionRequest | None
     )
 
 
-def get_assistant_service(db: Session) -> AssistantService:
-    return AssistantService(db)
+def _build_prompt_context_preview_warnings(sections: list[AssistantPromptSection]) -> list[str]:
+    warnings: list[str] = []
+    for section in sections:
+        if not section.uses_fallback:
+            continue
+        if section.contract_key == "organization":
+            warnings.append(
+                "Organization Context is using env-backed fallback values because no published organization profile is active."
+            )
+        elif section.contract_key == "business-model":
+            warnings.append(
+                "Business Operating Model is using env-backed fallback values because no published operating-model definition is active."
+            )
+    return warnings
+
+
+def get_assistant_service(db: Session, *, actor_id: str | None = None) -> AssistantService:
+    return AssistantService(db, actor_id=actor_id)
 
 
 @router.get("/settings", response_model=AssistantRuntimeSettingsOut)
 def get_assistant_settings() -> AssistantRuntimeSettingsOut:
     return build_assistant_runtime_settings()
+
+
+@router.get("/token-usage", response_model=AssistantTokenUsageSummaryOut)
+def get_assistant_token_usage(db: Session = Depends(get_db)) -> AssistantTokenUsageSummaryOut:
+    return summarize_assistant_token_usage(db)
+
+
+@router.get("/token-usage/tracker", response_model=AssistantTokenUsageTrackerOut)
+def get_assistant_token_usage_tracker(db: Session = Depends(get_db)) -> AssistantTokenUsageTrackerOut:
+    return summarize_assistant_token_usage_tracker(db)
+
+
+@router.get("/personas", response_model=list[AssistantPersonaDefinitionOut])
+def list_assistant_personas() -> list[AssistantPersonaDefinitionOut]:
+    return [definition.to_out() for definition in list_assistant_persona_definitions()]
 
 
 @router.get("/agents", response_model=list[AssistantAgentOut])
@@ -202,6 +295,54 @@ def list_assistant_agents(db: Session = Depends(get_db)) -> list[AssistantAgentO
         )
         for record in records
     ]
+
+
+@router.get("/profile-requests", response_model=list[AssistantAgentProfileRequestOut])
+def list_current_user_assistant_profile_requests(
+    request: Request,
+    status: str | None = None,
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> list[AssistantAgentProfileRequestOut]:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return [
+        to_profile_request_out_with_diff(db, record)
+        for record in list_profile_requests(
+            db,
+            status=status,
+            requested_by=user.user_id,
+            limit=limit,
+            offset=offset,
+        )
+    ]
+
+
+@router.post(
+    "/profile-requests",
+    response_model=AssistantAgentProfileRequestOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_current_user_assistant_profile_request(
+    payload: AssistantAgentProfileRequestSubmit,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantAgentProfileRequestOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+        return to_profile_request_out_with_diff(
+            db,
+            submit_profile_request(
+                db,
+                payload=payload,
+                requested_by=user.user_id,
+            ),
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @router.get("/conversations", response_model=list[AssistantConversationSummaryOut])
@@ -297,6 +438,68 @@ def submit_current_user_assistant_run_feedback(
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return to_assistant_run_feedback_out(feedback)
+
+
+@router.post("/runs/{run_id}/prompt-navigation-outcomes", response_model=AssistantPromptNavigationOutcomeOut)
+def submit_current_user_assistant_prompt_navigation_outcome(
+    run_id: int,
+    payload: AssistantPromptNavigationOutcomeCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantPromptNavigationOutcomeOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+        record = resolve_accessible_assistant_run(
+            db=db,
+            run_id=run_id,
+            user=user,
+        )
+        outcome = upsert_assistant_prompt_navigation_outcome(
+            db,
+            run=record,
+            user=user,
+            payload=payload,
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return to_assistant_prompt_navigation_outcome_out(outcome)
+
+
+@router.post("/prompt-navigation-outcomes", response_model=AssistantPromptNavigationOutcomeOut)
+def submit_current_user_prompt_home_navigation_outcome(
+    payload: AssistantPromptNavigationOutcomeCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantPromptNavigationOutcomeOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+        outcome = create_prompt_home_navigation_outcome(
+            db,
+            user=user,
+            payload=payload,
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return to_assistant_prompt_navigation_outcome_out(outcome)
+
+
+@router.get("/prompt-route-recommendations", response_model=list[AssistantPromptRouteRecommendationOut])
+def list_current_user_prompt_route_recommendations(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[AssistantPromptRouteRecommendationOut]:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    return [
+        AssistantPromptRouteRecommendationOut.model_validate(asdict(recommendation))
+        for recommendation in list_prompt_route_recommendations(
+            db,
+            user_role=user.role,
+        )
+    ]
 
 
 @router.get("/action-requests/{action_request_id}", response_model=AssistantActionRequestOut)
@@ -408,7 +611,11 @@ def preview_assistant_prompt_context(
         provider=provider.provider,
         model=model,
         generated_at=prompt_context.generated_at,
-        warnings=[*warnings, *prompt_context.warnings],
+        warnings=[
+            *warnings,
+            *prompt_context.warnings,
+            *_build_prompt_context_preview_warnings(list(prompt_context.sections)),
+        ],
         sections=[_to_prompt_section_out(section) for section in prompt_context.sections],
         rendered_system_prompt=prompt_context.system_prompt,
     )
@@ -428,7 +635,7 @@ async def respond_with_assistant(
             authorization_header=request.headers.get("authorization"),
         )
         response, _ = await execute_assistant_execution(
-            assistant_service=get_assistant_service(db),
+            assistant_service=get_assistant_service(db, actor_id=prepared.user.user_id),
             payload=payload,
             db=db,
             prepared=prepared,
@@ -442,6 +649,50 @@ async def respond_with_assistant(
                 prepared=prepared,
                 detail=exc.detail,
             )
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/voice/transcriptions", response_model=AssistantVoiceTranscriptionOut)
+async def transcribe_current_user_assistant_voice(
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> AssistantVoiceTranscriptionOut:
+    try:
+        resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+        payload = await file.read()
+        return await transcribe_assistant_voice_audio(
+            filename=file.filename or "voice-note.webm",
+            content_type=file.content_type,
+            payload=payload,
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except AssistantVoiceTranscriptionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/voice/speech")
+async def synthesize_current_user_assistant_voice(
+    payload: AssistantVoiceSpeechRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+        result = await synthesize_assistant_voice_audio(text=payload.text)
+        return Response(
+            content=result.payload,
+            media_type=result.content_type,
+            headers={
+                "x-assistant-voice-provider": result.provider,
+                "x-assistant-voice-model": result.model,
+                "x-assistant-voice-voice": result.voice,
+            },
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except AssistantVoiceGenerationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
@@ -464,7 +715,7 @@ async def stream_assistant_response(
         yield _encode_sse("status", {"phase": "running"})
         try:
             response, conversation = await execute_assistant_execution(
-                assistant_service=get_assistant_service(db),
+                assistant_service=get_assistant_service(db, actor_id=prepared.user.user_id),
                 payload=payload,
                 db=db,
                 prepared=prepared,
@@ -528,7 +779,7 @@ def list_admin_assistant_profile_requests(
     db: Session = Depends(get_db),
 ) -> list[AssistantAgentProfileRequestOut]:
     return [
-        to_profile_request_out(record)
+        to_profile_request_out_with_diff(db, record)
         for record in list_profile_requests(db, status=status, limit=limit, offset=offset)
     ]
 
@@ -543,7 +794,7 @@ def create_admin_assistant_profile_request(
     db: Session = Depends(get_db),
 ) -> AssistantAgentProfileRequestOut:
     try:
-        return to_profile_request_out(create_profile_request(db, payload))
+        return to_profile_request_out_with_diff(db, create_profile_request(db, payload))
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -555,7 +806,7 @@ def approve_admin_assistant_profile_request(
     db: Session = Depends(get_db),
 ) -> AssistantAgentProfileRequestOut:
     try:
-        return to_profile_request_out(approve_profile_request(db, request_id=request_id, payload=payload))
+        return to_profile_request_out_with_diff(db, approve_profile_request(db, request_id=request_id, payload=payload))
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -567,7 +818,22 @@ def reject_admin_assistant_profile_request(
     db: Session = Depends(get_db),
 ) -> AssistantAgentProfileRequestOut:
     try:
-        return to_profile_request_out(reject_profile_request(db, request_id=request_id, payload=payload))
+        return to_profile_request_out_with_diff(db, reject_profile_request(db, request_id=request_id, payload=payload))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@admin_router.post("/profile-requests/{request_id}/activate", response_model=AssistantAgentProfileRequestOut)
+def activate_admin_assistant_profile_request(
+    request_id: int,
+    payload: AssistantAgentProfileRequestActivation,
+    db: Session = Depends(get_db),
+) -> AssistantAgentProfileRequestOut:
+    try:
+        record = mark_profile_request_activated(db, request_id=request_id, payload=payload)
+        db.commit()
+        db.refresh(record)
+        return to_profile_request_out_with_diff(db, record)
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -713,9 +979,288 @@ async def build_admin_assistant_agent(
     db: Session = Depends(get_db),
 ) -> AssistantAgentBuildSuggestionOut:
     try:
-        return await get_assistant_service(db).build_agent_draft_with_openai(payload)
+        return await get_assistant_service(db).build_agent_draft(payload)
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@admin_router.post("/agents/{agent_id}/self-update-draft", response_model=AssistantAgentSelfUpdateDraftOut)
+async def build_admin_assistant_agent_self_update_draft(
+    agent_id: str,
+    request: Request,
+    payload: AssistantAgentSelfUpdateRequest | None = None,
+    db: Session = Depends(get_db),
+) -> AssistantAgentSelfUpdateDraftOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    try:
+        return await generate_assistant_agent_self_update_draft(
+            db,
+            agent_id=agent_id,
+            payload=payload,
+            assistant_service=get_assistant_service(db),
+            actor_id=resolve_audit_actor_id(user.user_id),
+        )
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@admin_router.get("/agents/{agent_id}/revisions", response_model=list[AssistantAgentRevisionOut])
+def list_admin_assistant_agent_revisions(
+    agent_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[AssistantAgentRevisionOut]:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    record = get_agent_record(db, agent_id.strip().lower())
+    if record is None:
+        raise HTTPException(status_code=404, detail="Assistant agent not found")
+
+    ensure_agent_publication_snapshot(record)
+    rows = list_agent_revisions(db, agent_id=record.agent_id)
+    return [_to_agent_revision_out(record, row) for row in rows]
+
+
+@admin_router.post("/agents/{agent_id}/revisions/{revision_id}/publish", response_model=AssistantAgentAdminOut)
+def publish_admin_assistant_agent_revision(
+    agent_id: str,
+    revision_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantAgentAdminOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    record = get_agent_record(db, agent_id.strip().lower())
+    if record is None:
+        raise HTTPException(status_code=404, detail="Assistant agent not found")
+    revision = get_agent_revision(db, agent_id=record.agent_id, revision_id=revision_id)
+    if revision is None:
+        raise HTTPException(status_code=404, detail="Assistant agent revision not found")
+    if record.latest_revision_id is not None and revision.revision_id != record.latest_revision_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Only the latest assistant agent revision can be published",
+        )
+
+    actor_id = resolve_audit_actor_id(user.user_id)
+    _publish_agent_revision(db, record=record, revision=revision, actor_id=actor_id)
+    db.commit()
+    db.refresh(record)
+    return to_admin_agent_out(
+        record,
+        token_budget=summarize_agent_token_budget(db, record),
+        eval_gate=build_agent_eval_gate(db, record),
+    )
+
+
+@admin_router.get(
+    "/organization-context/definitions",
+    response_model=list[AssistantOrganizationContextDefinitionOut],
+)
+def list_admin_organization_context_definitions(
+    request: Request,
+    section_key: AssistantOrganizationContextSectionKey | None = None,
+    status: AssistantOrganizationContextStatus | None = None,
+    definition_key: str | None = None,
+    db: Session = Depends(get_db),
+) -> list[AssistantOrganizationContextDefinitionOut]:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    return [
+        _to_organization_context_definition_out(record)
+        for record in list_organization_context_definitions(
+            db,
+            section_key=section_key,
+            status=status,
+            definition_key=definition_key.strip().lower() if definition_key is not None else None,
+        )
+    ]
+
+
+@admin_router.get(
+    "/organization-context/definitions/{definition_id}",
+    response_model=AssistantOrganizationContextDefinitionOut,
+)
+def get_admin_organization_context_definition(
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantOrganizationContextDefinitionOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    record = get_organization_context_definition(db, definition_id=definition_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Organization context definition not found")
+    return _to_organization_context_definition_out(record)
+
+
+@admin_router.post(
+    "/organization-context/definitions",
+    response_model=AssistantOrganizationContextDefinitionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_admin_organization_context_definition(
+    payload: AssistantOrganizationContextDefinitionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantOrganizationContextDefinitionOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    try:
+        record = create_organization_context_definition(
+            db,
+            definition_key=payload.definition_key,
+            section_key=payload.section_key,
+            content_kind=payload.content_kind,
+            title=payload.title,
+            summary=payload.summary,
+            body=payload.body,
+            display_order=payload.display_order,
+            created_by=resolve_audit_actor_id(payload.created_by),
+        )
+        db.commit()
+    except OrganizationContextRegistryError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    db.refresh(record)
+    return _to_organization_context_definition_out(record)
+
+
+@admin_router.put(
+    "/organization-context/definitions/{definition_id}",
+    response_model=AssistantOrganizationContextDefinitionOut,
+)
+def update_admin_organization_context_definition(
+    definition_id: int,
+    payload: AssistantOrganizationContextDefinitionUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantOrganizationContextDefinitionOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    record = get_organization_context_definition(db, definition_id=definition_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Organization context definition not found")
+
+    try:
+        updated_record = update_organization_context_definition(
+            db,
+            record=record,
+            definition_key=payload.definition_key,
+            section_key=payload.section_key,
+            content_kind=payload.content_kind,
+            title=payload.title,
+            summary=payload.summary,
+            body=payload.body,
+            display_order=payload.display_order,
+            updated_by=resolve_audit_actor_id(payload.updated_by),
+        )
+        db.commit()
+    except OrganizationContextRegistryError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    db.refresh(updated_record)
+    return _to_organization_context_definition_out(updated_record)
+
+
+@admin_router.post(
+    "/organization-context/definitions/{definition_id}/publish",
+    response_model=AssistantOrganizationContextDefinitionOut,
+)
+def publish_admin_organization_context_definition(
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantOrganizationContextDefinitionOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    record = get_organization_context_definition(db, definition_id=definition_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Organization context definition not found")
+
+    try:
+        published_record = publish_organization_context_definition(
+            db,
+            record=record,
+            actor_id=resolve_audit_actor_id(user.user_id),
+        )
+        db.commit()
+    except OrganizationContextRegistryError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    db.refresh(published_record)
+    return _to_organization_context_definition_out(published_record)
+
+
+@admin_router.post(
+    "/organization-context/definitions/{definition_id}/retire",
+    response_model=AssistantOrganizationContextDefinitionOut,
+)
+def retire_admin_organization_context_definition(
+    definition_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantOrganizationContextDefinitionOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    record = get_organization_context_definition(db, definition_id=definition_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Organization context definition not found")
+
+    retired_record = retire_organization_context_definition(
+        db,
+        record=record,
+        actor_id=resolve_audit_actor_id(user.user_id),
+    )
+    db.commit()
+    db.refresh(retired_record)
+    return _to_organization_context_definition_out(retired_record)
 
 
 @admin_router.get("/runs", response_model=list[AssistantRunSummaryOut])
@@ -816,6 +1361,11 @@ def get_admin_assistant_agent_health_review(
 def list_admin_assistant_agent_work_packages(
     request: Request,
     status: str | None = None,
+    has_pr: bool | None = None,
+    has_commit: bool | None = None,
+    has_eval: bool | None = None,
+    has_tests: bool | None = None,
+    has_docs: bool | None = None,
     db: Session = Depends(get_db),
 ) -> list[AssistantAgentWorkPackageOut]:
     try:
@@ -826,7 +1376,15 @@ def list_admin_assistant_agent_work_packages(
         raise HTTPException(status_code=403, detail="Administrative access is required")
 
     try:
-        records = list_agent_work_packages(db, status=status)
+        records = list_agent_work_packages(
+            db,
+            status=status,
+            has_pr=has_pr,
+            has_commit=has_commit,
+            has_eval=has_eval,
+            has_tests=has_tests,
+            has_docs=has_docs,
+        )
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return [to_agent_work_package_out(record) for record in records]
@@ -853,6 +1411,11 @@ def update_admin_assistant_agent_work_package(
             status=payload.status,
             updated_by=payload.updated_by if payload.updated_by else user.user_id,
             notes=payload.notes,
+            implementation_evidence=(
+                payload.implementation_evidence.model_dump(exclude_none=True)
+                if payload.implementation_evidence is not None
+                else None
+            ),
         )
     except AssistantServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -1018,6 +1581,72 @@ def simulate_admin_assistant_agent_policy(
     return simulate_assistant_agent_policy(db=db, record=record, payload=payload)
 
 
+@admin_router.post("/agents/{agent_id}/context-preview", response_model=AssistantPromptContextOut)
+def preview_admin_assistant_agent_draft_context(
+    agent_id: str,
+    payload: AssistantAgentUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AssistantPromptContextOut:
+    try:
+        user = resolve_prompt_user(db=db, authorization_header=request.headers.get("authorization"))
+    except AssistantServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if not is_admin_role(user.role):
+        raise HTTPException(status_code=403, detail="Administrative access is required")
+
+    record = get_agent_record(db, agent_id.strip().lower())
+    if record is None:
+        raise HTTPException(status_code=404, detail="Assistant agent not found")
+
+    _validate_agent_hierarchy_binding(agent_id=record.agent_id, payload=payload)
+    policy_defaults = _resolve_agent_profile_defaults(payload)
+    _validate_agent_activation(db, agent_id=record.agent_id, payload=payload)
+    draft_agent = _build_admin_agent_draft_definition(
+        record=record,
+        payload=payload,
+        policy_defaults=policy_defaults,
+    )
+    preview_payload = AssistantPromptContextRequest(
+        agent_id=record.agent_id,
+        provider=payload.provider,
+        workspace=_resolve_admin_agent_draft_preview_workspace(payload),
+        context=_build_admin_agent_draft_preview_context(
+            record=record,
+            payload=payload,
+            policy_defaults=policy_defaults,
+        ),
+        use_live_tools="READ" in {capability.upper() for capability in payload.capabilities},
+    )
+    provider, model, warnings = resolve_effective_runtime(preview_payload, draft_agent)
+    prompt_context = build_prompt_context(
+        payload=preview_payload,
+        user=user,
+        db=db,
+        agent_definition=draft_agent,
+    )
+    return AssistantPromptContextOut(
+        agent_id=prompt_context.agent_id,
+        agent_name=prompt_context.agent_name,
+        agent_role_key=prompt_context.agent_role_key,
+        agent_profile_kind=prompt_context.agent_profile_kind,
+        provider=provider.provider,
+        model=model,
+        generated_at=prompt_context.generated_at,
+        warnings=[
+            (
+                "Draft preview is built from an unsaved admin agent payload; "
+                "save the agent to make these construction changes runtime-active."
+            ),
+            *warnings,
+            *prompt_context.warnings,
+            *_build_prompt_context_preview_warnings(list(prompt_context.sections)),
+        ],
+        sections=[_to_prompt_section_out(section) for section in prompt_context.sections],
+        rendered_system_prompt=prompt_context.system_prompt,
+    )
+
+
 @admin_router.post("/agents", response_model=AssistantAgentAdminOut, status_code=status.HTTP_201_CREATED)
 def create_assistant_agent(
     payload: AssistantAgentCreate,
@@ -1043,9 +1672,14 @@ def create_assistant_agent(
         human_owner_role=payload.human_owner_role,
         authority_ceiling=payload.authority_ceiling,
         activation_notes=payload.activation_notes,
+        orchestration_pattern=payload.orchestration_pattern,
+        parent_agent_id=payload.parent_agent_id,
+        managed_agent_ids=list(payload.managed_agent_ids),
+        delegation_guidance=payload.delegation_guidance,
         profile_request_id=payload.profile_request_id,
         allowed_workspaces=list(payload.allowed_workspaces),
         capabilities=list(payload.capabilities),
+        skills=list(policy_defaults.skills),
         allowed_tools=list(policy_defaults.allowed_tools),
         allowed_action_types=list(policy_defaults.allowed_action_types),
         daily_token_allocation=payload.daily_token_allocation,
@@ -1058,6 +1692,16 @@ def create_assistant_agent(
     )
     db.add(record)
     db.flush()
+    create_agent_revision(
+        db,
+        record=record,
+        payload=serialize_agent_revision_payload(record),
+        change_summary=["Initial assistant agent snapshot."],
+        created_by=actor_id,
+        version=record.version,
+        published=record.status != "DRAFT",
+        created_at=now,
+    )
     _seed_profile_request_evals_for_agent(db, record=record, actor_id=actor_id)
     _validate_agent_activation(db, agent_id=payload.agent_id, payload=payload)
     if record.status == "ACTIVE":
@@ -1085,8 +1729,10 @@ def update_assistant_agent(
     record = get_agent_record(db, agent_id.strip().lower())
     if record is None:
         raise HTTPException(status_code=404, detail="Assistant agent not found")
+    _validate_agent_hierarchy_binding(agent_id=record.agent_id, payload=payload)
 
     old_status = record.status
+    previous_payload = serialize_agent_revision_payload(record)
     policy_defaults = _resolve_agent_profile_defaults(payload)
     record.name = payload.name
     record.description = payload.description
@@ -1100,17 +1746,32 @@ def update_assistant_agent(
     record.human_owner_role = payload.human_owner_role
     record.authority_ceiling = payload.authority_ceiling
     record.activation_notes = payload.activation_notes
+    record.orchestration_pattern = payload.orchestration_pattern
+    record.parent_agent_id = payload.parent_agent_id
+    record.managed_agent_ids = list(payload.managed_agent_ids)
+    record.delegation_guidance = payload.delegation_guidance
     record.profile_request_id = payload.profile_request_id
     record.allowed_workspaces = list(payload.allowed_workspaces)
     record.capabilities = list(payload.capabilities)
+    record.skills = list(policy_defaults.skills)
     record.allowed_tools = list(policy_defaults.allowed_tools)
     record.allowed_action_types = list(policy_defaults.allowed_action_types)
     record.daily_token_allocation = payload.daily_token_allocation
     record.system_prompt = payload.system_prompt
     record.updated_at = datetime.now(timezone.utc)
     record.updated_by = resolve_audit_actor_id(payload.updated_by)
-    record.version += 1
+    record.version = next_agent_revision_version(db, record=record)
     db.flush()
+    create_agent_revision(
+        db,
+        record=record,
+        payload=serialize_agent_revision_payload(record),
+        change_summary=_build_agent_change_summary(previous_payload, serialize_agent_revision_payload(record)),
+        created_by=record.updated_by,
+        version=record.version,
+        published=record.status != "DRAFT",
+        created_at=record.updated_at,
+    )
     _seed_profile_request_evals_for_agent(db, record=record, actor_id=record.updated_by)
     _validate_agent_activation(db, agent_id=record.agent_id, payload=payload)
     if old_status != "ACTIVE" and record.status == "ACTIVE":
@@ -1130,12 +1791,228 @@ def update_assistant_agent(
     )
 
 
+def _publish_agent_revision(
+    db: Session,
+    *,
+    record: AssistantAgent,
+    revision: AssistantAgentRevision,
+    actor_id: str,
+) -> None:
+    payload = AssistantAgentRevisionPayloadOut.model_validate(normalize_agent_revision_payload(revision.payload))
+    _validate_agent_hierarchy_binding(agent_id=record.agent_id, payload=payload)
+    old_status = record.status
+    policy_defaults = _resolve_agent_profile_defaults(payload)
+    record.name = payload.name
+    record.description = payload.description
+    record.status = payload.status
+    record.scope = payload.scope
+    record.provider = payload.provider
+    record.model = payload.model
+    record.role_key = payload.role_key
+    record.profile_kind = payload.profile_kind
+    record.specialization_summary = payload.specialization_summary
+    record.human_owner_role = payload.human_owner_role
+    record.authority_ceiling = payload.authority_ceiling
+    record.activation_notes = payload.activation_notes
+    record.orchestration_pattern = payload.orchestration_pattern
+    record.parent_agent_id = payload.parent_agent_id
+    record.managed_agent_ids = list(payload.managed_agent_ids)
+    record.delegation_guidance = payload.delegation_guidance
+    record.profile_request_id = payload.profile_request_id
+    record.allowed_workspaces = list(payload.allowed_workspaces)
+    record.capabilities = list(payload.capabilities)
+    record.skills = list(policy_defaults.skills)
+    record.allowed_tools = list(policy_defaults.allowed_tools)
+    record.allowed_action_types = list(policy_defaults.allowed_action_types)
+    record.daily_token_allocation = payload.daily_token_allocation
+    record.system_prompt = payload.system_prompt
+    record.updated_at = datetime.now(timezone.utc)
+    record.updated_by = actor_id
+    record.version = max(int(record.version or 0), int(revision.version or 0))
+    record.latest_revision_id = revision.revision_id
+    record.published_revision_id = revision.revision_id
+    record.published_snapshot = normalize_agent_revision_payload(revision.payload)
+    record.published_at = record.updated_at
+    record.published_by = actor_id
+    revision.published_at = record.updated_at
+    revision.published_by = actor_id
+    db.flush()
+    _seed_profile_request_evals_for_agent(db, record=record, actor_id=actor_id)
+    _validate_agent_activation(db, agent_id=record.agent_id, payload=payload)
+    if old_status != "ACTIVE" and record.status == "ACTIVE":
+        _mark_profile_request_activated_for_agent(db, record=record, actor_id=actor_id)
+    _record_agent_provenance(
+        db,
+        record=record,
+        operation_key=_agent_status_operation_key(old_status=old_status, new_status=record.status),
+        action=record.status.lower() if old_status != record.status else "published",
+    )
+
+
+def _to_agent_revision_out(record: AssistantAgent, revision: AssistantAgentRevision) -> AssistantAgentRevisionOut:
+    baseline_payload = None
+    if record.published_revision_id != revision.revision_id:
+        baseline_payload = record.published_snapshot
+    return AssistantAgentRevisionOut(
+        revision_id=revision.revision_id,
+        agent_id=revision.agent_id,
+        version=revision.version,
+        change_summary=list(revision.change_summary or []),
+        diff_summary=build_agent_revision_diff_summary(baseline_payload, revision.payload),
+        payload=AssistantAgentRevisionPayloadOut.model_validate(normalize_agent_revision_payload(revision.payload)),
+        created_at=revision.created_at,
+        created_by=revision.created_by,
+        published_at=revision.published_at,
+        published_by=revision.published_by,
+        restored_from_revision_id=revision.restored_from_revision_id,
+        is_published=revision.published_at is not None,
+    )
+
+
+def _build_agent_change_summary(
+    previous_payload: dict[str, object],
+    next_payload: dict[str, object],
+) -> list[str]:
+    diff_summary = build_agent_revision_diff_summary(previous_payload, next_payload)
+    if not diff_summary:
+        return ["No material profile changes recorded."]
+    return [
+        f"{entry['label']}: {entry['current_value']} -> {entry['next_value']}"
+        for entry in diff_summary[:6]
+    ]
+
+
+def _build_admin_agent_draft_definition(
+    *,
+    record: AssistantAgent,
+    payload: AssistantAgentUpdate,
+    policy_defaults: AssistantAgentProfilePolicyDefaults,
+) -> ManagedAssistantAgent:
+    return ManagedAssistantAgent(
+        agent_id=record.agent_id,
+        name=payload.name,
+        description=payload.description,
+        status=payload.status,
+        scope=payload.scope,
+        provider=payload.provider,
+        model=payload.model,
+        role_key=payload.role_key,
+        profile_kind=payload.profile_kind,
+        specialization_summary=payload.specialization_summary,
+        human_owner_role=payload.human_owner_role,
+        authority_ceiling=payload.authority_ceiling,
+        activation_notes=payload.activation_notes,
+        orchestration_pattern=payload.orchestration_pattern,
+        parent_agent_id=payload.parent_agent_id,
+        managed_agent_ids=tuple(payload.managed_agent_ids),
+        delegation_guidance=payload.delegation_guidance,
+        allowed_workspaces=tuple(payload.allowed_workspaces),
+        capabilities=tuple(payload.capabilities),
+        skills=tuple(policy_defaults.skills),
+        allowed_tools=tuple(policy_defaults.allowed_tools),
+        allowed_action_types=tuple(policy_defaults.allowed_action_types),
+        system_prompt=payload.system_prompt,
+    )
+
+
+def _resolve_admin_agent_draft_preview_workspace(
+    payload: AssistantAgentUpdate,
+) -> AssistantWorkspace | None:
+    allowed_workspaces = list(payload.allowed_workspaces)
+    for preferred_workspace in ("admin", "assistant"):
+        if preferred_workspace in allowed_workspaces:
+            return cast(AssistantWorkspace, preferred_workspace)
+    if allowed_workspaces:
+        return allowed_workspaces[0]
+    return None
+
+
+def _build_admin_agent_draft_preview_context(
+    *,
+    record: AssistantAgent,
+    payload: AssistantAgentUpdate,
+    policy_defaults: AssistantAgentProfilePolicyDefaults,
+) -> str:
+    return "\n".join(
+        [
+            "Admin managed-agent draft construction preview",
+            f"saved_agent_id: {record.agent_id}",
+            f"draft_name: {payload.name}",
+            f"draft_profile_kind: {payload.profile_kind}",
+            f"draft_status: {payload.status}",
+            f"draft_scope: {payload.scope}",
+            _format_agent_draft_context_line("role_key", payload.role_key),
+            _format_agent_draft_context_line("human_owner_role", payload.human_owner_role),
+            _format_agent_draft_context_line("authority_ceiling", payload.authority_ceiling),
+            f"effective_workspaces: {_format_agent_draft_context_values(payload.allowed_workspaces)}",
+            f"effective_capabilities: {_format_agent_draft_context_values(payload.capabilities)}",
+            f"effective_skills: {_format_agent_draft_context_values(policy_defaults.skills)}",
+            f"effective_tools: {_format_agent_draft_context_values(policy_defaults.allowed_tools)}",
+            f"effective_actions: {_format_agent_draft_context_values(policy_defaults.allowed_action_types)}",
+            f"orchestration_pattern: {payload.orchestration_pattern}",
+            _format_agent_draft_context_line("parent_agent_id", payload.parent_agent_id),
+            f"managed_agent_ids: {_format_agent_draft_context_values(payload.managed_agent_ids)}",
+            _format_agent_draft_context_line("delegation_guidance", payload.delegation_guidance),
+            (
+                "review_goal: Show the unsaved context, policy, hierarchy, skills, prompt layers, "
+                "tool access, and action access before an admin saves the agent."
+            ),
+        ]
+    )
+
+
+def _format_agent_draft_context_line(label: str, value: object | None) -> str:
+    if value is None or value == "":
+        return f"{label}: none"
+    return f"{label}: {value}"
+
+
+def _format_agent_draft_context_values(values: tuple[str, ...] | list[str]) -> str:
+    return ", ".join(values) if values else "none"
+
+
 def _to_prompt_section_out(section: AssistantPromptSection) -> AssistantPromptSectionOut:
     return AssistantPromptSectionOut(
+        contract_key=section.contract_key,
+        contract_version=section.contract_version,
         key=section.key,
         title=section.title,
         source=section.source,
+        scope=section.scope,
+        kind=section.kind,
+        owner=section.owner,
+        owner_reference=section.owner_reference,
+        freshness=section.freshness,
+        merge_strategy=section.merge_strategy,
+        uses_fallback=section.uses_fallback,
         content=section.content,
+    )
+
+
+def _to_organization_context_definition_out(
+    record,
+) -> AssistantOrganizationContextDefinitionOut:
+    return AssistantOrganizationContextDefinitionOut(
+        id=record.id,
+        definition_key=record.definition_key,
+        section_key=record.section_key,
+        content_kind=record.content_kind,
+        title=record.title,
+        summary=record.summary,
+        body=record.body,
+        scope=record.scope,
+        status=record.status,
+        version=record.version,
+        display_order=record.display_order,
+        created_at=record.created_at,
+        created_by=record.created_by,
+        updated_at=record.updated_at,
+        updated_by=record.updated_by,
+        published_at=record.published_at,
+        published_by=record.published_by,
+        retired_at=record.retired_at,
+        retired_by=record.retired_by,
+        is_editable=record.status == "DRAFT",
     )
 
 
@@ -1149,25 +2026,33 @@ def _encode_sse(event: str, payload: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
 
 
-def _resolve_agent_profile_defaults(payload: AssistantAgentCreate | AssistantAgentUpdate) -> AssistantAgentProfilePolicyDefaults:
+def _resolve_agent_profile_defaults(
+    payload: AssistantAgentCreate | AssistantAgentUpdate | AssistantAgentRevisionPayloadOut,
+) -> AssistantAgentProfilePolicyDefaults:
     defaults = resolve_agent_profile_policy_defaults(
         role_key=payload.role_key,
         profile_kind=payload.profile_kind,
         capabilities=tuple(payload.capabilities),
+        skills=tuple(payload.skills),
         allowed_tools=tuple(payload.allowed_tools),
         allowed_action_types=tuple(payload.allowed_action_types),
     )
     try:
         validate_agent_profile_definition(
             agent_name=payload.name,
+            agent_id=getattr(payload, "agent_id", None),
             role_key=payload.role_key,
             profile_kind=payload.profile_kind,
             scope=payload.scope,
             allowed_workspaces=tuple(payload.allowed_workspaces),
             capabilities=tuple(payload.capabilities),
+            skills=defaults.skills,
             allowed_tools=defaults.allowed_tools,
             allowed_action_types=defaults.allowed_action_types,
             authority_ceiling=payload.authority_ceiling,
+            orchestration_pattern=payload.orchestration_pattern,
+            parent_agent_id=payload.parent_agent_id,
+            managed_agent_ids=tuple(payload.managed_agent_ids),
         )
     except AssistantAgentProfilePolicyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1178,7 +2063,7 @@ def _validate_agent_activation(
     db: Session,
     *,
     agent_id: str,
-    payload: AssistantAgentCreate | AssistantAgentUpdate,
+    payload: AssistantAgentCreate | AssistantAgentUpdate | AssistantAgentRevisionPayloadOut,
 ) -> None:
     try:
         validate_agent_activation_requirements(
@@ -1199,6 +2084,17 @@ def _validate_agent_activation(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+def _validate_agent_hierarchy_binding(
+    *,
+    agent_id: str,
+    payload: AssistantAgentUpdate | AssistantAgentRevisionPayloadOut,
+) -> None:
+    if payload.parent_agent_id == agent_id:
+        raise HTTPException(status_code=400, detail="parent_agent_id cannot match agent_id")
+    if agent_id in set(payload.managed_agent_ids):
+        raise HTTPException(status_code=400, detail="managed_agent_ids cannot include agent_id")
+
+
 def _mark_profile_request_activated_for_agent(
     db: Session,
     *,
@@ -1207,6 +2103,12 @@ def _mark_profile_request_activated_for_agent(
 ) -> None:
     if record.profile_request_id is None:
         return
+    linked_revision_id = record.published_revision_id or record.latest_revision_id
+    if linked_revision_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Assistant agent profile request activation requires a saved agent revision.",
+        )
     try:
         mark_profile_request_activated(
             db,
@@ -1214,6 +2116,7 @@ def _mark_profile_request_activated_for_agent(
             payload=AssistantAgentProfileRequestActivation(
                 activated_by=actor_id,
                 linked_agent_id=record.agent_id,
+                linked_revision_id=linked_revision_id,
             ),
         )
     except AssistantServiceError as exc:
@@ -1276,6 +2179,8 @@ def _record_agent_provenance(
             "profile_kind": record.profile_kind,
             "profile_request_id": record.profile_request_id,
             "workspace_count": len(record.allowed_workspaces or []),
+            "capability_count": len(record.capabilities or []),
+            "skill_count": len(record.skills or []),
             "tool_count": len(record.allowed_tools or []),
             "action_type_count": len(record.allowed_action_types or []),
         },

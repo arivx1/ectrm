@@ -6,9 +6,11 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.auth import is_operations_role
 from apps.api.app.core.http import NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.operations.services.actualizations import void_trade_actualization
 from apps.api.app.domains.operations.services.actualizations import upsert_trade_actualization
 from apps.api.app.domains.operations.services.shipments import list_shipments_for_operations
 from apps.api.app.schemas.shipment import DeliveryActualizationOut
+from apps.api.app.schemas.shipment import DeliveryActualizationVoidWrite
 from apps.api.app.schemas.shipment import DeliveryActualizationWrite
 from apps.api.app.schemas.shipment import DeliveryObligationOut
 from .framework import build_role_mutation_spec
@@ -82,9 +84,55 @@ def put_trade_leg_actualization(
     )
 
 
+@router.post("/{trade_id}/actualization/void", response_model=DeliveryActualizationOut)
+def post_trade_actualization_void(
+    trade_id: str,
+    payload: DeliveryActualizationVoidWrite,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DeliveryActualizationOut:
+    return execute_operational_mutation(
+        SHIPMENT_ACTUALIZATION_MUTATION_SPEC,
+        request,
+        db,
+        lambda actor: void_trade_actualization(
+            db,
+            trade_id=trade_id,
+            actor_id=actor.actor_id,
+            void_reason=payload.void_reason,
+            notes=payload.notes,
+        )
+    )
+
+
+@router.post("/{trade_id}/legs/{leg_no}/actualization/void", response_model=DeliveryActualizationOut)
+def post_trade_leg_actualization_void(
+    trade_id: str,
+    leg_no: int,
+    payload: DeliveryActualizationVoidWrite,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DeliveryActualizationOut:
+    return execute_operational_mutation(
+        SHIPMENT_ACTUALIZATION_MUTATION_SPEC,
+        request,
+        db,
+        lambda actor: void_trade_actualization(
+            db,
+            trade_id=trade_id,
+            leg_no=leg_no,
+            actor_id=actor.actor_id,
+            void_reason=payload.void_reason,
+            notes=payload.notes,
+        )
+    )
+
+
 __all__ = [
     "router",
     "list_shipments",
     "put_trade_actualization",
     "put_trade_leg_actualization",
+    "post_trade_actualization_void",
+    "post_trade_leg_actualization_void",
 ]

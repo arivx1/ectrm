@@ -31,6 +31,26 @@ same entrypoints.
 uvicorn apps.api.app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+If you are testing the first ChatGPT MCP scaffold locally, enable
+`MCP_ENABLED=true` in `apps/api/.env` before starting the API. The mounted MCP
+endpoint will then be available at:
+
+```text
+http://127.0.0.1:8000/mcp/
+```
+
+To test the new ChatGPT-ready OAuth bridge locally, also set:
+
+```text
+MCP_AUTH_MODE=oauth
+MCP_OAUTH_ISSUER_URL=http://127.0.0.1:8000/mcp
+MCP_OAUTH_SIGNING_SECRET=<strong-random-secret>
+```
+
+That enables the browser-side authorization handoff at `/mcp/login` and the
+debug identity probe at `/mcp/whoami`. The current login page supports ECTRM
+password sign-in and optional single-user auth only.
+
 ### Web
 
 ```bash
@@ -47,6 +67,17 @@ If Vite needs another local port because `5173` is already occupied, the API
 should still accept loopback browser origins such as `http://localhost:5174`
 and `http://127.0.0.1:5174` as long as loopback origins remain part of the
 configured CORS allowlist.
+
+### One-command local start
+
+From the repo root:
+
+```bash
+make dev
+```
+
+This starts Docker Compose for PostgreSQL, then launches the API and web app
+in one foreground process so `Ctrl+C` stops both together.
 
 ### Rebuild trades projection
 
@@ -66,7 +97,10 @@ Run these from the repo root:
 
 ```bash
 make api-contract-check
+make api-mcp-test
 make api-assistant-evals
+make api-document-classification-evals
+make api-document-packet-split-evals
 make api-test
 make web-build
 make web-lint
@@ -111,6 +145,44 @@ Use `make api-assistant-evals` explicitly whenever changes affect assistant or
 automation behavior. That lane is also part of the repo-level `make verify`
 contract now.
 
+Use `make api-document-classification-evals` explicitly whenever changes affect
+deterministic document typing, classification evidence weights, ambiguity
+handling, or reviewed-example reuse for uploaded documents.
+
+Use `make api-document-packet-split-evals` explicitly whenever changes affect
+logical-document packet split detection, shared-page inference, packet
+correction capture, or replay fixture handling. This lane is also part of the
+repo-level `make verify` contract and the backend pull-request CI path.
+
+To export a sanitized replay fixture from reviewed document pages in the
+configured database, run:
+
+```bash
+./.venv/bin/python apps/api/scripts/export_document_classification_replay_fixture.py \
+  --output tmp/document-classification-reviewed-replay.json \
+  --limit 100
+```
+
+Then replay it through the same scorer lane with:
+
+```bash
+./.venv/bin/python apps/api/scripts/run_document_classification_evals.py \
+  --corpus tmp/document-classification-reviewed-replay.json --check
+```
+
+To replay captured packet split correction fixtures against the deterministic
+split detector, run:
+
+```bash
+./.venv/bin/python apps/api/scripts/run_document_packet_split_correction_replay.py \
+  --fixture apps/api/tests/fixtures/document_packet_split_correction_eval_corpus.json \
+  --check
+```
+
+Use `make api-mcp-test` explicitly whenever changes affect the ChatGPT MCP
+surface, including `/mcp` transport behavior, MCP OAuth, or the published
+`search` and `fetch` tools.
+
 The first backend CI lane runs on Python `3.12`, checks the committed trade
 metadata contract artifact with `make api-contract-check`, and currently does
 not start a PostgreSQL service container because the checked-in backend suite
@@ -124,3 +196,23 @@ frontend verification contract matches the repo-level Make targets.
 The first browser smoke CI path is a manual `Browser Smoke` workflow. It uses
 `make web-install`, `make web-smoke-install-ci`, and `make web-smoke-test` so
 the Playwright startup path matches the local seeded harness contract.
+
+## Prompt-First Verification Lane
+
+Prompt-led UX spans assistant behavior, React rendering, and browser routing,
+so use the narrowest lane that matches the change:
+
+- run `make api-assistant-evals` when a prompt-first change affects assistant
+  instructions, mutation authority boundaries, staged action behavior, or the
+  expected split between navigation, explanation, and manual fallback
+- run `make web-test` when a change affects prompt-intent parsing, Prompt Home
+  rendering, contextual starters, handoff controls, or client-side fail-closed
+  behavior
+- run `make web-smoke-test` when a change affects first landing, sign-in
+  resume, prompt submission, assistant-to-workspace handoff, or other
+  end-to-end prompt-first flows
+
+For prompt-first packages, it is common to need more than one lane. A routing
+or authority change usually needs `make api-assistant-evals` plus either
+`make web-test` or `make web-smoke-test`, depending on whether the behavior is
+component-local or browser-level.

@@ -1,9 +1,15 @@
 import { fetchJson, patchJson, postFormData, postJson, requestOk } from '../../shared/api'
 import type { StoredAuthSession } from '../../shared/mutation'
 import type {
+  DocumentActionApprovalRequestRecord,
+  DocumentGmailInboxBrowseResultRecord,
+  DocumentGmailInboxMessageDetailRecord,
   DocumentIngestionRecord,
   DocumentProcessorRuntimeSettingsRecord,
+  DocumentRecordCreationRequestRecord,
   DocumentSchemaRegistryRecord,
+  DocumentWorkflowExecutionRecord,
+  DocumentWorkflowListRecord,
 } from '../../shared/models'
 
 export type DocumentExtractedFieldInput = {
@@ -23,9 +29,22 @@ export type DocumentTableBlockInput = {
   source?: string | null
 }
 
+export type DocumentFacetAssignmentInput = {
+  facet_key: string
+  value_code: string
+  value_label?: string | null
+  source?: string
+  confidence?: number | null
+  review_status?: string
+  evidence?: string[]
+}
+
 export type UpdateDocumentIngestionInput = {
   display_name?: string | null
+  document_kind?: string | null
+  facet_values?: DocumentFacetAssignmentInput[]
   review_status?: string | null
+  verification_mode?: 'STRICT' | 'STATUS_ONLY' | null
   review_notes?: string | null
 }
 
@@ -34,12 +53,108 @@ export type UpdateDocumentPageInput = {
   document_subtype?: string | null
   header_fields?: DocumentExtractedFieldInput[]
   table_blocks?: DocumentTableBlockInput[]
+  facet_values?: DocumentFacetAssignmentInput[]
   review_status?: string | null
   review_notes?: string | null
 }
 
+export type UpdateDocumentLogicalDocumentInput = {
+  document_kind: string
+  document_subtype?: string | null
+  page_ids: number[]
+  review_status?: string | null
+  review_notes?: string | null
+}
+
+export type UpdateDocumentLogicalDocumentsInput = {
+  expected_document_version?: number | null
+  logical_documents: UpdateDocumentLogicalDocumentInput[]
+}
+
+export type ImportGmailInboxDocumentsInput = {
+  query?: string | null
+  max_messages?: number | null
+}
+
+export type GmailImportedDocument = {
+  document_id: string
+  display_name: string
+  original_filename: string
+  gmail_message_id: string
+  gmail_thread_id: string | null
+  gmail_subject: string | null
+  gmail_sender: string | null
+}
+
+export type GmailInboxImportResult = {
+  query: string
+  requested_max_messages: number
+  matched_message_count: number
+  matched_attachment_count: number
+  imported_count: number
+  skipped_count: number
+  imported_documents: GmailImportedDocument[]
+  warnings: string[]
+}
+
+export type ListGmailInboxMessagesInput = {
+  query?: string | null
+  page_size?: number | null
+  page_token?: string | null
+}
+
+export type ListDocumentActionApprovalRequestsInput = {
+  status?: 'PENDING' | 'EXECUTED' | 'REJECTED' | null
+  limit?: number | null
+}
+
+export type StageDocumentActionApprovalRequestInput = {
+  request_comment?: string | null
+}
+
+export type StageDocumentRecordCreationRequestInput = {
+  request_comment?: string | null
+}
+
+export type ResolveDocumentRecordCreationRequestInput = {
+  record_type: string
+  record_id: string
+  resolution_comment?: string | null
+}
+
+export type CancelDocumentRecordCreationRequestInput = {
+  resolution_comment: string
+}
+
+export type DecideDocumentActionApprovalRequestInput = {
+  decision_comment: string
+}
+
+export type DocumentRecordCandidateSelectionInput = {
+  record_type: string
+  record_id?: string | null
+  request_comment?: string | null
+}
+
 function documentHeaders(session: StoredAuthSession): Headers {
   return new Headers({ Authorization: `Bearer ${session.accessToken}` })
+}
+
+const DOCUMENT_WORKFLOW_LIST_TIMEOUT_MS = 15_000
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs)
+  })
+
+  try {
+    return await Promise.race([promise, timeoutPromise])
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId)
+    }
+  }
 }
 
 export async function listDocumentSchemaRegistry(
@@ -78,6 +193,8 @@ export async function uploadPdfDocument(
   file: File,
   displayName?: string,
   processorProvider?: 'builtin' | 'openai' | 'anthropic' | 'google' | null,
+  processorModel?: string | null,
+  aiConfidenceThreshold?: number | null,
 ): Promise<DocumentIngestionRecord> {
   const formData = new FormData()
   formData.append('file', file)
@@ -86,6 +203,12 @@ export async function uploadPdfDocument(
   }
   if (processorProvider?.trim()) {
     formData.append('processor_provider', processorProvider.trim())
+  }
+  if (processorModel?.trim()) {
+    formData.append('processor_model', processorModel.trim())
+  }
+  if (typeof aiConfidenceThreshold === 'number' && Number.isFinite(aiConfidenceThreshold)) {
+    formData.append('ai_confidence_threshold', String(Math.min(Math.max(aiConfidenceThreshold, 0), 1)))
   }
 
   return postFormData<DocumentIngestionRecord>(`${apiBase}/documents/uploads`, formData, {
@@ -124,19 +247,94 @@ export async function updateDocumentPage(
   )
 }
 
+export async function updateDocumentLogicalDocuments(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  payload: UpdateDocumentLogicalDocumentsInput,
+): Promise<DocumentIngestionRecord> {
+  return patchJson<DocumentIngestionRecord>(
+    `${apiBase}/documents/${documentId}/logical-documents`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
 export async function reprocessDocumentIngestion(
   apiBase: string,
   session: StoredAuthSession,
   documentId: string,
   processorProvider?: 'builtin' | 'openai' | 'anthropic' | 'google' | null,
+  processorModel?: string | null,
+  aiConfidenceThreshold?: number | null,
 ): Promise<DocumentIngestionRecord> {
+  const payload: Record<string, unknown> = {}
+  if (processorProvider) {
+    payload.processor_provider = processorProvider
+  }
+  if (processorModel?.trim()) {
+    payload.processor_model = processorModel.trim()
+  }
+  if (typeof aiConfidenceThreshold === 'number' && Number.isFinite(aiConfidenceThreshold)) {
+    payload.ai_confidence_threshold = Math.min(Math.max(aiConfidenceThreshold, 0), 1)
+  }
   return postJson<DocumentIngestionRecord>(
     `${apiBase}/documents/${documentId}/reprocess`,
-    processorProvider ? { processor_provider: processorProvider } : {},
+    payload,
     {
       headers: documentHeaders(session),
     },
   )
+}
+
+export async function importGmailInboxDocuments(
+  apiBase: string,
+  session: StoredAuthSession,
+  payload: ImportGmailInboxDocumentsInput = {},
+): Promise<GmailInboxImportResult> {
+  return postJson<GmailInboxImportResult>(
+    `${apiBase}/documents/imports/gmail`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function listGmailInboxMessages(
+  apiBase: string,
+  session: StoredAuthSession,
+  payload: ListGmailInboxMessagesInput = {},
+): Promise<DocumentGmailInboxBrowseResultRecord> {
+  const searchParams = new URLSearchParams()
+  if (payload.query?.trim()) {
+    searchParams.set('query', payload.query.trim())
+  }
+  if (typeof payload.page_size === 'number' && Number.isFinite(payload.page_size)) {
+    searchParams.set('page_size', String(payload.page_size))
+  }
+  if (payload.page_token?.trim()) {
+    searchParams.set('page_token', payload.page_token.trim())
+  }
+  const querySuffix = searchParams.size > 0 ? `?${searchParams.toString()}` : ''
+
+  return fetchJson<DocumentGmailInboxBrowseResultRecord>(`${apiBase}/documents/gmail/messages${querySuffix}`, {
+    headers: documentHeaders(session),
+    cache: 'no-store',
+  })
+}
+
+export async function getGmailInboxMessageDetail(
+  apiBase: string,
+  session: StoredAuthSession,
+  messageId: string,
+): Promise<DocumentGmailInboxMessageDetailRecord> {
+  return fetchJson<DocumentGmailInboxMessageDetailRecord>(`${apiBase}/documents/gmail/messages/${encodeURIComponent(messageId)}`, {
+    headers: documentHeaders(session),
+    cache: 'no-store',
+  })
 }
 
 export async function executeDocumentActionPlan(
@@ -153,6 +351,181 @@ export async function executeDocumentActionPlan(
   )
 }
 
+export async function listDocumentActionApprovalRequests(
+  apiBase: string,
+  session: StoredAuthSession,
+  payload: ListDocumentActionApprovalRequestsInput = {},
+): Promise<DocumentActionApprovalRequestRecord[]> {
+  const searchParams = new URLSearchParams()
+  if (payload.status?.trim()) {
+    searchParams.set('status', payload.status.trim())
+  }
+  if (typeof payload.limit === 'number' && Number.isFinite(payload.limit)) {
+    searchParams.set('limit', String(payload.limit))
+  }
+  const querySuffix = searchParams.size > 0 ? `?${searchParams.toString()}` : ''
+
+  return fetchJson<DocumentActionApprovalRequestRecord[]>(
+    `${apiBase}/documents/action-approval-requests${querySuffix}`,
+    {
+      headers: documentHeaders(session),
+      cache: 'no-store',
+    },
+  )
+}
+
+export async function stageDocumentActionApprovalRequest(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  payload: StageDocumentActionApprovalRequestInput = {},
+): Promise<DocumentActionApprovalRequestRecord> {
+  return postJson<DocumentActionApprovalRequestRecord>(
+    `${apiBase}/documents/${documentId}/action-approval-requests`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function approveDocumentActionApprovalRequest(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  payload: DecideDocumentActionApprovalRequestInput,
+): Promise<DocumentActionApprovalRequestRecord> {
+  return postJson<DocumentActionApprovalRequestRecord>(
+    `${apiBase}/documents/${documentId}/action-approval-requests/approve`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function rejectDocumentActionApprovalRequest(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  payload: DecideDocumentActionApprovalRequestInput,
+): Promise<DocumentActionApprovalRequestRecord> {
+  return postJson<DocumentActionApprovalRequestRecord>(
+    `${apiBase}/documents/${documentId}/action-approval-requests/reject`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function attachSelectedDocumentRecordCandidate(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  payload: DocumentRecordCandidateSelectionInput,
+): Promise<DocumentIngestionRecord> {
+  return postJson<DocumentIngestionRecord>(
+    `${apiBase}/documents/${documentId}/record-candidate-attachments`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function stageSelectedDocumentRecordCandidateApprovalRequest(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  payload: DocumentRecordCandidateSelectionInput,
+): Promise<DocumentActionApprovalRequestRecord> {
+  return postJson<DocumentActionApprovalRequestRecord>(
+    `${apiBase}/documents/${documentId}/record-candidate-attachments/approval-requests`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function stageDocumentRecordCreationRequest(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  payload: StageDocumentRecordCreationRequestInput = {},
+): Promise<DocumentRecordCreationRequestRecord> {
+  return postJson<DocumentRecordCreationRequestRecord>(
+    `${apiBase}/documents/${documentId}/record-creation-requests`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function resolveDocumentRecordCreationRequest(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  requestId: number,
+  payload: ResolveDocumentRecordCreationRequestInput,
+): Promise<DocumentRecordCreationRequestRecord> {
+  return postJson<DocumentRecordCreationRequestRecord>(
+    `${apiBase}/documents/${documentId}/record-creation-requests/${requestId}/resolve`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function cancelDocumentRecordCreationRequest(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  requestId: number,
+  payload: CancelDocumentRecordCreationRequestInput,
+): Promise<DocumentRecordCreationRequestRecord> {
+  return postJson<DocumentRecordCreationRequestRecord>(
+    `${apiBase}/documents/${documentId}/record-creation-requests/${requestId}/cancel`,
+    payload as Record<string, unknown>,
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
+export async function listDocumentWorkflows(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+): Promise<DocumentWorkflowListRecord> {
+  return withTimeout(
+    fetchJson<DocumentWorkflowListRecord>(`${apiBase}/documents/${documentId}/workflows`, {
+      headers: documentHeaders(session),
+      cache: 'no-store',
+    }),
+    DOCUMENT_WORKFLOW_LIST_TIMEOUT_MS,
+    'Document workflows did not respond within 15 seconds. Try again or check the API connection.',
+  )
+}
+
+export async function executeDocumentWorkflow(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+  workflowId: string,
+): Promise<DocumentWorkflowExecutionRecord> {
+  return postJson<DocumentWorkflowExecutionRecord>(
+    `${apiBase}/documents/${documentId}/workflows/${workflowId}/execute`,
+    {},
+    {
+      headers: documentHeaders(session),
+    },
+  )
+}
+
 export async function fetchDocumentPagePreview(
   apiBase: string,
   session: StoredAuthSession,
@@ -160,6 +533,18 @@ export async function fetchDocumentPagePreview(
   pageId: number,
 ): Promise<Blob> {
   const response = await requestOk(`${apiBase}/documents/${documentId}/pages/${pageId}/preview`, {
+    headers: documentHeaders(session),
+    cache: 'no-store',
+  })
+  return response.blob()
+}
+
+export async function fetchDocumentSource(
+  apiBase: string,
+  session: StoredAuthSession,
+  documentId: string,
+): Promise<Blob> {
+  const response = await requestOk(`${apiBase}/documents/${documentId}/source`, {
     headers: documentHeaders(session),
     cache: 'no-store',
   })

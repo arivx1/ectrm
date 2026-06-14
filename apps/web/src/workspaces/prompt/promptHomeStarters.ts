@@ -1,4 +1,5 @@
 import type { PromptNavigationIntent } from '../../entities/app/promptNavigationIntent'
+import type { AssistantWorkspaceSummaryTarget } from '../../shared/models'
 
 export type PromptHomeCounts = {
   activeTrades: number | null
@@ -22,6 +23,7 @@ export type PromptHomeContextualStarter = {
   prompt: string
   askLabel: string
   intent: PromptNavigationIntent
+  summaryTargets?: AssistantWorkspaceSummaryTarget[]
 }
 
 function formatStarterCount(value: number | null): string {
@@ -59,8 +61,10 @@ export function buildPromptHomeContextualStarters(
       kicker: 'Operations',
       title: 'Clear operations blockers',
       metric: formatStarterCount(operationsCount),
-      detail: 'Confirmation, delivery, approval, and handoff work belongs in the operations queue.',
-      prompt: 'Summarize the open operations queue and tell me which blocker to handle first.',
+      detail:
+        'Confirmation, delivery, approval, and handoff work belongs in the operations queue. Older unconfirmed and uninvoiced trades rise first, while delivery-near physical work moves to the front.',
+      prompt:
+        'Summarize the open operations queue, explain why the lead item is first, and tell me which blocker to handle now.',
       askLabel: 'Ask about operations blockers',
       intent: {
         kind: 'open_workspace',
@@ -68,14 +72,22 @@ export function buildPromptHomeContextualStarters(
         label: 'Open Work Queue',
         rationale: 'Use the work queue for confirmations, delivery blockers, approvals, and handoffs.',
       },
+      summaryTargets: [
+        'dashboard.attention.confirmation_backlog_count',
+        'dashboard.attention.nomination_backlog_count',
+        'dashboard.attention.allocation_backlog_count',
+        'dashboard.attention.invoice_backlog_count',
+      ],
     },
     {
       key: 'settlement-follow-through',
       kicker: 'Settlement',
       title: 'Review invoices and payments',
       metric: formatStarterCount(settlementCount),
-      detail: 'Invoice status, payment due items, and settlement exceptions continue in settlement.',
-      prompt: 'Summarize pending invoices and payments due, then route me to the right settlement follow-through.',
+      detail:
+        'Invoice status, payment due items, and settlement exceptions continue in settlement. Ready invoice work rises before blocked previews, and disputed or overdue cash work comes before ordinary due follow-through.',
+      prompt:
+        'Summarize pending invoices and payments due, explain why the lead item is first, then route me to the right settlement follow-through.',
       askLabel: 'Ask about settlement follow-through',
       intent: {
         kind: 'open_workspace',
@@ -83,13 +95,19 @@ export function buildPromptHomeContextualStarters(
         label: 'Open Settlement',
         rationale: 'Use settlement for invoices, payments, aging, and cash exceptions.',
       },
+      summaryTargets: [
+        'settlement.invoice_pending_count',
+        'settlement.payment_due_count',
+        'settlement.trade_exception_count',
+      ],
     },
     {
       key: 'pricing-exposure',
       kicker: 'Risk',
       title: 'Check pricing and exposure',
       metric: formatStarterCount(pricingRiskCount),
-      detail: 'Pricing gaps and exposure signals are best reviewed against the risk workspace.',
+      detail:
+        'Pricing gaps and exposure signals are best reviewed against the risk workspace. Older unresolved pricing work rises first.',
       prompt: 'Where should I look for exposure risk today based on pricing gaps and desk attention items?',
       askLabel: 'Ask about pricing and exposure',
       intent: {
@@ -98,6 +116,7 @@ export function buildPromptHomeContextualStarters(
         label: 'Open Exposure',
         rationale: 'Use exposure when pricing coverage, open risk, or position context needs review.',
       },
+      summaryTargets: ['dashboard.attention.stale_pricing_count'],
     },
     {
       key: 'trade-capture',

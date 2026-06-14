@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -p tsconfig.app.json --noEmit --incremental false && tsc -p tsconfig.node.json --noEmit --incremental false && vite build",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
     "test:browser-smoke": "npm run test:smoke",
@@ -18,8 +18,10 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "maplibre-gl": "^5.24.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

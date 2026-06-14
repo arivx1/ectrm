@@ -1,3 +1,7 @@
+import { byteLength, estimateApiRequestBytes, recordApiTransfer } from './apiThroughput'
+
+const responsesWithRecordedInboundBytes = new WeakSet<Response>()
+
 export class ApiError extends Error {
   status: number
   correlationId: string | null
@@ -26,24 +30,38 @@ function formatApiErrorMessage(message: string, correlationId?: string | null): 
   return `${normalizedMessage} ${suffix}`
 }
 
-function resolveLoopbackFallbackUrls(url: string): string[] {
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1'
+}
+
+function appendUniqueUrl(urls: string[], candidate: string): void {
+  if (!urls.includes(candidate)) {
+    urls.push(candidate)
+  }
+}
+
+function resolveApiFallbackUrls(url: string): string[] {
   if (typeof window === 'undefined') {
     return []
   }
 
   try {
     const parsedUrl = new URL(url, window.location.href)
-    if (parsedUrl.hostname === 'localhost') {
-      parsedUrl.hostname = '127.0.0.1'
-      return [parsedUrl.toString()]
+    const fallbackUrls: string[] = []
+
+    if (isLoopbackHost(parsedUrl.hostname)) {
+      const alternateLoopbackUrl = new URL(parsedUrl.toString())
+      alternateLoopbackUrl.hostname = parsedUrl.hostname === 'localhost' ? '127.0.0.1' : 'localhost'
+      appendUniqueUrl(fallbackUrls, alternateLoopbackUrl.toString())
     }
 
-    if (parsedUrl.hostname === '127.0.0.1') {
-      parsedUrl.hostname = 'localhost'
-      return [parsedUrl.toString()]
+    if (isLoopbackHost(parsedUrl.hostname) && !isLoopbackHost(window.location.hostname)) {
+      const browserHostnameUrl = new URL(parsedUrl.toString())
+      browserHostnameUrl.hostname = window.location.hostname
+      appendUniqueUrl(fallbackUrls, browserHostnameUrl.toString())
     }
 
-    return []
+    return fallbackUrls
   } catch {
     return []
   }
@@ -51,11 +69,13 @@ function resolveLoopbackFallbackUrls(url: string): string[] {
 
 async function fetchWithApiFallback(url: string, init?: RequestInit): Promise<Response> {
   try {
+    recordApiTransfer({ bytesOut: estimateApiRequestBytes(url, init) })
     return await fetch(url, init)
   } catch (error) {
-    const fallbackUrls = resolveLoopbackFallbackUrls(url)
+    const fallbackUrls = resolveApiFallbackUrls(url)
     for (const fallbackUrl of fallbackUrls) {
       try {
+        recordApiTransfer({ bytesOut: estimateApiRequestBytes(fallbackUrl, init) })
         return await fetch(fallbackUrl, init)
       } catch {
         // Try the next loopback alias before surfacing the connection issue.
@@ -146,6 +166,30 @@ function extractApiErrorMessage(payload: unknown): string | null {
   return null
 }
 
+function recordResponseContentLength(response: Response): void {
+  const rawContentLength = response.headers.get('content-length')
+  if (!rawContentLength) {
+    return
+  }
+
+  const contentLength = Number(rawContentLength)
+  if (!Number.isFinite(contentLength) || contentLength <= 0) {
+    return
+  }
+
+  recordApiTransfer({ bytesIn: contentLength })
+  responsesWithRecordedInboundBytes.add(response)
+}
+
+function recordResponseBodyBytes(response: Response, bodyText: string): void {
+  if (responsesWithRecordedInboundBytes.has(response)) {
+    return
+  }
+
+  recordApiTransfer({ bytesIn: byteLength(bodyText) })
+  responsesWithRecordedInboundBytes.add(response)
+}
+
 export function createApiError(
   message: string,
   init?: { status?: number; correlationId?: string | null },
@@ -156,6 +200,7 @@ export function createApiError(
 export async function buildApiError(response: Response): Promise<ApiError> {
   const responseCorrelationId = getResponseCorrelationId(response)
   const text = await response.text()
+  recordResponseBodyBytes(response, text)
   if (text) {
     let payload: unknown = null
 
@@ -189,6 +234,7 @@ export async function buildApiError(response: Response): Promise<ApiError> {
 
 export async function requestOk(url: string, init?: RequestInit): Promise<Response> {
   const response = await fetchWithApiFallback(url, init)
+  recordResponseContentLength(response)
   if (!response.ok) {
     throw await buildApiError(response)
   }
@@ -202,7 +248,9 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
     return undefined as T
   }
 
-  return response.json() as Promise<T>
+  const text = await response.text()
+  recordResponseBodyBytes(response, text)
+  return JSON.parse(text) as T
 }
 
 function mergeHeaders(

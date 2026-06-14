@@ -19,6 +19,7 @@ PreTradeRecommendationSourceQuality = Literal["OK", "STALE", "DEGRADED", "MISSIN
 PreTradeGovernanceRiskStatus = Literal["CLEAR", "WATCH", "ACTION_REQUIRED"]
 PreTradeOpportunityCategory = Literal[
     "MARK_GAP",
+    "ARBITRAGE",
     "EXPOSURE_OFFSET",
     "RISK_REDUCTION",
     "RISK_INCREASE",
@@ -27,9 +28,34 @@ PreTradeOpportunityCategory = Literal[
 ]
 PreTradeExposureDirection = Literal["LONG", "SHORT", "FLAT", "UNKNOWN"]
 PreTradeExposureEffect = Literal["OFFSETS", "DEEPENS", "NEUTRAL", "UNKNOWN"]
+PreTradeArbitrageFamily = Literal["PRODUCT_QUALITY", "TIME", "GEOGRAPHIC", "COMBINED"]
+PreTradeArbitrageCandidateStatus = Literal["SUPPORTED", "INCOMPLETE", "UNSUPPORTED"]
+PreTradeExecutablePriceBasis = Literal["ASK", "BID", "LAST", "TARGET", "ASSUMPTION"]
+PreTradeTransformationEdgeType = Literal[
+    "PRODUCT_CONVERSION",
+    "STORAGE",
+    "TRANSPORT",
+    "FINANCING",
+    "FEES",
+    "RISK_BUFFER",
+]
 PreTradeNettingCandidateMatchQuality = Literal["EXACT", "PARTIAL", "REJECTED"]
 PreTradeHedgeInstrumentType = Literal["FUTURES", "OPTIONS", "SWAP", "PHYSICAL_OFFSET", "NO_HEDGE", "WAIT_FOR_DATA"]
 PreTradeMissingEvidenceSeverity = Literal["BLOCKING", "WARNING"]
+PreTradePromotionCandidateType = Literal["NETTING_SET", "HEDGE_RECOMMENDATION", "RISK_SCENARIO", "MARKET_OPPORTUNITY"]
+PreTradePromotionCandidateStatus = Literal["WATCH", "CANDIDATE"]
+PreTradePromotionOutcomeType = Literal[
+    "CREATED",
+    "REUSED",
+    "RETIRED",
+    "REJECTED",
+    "MERGED_INTO_BOOKED_TRADE",
+    "BLOCKED_BY_MISSING_EVIDENCE",
+]
+PreTradeNettingSetStatus = Literal["REVIEW_DRAFT", "RETIRED"]
+PreTradeHedgeRecommendationStatus = Literal["REVIEW_DRAFT", "RETIRED"]
+PreTradeRiskScenarioStatus = Literal["REVIEW_DRAFT", "RETIRED"]
+PreTradeMarketOpportunityStatus = Literal["REVIEW_DRAFT", "RETIRED"]
 PreTradeGovernanceAuditCategory = Literal[
     "PENDING_REVIEW",
     "RISKY_RECOMMENDATION",
@@ -37,6 +63,16 @@ PreTradeGovernanceAuditCategory = Literal[
     "OVERRIDE",
     "BOOKED_WITH_OVERRIDE",
     "STALE_EVIDENCE",
+    "PROMOTION_CANDIDATE",
+]
+PreTradeReviewDriftStatus = Literal["ALIGNED", "REAPPROVAL_REQUIRED", "NOT_APPROVED"]
+PreTradeReviewDriftReasonCode = Literal[
+    "MISSING_APPROVAL_SNAPSHOT",
+    "MISSING_APPROVAL_BASELINE",
+    "RECOMMENDATION_CHANGED",
+    "NEWER_RECOMMENDATION_AVAILABLE",
+    "SOURCE_IMPAIRMENT_APPEARED",
+    "OVERRIDE_CHANGED",
 ]
 
 
@@ -106,12 +142,57 @@ class PreTradeScenarioDraft(BaseModel):
         return self
 
 
+class PreTradeScenarioEnrichmentOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    opportunity_category: PreTradeOpportunityCategory | None = None
+    hedge_intent: PreTradeHedgeInstrumentType | None = None
+    residual_exposure_summary: str | None = Field(default=None, max_length=1000)
+    source_freshness_summary: str | None = Field(default=None, max_length=1000)
+    reviewer_focus: list[str] = Field(default_factory=list)
+    recommendation_run_id: int | None = Field(default=None, ge=1)
+    recommendation_run_key: str | None = Field(default=None, max_length=120)
+    recommendation_stance: PreTradeRecommendationStance | None = None
+    recommendation_score: int | None = Field(default=None, ge=0, le=100)
+    recommendation_headline: str | None = Field(default=None, max_length=1000)
+    captured_at: datetime | None = None
+
+    @field_validator(
+        "residual_exposure_summary",
+        "source_freshness_summary",
+        "recommendation_run_key",
+        "recommendation_headline",
+    )
+    @classmethod
+    def normalize_optional_fields(cls, value: str | None, info) -> str | None:
+        return _normalize_optional_text(value, field_name=info.field_name)
+
+    @field_validator("reviewer_focus")
+    @classmethod
+    def normalize_reviewer_focus(cls, value: list[str]) -> list[str]:
+        normalized_items: list[str] = []
+        seen_items: set[str] = set()
+        for item in value:
+            normalized_item = _normalize_optional_text(item, field_name="reviewer_focus")
+            if normalized_item is None:
+                continue
+            item_key = normalized_item.casefold()
+            if item_key in seen_items:
+                continue
+            normalized_items.append(normalized_item[:500])
+            seen_items.add(item_key)
+            if len(normalized_items) >= 8:
+                break
+        return normalized_items
+
+
 class PreTradeScenarioCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., min_length=1, max_length=120)
     thesis: str | None = Field(default=None, max_length=2000)
     draft: PreTradeScenarioDraft
+    enrichment: PreTradeScenarioEnrichmentOut | None = None
 
     @field_validator("name")
     @classmethod
@@ -130,6 +211,7 @@ class PreTradeScenarioUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     thesis: str | None = Field(default=None, max_length=2000)
     draft: PreTradeScenarioDraft | None = None
+    enrichment: PreTradeScenarioEnrichmentOut | None = None
 
     @field_validator("name")
     @classmethod
@@ -147,6 +229,7 @@ class PreTradeScenarioOut(BaseModel):
     name: str
     thesis: str | None
     draft: PreTradeScenarioDraft
+    enrichment: PreTradeScenarioEnrichmentOut | None = None
     created_at: datetime
     created_by: str
     updated_at: datetime
@@ -163,6 +246,7 @@ class PreTradeReviewItemCreate(BaseModel):
     draft: PreTradeScenarioDraft
     source_scenario_id: int | None = Field(default=None, ge=1)
     recommendation_run_id: int | None = Field(default=None, ge=1)
+    enrichment: PreTradeScenarioEnrichmentOut | None = None
     owner: str | None = Field(default=None, max_length=120)
     due_at: datetime | None = None
     review_notes: str | None = Field(default=None, max_length=4000)
@@ -185,6 +269,7 @@ class PreTradeReviewItemUpdate(BaseModel):
     thesis: str | None = Field(default=None, max_length=2000)
     draft: PreTradeScenarioDraft | None = None
     recommendation_run_id: int | None = Field(default=None, ge=1)
+    enrichment: PreTradeScenarioEnrichmentOut | None = None
     recommendation_override_reason: str | None = Field(default=None, max_length=4000)
     review_status: PreTradeReviewStatus | None = None
     owner: str | None = Field(default=None, max_length=120)
@@ -241,6 +326,7 @@ class PreTradeReviewItemOut(BaseModel):
     draft: PreTradeScenarioDraft
     source_scenario_id: int | None
     recommendation_run_id: int | None = None
+    enrichment: PreTradeScenarioEnrichmentOut | None = None
     recommendation_summary: PreTradeReviewRecommendationSummary | None = None
     recommendation_override_reason: str | None = None
     recommendation_override_by: str | None = None
@@ -253,6 +339,8 @@ class PreTradeReviewItemOut(BaseModel):
     linked_trade_status: str | None = None
     booked_at: datetime | None = None
     booked_by: str | None = None
+    approval_governance_snapshot: PreTradeGovernanceAuditExportOut | None = None
+    booking_governance_snapshot: PreTradeGovernanceAuditExportOut | None = None
     activity: list[PreTradeReviewActivityOut] = Field(default_factory=list)
     created_at: datetime
     created_by: str
@@ -260,6 +348,35 @@ class PreTradeReviewItemOut(BaseModel):
     updated_by: str
     version: int
     can_edit: bool
+
+
+class PreTradeReviewDriftReasonOut(BaseModel):
+    code: PreTradeReviewDriftReasonCode
+    summary: str
+    detail: str
+
+
+class PreTradeReviewDriftOut(BaseModel):
+    review_id: int
+    checked_at: datetime
+    review_status: PreTradeReviewStatus
+    alignment_status: PreTradeReviewDriftStatus
+    requires_reapproval: bool = False
+    approval_snapshot_generated_at: datetime | None = None
+    approval_snapshot_exported_by: str | None = None
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+    approved_recommendation_run_id: int | None = None
+    approved_recommendation_stance: PreTradeRecommendationStance | None = None
+    approved_recommendation_score: int | None = Field(default=None, ge=0, le=100)
+    current_recommendation_run_id: int | None = None
+    current_recommendation_stance: PreTradeRecommendationStance | None = None
+    current_recommendation_score: int | None = Field(default=None, ge=0, le=100)
+    latest_recommendation_run_id: int | None = None
+    latest_recommendation_stance: PreTradeRecommendationStance | None = None
+    latest_recommendation_score: int | None = Field(default=None, ge=0, le=100)
+    current_impaired_sources: list[str] = Field(default_factory=list)
+    reasons: list[PreTradeReviewDriftReasonOut] = Field(default_factory=list)
 
 
 class PreTradeGovernanceSummaryOut(BaseModel):
@@ -278,6 +395,8 @@ class PreTradeGovernanceSummaryOut(BaseModel):
     stale_evidence_run_count: int = 0
     stale_evidence_source_count: int = 0
     recommendation_run_count: int = 0
+    promotion_candidate_count: int = 0
+    top_promotion_candidate_type: PreTradePromotionCandidateType | None = None
 
 
 class PreTradeRecommendationSourceSnapshot(BaseModel):
@@ -377,6 +496,53 @@ class PreTradeRecommendationOpportunitySummaryOut(BaseModel):
     source_refs: list[PreTradeRecommendationEvidenceRefOut] = Field(default_factory=list)
 
 
+class PreTradeRecommendationCommodityStateOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    commodity_class: str | None = None
+    commodity: str | None = None
+    quality_spec: str | None = None
+    location_code: str | None = None
+    delivery_start: date | None = None
+    delivery_end: date | None = None
+    price_index_code: str | None = None
+    unit_of_measure: str | None = None
+    currency_code: str | None = None
+
+
+class PreTradeRecommendationTransformationEdgeOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    edge_type: PreTradeTransformationEdgeType
+    label: str
+    bridge_cost_per_unit: float = Field(..., ge=0)
+    supported: bool = True
+    detail: str
+    source_refs: list[PreTradeRecommendationEvidenceRefOut] = Field(default_factory=list)
+
+
+class PreTradeRecommendationArbitrageCandidateOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    family: PreTradeArbitrageFamily
+    status: PreTradeArbitrageCandidateStatus
+    buy_state: PreTradeRecommendationCommodityStateOut
+    sell_state: PreTradeRecommendationCommodityStateOut
+    buy_price: float | None = None
+    buy_price_basis: PreTradeExecutablePriceBasis | None = None
+    sell_price: float | None = None
+    sell_price_basis: PreTradeExecutablePriceBasis | None = None
+    gross_spread: float | None = None
+    bridge_cost: float | None = Field(default=None, ge=0)
+    net_opportunity: float | None = None
+    net_opportunity_pct: float | None = None
+    estimated_value: float | None = None
+    edges: list[PreTradeRecommendationTransformationEdgeOut] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    stop_reasons: list[str] = Field(default_factory=list)
+    source_refs: list[PreTradeRecommendationEvidenceRefOut] = Field(default_factory=list)
+
+
 class PreTradeRecommendationResidualExposureOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -396,6 +562,9 @@ class PreTradeRecommendationNettingCandidateOut(BaseModel):
     candidate_id: str
     label: str
     match_quality: PreTradeNettingCandidateMatchQuality
+    gross_exposure: float | None = None
+    offset_quantity: float | None = None
+    residual_exposure: float | None = None
     matched_quantity: float | None = None
     residual_quantity: float | None = None
     constraints: list[str] = Field(default_factory=list)
@@ -407,9 +576,11 @@ class PreTradeRecommendationHedgeRecommendationOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     instrument_type: PreTradeHedgeInstrumentType
+    decision_key: str | None = None
     rationale: str
     target_delta: float | None = None
     hedge_ratio: float | None = None
+    decision_factors: list[str] = Field(default_factory=list)
     policy_stops: list[str] = Field(default_factory=list)
     source_refs: list[PreTradeRecommendationEvidenceRefOut] = Field(default_factory=list)
 
@@ -448,6 +619,7 @@ class PreTradeRecommendationResultOut(BaseModel):
     checks: list[PreTradeRecommendationCheckOut]
     next_actions: list[str]
     opportunity_summary: PreTradeRecommendationOpportunitySummaryOut | None = None
+    arbitrage_candidate: PreTradeRecommendationArbitrageCandidateOut | None = None
     residual_exposure: PreTradeRecommendationResidualExposureOut | None = None
     netting_candidates: list[PreTradeRecommendationNettingCandidateOut] = Field(default_factory=list)
     hedge_recommendation: PreTradeRecommendationHedgeRecommendationOut | None = None
@@ -483,6 +655,32 @@ class PreTradeRecommendationRunComparisonOut(BaseModel):
     source_quality_changes: list[PreTradeRecommendationSourceQualityDeltaOut] = Field(default_factory=list)
     input_snapshot_changes: list[PreTradeRecommendationInputDeltaOut] = Field(default_factory=list)
     summary: str
+
+
+class PreTradeRecommendationDraftAnalysisCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    thesis: str | None = Field(default=None, max_length=2000)
+    draft: PreTradeScenarioDraft
+    source_scenario_id: int | None = Field(default=None, ge=1)
+    source_review_id: int | None = Field(default=None, ge=1)
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot] = Field(default_factory=list, max_length=20)
+
+    @field_validator("thesis")
+    @classmethod
+    def normalize_thesis(cls, value: str | None) -> str | None:
+        return _normalize_optional_text(value, field_name="thesis")
+
+
+class PreTradeRecommendationDraftAnalysisOut(BaseModel):
+    thesis: str | None
+    draft: PreTradeScenarioDraft
+    source_scenario_id: int | None = None
+    source_review_id: int | None = None
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot]
+    recommendation: PreTradeRecommendationResultOut
+    comparison: PreTradeRecommendationRunComparisonOut | None = None
+    evaluated_at: datetime
 
 
 class PreTradeRecommendationRunCreate(BaseModel):
@@ -536,6 +734,25 @@ class PreTradeGovernanceStaleEvidenceRunOut(BaseModel):
     impaired_snapshots: list[PreTradeRecommendationSourceSnapshot] = Field(default_factory=list)
 
 
+class PreTradeGovernancePromotionCandidateOut(BaseModel):
+    candidate_type: PreTradePromotionCandidateType
+    label: str
+    status: PreTradePromotionCandidateStatus
+    score: int = Field(..., ge=0, le=100)
+    review_count: int = 0
+    approved_review_count: int = 0
+    booked_review_count: int = 0
+    override_count: int = 0
+    run_count: int = 0
+    latest_review_id: int | None = None
+    latest_run_id: int | None = None
+    evidence_summary: str
+    promotion_rationale: str
+    stop_reasons: list[str] = Field(default_factory=list)
+    sample_review_ids: list[int] = Field(default_factory=list)
+    sample_run_ids: list[int] = Field(default_factory=list)
+
+
 class PreTradeGovernanceItemsOut(BaseModel):
     generated_at: datetime
     pending_reviews: list[PreTradeReviewItemOut] = Field(default_factory=list)
@@ -544,6 +761,266 @@ class PreTradeGovernanceItemsOut(BaseModel):
     override_reviews: list[PreTradeReviewItemOut] = Field(default_factory=list)
     booked_with_override_reviews: list[PreTradeReviewItemOut] = Field(default_factory=list)
     stale_evidence_runs: list[PreTradeGovernanceStaleEvidenceRunOut] = Field(default_factory=list)
+    promotion_candidates: list[PreTradeGovernancePromotionCandidateOut] = Field(default_factory=list)
+
+
+class PreTradeNettingSetPromoteCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    owner: str | None = Field(default=None, max_length=120)
+    review_note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("owner", "review_note")
+    @classmethod
+    def normalize_optional_fields(cls, value: str | None, info) -> str | None:
+        return _normalize_optional_text(value, field_name=info.field_name)
+
+
+class PreTradeNettingSetOut(BaseModel):
+    netting_set_id: int
+    netting_set_key: str
+    name: str
+    status: PreTradeNettingSetStatus
+    owner: str | None = None
+    review_note: str | None = None
+    source_promotion_candidate_type: PreTradePromotionCandidateType
+    source_promotion_status: PreTradePromotionCandidateStatus
+    source_promotion_score: int = Field(..., ge=0, le=100)
+    source_review_count: int = 0
+    source_approved_review_count: int = 0
+    source_booked_review_count: int = 0
+    source_override_count: int = 0
+    source_run_count: int = 0
+    source_latest_review_id: int | None = None
+    source_latest_run_id: int | None = None
+    source_sample_review_ids: list[int] = Field(default_factory=list)
+    source_sample_run_ids: list[int] = Field(default_factory=list)
+    source_evidence_summary: str
+    source_promotion_rationale: str
+    source_stop_reasons: list[str] = Field(default_factory=list)
+    draft: PreTradeScenarioDraft
+    netting_candidates: list[PreTradeRecommendationNettingCandidateOut] = Field(default_factory=list)
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+    can_edit: bool
+
+
+class PreTradeHedgeRecommendationPromoteCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    owner: str | None = Field(default=None, max_length=120)
+    review_note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("owner", "review_note")
+    @classmethod
+    def normalize_optional_fields(cls, value: str | None, info) -> str | None:
+        return _normalize_optional_text(value, field_name=info.field_name)
+
+
+class PreTradeHedgeRecommendationOut(BaseModel):
+    hedge_recommendation_id: int
+    hedge_recommendation_key: str
+    name: str
+    status: PreTradeHedgeRecommendationStatus
+    owner: str | None = None
+    review_note: str | None = None
+    source_promotion_candidate_type: PreTradePromotionCandidateType
+    source_promotion_status: PreTradePromotionCandidateStatus
+    source_promotion_score: int = Field(..., ge=0, le=100)
+    source_review_count: int = 0
+    source_approved_review_count: int = 0
+    source_booked_review_count: int = 0
+    source_override_count: int = 0
+    source_run_count: int = 0
+    source_latest_review_id: int | None = None
+    source_latest_run_id: int | None = None
+    source_sample_review_ids: list[int] = Field(default_factory=list)
+    source_sample_run_ids: list[int] = Field(default_factory=list)
+    source_evidence_summary: str
+    source_promotion_rationale: str
+    source_stop_reasons: list[str] = Field(default_factory=list)
+    source_recommendation_stance: PreTradeRecommendationStance
+    source_recommendation_score: int = Field(..., ge=0, le=100)
+    source_recommendation_headline: str
+    draft: PreTradeScenarioDraft
+    residual_exposure: PreTradeRecommendationResidualExposureOut | None = None
+    hedge_recommendation: PreTradeRecommendationHedgeRecommendationOut
+    rejected_alternatives: list[PreTradeRecommendationRejectedAlternativeOut] = Field(default_factory=list)
+    missing_evidence: list[PreTradeRecommendationMissingEvidenceOut] = Field(default_factory=list)
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+    can_edit: bool
+
+
+class PreTradeRiskScenarioPromoteCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    owner: str | None = Field(default=None, max_length=120)
+    review_note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("owner", "review_note")
+    @classmethod
+    def normalize_optional_fields(cls, value: str | None, info) -> str | None:
+        return _normalize_optional_text(value, field_name=info.field_name)
+
+
+class PreTradeRiskScenarioOut(BaseModel):
+    risk_scenario_id: int
+    risk_scenario_key: str
+    name: str
+    status: PreTradeRiskScenarioStatus
+    owner: str | None = None
+    review_note: str | None = None
+    source_promotion_candidate_type: PreTradePromotionCandidateType
+    source_promotion_status: PreTradePromotionCandidateStatus
+    source_promotion_score: int = Field(..., ge=0, le=100)
+    source_review_count: int = 0
+    source_approved_review_count: int = 0
+    source_booked_review_count: int = 0
+    source_override_count: int = 0
+    source_run_count: int = 0
+    source_latest_review_id: int | None = None
+    source_latest_run_id: int | None = None
+    source_sample_review_ids: list[int] = Field(default_factory=list)
+    source_sample_run_ids: list[int] = Field(default_factory=list)
+    source_evidence_summary: str
+    source_promotion_rationale: str
+    source_stop_reasons: list[str] = Field(default_factory=list)
+    source_review_name: str
+    source_review_status: PreTradeReviewStatus
+    source_review_thesis: str | None = None
+    source_review_notes: str | None = None
+    source_review_owner: str | None = None
+    source_recommendation_stance: PreTradeRecommendationStance | None = None
+    source_recommendation_score: int | None = Field(default=None, ge=0, le=100)
+    source_recommendation_headline: str | None = None
+    draft: PreTradeScenarioDraft
+    enrichment: PreTradeScenarioEnrichmentOut | None = None
+    residual_exposure: PreTradeRecommendationResidualExposureOut | None = None
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot] = Field(default_factory=list)
+    missing_evidence: list[PreTradeRecommendationMissingEvidenceOut] = Field(default_factory=list)
+    reviewer_focus: list[str] = Field(default_factory=list)
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+    can_edit: bool
+
+
+class PreTradeMarketOpportunityPromoteCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    owner: str | None = Field(default=None, max_length=120)
+    review_note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("owner", "review_note")
+    @classmethod
+    def normalize_optional_fields(cls, value: str | None, info) -> str | None:
+        return _normalize_optional_text(value, field_name=info.field_name)
+
+
+class PreTradeMarketOpportunityOut(BaseModel):
+    market_opportunity_id: int
+    market_opportunity_key: str
+    name: str
+    status: PreTradeMarketOpportunityStatus
+    owner: str | None = None
+    review_note: str | None = None
+    source_promotion_candidate_type: PreTradePromotionCandidateType
+    source_promotion_status: PreTradePromotionCandidateStatus
+    source_promotion_score: int = Field(..., ge=0, le=100)
+    source_review_count: int = 0
+    source_approved_review_count: int = 0
+    source_booked_review_count: int = 0
+    source_override_count: int = 0
+    source_run_count: int = 0
+    source_latest_review_id: int | None = None
+    source_latest_run_id: int | None = None
+    source_sample_review_ids: list[int] = Field(default_factory=list)
+    source_sample_run_ids: list[int] = Field(default_factory=list)
+    source_evidence_summary: str
+    source_promotion_rationale: str
+    source_stop_reasons: list[str] = Field(default_factory=list)
+    source_review_name: str
+    source_review_status: PreTradeReviewStatus
+    source_review_thesis: str | None = None
+    source_review_notes: str | None = None
+    source_review_owner: str | None = None
+    source_recommendation_stance: PreTradeRecommendationStance
+    source_recommendation_score: int = Field(..., ge=0, le=100)
+    source_recommendation_headline: str
+    draft: PreTradeScenarioDraft
+    opportunity_summary: PreTradeRecommendationOpportunitySummaryOut
+    arbitrage_candidate: PreTradeRecommendationArbitrageCandidateOut | None = None
+    residual_exposure: PreTradeRecommendationResidualExposureOut | None = None
+    input_snapshots: list[PreTradeRecommendationSourceSnapshot] = Field(default_factory=list)
+    missing_evidence: list[PreTradeRecommendationMissingEvidenceOut] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+    reviewer_focus: list[str] = Field(default_factory=list)
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+    can_edit: bool
+
+
+class PreTradePromotionOutcomeMetricOut(BaseModel):
+    outcome: PreTradePromotionOutcomeType
+    count: int = 0
+
+
+class PreTradePromotionOutcomeByDraftTypeOut(BaseModel):
+    draft_type: PreTradePromotionCandidateType
+    label: str
+    total_count: int = 0
+    created_count: int = 0
+    reused_count: int = 0
+    retired_count: int = 0
+    rejected_count: int = 0
+    merged_into_booked_trade_count: int = 0
+    blocked_by_missing_evidence_count: int = 0
+
+
+class PreTradePromotionOutcomeDraftOut(BaseModel):
+    draft_type: PreTradePromotionCandidateType
+    draft_id: int
+    draft_key: str
+    name: str
+    status: str
+    source_promotion_score: int = Field(..., ge=0, le=100)
+    source_review_count: int = 0
+    source_approved_review_count: int = 0
+    source_booked_review_count: int = 0
+    source_run_count: int = 0
+    source_latest_review_id: int | None = None
+    source_latest_run_id: int | None = None
+    source_review_status: PreTradeReviewStatus | None = None
+    source_linked_trade_id: str | None = None
+    source_linked_trade_status: str | None = None
+    source_booked_at: datetime | None = None
+    has_blocking_missing_evidence: bool = False
+    outcomes: list[PreTradePromotionOutcomeType] = Field(default_factory=list)
+    outcome_reasons: list[str] = Field(default_factory=list)
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+
+
+class PreTradePromotionOutcomeSummaryOut(BaseModel):
+    generated_at: datetime
+    total_draft_count: int = 0
+    metrics: list[PreTradePromotionOutcomeMetricOut] = Field(default_factory=list)
+    by_draft_type: list[PreTradePromotionOutcomeByDraftTypeOut] = Field(default_factory=list)
+    drafts: list[PreTradePromotionOutcomeDraftOut] = Field(default_factory=list)
 
 
 class PreTradeGovernanceAuditRowOut(BaseModel):
@@ -570,6 +1047,9 @@ class PreTradeGovernanceAuditRowOut(BaseModel):
     source_provider: str | None = None
     source_dataset: str | None = None
     source_observed_at: datetime | None = None
+    promotion_candidate_type: PreTradePromotionCandidateType | None = None
+    promotion_status: PreTradePromotionCandidateStatus | None = None
+    promotion_score: int | None = Field(default=None, ge=0, le=100)
     summary: str
 
 

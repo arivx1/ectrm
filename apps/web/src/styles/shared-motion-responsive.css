@@ -44,23 +44,6 @@
   }
 }
 
-@media (max-width: 1440px) {
-  .auth-gate-frame {
-    width: min(100%, 90rem);
-    grid-template-columns: minmax(0, 1.08fr) minmax(28rem, 0.92fr);
-  }
-
-  .auth-gate-signal-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .auth-gate-step-rail,
-  .auth-gate-entry-grid,
-  .auth-gate-primary-actions {
-    grid-template-columns: 1fr;
-  }
-}
-
 @media (max-width: 1200px) {
   .metric-grid,
   .dashboard-grid,
@@ -88,8 +71,11 @@
   .assistant-agent-analytics-frequency-grid,
   .assistant-agent-analytics-version-grid,
   .assistant-admin-summary-grid,
+  .assistant-agent-section-tabs,
+  .assistant-agent-overview-grid,
   .assistant-control-tower-grid,
   .assistant-control-tower-signal-list,
+  .assistant-supervision-summary-grid,
   .assistant-outcome-grid,
   .assistant-outcome-feedback-grid,
   .projection-integrity-grid,
@@ -119,6 +105,13 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .desk-headline-toolbar,
+  .watchlist-alert-stat-grid,
+  .market-monitor-section-grid,
+  .instrument-brief-section-grid {
+    grid-template-columns: 1fr;
+  }
+
   .field-wide {
     grid-column: span 1;
   }
@@ -140,6 +133,100 @@
 @media (max-width: 960px) {
   .app-shell {
     grid-template-columns: 1fr;
+  }
+
+  .asset-map-head,
+  .asset-map-summary-grid {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .asset-map-filter-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .asset-map-stats {
+    justify-content: flex-start;
+  }
+
+  .workspace-topbar {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+
+  .market-monitor-strip-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .terminal-quote-layout,
+  .terminal-analytics-grid,
+  .terminal-analytics-stat-grid,
+  .terminal-quote-stat-grid,
+  .terminal-curve-bucket-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .market-monitor-focus-row,
+  .market-monitor-priority-row,
+  .desk-headline-row,
+  .watchlist-alert-head,
+  .watchlist-alert-row,
+  .watchlist-alert-delivery-head,
+  .watchlist-alert-delivery-row,
+  .market-monitor-strip-head,
+  .terminal-analytics-hero,
+  .terminal-analytics-section-head,
+  .terminal-analytics-row,
+  .terminal-quote-card-head,
+  .terminal-curve-row,
+  .instrument-brief-head,
+  .instrument-brief-row {
+    flex-direction: column;
+  }
+
+  .market-monitor-focus-meta,
+  .market-monitor-priority-meta,
+  .desk-headline-meta,
+  .watchlist-alert-row-meta,
+  .terminal-quote-latest,
+  .terminal-analytics-latest,
+  .terminal-analytics-row-meta,
+  .instrument-brief-row-meta {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .workspace-topbar-actions {
+    grid-template-columns: 1fr;
+    justify-content: flex-start;
+  }
+
+  .workspace-topbar-command-actions,
+  .workspace-topbar-account-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .app-back-button-desktop {
+    display: none;
+  }
+
+  .app-back-button-mobile {
+    display: inline-flex;
+  }
+
+  .workspace-topbar-token,
+  .workspace-topbar-db-size {
+    flex: 0 0 auto;
+  }
+
+  .terminal-command-trigger {
+    width: 100%;
+  }
+
+  .terminal-command-trigger-shortcut {
+    display: none;
   }
 
   .trade-form-overview-head,
@@ -180,6 +267,16 @@
     padding: 1rem 1rem 0;
     background: linear-gradient(180deg, rgba(244, 241, 234, 0.96), rgba(244, 241, 234, 0.7), rgba(244, 241, 234, 0));
     backdrop-filter: blur(10px);
+  }
+
+  .product-switch-mobile {
+    --brand-mark-row-item-inline-size: 5.3rem;
+
+    flex: 0 1 auto;
+  }
+
+  .product-switch-mobile .product-switch-button {
+    padding-inline: 0.58rem;
   }
 
   .mobile-nav-button {
@@ -235,21 +332,8 @@
     padding: 1rem;
   }
 
-  .auth-gate-frame,
-  .auth-gate-signal-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .auth-gate-step-rail,
-  .auth-gate-entry-grid,
-  .auth-gate-primary-actions,
   .auth-gate-method-grid {
     grid-template-columns: 1fr;
-  }
-
-  .auth-gate-hero,
-  .auth-gate-panel {
-    min-height: auto;
   }
 
   .hero h2 {
@@ -259,9 +343,42 @@
   .hero-badge {
     min-width: 0;
   }
+
+  .terminal-command-overlay {
+    padding-top: 5.25rem;
+  }
+
+  .terminal-shortcut-overlay {
+    padding-top: 5.25rem;
+  }
+
+  .terminal-command-dialog {
+    width: min(100%, calc(100vw - 1.2rem));
+    max-height: calc(100vh - 6.4rem);
+  }
+
+  .terminal-shortcut-dialog {
+    width: min(100%, calc(100vw - 1.2rem));
+    max-height: calc(100vh - 6.4rem);
+  }
+
+  .terminal-workspace-set-targets {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
+  .mobile-topbar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .mobile-topbar-actions {
+    flex: 1 1 16rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
   .metric-grid,
   .system-status-grid,
   .dependency-status-grid,
@@ -269,6 +386,9 @@
   .trade-form,
   .trade-form-feature,
   .admin-summary-grid,
+  .admin-section-tabs,
+  .admin-overview-grid,
+  .admin-overview-action-grid,
   .roadmap-admin-meta-grid,
   .roadmap-admin-field-grid,
   .assistant-admin-form-grid,
@@ -285,6 +405,7 @@
   .assistant-admin-summary-grid,
   .assistant-control-tower-grid,
   .assistant-control-tower-signal-list,
+  .assistant-supervision-summary-grid,
   .projection-integrity-summary-grid,
   .projection-integrity-toggle-grid,
   .projection-integrity-channel-grid,
@@ -300,6 +421,7 @@
 
   .section-head,
   .section-head-control,
+  .tile-layout-customize-bar,
   .tile-layout-toolbar-head,
   .reference-paste-head,
   .workspace-tile-head,
@@ -317,6 +439,7 @@
   }
 
   .admin-sync-head,
+  .admin-price-source-view-head,
   .admin-run-row,
   .roadmap-admin-toolbar,
   .roadmap-admin-lock,
@@ -355,6 +478,38 @@
 
   .workspace-tile-controls {
     justify-items: start;
+  }
+
+  .terminal-command-head,
+  .terminal-command-result,
+  .terminal-command-footer {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .terminal-command-hints {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .terminal-shortcut-grid,
+  .terminal-shortcut-workspace-list,
+  .terminal-shortcut-workspace-row {
+    grid-template-columns: 1fr;
+  }
+
+  .terminal-workspace-set-head,
+  .terminal-workspace-set-toolbar {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .terminal-workspace-set-targets {
+    grid-template-columns: 1fr;
+  }
+
+  .terminal-command-result-kind {
+    justify-self: flex-start;
   }
 
   .admin-run-meta {

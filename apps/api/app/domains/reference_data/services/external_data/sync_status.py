@@ -80,6 +80,12 @@ def build_external_data_sync_status(
                 "latest_run_status": latest_run.status if latest_run is not None else "NO_RUNS",
                 "success_sla_hours": definition["success_sla_hours"],
                 "scheduler_interval_minutes": definition["scheduler_interval_minutes"],
+                "ingestion_method": definition["ingestion_method"],
+                "ingestion_mode": definition["ingestion_mode"],
+                "source_system": definition["source_system"],
+                "source_endpoint": definition["source_endpoint"],
+                "sync_job_name": definition["sync_job_name"],
+                "default_lookback_days": definition["default_lookback_days"],
                 "active_series_count": active_series_count,
                 "due_for_sync": due_for_sync,
                 "last_run_at": _run_reference_time(latest_run),
@@ -115,6 +121,12 @@ def _provider_definitions() -> tuple[dict[str, object], ...]:
             "series_kind": "price",
             "success_sla_hours": settings.EIA_SYNC_SUCCESS_SLA_HOURS,
             "scheduler_interval_minutes": settings.EIA_SYNC_INTERVAL_MINUTES,
+            "ingestion_method": "EIA API pull",
+            "ingestion_mode": "Admin manual sync or login-triggered due check",
+            "source_system": "U.S. Energy Information Administration",
+            "source_endpoint": settings.EIA_BASE_URL,
+            "sync_job_name": "sync_eia_price_data",
+            "default_lookback_days": settings.EIA_SYNC_DEFAULT_LOOKBACK_DAYS,
         },
         {
             "provider": "EIA_FUNDAMENTALS",
@@ -124,15 +136,102 @@ def _provider_definitions() -> tuple[dict[str, object], ...]:
             "series_kind": "series",
             "success_sla_hours": settings.EIA_FUNDAMENTALS_SYNC_SUCCESS_SLA_HOURS,
             "scheduler_interval_minutes": settings.EIA_FUNDAMENTALS_SYNC_INTERVAL_MINUTES,
+            "ingestion_method": "EIA API pull",
+            "ingestion_mode": "Admin manual sync or login-triggered due check",
+            "source_system": "U.S. Energy Information Administration",
+            "source_endpoint": settings.EIA_BASE_URL,
+            "sync_job_name": "sync_eia_fundamental_series",
+            "default_lookback_days": settings.EIA_FUNDAMENTALS_SYNC_DEFAULT_LOOKBACK_DAYS,
         },
         {
             "provider": "FRED",
-            "label": "FRED Macro Sync",
-            "category": "macro",
-            "observation_kind": "series",
-            "series_kind": "series",
+            "label": "FRED Market Sync",
+            "category": "market",
+            "observation_kind": "mixed",
+            "series_kind": "mixed",
             "success_sla_hours": settings.FRED_SYNC_SUCCESS_SLA_HOURS,
             "scheduler_interval_minutes": settings.FRED_SYNC_INTERVAL_MINUTES,
+            "ingestion_method": "FRED API pull",
+            "ingestion_mode": "Admin manual sync or login-triggered due check",
+            "source_system": "Federal Reserve Economic Data",
+            "source_endpoint": settings.FRED_BASE_URL,
+            "sync_job_name": "sync_fred_series",
+            "default_lookback_days": settings.FRED_SYNC_DEFAULT_LOOKBACK_DAYS,
+        },
+        {
+            "provider": "ALPHA_VANTAGE",
+            "label": "Alpha Vantage Demo Quote Sync",
+            "category": "market",
+            "observation_kind": "price",
+            "series_kind": "price",
+            "success_sla_hours": settings.ALPHA_VANTAGE_SYNC_SUCCESS_SLA_HOURS,
+            "scheduler_interval_minutes": settings.ALPHA_VANTAGE_SYNC_INTERVAL_MINUTES,
+            "ingestion_method": "Alpha Vantage API pull",
+            "ingestion_mode": "Admin manual sync or opt-in scheduler due check",
+            "source_system": "Alpha Vantage",
+            "source_endpoint": settings.ALPHA_VANTAGE_BASE_URL,
+            "sync_job_name": "sync_alpha_vantage_prices",
+            "default_lookback_days": None,
+        },
+        {
+            "provider": "BLS_PPI",
+            "label": "BLS PPI Commodity Index Sync",
+            "category": "price",
+            "observation_kind": "price",
+            "series_kind": "price",
+            "success_sla_hours": settings.BLS_PPI_SYNC_SUCCESS_SLA_HOURS,
+            "scheduler_interval_minutes": settings.BLS_PPI_SYNC_INTERVAL_MINUTES,
+            "ingestion_method": "BLS public API pull",
+            "ingestion_mode": "Admin manual sync or login-triggered due check",
+            "source_system": "U.S. Bureau of Labor Statistics",
+            "source_endpoint": settings.BLS_BASE_URL,
+            "sync_job_name": "sync_bls_ppi_prices",
+            "default_lookback_days": settings.BLS_PPI_SYNC_DEFAULT_LOOKBACK_DAYS,
+        },
+        {
+            "provider": "WORLD_BANK",
+            "label": "World Bank Pink Sheet Sync",
+            "category": "price",
+            "observation_kind": "price",
+            "series_kind": "price",
+            "success_sla_hours": settings.WORLD_BANK_SYNC_SUCCESS_SLA_HOURS,
+            "scheduler_interval_minutes": settings.WORLD_BANK_SYNC_INTERVAL_MINUTES,
+            "ingestion_method": "World Bank Pink Sheet workbook download",
+            "ingestion_mode": "Admin manual sync or login-triggered due check",
+            "source_system": "World Bank Commodity Markets",
+            "source_endpoint": settings.WORLD_BANK_PINK_SHEET_MONTHLY_URL,
+            "sync_job_name": "sync_world_bank_pink_sheet",
+            "default_lookback_days": settings.WORLD_BANK_SYNC_DEFAULT_LOOKBACK_DAYS,
+        },
+        {
+            "provider": "USDA_NASS",
+            "label": "USDA NASS QuickStats Price Sync",
+            "category": "price",
+            "observation_kind": "price",
+            "series_kind": "price",
+            "success_sla_hours": settings.USDA_NASS_SYNC_SUCCESS_SLA_HOURS,
+            "scheduler_interval_minutes": settings.USDA_NASS_SYNC_INTERVAL_MINUTES,
+            "ingestion_method": "USDA QuickStats API pull",
+            "ingestion_mode": "Admin manual sync or login-triggered due check",
+            "source_system": "USDA National Agricultural Statistics Service",
+            "source_endpoint": settings.USDA_NASS_BASE_URL,
+            "sync_job_name": "sync_usda_nass_prices",
+            "default_lookback_days": settings.USDA_NASS_SYNC_DEFAULT_LOOKBACK_DAYS,
+        },
+        {
+            "provider": "EIA_WHOLESALE_POWER",
+            "label": "EIA Wholesale Power Sync",
+            "category": "power",
+            "observation_kind": "price",
+            "series_kind": "price",
+            "success_sla_hours": settings.EIA_WHOLESALE_POWER_SYNC_SUCCESS_SLA_HOURS,
+            "scheduler_interval_minutes": settings.EIA_WHOLESALE_POWER_SYNC_INTERVAL_MINUTES,
+            "ingestion_method": "EIA wholesale power workbook download",
+            "ingestion_mode": "Admin manual sync or login-triggered due check",
+            "source_system": "U.S. Energy Information Administration",
+            "source_endpoint": settings.EIA_WHOLESALE_POWER_BASE_URL,
+            "sync_job_name": "sync_eia_wholesale_power_prices",
+            "default_lookback_days": settings.EIA_WHOLESALE_POWER_SYNC_DEFAULT_LOOKBACK_DAYS,
         },
         {
             "provider": "CFTC",
@@ -142,24 +241,72 @@ def _provider_definitions() -> tuple[dict[str, object], ...]:
             "series_kind": "series",
             "success_sla_hours": settings.CFTC_SYNC_SUCCESS_SLA_HOURS,
             "scheduler_interval_minutes": settings.CFTC_SYNC_INTERVAL_MINUTES,
+            "ingestion_method": "CFTC public reporting API pull",
+            "ingestion_mode": "Admin manual sync or login-triggered due check",
+            "source_system": "Commodity Futures Trading Commission",
+            "source_endpoint": settings.CFTC_BASE_URL,
+            "sync_job_name": "sync_cftc_series",
+            "default_lookback_days": settings.CFTC_SYNC_DEFAULT_LOOKBACK_DAYS,
         },
         {
             "provider": "CAISO",
             "label": "CAISO Power Sync",
             "category": "power",
-            "observation_kind": "series",
-            "series_kind": "series",
+            "observation_kind": "mixed",
+            "series_kind": "mixed",
             "success_sla_hours": settings.CAISO_SYNC_SUCCESS_SLA_HOURS,
             "scheduler_interval_minutes": settings.CAISO_SYNC_INTERVAL_MINUTES,
+            "ingestion_method": "CAISO OASIS API pull",
+            "ingestion_mode": "Admin manual sync or login-triggered due check",
+            "source_system": "California ISO",
+            "source_endpoint": settings.CAISO_BASE_URL,
+            "sync_job_name": "sync_caiso_power_series",
+            "default_lookback_days": None,
         },
         {
             "provider": "ERCOT",
             "label": "ERCOT Power Sync",
             "category": "power",
-            "observation_kind": "series",
-            "series_kind": "series",
+            "observation_kind": "mixed",
+            "series_kind": "mixed",
             "success_sla_hours": settings.ERCOT_SYNC_SUCCESS_SLA_HOURS,
             "scheduler_interval_minutes": settings.ERCOT_SYNC_INTERVAL_MINUTES,
+            "ingestion_method": "ERCOT public HTML pull",
+            "ingestion_mode": "Admin manual sync or login-triggered due check",
+            "source_system": "Electric Reliability Council of Texas",
+            "source_endpoint": settings.ERCOT_BASE_URL,
+            "sync_job_name": "sync_ercot_power_series",
+            "default_lookback_days": None,
+        },
+        {
+            "provider": "MISO",
+            "label": "MISO Power Sync",
+            "category": "power",
+            "observation_kind": "price",
+            "series_kind": "price",
+            "success_sla_hours": settings.MISO_SYNC_SUCCESS_SLA_HOURS,
+            "scheduler_interval_minutes": settings.MISO_SYNC_INTERVAL_MINUTES,
+            "ingestion_method": "MISO public API pull",
+            "ingestion_mode": "Admin manual sync or login-triggered due check",
+            "source_system": "Midcontinent ISO",
+            "source_endpoint": settings.MISO_BASE_URL,
+            "sync_job_name": "sync_miso_power_prices",
+            "default_lookback_days": None,
+        },
+        {
+            "provider": "NYISO",
+            "label": "NYISO Power Sync",
+            "category": "power",
+            "observation_kind": "price",
+            "series_kind": "price",
+            "success_sla_hours": settings.NYISO_SYNC_SUCCESS_SLA_HOURS,
+            "scheduler_interval_minutes": settings.NYISO_SYNC_INTERVAL_MINUTES,
+            "ingestion_method": "NYISO public CSV pull",
+            "ingestion_mode": "Admin manual sync or login-triggered due check",
+            "source_system": "New York ISO",
+            "source_endpoint": settings.NYISO_BASE_URL,
+            "sync_job_name": "sync_nyiso_power_prices",
+            "default_lookback_days": None,
         },
         {
             "provider": "KALSHI",
@@ -169,6 +316,12 @@ def _provider_definitions() -> tuple[dict[str, object], ...]:
             "series_kind": "series",
             "success_sla_hours": settings.KALSHI_SYNC_SUCCESS_SLA_HOURS,
             "scheduler_interval_minutes": settings.KALSHI_SYNC_INTERVAL_MINUTES,
+            "ingestion_method": "Kalshi trading API pull",
+            "ingestion_mode": "Admin manual sync or login-triggered due check",
+            "source_system": "Kalshi",
+            "source_endpoint": settings.KALSHI_BASE_URL,
+            "sync_job_name": "sync_kalshi_series",
+            "default_lookback_days": settings.KALSHI_DEFAULT_LOOKBACK_DAYS,
         },
     )
 
@@ -204,6 +357,28 @@ def _active_series_count(db: Session, *, provider: str, series_kind: str) -> int
                 )
             ).scalar_one()
         )
+    if series_kind == "mixed":
+        external_series_count = int(
+            db.execute(
+                select(func.count())
+                .select_from(ExternalSeriesDefinition)
+                .where(
+                    ExternalSeriesDefinition.provider == provider,
+                    ExternalSeriesDefinition.is_active.is_(True),
+                )
+            ).scalar_one()
+        )
+        price_series_count = int(
+            db.execute(
+                select(func.count())
+                .select_from(ReferencePriceIndexSource)
+                .where(
+                    ReferencePriceIndexSource.provider == provider,
+                    ReferencePriceIndexSource.is_active.is_(True),
+                )
+            ).scalar_one()
+        )
+        return external_series_count + price_series_count
     return int(
         db.execute(
             select(func.count())
@@ -223,6 +398,25 @@ def _latest_observation_at(db: Session, *, provider: str, observation_kind: str)
                 PriceIndexObservation.source_provider == provider,
             )
         ).scalar_one()
+    elif observation_kind == "mixed":
+        latest_price = db.execute(
+            select(func.max(PriceIndexObservation.downloaded_at)).where(
+                PriceIndexObservation.source_provider == provider,
+            )
+        ).scalar_one()
+        latest_series = db.execute(
+            select(func.max(ExternalSeriesObservation.downloaded_at)).where(
+                ExternalSeriesObservation.source_provider == provider,
+            )
+        ).scalar_one()
+        value = max(
+            (
+                item
+                for item in (_coerce_utc(latest_price), _coerce_utc(latest_series))
+                if item is not None
+            ),
+            default=None,
+        )
     else:
         value = db.execute(
             select(func.max(ExternalSeriesObservation.downloaded_at)).where(

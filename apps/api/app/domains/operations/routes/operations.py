@@ -4,17 +4,31 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.config import settings
+from apps.api.app.core.auth import is_operations_role
+from apps.api.app.core.auth import is_settlement_role
 from apps.api.app.core.query_params import LIST_OFFSET_QUERY, STANDARD_LIST_LIMIT_QUERY
+from apps.api.app.core.http import require_actor_role
 from apps.api.app.deps.db import get_db
 from apps.api.app.domains.operations.services import build_database_overview
+from apps.api.app.domains.operations.services.document_intake_work_items import (
+    list_document_record_creation_work_items,
+)
 from apps.api.app.domains.operations.services.operational_resource_registry import (
     OPERATIONAL_RESOURCE_DESCRIPTORS,
 )
 from apps.api.app.domains.operations.services import build_workspace_bootstrap_summary
+from apps.api.app.domains.operations.services.trade_attention_candidates import (
+    TRADE_ATTENTION_CANDIDATE_TYPE_NAMES,
+    count_trade_attention_candidates,
+    count_trade_attention_candidates_for_types,
+    get_trade_attention_candidate_definition,
+    list_trade_attention_candidates,
+)
 from apps.api.app.domains.operations.services.workflow_items import book_trade_workflow_item_underlying
 from apps.api.app.domains.operations.services.workflow_items import create_trade_workflow_item
 from apps.api.app.domains.operations.services.workflow_items import list_trade_workflow_items
@@ -25,6 +39,7 @@ from apps.api.app.models.trade import Trade
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 from apps.api.app.schemas.operations import DependencyHealthOut
+from apps.api.app.schemas.operations import DocumentRecordCreationWorkItemOut
 from apps.api.app.schemas.operations import OperationalResourceDescriptorOut
 from apps.api.app.schemas.operations import OperationalResourceEmptyStateOut
 from apps.api.app.schemas.operations import OperationalResourcePrimaryActionOut
@@ -32,6 +47,8 @@ from apps.api.app.schemas.operations import OperationalResourceSurfaceActionOut
 from apps.api.app.schemas.operations import OperationalResourceSummaryStatOut
 from apps.api.app.schemas.operations import OperationalResourceSurfaceOut
 from apps.api.app.schemas.operations import SystemOverviewOut
+from apps.api.app.schemas.operations import TradeAttentionCandidateListOut
+from apps.api.app.schemas.operations import TradeAttentionCandidateOut
 from apps.api.app.schemas.operations import TradeWorkflowItemCreate
 from apps.api.app.schemas.operations import TradeWorkflowItemOut
 from apps.api.app.schemas.operations import TradeWorkflowItemUpdate
@@ -39,6 +56,7 @@ from apps.api.app.schemas.operations import WorkspaceBootstrapSummaryOut
 from .framework import AUTHENTICATED_WORK_ITEM_MUTATION_SPEC
 from .framework import execute_operational_mutation
 from .framework import execute_operational_patch_mutation
+from .framework import execute_operational_query
 from .framework import execute_operational_query_spec
 from .framework import OperationalQuerySpec
 
@@ -55,6 +73,10 @@ DEPENDENCY_DEFINITIONS = (
     },
 )
 WORK_ITEM_LIST_QUERY_SPEC = OperationalQuerySpec(load=list_trade_workflow_items, commit=True)
+
+
+def _can_view_document_intake(role: str | None) -> bool:
+    return is_operations_role(role) or is_settlement_role(role)
 
 
 def _coerce_utc(value: Optional[datetime]) -> Optional[datetime]:
@@ -217,6 +239,77 @@ def get_workspace_bootstrap_summary(db: Session = Depends(get_db)) -> WorkspaceB
     )
 
 
+def _to_trade_attention_candidate_out(candidate) -> TradeAttentionCandidateOut:
+    return TradeAttentionCandidateOut(
+        trade_id=candidate.trade_id,
+        candidate_types=list(candidate.candidate_types),
+        source_count_keys=list(candidate.source_count_keys),
+        priority_reason=candidate.priority_reason,
+        trade_nature=candidate.trade_nature,
+        book=candidate.book,
+        portfolio=candidate.portfolio,
+        counterparty=candidate.counterparty,
+        commodity_class=candidate.commodity_class,
+        commodity=candidate.commodity,
+        trader_user=candidate.trader_user,
+        trade_date=candidate.trade_date,
+        execution_timestamp=candidate.execution_timestamp,
+        delivery_start=candidate.delivery_start,
+        delivery_end=candidate.delivery_end,
+        confirmation_status=candidate.confirmation_status,
+        nomination_status=candidate.nomination_status,
+        allocation_status=candidate.allocation_status,
+        pricing_status=candidate.pricing_status,
+        invoice_status=candidate.invoice_status,
+        payment_status=candidate.payment_status,
+        settlement_status=candidate.settlement_status,
+        age_days=candidate.age_days,
+        supporting_records=jsonable_encoder(candidate.supporting_records or {}),
+        suggested_next_tool=candidate.suggested_next_tool,
+        next_steps=list(candidate.next_steps),
+        blocking_reasons=list(candidate.blocking_reasons),
+        recommended_action=jsonable_encoder(candidate.recommended_action) if candidate.recommended_action is not None else None,
+    )
+
+
+@router.get("/trade-attention-candidates", response_model=TradeAttentionCandidateListOut)
+def get_trade_attention_candidates(
+    candidate_type: str | None = Query(default=None),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> TradeAttentionCandidateListOut:
+    def _load() -> TradeAttentionCandidateListOut:
+        rows = list_trade_attention_candidates(db, candidate_type=candidate_type, limit=limit, offset=offset)
+        candidate_type_counts: dict[str, int] = {}
+        for row in rows:
+            for row_candidate_type in row.candidate_types:
+                candidate_type_counts[row_candidate_type] = candidate_type_counts.get(row_candidate_type, 0) + 1
+
+        if candidate_type is not None:
+            definition = get_trade_attention_candidate_definition(candidate_type)
+            total_count = count_trade_attention_candidates(db, definition.candidate_type)
+            return TradeAttentionCandidateListOut(
+                count=len(rows),
+                total_count=total_count,
+                items=[_to_trade_attention_candidate_out(row) for row in rows],
+                candidate_type_counts=candidate_type_counts,
+                candidate_type=definition.candidate_type,
+                source_count_key=definition.source_count_key,
+                description=definition.description,
+            )
+
+        return TradeAttentionCandidateListOut(
+            count=len(rows),
+            total_count=count_trade_attention_candidates_for_types(db, TRADE_ATTENTION_CANDIDATE_TYPE_NAMES),
+            items=[_to_trade_attention_candidate_out(row) for row in rows],
+            candidate_type_counts=candidate_type_counts,
+            candidate_types=list(TRADE_ATTENTION_CANDIDATE_TYPE_NAMES),
+        )
+
+    return execute_operational_query(db, _load)
+
+
 @router.get("/resources", response_model=list[OperationalResourceDescriptorOut])
 def get_operational_resource_descriptors() -> list[OperationalResourceDescriptorOut]:
     return [
@@ -269,6 +362,37 @@ def get_operational_resource_descriptors() -> list[OperationalResourceDescriptor
         )
         for descriptor in OPERATIONAL_RESOURCE_DESCRIPTORS.values()
     ]
+
+
+@router.get("/document-record-creation-requests", response_model=list[DocumentRecordCreationWorkItemOut])
+def get_document_record_creation_work_items(
+    request: Request,
+    queue: str | None = Query(default=None),
+    target_record_type: str | None = Query(default=None),
+    include_closed: bool = Query(default=False),
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> list[DocumentRecordCreationWorkItemOut]:
+    require_actor_role(
+        request,
+        predicate=_can_view_document_intake,
+        detail=(
+            "Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions "
+            "can view document intake work items."
+        ),
+    )
+    return execute_operational_query(
+        db,
+        lambda: list_document_record_creation_work_items(
+            db,
+            queue=queue,
+            target_record_type=target_record_type,
+            include_closed=include_closed,
+            limit=limit,
+            offset=offset,
+        ),
+    )
 
 
 @router.get("/work-items", response_model=list[TradeWorkflowItemOut])
@@ -363,6 +487,7 @@ __all__ = [
     "router",
     "get_system_overview",
     "get_workspace_bootstrap_summary",
+    "get_document_record_creation_work_items",
     "get_work_items",
     "post_work_item",
     "patch_work_item",

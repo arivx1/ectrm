@@ -169,6 +169,75 @@
     linear-gradient(180deg, rgba(11, 20, 31, 0.98), rgba(8, 15, 24, 0.98));
 }
 
+:root[data-color-mode='dark'] .price-report-observation-table-shell {
+  border-color: rgba(126, 154, 184, 0.14);
+  background: rgba(8, 15, 24, 0.72);
+}
+
+:root[data-color-mode='dark'] .price-report-column-dock {
+  border-color: rgba(126, 154, 184, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+:root[data-color-mode='dark'] .price-report-column-dock-label,
+:root[data-color-mode='dark'] .price-report-column-dock-placeholder {
+  color: var(--terminal-muted);
+}
+
+:root[data-color-mode='dark'] .price-report-column-chip {
+  border-color: rgba(78, 167, 255, 0.18);
+  background: rgba(78, 167, 255, 0.1);
+  color: var(--terminal-blue);
+}
+
+:root[data-color-mode='dark'] .price-report-observation-table th {
+  color: var(--terminal-muted);
+}
+
+:root[data-color-mode='dark'] .price-report-observation-table td {
+  border-color: rgba(126, 154, 184, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--terminal-text-soft);
+}
+
+:root[data-color-mode='dark'] .price-report-observation-table strong {
+  color: var(--terminal-text);
+}
+
+:root[data-color-mode='dark'] .price-report-observation-price {
+  border-color: rgba(61, 214, 160, 0.2);
+  background: rgba(61, 214, 160, 0.1);
+  color: var(--terminal-accent-strong);
+}
+
+:root[data-color-mode='dark'] .price-report-observation-source small {
+  color: var(--terminal-muted);
+}
+
+:root[data-color-mode='dark'] .admin-price-source-view,
+:root[data-color-mode='dark'] .admin-price-source-fact,
+:root[data-color-mode='dark'] .admin-price-source-detail-section {
+  border-color: rgba(126, 154, 184, 0.14);
+  background: rgba(8, 15, 24, 0.72);
+}
+
+:root[data-color-mode='dark'] .admin-price-source-view-head h4,
+:root[data-color-mode='dark'] .admin-price-source-fact strong,
+:root[data-color-mode='dark'] .admin-price-source-detail-section h5 {
+  color: var(--terminal-text);
+}
+
+:root[data-color-mode='dark'] .admin-price-source-view-head p,
+:root[data-color-mode='dark'] .admin-price-source-fact p,
+:root[data-color-mode='dark'] .admin-price-source-detail-section dd {
+  color: var(--terminal-text-soft);
+}
+
+:root[data-color-mode='dark'] .admin-price-source-fact span,
+:root[data-color-mode='dark'] .admin-price-source-detail-section dt {
+  color: var(--terminal-muted);
+}
+
 .pnl-trend-stat-value-up {
   color: var(--terminal-accent-strong);
 }
@@ -216,3 +285,73 @@
   box-shadow: 0 0 0 10px rgba(61, 214, 160, 0.05);
 }
 
+.terminal-quote-selector,
+.terminal-quote-chart-card,
+.terminal-curve-card,
+.terminal-analytics-hero,
+.terminal-analytics-card,
+.terminal-analytics-note-list,
+.watchlist-alert-delivery-list {
+  border-color: rgba(126, 154, 184, 0.16);
+  background:
+    radial-gradient(circle at top right, rgba(78, 167, 255, 0.08), transparent 34%),
+    linear-gradient(180deg, rgba(11, 20, 31, 0.98), rgba(8, 15, 24, 0.98));
+}
+
+.terminal-quote-selector-row,
+.terminal-quote-stat-grid article,
+.terminal-analytics-stat-grid article,
+.terminal-analytics-row,
+.terminal-curve-row,
+.terminal-curve-bucket,
+.watchlist-alert-delivery-row {
+  border-color: rgba(126, 154, 184, 0.12);
+  background: linear-gradient(180deg, rgba(7, 14, 23, 0.96), rgba(13, 23, 35, 0.76));
+}
+
+.terminal-quote-selector-row.is-active {
+  border-color: rgba(61, 214, 160, 0.26);
+  box-shadow: 0 0 0 1px rgba(61, 214, 160, 0.08);
+}
+
+.terminal-quote-card-head strong,
+.terminal-analytics-copy strong,
+.terminal-analytics-latest strong,
+.terminal-analytics-section-head strong,
+.terminal-analytics-row-copy strong,
+.terminal-analytics-row-meta strong,
+.terminal-analytics-stat-grid strong,
+.terminal-quote-selector-head strong,
+.terminal-quote-latest strong,
+.terminal-quote-selector-row strong,
+.terminal-quote-stat-grid strong,
+.terminal-curve-row-copy strong,
+.terminal-curve-row-meta strong,
+.terminal-curve-bucket strong,
+.watchlist-alert-delivery-head strong {
+  color: var(--terminal-text);
+}
+
+.terminal-quote-card-head p,
+.terminal-analytics-copy p,
+.terminal-analytics-latest span,
+.terminal-analytics-latest small,
+.terminal-analytics-section-head small,
+.terminal-analytics-row-copy span,
+.terminal-analytics-row-meta span,
+.terminal-analytics-note-list p,
+.terminal-quote-latest span,
+.terminal-quote-latest small,
+.terminal-quote-selector-row span,
+.terminal-quote-stat-grid span,
+.terminal-curve-row-copy span,
+.terminal-curve-bucket span,
+.terminal-curve-bucket p,
+.watchlist-alert-delivery-head span,
+.watchlist-alert-delivery-head small {
+  color: var(--terminal-muted);
+}
+
+.terminal-curve-row-bar {
+  background: rgba(126, 154, 184, 0.12);
+}

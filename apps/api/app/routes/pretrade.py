@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -13,9 +14,11 @@ from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reports.services.pretrade_reviews import (
     PRETRADE_REVIEW_PRESET_KEY,
     PRETRADE_SHARED_OWNER_KEY,
+    REVIEW_APPROVAL_GOVERNANCE_SNAPSHOT_KEY,
     append_review_activity,
     build_linked_trade_status_lookup,
     get_pretrade_review_record,
+    persist_review_governance_snapshot,
     review_draft,
     review_linked_trade_id,
     review_owner,
@@ -27,17 +30,57 @@ from apps.api.app.domains.reports.services.pretrade_reviews import (
     review_thesis,
     to_review_out,
 )
+from apps.api.app.domains.reports.services.pretrade_governance import (
+    build_pretrade_governance_audit_export,
+    build_pretrade_governance_items,
+    build_pretrade_governance_summary,
+)
+from apps.api.app.domains.reports.services.pretrade_hedge_recommendations import (
+    PreTradeHedgeRecommendationPromotionError,
+    promote_governance_hedge_recommendation_draft,
+    to_pretrade_hedge_recommendation_out,
+    visible_pretrade_hedge_recommendation_records,
+)
+from apps.api.app.domains.reports.services.pretrade_market_opportunities import (
+    PreTradeMarketOpportunityPromotionError,
+    promote_governance_market_opportunity_draft,
+    to_pretrade_market_opportunity_out,
+    visible_pretrade_market_opportunity_records,
+)
+from apps.api.app.domains.reports.services.pretrade_netting_sets import (
+    PreTradeNettingSetPromotionError,
+    promote_governance_netting_set_draft,
+    to_pretrade_netting_set_out,
+    visible_pretrade_netting_set_records,
+)
+from apps.api.app.domains.reports.services.pretrade_risk_scenarios import (
+    PreTradeRiskScenarioPromotionError,
+    promote_governance_risk_scenario_draft,
+    to_pretrade_risk_scenario_out,
+    visible_pretrade_risk_scenario_records,
+)
+from apps.api.app.domains.reports.services.pretrade_promotion_outcomes import (
+    build_pretrade_promotion_outcome_summary,
+)
+from apps.api.app.domains.reports.services.pretrade_review_drift import (
+    build_pretrade_review_drift,
+)
 from apps.api.app.domains.reports.services.pretrade_recommendations import (
     PRETRADE_RECOMMENDATION_RUN_PRESET_KEY,
-    build_pretrade_recommendation_result,
+    accessible_recommendation_run_records,
+    build_pretrade_recommendation_draft_analysis,
+    build_pretrade_scenario_enrichment,
     build_recommendation_run_payload,
     build_recommendation_summary_lookup,
+    get_accessible_recommendation_run_record,
     list_pretrade_source_adapters,
-    normalize_recommendation_input_snapshots,
+    latest_accessible_recommendation_run_record,
     pretrade_recommendation_run_records_stmt,
-    pretrade_recommendation_run_record_stmt,
+    prepare_pretrade_recommendation_evaluation,
+    previous_recommendation_run_record,
     recommendation_run_source_review_id,
     recommendation_run_source_scenario_id,
+    resolve_pretrade_recommendation_input_snapshots,
     to_recommendation_run_out,
 )
 from apps.api.app.models.report_preset import ReportPreset
@@ -45,8 +88,17 @@ from apps.api.app.schemas.pretrade import (
     PreTradeGovernanceAuditCategory,
     PreTradeGovernanceAuditExportOut,
     PreTradeGovernanceAuditRowOut,
+    PreTradeHedgeRecommendationOut,
+    PreTradeHedgeRecommendationPromoteCreate,
     PreTradeGovernanceItemsOut,
     PreTradeGovernanceSummaryOut,
+    PreTradeMarketOpportunityOut,
+    PreTradeMarketOpportunityPromoteCreate,
+    PreTradeNettingSetOut,
+    PreTradeNettingSetPromoteCreate,
+    PreTradePromotionOutcomeSummaryOut,
+    PreTradeRecommendationDraftAnalysisCreate,
+    PreTradeRecommendationDraftAnalysisOut,
     PreTradeGovernanceStaleEvidenceRunOut,
     PreTradeRecommendationRunCreate,
     PreTradeRecommendationRunOut,
@@ -54,11 +106,15 @@ from apps.api.app.schemas.pretrade import (
     PreTradeRecommendationSourceAdapterOut,
     PreTradeReviewActivityAction,
     PreTradeReviewActivityCreate,
+    PreTradeReviewDriftOut,
     PreTradeReviewItemCreate,
     PreTradeReviewItemOut,
     PreTradeReviewItemUpdate,
+    PreTradeRiskScenarioOut,
+    PreTradeRiskScenarioPromoteCreate,
     PreTradeScenarioCreate,
     PreTradeScenarioDraft,
+    PreTradeScenarioEnrichmentOut,
     PreTradeScenarioOut,
     PreTradeScenarioUpdate,
 )
@@ -90,12 +146,29 @@ def _scenario_thesis(record: ReportPreset) -> str | None:
     return thesis if isinstance(thesis, str) else None
 
 
+def _payload_enrichment_json(enrichment: PreTradeScenarioEnrichmentOut | None) -> dict[str, object] | None:
+    if enrichment is None:
+        return None
+    return enrichment.model_dump(mode="json", exclude_none=True)
+
+
+def _scenario_enrichment(record: ReportPreset) -> PreTradeScenarioEnrichmentOut | None:
+    raw_enrichment = _record_payload(record).get("enrichment")
+    if not isinstance(raw_enrichment, dict):
+        return None
+    try:
+        return PreTradeScenarioEnrichmentOut.model_validate(raw_enrichment)
+    except ValidationError:
+        return None
+
+
 def _to_scenario_out(record: ReportPreset, *, actor_id: str) -> PreTradeScenarioOut:
     return PreTradeScenarioOut(
         scenario_id=record.id,
         name=record.name,
         thesis=_scenario_thesis(record),
         draft=_draft_from_record(record),
+        enrichment=_scenario_enrichment(record),
         created_at=record.created_at,
         created_by=record.created_by,
         updated_at=record.updated_at,
@@ -105,11 +178,20 @@ def _to_scenario_out(record: ReportPreset, *, actor_id: str) -> PreTradeScenario
     )
 
 
-def _scenario_payload_json(*, thesis: str | None, draft: PreTradeScenarioDraft) -> dict[str, object | None]:
-    return {
+def _scenario_payload_json(
+    *,
+    thesis: str | None,
+    draft: PreTradeScenarioDraft,
+    enrichment: PreTradeScenarioEnrichmentOut | None = None,
+) -> dict[str, object | None]:
+    payload: dict[str, object | None] = {
         "thesis": thesis,
         "draft": draft.model_dump(mode="json", exclude_none=True),
     }
+    enrichment_json = _payload_enrichment_json(enrichment)
+    if enrichment_json is not None:
+        payload["enrichment"] = enrichment_json
+    return payload
 
 
 def _review_payload_json(
@@ -118,6 +200,7 @@ def _review_payload_json(
     draft: PreTradeScenarioDraft,
     source_scenario_id: int | None,
     recommendation_run_id: int | None,
+    enrichment: PreTradeScenarioEnrichmentOut | None,
     review_status: str,
     owner: str | None,
     due_at: datetime | None,
@@ -128,6 +211,7 @@ def _review_payload_json(
         "draft": draft.model_dump(mode="json", exclude_none=True),
         "source_scenario_id": source_scenario_id,
         "recommendation_run_id": recommendation_run_id,
+        "enrichment": _payload_enrichment_json(enrichment),
         "recommendation_override_reason": None,
         "recommendation_override_by": None,
         "recommendation_override_at": None,
@@ -152,32 +236,13 @@ def _visible_reviews_stmt():
     )
 
 
-def _recommendation_run_attached_to_shared_review(db: Session, recommendation_run_id: int) -> bool:
-    records = db.execute(_visible_reviews_stmt()).scalars().all()
-    return any(review_recommendation_run_id(record) == recommendation_run_id for record in records)
-
-
-def _get_accessible_recommendation_run_record(
-    db: Session,
-    *,
-    recommendation_run_id: int,
-    actor_id: str,
-) -> ReportPreset | None:
-    record = db.execute(pretrade_recommendation_run_record_stmt(recommendation_run_id)).scalars().first()
-    if record is None:
-        return None
-    if record.scope_owner_key in {actor_id, PRETRADE_SHARED_OWNER_KEY} or _recommendation_run_attached_to_shared_review(db, recommendation_run_id):
-        return record
-    return None
-
-
 def _get_visible_recommendation_run_record_or_404(
     db: Session,
     *,
     recommendation_run_id: int,
     actor_id: str,
 ) -> ReportPreset:
-    record = _get_accessible_recommendation_run_record(
+    record = get_accessible_recommendation_run_record(
         db,
         recommendation_run_id=recommendation_run_id,
         actor_id=actor_id,
@@ -188,6 +253,19 @@ def _get_visible_recommendation_run_record_or_404(
             detail="Pre-trade recommendation run was not found.",
         )
     return record
+
+
+def _recommendation_record_enrichment(
+    recommendation_record: ReportPreset,
+    *,
+    actor_id: str,
+) -> PreTradeScenarioEnrichmentOut:
+    return build_pretrade_scenario_enrichment(
+        to_recommendation_run_out(
+            recommendation_record,
+            actor_id=actor_id,
+        )
+    )
 
 
 def _validate_review_recommendation_attachment(
@@ -227,27 +305,8 @@ def _governance_recommendation_run_records(
     actor_id: str,
     review_records: list[ReportPreset],
 ) -> list[ReportPreset]:
-    records_by_id = {
-        record.id: record
-        for record in db.execute(pretrade_recommendation_run_records_stmt(actor_id)).scalars().all()
-    }
-    attached_run_ids = sorted(
-        {
-            recommendation_run_id
-            for recommendation_run_id in (review_recommendation_run_id(record) for record in review_records)
-            if recommendation_run_id is not None and recommendation_run_id not in records_by_id
-        }
-    )
-    if attached_run_ids:
-        attached_records = db.execute(
-            select(ReportPreset).where(
-                ReportPreset.preset_key == PRETRADE_RECOMMENDATION_RUN_PRESET_KEY,
-                ReportPreset.id.in_(attached_run_ids),
-            )
-        ).scalars().all()
-        records_by_id.update({record.id: record for record in attached_records})
-
-    return sorted(records_by_id.values(), key=lambda record: (record.created_at, record.id), reverse=True)
+    del review_records
+    return accessible_recommendation_run_records(db, actor_id=actor_id)
 
 
 def _governance_recommendation_run_group_key(record: ReportPreset) -> tuple[str, int]:
@@ -391,31 +450,6 @@ def _governance_audit_rows(items: PreTradeGovernanceItemsOut) -> list[PreTradeGo
     return rows
 
 
-def _same_recommendation_comparison_group(left: ReportPreset, right: ReportPreset) -> bool:
-    left_review_id = recommendation_run_source_review_id(left)
-    right_review_id = recommendation_run_source_review_id(right)
-    if left_review_id is not None or right_review_id is not None:
-        return left_review_id is not None and left_review_id == right_review_id
-
-    left_scenario_id = recommendation_run_source_scenario_id(left)
-    right_scenario_id = recommendation_run_source_scenario_id(right)
-    return left_scenario_id is not None and left_scenario_id == right_scenario_id
-
-
-def _previous_recommendation_run_record(
-    records: list[ReportPreset],
-    current_record: ReportPreset,
-) -> ReportPreset | None:
-    matching_older_records = [
-        record
-        for record in records
-        if record.id != current_record.id
-        and _same_recommendation_comparison_group(current_record, record)
-        and (record.created_at, record.id) < (current_record.created_at, current_record.id)
-    ]
-    return max(matching_older_records, key=lambda record: (record.created_at, record.id), default=None)
-
-
 @router.get("/scenarios", response_model=list[PreTradeScenarioOut])
 def get_pretrade_scenarios(
     request: Request,
@@ -456,7 +490,11 @@ def create_pretrade_scenario(
         scope_owner_key=actor_id,
         name=payload.name,
         name_key=name_key,
-        filters_json=_scenario_payload_json(thesis=payload.thesis, draft=payload.draft),
+        filters_json=_scenario_payload_json(
+            thesis=payload.thesis,
+            draft=payload.draft,
+            enrichment=payload.enrichment,
+        ),
         created_at=now,
         created_by=actor_id,
         updated_at=now,
@@ -511,6 +549,12 @@ def update_pretrade_scenario(
         if payload.draft is None:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="draft is required when provided")
         next_payload["draft"] = payload.draft.model_dump(mode="json", exclude_none=True)
+    if "enrichment" in changes:
+        enrichment_json = _payload_enrichment_json(payload.enrichment)
+        if enrichment_json is None:
+            next_payload.pop("enrichment", None)
+        else:
+            next_payload["enrichment"] = enrichment_json
     record.filters_json = next_payload
 
     record.updated_at = datetime.now(timezone.utc)
@@ -545,99 +589,42 @@ def get_pretrade_recommendation_source_adapters(
     return list_pretrade_source_adapters()
 
 
+@router.post("/recommendations/draft-analysis", response_model=PreTradeRecommendationDraftAnalysisOut)
+def analyze_pretrade_recommendation_draft(
+    payload: PreTradeRecommendationDraftAnalysisCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradeRecommendationDraftAnalysisOut:
+    actor_id = require_authenticated_actor(request)
+    evaluated_at = datetime.now(timezone.utc)
+    previous_record = latest_accessible_recommendation_run_record(
+        db,
+        actor_id=actor_id,
+        source_scenario_id=payload.source_scenario_id,
+        source_review_id=payload.source_review_id,
+    )
+    return build_pretrade_recommendation_draft_analysis(
+        thesis=payload.thesis,
+        draft=payload.draft,
+        source_scenario_id=payload.source_scenario_id,
+        source_review_id=payload.source_review_id,
+        input_snapshots=payload.input_snapshots,
+        db=db,
+        as_of=evaluated_at,
+        actor_id=actor_id,
+        previous_record=previous_record,
+    )
+
+
 @router.get("/governance/summary", response_model=PreTradeGovernanceSummaryOut)
 def get_pretrade_governance_summary(
     request: Request,
     db: Session = Depends(get_db),
 ) -> PreTradeGovernanceSummaryOut:
     actor_id = require_authenticated_actor(request)
-    review_records = db.execute(_visible_reviews_stmt()).scalars().all()
-    recommendation_summary_by_id = _review_recommendation_summary_lookup(db, review_records)
-
-    open_review_count = 0
-    in_review_count = 0
-    approved_review_count = 0
-    rejected_review_count = 0
-    booked_review_count = 0
-    risky_recommendation_count = 0
-    unresolved_risky_recommendation_count = 0
-    override_count = 0
-    booked_with_override_count = 0
-
-    for record in review_records:
-        status_value = review_status(record)
-        if status_value == "OPEN":
-            open_review_count += 1
-        elif status_value == "IN_REVIEW":
-            in_review_count += 1
-        elif status_value == "APPROVED":
-            approved_review_count += 1
-        elif status_value == "REJECTED":
-            rejected_review_count += 1
-
-        override_reason = review_recommendation_override_reason(record)
-        linked_trade_id = review_linked_trade_id(record)
-        if override_reason is not None:
-            override_count += 1
-        if linked_trade_id is not None:
-            booked_review_count += 1
-            if override_reason is not None:
-                booked_with_override_count += 1
-
-        recommendation_run_id = review_recommendation_run_id(record)
-        recommendation_summary = (
-            recommendation_summary_by_id.get(recommendation_run_id)
-            if recommendation_run_id is not None
-            else None
-        )
-        if recommendation_summary is not None and recommendation_summary.stance in RECOMMENDATION_OVERRIDE_STANCES:
-            risky_recommendation_count += 1
-            if status_value != "APPROVED" or override_reason is None:
-                unresolved_risky_recommendation_count += 1
-
-    all_recommendation_run_records = _governance_recommendation_run_records(
+    return build_pretrade_governance_summary(
         db,
         actor_id=actor_id,
-        review_records=review_records,
-    )
-    recommendation_run_records = _latest_governance_recommendation_run_records(all_recommendation_run_records)
-    stale_evidence_run_count = 0
-    stale_evidence_source_count = 0
-    for record in recommendation_run_records:
-        run = to_recommendation_run_out(
-            record,
-            actor_id=actor_id,
-            previous_record=_previous_recommendation_run_record(all_recommendation_run_records, record),
-        )
-        impaired_source_count = len(_governance_impaired_snapshots(run))
-        if impaired_source_count:
-            stale_evidence_run_count += 1
-            stale_evidence_source_count += impaired_source_count
-
-    pending_review_count = open_review_count + in_review_count
-    if pending_review_count or unresolved_risky_recommendation_count:
-        risk_status = "ACTION_REQUIRED"
-    elif stale_evidence_run_count or override_count or booked_with_override_count or approved_review_count:
-        risk_status = "WATCH"
-    else:
-        risk_status = "CLEAR"
-
-    return PreTradeGovernanceSummaryOut(
-        generated_at=datetime.now(timezone.utc),
-        risk_status=risk_status,  # type: ignore[arg-type]
-        open_review_count=open_review_count,
-        in_review_count=in_review_count,
-        approved_review_count=approved_review_count,
-        rejected_review_count=rejected_review_count,
-        pending_review_count=pending_review_count,
-        booked_review_count=booked_review_count,
-        risky_recommendation_count=risky_recommendation_count,
-        unresolved_risky_recommendation_count=unresolved_risky_recommendation_count,
-        override_count=override_count,
-        booked_with_override_count=booked_with_override_count,
-        stale_evidence_run_count=stale_evidence_run_count,
-        stale_evidence_source_count=stale_evidence_source_count,
-        recommendation_run_count=len(recommendation_run_records),
     )
 
 
@@ -647,68 +634,9 @@ def get_pretrade_governance_items(
     db: Session = Depends(get_db),
 ) -> PreTradeGovernanceItemsOut:
     actor_id = require_authenticated_actor(request)
-    review_records = db.execute(
-        _visible_reviews_stmt().order_by(ReportPreset.updated_at.desc(), ReportPreset.created_at.desc())
-    ).scalars().all()
-    recommendation_summary_by_id = _review_recommendation_summary_lookup(db, review_records)
-
-    pending_records: list[ReportPreset] = []
-    risky_records: list[ReportPreset] = []
-    unresolved_risky_records: list[ReportPreset] = []
-    override_records: list[ReportPreset] = []
-    booked_with_override_records: list[ReportPreset] = []
-
-    for record in review_records:
-        status_value = review_status(record)
-        override_reason = review_recommendation_override_reason(record)
-        linked_trade_id = review_linked_trade_id(record)
-        recommendation_run_id = review_recommendation_run_id(record)
-        recommendation_summary = (
-            recommendation_summary_by_id.get(recommendation_run_id)
-            if recommendation_run_id is not None
-            else None
-        )
-
-        if status_value in {"OPEN", "IN_REVIEW"}:
-            pending_records.append(record)
-        if override_reason is not None:
-            override_records.append(record)
-            if linked_trade_id is not None:
-                booked_with_override_records.append(record)
-        if recommendation_summary is not None and recommendation_summary.stance in RECOMMENDATION_OVERRIDE_STANCES:
-            risky_records.append(record)
-            if status_value != "APPROVED" or override_reason is None:
-                unresolved_risky_records.append(record)
-
-    all_recommendation_run_records = _governance_recommendation_run_records(
+    return build_pretrade_governance_items(
         db,
         actor_id=actor_id,
-        review_records=review_records,
-    )
-    stale_evidence_runs: list[PreTradeGovernanceStaleEvidenceRunOut] = []
-    for record in _latest_governance_recommendation_run_records(all_recommendation_run_records):
-        run = to_recommendation_run_out(
-            record,
-            actor_id=actor_id,
-            previous_record=_previous_recommendation_run_record(all_recommendation_run_records, record),
-        )
-        impaired_snapshots = _governance_impaired_snapshots(run)
-        if impaired_snapshots:
-            stale_evidence_runs.append(
-                PreTradeGovernanceStaleEvidenceRunOut(
-                    run=run,
-                    impaired_snapshots=impaired_snapshots,
-                )
-            )
-
-    return PreTradeGovernanceItemsOut(
-        generated_at=datetime.now(timezone.utc),
-        pending_reviews=_to_review_items(db, pending_records),
-        risky_recommendation_reviews=_to_review_items(db, risky_records),
-        unresolved_risky_recommendation_reviews=_to_review_items(db, unresolved_risky_records),
-        override_reviews=_to_review_items(db, override_records),
-        booked_with_override_reviews=_to_review_items(db, booked_with_override_records),
-        stale_evidence_runs=stale_evidence_runs,
     )
 
 
@@ -718,15 +646,151 @@ def export_pretrade_governance_audit(
     db: Session = Depends(get_db),
 ) -> PreTradeGovernanceAuditExportOut:
     actor_id = require_authenticated_actor(request)
-    summary = get_pretrade_governance_summary(request, db)
-    items = get_pretrade_governance_items(request, db)
-    return PreTradeGovernanceAuditExportOut(
-        generated_at=datetime.now(timezone.utc),
-        exported_by=actor_id,
-        summary=summary,
-        items=items,
-        audit_rows=_governance_audit_rows(items),
+    return build_pretrade_governance_audit_export(
+        db,
+        actor_id=actor_id,
     )
+
+
+@router.get("/promotion-outcomes", response_model=PreTradePromotionOutcomeSummaryOut)
+def get_pretrade_promotion_outcomes(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradePromotionOutcomeSummaryOut:
+    require_authenticated_actor(request)
+    return build_pretrade_promotion_outcome_summary(db)
+
+
+@router.get("/netting-sets", response_model=list[PreTradeNettingSetOut])
+def get_pretrade_netting_sets(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[PreTradeNettingSetOut]:
+    actor_id = require_authenticated_actor(request)
+    return [
+        to_pretrade_netting_set_out(record, actor_id=actor_id)
+        for record in visible_pretrade_netting_set_records(db)
+    ]
+
+
+@router.post("/netting-sets/from-promotion", response_model=PreTradeNettingSetOut, status_code=status.HTTP_201_CREATED)
+def promote_pretrade_netting_set_from_governance(
+    payload: PreTradeNettingSetPromoteCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradeNettingSetOut:
+    actor_id = require_authenticated_actor(request)
+    try:
+        record = promote_governance_netting_set_draft(
+            db,
+            actor_id=actor_id,
+            payload=payload,
+        )
+    except PreTradeNettingSetPromotionError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return to_pretrade_netting_set_out(record, actor_id=actor_id)
+
+
+@router.get("/hedge-recommendations", response_model=list[PreTradeHedgeRecommendationOut])
+def get_pretrade_hedge_recommendations(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[PreTradeHedgeRecommendationOut]:
+    actor_id = require_authenticated_actor(request)
+    return [
+        to_pretrade_hedge_recommendation_out(record, actor_id=actor_id)
+        for record in visible_pretrade_hedge_recommendation_records(db)
+    ]
+
+
+@router.post(
+    "/hedge-recommendations/from-promotion",
+    response_model=PreTradeHedgeRecommendationOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def promote_pretrade_hedge_recommendation_from_governance(
+    payload: PreTradeHedgeRecommendationPromoteCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradeHedgeRecommendationOut:
+    actor_id = require_authenticated_actor(request)
+    try:
+        record = promote_governance_hedge_recommendation_draft(
+            db,
+            actor_id=actor_id,
+            payload=payload,
+        )
+    except PreTradeHedgeRecommendationPromotionError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return to_pretrade_hedge_recommendation_out(record, actor_id=actor_id)
+
+
+@router.get("/risk-scenarios", response_model=list[PreTradeRiskScenarioOut])
+def get_pretrade_risk_scenarios(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[PreTradeRiskScenarioOut]:
+    actor_id = require_authenticated_actor(request)
+    return [
+        to_pretrade_risk_scenario_out(record, actor_id=actor_id)
+        for record in visible_pretrade_risk_scenario_records(db)
+    ]
+
+
+@router.post(
+    "/risk-scenarios/from-promotion",
+    response_model=PreTradeRiskScenarioOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def promote_pretrade_risk_scenario_from_governance(
+    payload: PreTradeRiskScenarioPromoteCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradeRiskScenarioOut:
+    actor_id = require_authenticated_actor(request)
+    try:
+        record = promote_governance_risk_scenario_draft(
+            db,
+            actor_id=actor_id,
+            payload=payload,
+        )
+    except PreTradeRiskScenarioPromotionError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return to_pretrade_risk_scenario_out(record, actor_id=actor_id)
+
+
+@router.get("/market-opportunities", response_model=list[PreTradeMarketOpportunityOut])
+def get_pretrade_market_opportunities(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> list[PreTradeMarketOpportunityOut]:
+    actor_id = require_authenticated_actor(request)
+    return [
+        to_pretrade_market_opportunity_out(record, actor_id=actor_id)
+        for record in visible_pretrade_market_opportunity_records(db)
+    ]
+
+
+@router.post(
+    "/market-opportunities/from-promotion",
+    response_model=PreTradeMarketOpportunityOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def promote_pretrade_market_opportunity_from_governance(
+    payload: PreTradeMarketOpportunityPromoteCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradeMarketOpportunityOut:
+    actor_id = require_authenticated_actor(request)
+    try:
+        record = promote_governance_market_opportunity_draft(
+            db,
+            actor_id=actor_id,
+            payload=payload,
+        )
+    except PreTradeMarketOpportunityPromotionError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return to_pretrade_market_opportunity_out(record, actor_id=actor_id)
 
 
 @router.get("/recommendations/runs", response_model=list[PreTradeRecommendationRunOut])
@@ -759,7 +823,7 @@ def get_pretrade_recommendation_runs(
             to_recommendation_run_out(
                 record,
                 actor_id=actor_id,
-                previous_record=_previous_recommendation_run_record(filtered_records, record),
+                previous_record=previous_recommendation_run_record(filtered_records, record),
             )
         )
         if len(runs) >= limit:
@@ -788,7 +852,7 @@ def get_pretrade_recommendation_run(
     return to_recommendation_run_out(
         record,
         actor_id=actor_id,
-        previous_record=_previous_recommendation_run_record(records, record),
+        previous_record=previous_recommendation_run_record(records, record),
     )
 
 
@@ -842,15 +906,18 @@ def create_pretrade_recommendation_run(
         thesis = _scenario_thesis(source_scenario_record)
 
     now = datetime.now(timezone.utc)
-    input_snapshots = normalize_recommendation_input_snapshots(
-        payload.input_snapshots,
+    resolved_input_snapshots = resolve_pretrade_recommendation_input_snapshots(
+        db=db,
+        draft=draft,
+        input_snapshots=payload.input_snapshots,
         as_of=now,
         actor_id=actor_id,
     )
-    recommendation = build_pretrade_recommendation_result(
+    evaluation = prepare_pretrade_recommendation_evaluation(
         draft=draft,
-        input_snapshots=input_snapshots,
+        input_snapshots=resolved_input_snapshots,
         as_of=now,
+        actor_id=actor_id,
     )
     name = (
         payload.name
@@ -867,8 +934,8 @@ def create_pretrade_recommendation_run(
             draft=draft,
             source_scenario_id=source_scenario_id,
             source_review_id=payload.source_review_id,
-            input_snapshots=input_snapshots,
-            recommendation=recommendation,
+            input_snapshots=evaluation.input_snapshots,
+            recommendation=evaluation.recommendation,
         ),
         created_at=now,
         created_by=actor_id,
@@ -929,6 +996,23 @@ def get_pretrade_review(
     )
 
 
+@router.get("/reviews/{review_id}/drift", response_model=PreTradeReviewDriftOut)
+def get_pretrade_review_drift(
+    review_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> PreTradeReviewDriftOut:
+    actor_id = require_authenticated_actor(request)
+    record = get_pretrade_review_record(db, review_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pre-trade review item was not found.")
+    return build_pretrade_review_drift(
+        db,
+        review_record=record,
+        actor_id=actor_id,
+    )
+
+
 @router.post("/reviews", response_model=PreTradeReviewItemOut, status_code=status.HTTP_201_CREATED)
 def create_pretrade_review(
     payload: PreTradeReviewItemCreate,
@@ -937,6 +1021,7 @@ def create_pretrade_review(
 ) -> PreTradeReviewItemOut:
     actor_id = require_authenticated_actor(request)
 
+    source_record: ReportPreset | None = None
     if payload.source_scenario_id is not None:
         source_record = db.execute(
             _visible_scenarios_stmt(actor_id).where(ReportPreset.id == payload.source_scenario_id)
@@ -959,6 +1044,15 @@ def create_pretrade_review(
             source_scenario_id=payload.source_scenario_id,
         )
 
+    resolved_enrichment = payload.enrichment
+    if resolved_enrichment is None and source_record is not None:
+        resolved_enrichment = _scenario_enrichment(source_record)
+    if recommendation_record is not None:
+        resolved_enrichment = _recommendation_record_enrichment(
+            recommendation_record,
+            actor_id=actor_id,
+        )
+
     now = datetime.now(timezone.utc)
     record = ReportPreset(
         preset_key=PRETRADE_REVIEW_PRESET_KEY,
@@ -971,6 +1065,7 @@ def create_pretrade_review(
             draft=payload.draft,
             source_scenario_id=payload.source_scenario_id,
             recommendation_run_id=payload.recommendation_run_id,
+            enrichment=resolved_enrichment,
             review_status="OPEN",
             owner=payload.owner,
             due_at=payload.due_at,
@@ -993,6 +1088,7 @@ def create_pretrade_review(
             for key, value in {
                 "source_scenario_id": payload.source_scenario_id,
                 "recommendation_run_id": payload.recommendation_run_id,
+                "opportunity_category": resolved_enrichment.opportunity_category if resolved_enrichment else None,
             }.items()
             if value is not None
         },
@@ -1049,6 +1145,7 @@ def update_pretrade_review(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Approval comment is required.",
         )
+    recommendation_enrichment: PreTradeScenarioEnrichmentOut | None = None
     if "recommendation_run_id" in changes and payload.recommendation_run_id is not None:
         recommendation_record = _get_visible_recommendation_run_record_or_404(
             db,
@@ -1058,6 +1155,10 @@ def update_pretrade_review(
         _validate_review_recommendation_attachment(
             recommendation_record=recommendation_record,
             source_scenario_id=review_source_scenario_id(record),
+        )
+        recommendation_enrichment = _recommendation_record_enrichment(
+            recommendation_record,
+            actor_id=actor_id,
         )
 
     recommendation_summary = (
@@ -1093,6 +1194,16 @@ def update_pretrade_review(
         next_payload["draft"] = payload.draft.model_dump(mode="json", exclude_none=True)
     if "recommendation_run_id" in changes:
         next_payload["recommendation_run_id"] = payload.recommendation_run_id
+        if recommendation_enrichment is not None:
+            next_payload["enrichment"] = _payload_enrichment_json(recommendation_enrichment)
+        elif payload.recommendation_run_id is None:
+            next_payload.pop("enrichment", None)
+    if "enrichment" in changes:
+        enrichment_json = _payload_enrichment_json(payload.enrichment)
+        if enrichment_json is None:
+            next_payload.pop("enrichment", None)
+        else:
+            next_payload["enrichment"] = enrichment_json
     if "recommendation_override_reason" in changes:
         next_payload["recommendation_override_reason"] = payload.recommendation_override_reason
         next_payload["recommendation_override_by"] = actor_id if payload.recommendation_override_reason else None
@@ -1132,6 +1243,8 @@ def update_pretrade_review(
         activity_action = "COMMENTED"
         activity_payload["from_recommendation_run_id"] = current_recommendation_run_id
         activity_payload["to_recommendation_run_id"] = payload.recommendation_run_id
+        if recommendation_enrichment is not None and recommendation_enrichment.opportunity_category is not None:
+            activity_payload["opportunity_category"] = recommendation_enrichment.opportunity_category
     elif "activity_comment" in changes or "review_notes" in changes:
         activity_action = "COMMENTED"
     elif "recommendation_override_reason" in changes:
@@ -1153,6 +1266,17 @@ def update_pretrade_review(
     record.updated_at = now
     record.updated_by = actor_id
     record.version += 1
+    if "review_status" in changes and payload.review_status == "APPROVED" and payload.review_status != current_review_status:
+        persist_review_governance_snapshot(
+            record,
+            snapshot=build_pretrade_governance_audit_export(
+                db,
+                actor_id=actor_id,
+                generated_at=now,
+            ),
+            snapshot_key=REVIEW_APPROVAL_GOVERNANCE_SNAPSHOT_KEY,
+            activity_action="APPROVED",
+        )
     db.commit()
     db.refresh(record)
     linked_trade_status_by_id = build_linked_trade_status_lookup(

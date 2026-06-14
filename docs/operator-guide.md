@@ -53,13 +53,22 @@ Use Guide when you need product context without leaving the application.
 - jump between concepts, workflows, and access notes quickly
 - move straight from a help section into the workspace you need next
 
-### Dashboard
+### Home
 
-Use Dashboard when you want a quick operational picture.
+Use Home when you want the signed-in operating brief.
 
-- highlights current system health
-- surfaces recent trade activity and event flow
-- summarizes exposure without forcing users into raw tables first
+- summarizes what needs attention in plain language
+- promotes one recommended next move and the object most worth inspecting
+- shows a compact operating timeline, watched market marks, and recent event
+  flow without forcing users into a full dashboard first
+
+### Apps
+
+Use Apps when you want the configurable Home apps surface.
+
+- switch between saved personal or shared Home view instances
+- arrange market, map, document, communication, and assistant cards
+- ask the desk assistant or jump into promoted workflow routes
 
 ### Trades
 
@@ -128,7 +137,7 @@ Current admin-facing capabilities include:
 - trading source register access
 - schema and explainability-oriented summaries
 
-This workspace is intentionally more technical than Dashboard or Trades, but it
+This workspace is intentionally more technical than Home or Trades, but it
 still presents the system in product language rather than database language.
 
 ### Settings
@@ -139,6 +148,8 @@ Use Settings for access and runtime setup.
 - bootstrap the first admin account when the API is configured for it
 - review safe runtime settings exposed by the backend
 - change browser-side API and query-limit overrides for local testing
+- connect Google Calendar in the browser to pull the next few scheduled events
+  into the app without storing Google calendar data on the ECTRM API
 
 If you need to make changes and the app is behaving like read-only software,
 this is the first place to check.
@@ -212,6 +223,22 @@ Admin-capable users can:
 - inspect external market-data sync runs
 - trigger seeded trading source refreshes
 - use schema and provenance views to explain how events feed projections
+
+### 7. Connect Google Calendar In Settings
+
+1. Open Settings.
+2. Scroll to the Google Calendar panel.
+3. If the panel says the calendar connection is not configured, ask your
+   implementation team to set `GOOGLE_AUTH_CLIENT_ID` on the API and restart
+   it.
+4. Once enabled, connect your Google account and grant readonly calendar
+   access.
+5. Choose the calendar you want and refresh when you need a newer snapshot.
+
+The current UI only reads upcoming events for the next 7 days. The Google
+token and event content stay browser-side for this feature, persist in this
+browser until you disconnect or clear site data, and are not stored by the
+ECTRM API.
 
 ## Roles And Access
 

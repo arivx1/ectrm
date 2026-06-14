@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -13,24 +13,69 @@ from apps.api.app.core.http import require_actor_role
 from apps.api.app.core.http import require_authenticated_actor
 from apps.api.app.core.http import VALIDATION_ERROR_STATUS_CODES
 from apps.api.app.deps.db import get_db
+from apps.api.app.domains.integrations.services.gmail_inbox import (
+    GmailInboxIntegrationError,
+    get_gmail_inbox_message_detail,
+    import_gmail_inbox_documents,
+    list_gmail_inbox_messages,
+)
+from apps.api.app.domains.documents.services.document_action_approval_requests import (
+    approve_document_action_approval_request,
+    list_document_action_approval_requests,
+    reject_document_action_approval_request,
+    stage_document_action_approval_request,
+    to_document_action_approval_request_out,
+)
 from apps.api.app.domains.documents.services.document_action_execution import execute_document_action_plan
+from apps.api.app.domains.documents.services.document_candidate_actions import (
+    execute_selected_document_record_candidate_attach,
+    stage_selected_document_record_candidate_approval_request,
+)
+from apps.api.app.domains.documents.services.document_record_creation_requests import (
+    DocumentRecordCreationRequestPersistenceUnavailable,
+    cancel_document_record_creation_request,
+    list_document_record_creation_requests,
+    resolve_document_record_creation_request,
+    stage_document_record_creation_request,
+    to_document_record_creation_request_out,
+)
+from apps.api.app.domains.documents.services.document_workflows import execute_document_workflow
+from apps.api.app.domains.documents.services.document_workflows import list_document_workflows
 from apps.api.app.domains.documents.services.ingestion import get_document_ingestion
 from apps.api.app.domains.documents.services.ingestion import get_document_page_preview_path
+from apps.api.app.domains.documents.services.ingestion import get_document_source_file_details
 from apps.api.app.domains.documents.services.ingestion import ingest_pdf_document
 from apps.api.app.domains.documents.services.ingestion import list_document_ingestions
 from apps.api.app.domains.documents.services.ingestion import build_document_processor_runtime_settings
 from apps.api.app.domains.documents.services.ingestion import list_document_schema_registry
 from apps.api.app.domains.documents.services.ingestion import reprocess_document_ingestion
+from apps.api.app.domains.documents.services.ingestion import resolve_document_ai_confidence_threshold
 from apps.api.app.domains.documents.services.ingestion import run_document_processing_job
 from apps.api.app.domains.documents.services.ingestion import update_document_ingestion
 from apps.api.app.domains.documents.services.ingestion import update_document_ingestion_page
+from apps.api.app.domains.documents.services.ingestion import update_document_logical_documents
 from apps.api.app.schemas.document import DocumentIngestionOut
+from apps.api.app.schemas.document import DocumentGmailInboxBrowseResultOut
+from apps.api.app.schemas.document import DocumentGmailInboxMessageDetailOut
+from apps.api.app.schemas.document import DocumentGmailInboxImportRequest
+from apps.api.app.schemas.document import DocumentGmailInboxImportResultOut
+from apps.api.app.schemas.document import DocumentActionApprovalDecisionRequest
+from apps.api.app.schemas.document import DocumentActionApprovalRequestCreate
+from apps.api.app.schemas.document import DocumentActionApprovalRequestOut
+from apps.api.app.schemas.document import DocumentRecordCreationRequestCancel
+from apps.api.app.schemas.document import DocumentRecordCreationRequestCreate
+from apps.api.app.schemas.document import DocumentRecordCreationRequestOut
+from apps.api.app.schemas.document import DocumentRecordCreationRequestResolve
+from apps.api.app.schemas.document import DocumentRecordCandidateSelectionRequest
 from apps.api.app.schemas.document import DocumentIngestionPageUpdate
+from apps.api.app.schemas.document import DocumentLogicalDocumentsUpdate
 from apps.api.app.schemas.document import DocumentIngestionProcessRequest
 from apps.api.app.schemas.document import DocumentProcessorSelection
 from apps.api.app.schemas.document import DocumentProcessorRuntimeSettingsOut
 from apps.api.app.schemas.document import DocumentIngestionUpdate
 from apps.api.app.schemas.document import DocumentSchemaRegistryOut
+from apps.api.app.schemas.document import DocumentWorkflowExecutionOut
+from apps.api.app.schemas.document import DocumentWorkflowListOut
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -64,6 +109,106 @@ def get_documents(
 ) -> list[DocumentIngestionOut]:
     require_authenticated_actor(request)
     return list_document_ingestions(db, limit=limit, offset=offset)
+
+
+@router.get("/gmail/messages", response_model=DocumentGmailInboxBrowseResultOut)
+def get_gmail_messages(
+    request: Request,
+    query: str | None = Query(default=None, max_length=500),
+    page_size: int = Query(default=20, ge=1, le=50),
+    page_token: str | None = Query(default=None, max_length=500),
+    db: Session = Depends(get_db),
+) -> DocumentGmailInboxBrowseResultOut:
+    require_authenticated_actor(request)
+
+    try:
+        return list_gmail_inbox_messages(
+            db,
+            query_override=query,
+            page_size=page_size,
+            page_token=page_token,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except GmailInboxIntegrationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@router.get("/gmail/messages/{message_id}", response_model=DocumentGmailInboxMessageDetailOut)
+def get_gmail_message_detail(
+    message_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DocumentGmailInboxMessageDetailOut:
+    require_authenticated_actor(request)
+
+    try:
+        return get_gmail_inbox_message_detail(
+            db,
+            message_id=message_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except GmailInboxIntegrationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@router.get("/action-approval-requests", response_model=list[DocumentActionApprovalRequestOut])
+def get_document_action_approval_requests(
+    request: Request,
+    status_filter: str | None = Query(default="PENDING", alias="status", max_length=24),
+    limit: int = Query(default=50, ge=1, le=250),
+    db: Session = Depends(get_db),
+) -> list[DocumentActionApprovalRequestOut]:
+    require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can view document action approvals.",
+    )
+
+    def load_requests() -> list[DocumentActionApprovalRequestOut]:
+        return list_document_action_approval_requests(
+            db,
+            status_filter=status_filter,
+            limit=limit,
+        )
+
+    return execute_http_action(
+        db,
+        load_requests,
+        handled_exceptions=VALIDATION_ERROR_STATUS_CODES,
+    )
+
+
+@router.get("/record-creation-requests", response_model=list[DocumentRecordCreationRequestOut])
+def get_document_record_creation_requests(
+    request: Request,
+    status_filter: str | None = Query(default="OPEN", alias="status", max_length=24),
+    limit: int = Query(default=50, ge=1, le=250),
+    db: Session = Depends(get_db),
+) -> list[DocumentRecordCreationRequestOut]:
+    require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can view document record creation requests.",
+    )
+
+    def load_requests() -> list[DocumentRecordCreationRequestOut]:
+        return list_document_record_creation_requests(
+            db,
+            status_filter=status_filter,
+            limit=limit,
+        )
+
+    return execute_http_action(
+        db,
+        load_requests,
+        handled_exceptions=VALIDATION_ERROR_STATUS_CODES,
+    )
 
 
 @router.get("/{document_id}", response_model=DocumentIngestionOut)
@@ -138,6 +283,32 @@ def patch_document_page(
     )
 
 
+@router.patch("/{document_id}/logical-documents", response_model=DocumentIngestionOut)
+def patch_document_logical_documents(
+    document_id: str,
+    payload: DocumentLogicalDocumentsUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DocumentIngestionOut:
+    actor_id = require_authenticated_actor(request)
+    changes = payload.model_dump(exclude_unset=True)
+
+    def update_logical_documents() -> DocumentIngestionOut:
+        return update_document_logical_documents(
+            db,
+            document_id=document_id,
+            actor_id=actor_id,
+            changes=changes,
+        )
+
+    return execute_http_action(
+        db,
+        update_logical_documents,
+        commit=True,
+        handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
+
+
 @router.get("/{document_id}/pages/{page_id}/preview")
 def get_document_page_preview(
     document_id: str,
@@ -166,6 +337,33 @@ def get_document_page_preview(
     )
 
 
+@router.get("/{document_id}/source")
+def get_document_source(
+    document_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    require_authenticated_actor(request)
+
+    def load_source_file() -> tuple[str, str, str]:
+        source_path, media_type, filename = get_document_source_file_details(
+            db,
+            document_id=document_id,
+        )
+        return str(source_path), media_type, filename
+
+    source_path, media_type, filename = execute_http_action(
+        db,
+        load_source_file,
+        handled_exceptions=NOT_FOUND_ERROR_STATUS_CODES,
+    )
+    return FileResponse(
+        source_path,
+        media_type=media_type or "application/pdf",
+        filename=filename,
+    )
+
+
 @router.post("/uploads", response_model=DocumentIngestionOut, status_code=status.HTTP_201_CREATED)
 async def post_document_upload(
     request: Request,
@@ -173,10 +371,13 @@ async def post_document_upload(
     file: UploadFile = File(...),
     display_name: str | None = Form(default=None),
     processor_provider: DocumentProcessorSelection | None = Form(default=None),
+    processor_model: str | None = Form(default=None),
+    ai_confidence_threshold: float | None = Form(default=None, ge=0, le=1),
     db: Session = Depends(get_db),
 ) -> DocumentIngestionOut:
     actor_id = require_authenticated_actor(request)
     payload = await file.read()
+    resolved_ai_confidence_threshold = resolve_document_ai_confidence_threshold(ai_confidence_threshold)
 
     def ingest_document() -> DocumentIngestionOut:
         return ingest_pdf_document(
@@ -187,6 +388,8 @@ async def post_document_upload(
             payload=payload,
             display_name=display_name,
             processor_provider=processor_provider,
+            processor_model=processor_model,
+            ai_confidence_threshold=resolved_ai_confidence_threshold,
         )
 
     document = execute_http_action(
@@ -199,6 +402,7 @@ async def post_document_upload(
         run_document_processing_job,
         request.app.state.session_factory,
         document_id=document.document_id,
+        ai_confidence_threshold=resolved_ai_confidence_threshold,
     )
     return document
 
@@ -213,6 +417,9 @@ def post_document_reprocess(
 ) -> DocumentIngestionOut:
     actor_id = require_authenticated_actor(request)
     changes = payload.model_dump(exclude_unset=True) if payload is not None else {}
+    resolved_ai_confidence_threshold = resolve_document_ai_confidence_threshold(
+        changes.get("ai_confidence_threshold")
+    )
 
     def reprocess_document() -> DocumentIngestionOut:
         return reprocess_document_ingestion(
@@ -220,7 +427,10 @@ def post_document_reprocess(
             document_id=document_id,
             actor_id=actor_id,
             processor_provider=changes.get("processor_provider"),
+            processor_model=changes.get("processor_model"),
+            ai_confidence_threshold=resolved_ai_confidence_threshold,
             processor_provider_specified="processor_provider" in changes,
+            processor_model_specified="processor_model" in changes,
         )
 
     document = execute_http_action(
@@ -233,8 +443,43 @@ def post_document_reprocess(
         run_document_processing_job,
         request.app.state.session_factory,
         document_id=document_id,
+        ai_confidence_threshold=resolved_ai_confidence_threshold,
     )
     return document
+
+
+@router.post("/imports/gmail", response_model=DocumentGmailInboxImportResultOut, status_code=status.HTTP_202_ACCEPTED)
+def post_gmail_document_import(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    payload: DocumentGmailInboxImportRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> DocumentGmailInboxImportResultOut:
+    actor_id = require_authenticated_actor(request)
+    changes = payload.model_dump(exclude_unset=True) if payload is not None else {}
+
+    try:
+        result = import_gmail_inbox_documents(
+            db,
+            actor_id=actor_id,
+            query_override=changes.get("query"),
+            max_messages_override=changes.get("max_messages"),
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except GmailInboxIntegrationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+    for imported_document in result.imported_documents:
+        background_tasks.add_task(
+            run_document_processing_job,
+            request.app.state.session_factory,
+            document_id=imported_document.document_id,
+        )
+    return result
 
 
 @router.post("/{document_id}/execute-action-plan", response_model=DocumentIngestionOut)
@@ -259,6 +504,330 @@ def post_execute_document_action_plan(
     return execute_http_action(
         db,
         execute_action,
+        commit=True,
+        handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
+
+
+@router.post(
+    "/{document_id}/action-approval-requests",
+    response_model=DocumentActionApprovalRequestOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_document_action_approval_request(
+    document_id: str,
+    request: Request,
+    payload: DocumentActionApprovalRequestCreate | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> DocumentActionApprovalRequestOut:
+    actor_id = require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can request document action approvals.",
+    )
+    changes = payload.model_dump(exclude_unset=True) if payload is not None else {}
+
+    def stage_request() -> DocumentActionApprovalRequestOut:
+        staged = stage_document_action_approval_request(
+            db,
+            document_id=document_id,
+            actor_id=actor_id,
+            request_comment=changes.get("request_comment"),
+        )
+        return to_document_action_approval_request_out(staged)
+
+    return execute_http_action(
+        db,
+        stage_request,
+        commit=True,
+        handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
+
+
+@router.post("/{document_id}/action-approval-requests/approve", response_model=DocumentActionApprovalRequestOut)
+def post_approve_document_action_approval_request(
+    document_id: str,
+    request: Request,
+    payload: DocumentActionApprovalDecisionRequest,
+    db: Session = Depends(get_db),
+) -> DocumentActionApprovalRequestOut:
+    actor_id = require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can approve document action approvals.",
+    )
+
+    def approve_request() -> DocumentActionApprovalRequestOut:
+        approved = approve_document_action_approval_request(
+            db,
+            document_id=document_id,
+            actor_id=actor_id,
+            decision_comment=payload.decision_comment,
+        )
+        return to_document_action_approval_request_out(approved)
+
+    return execute_http_action(
+        db,
+        approve_request,
+        commit=True,
+        handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
+
+
+@router.post("/{document_id}/action-approval-requests/reject", response_model=DocumentActionApprovalRequestOut)
+def post_reject_document_action_approval_request(
+    document_id: str,
+    request: Request,
+    payload: DocumentActionApprovalDecisionRequest,
+    db: Session = Depends(get_db),
+) -> DocumentActionApprovalRequestOut:
+    actor_id = require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can reject document action approvals.",
+    )
+
+    def reject_request() -> DocumentActionApprovalRequestOut:
+        rejected = reject_document_action_approval_request(
+            db,
+            document_id=document_id,
+            actor_id=actor_id,
+            decision_comment=payload.decision_comment,
+        )
+        return to_document_action_approval_request_out(rejected)
+
+    return execute_http_action(
+        db,
+        reject_request,
+        commit=True,
+        handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
+
+
+@router.post("/{document_id}/record-candidate-attachments", response_model=DocumentIngestionOut)
+def post_attach_selected_record_candidate(
+    document_id: str,
+    payload: DocumentRecordCandidateSelectionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DocumentIngestionOut:
+    actor_id = require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can attach selected document candidates.",
+    )
+
+    def attach_candidate() -> DocumentIngestionOut:
+        return execute_selected_document_record_candidate_attach(
+            db,
+            document_id=document_id,
+            actor_id=actor_id,
+            record_type=payload.record_type,
+            record_id=payload.record_id,
+        )
+
+    return execute_http_action(
+        db,
+        attach_candidate,
+        commit=True,
+        handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
+
+
+@router.post(
+    "/{document_id}/record-candidate-attachments/approval-requests",
+    response_model=DocumentActionApprovalRequestOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_selected_record_candidate_approval_request(
+    document_id: str,
+    payload: DocumentRecordCandidateSelectionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DocumentActionApprovalRequestOut:
+    actor_id = require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can request selected candidate approvals.",
+    )
+
+    def stage_request() -> DocumentActionApprovalRequestOut:
+        staged = stage_selected_document_record_candidate_approval_request(
+            db,
+            document_id=document_id,
+            actor_id=actor_id,
+            record_type=payload.record_type,
+            record_id=payload.record_id,
+            request_comment=payload.request_comment,
+        )
+        return to_document_action_approval_request_out(staged)
+
+    return execute_http_action(
+        db,
+        stage_request,
+        commit=True,
+        handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+    )
+
+
+@router.post(
+    "/{document_id}/record-creation-requests",
+    response_model=DocumentRecordCreationRequestOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_document_record_creation_request(
+    document_id: str,
+    request: Request,
+    payload: DocumentRecordCreationRequestCreate | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> DocumentRecordCreationRequestOut:
+    actor_id = require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can request missing document record creation.",
+    )
+    changes = payload.model_dump(exclude_unset=True) if payload is not None else {}
+
+    def stage_request() -> DocumentRecordCreationRequestOut:
+        staged = stage_document_record_creation_request(
+            db,
+            document_id=document_id,
+            actor_id=actor_id,
+            request_comment=changes.get("request_comment"),
+        )
+        return to_document_record_creation_request_out(staged)
+
+    return execute_http_action(
+        db,
+        stage_request,
+        commit=True,
+        handled_exceptions=(
+            *NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+            (DocumentRecordCreationRequestPersistenceUnavailable, status.HTTP_503_SERVICE_UNAVAILABLE),
+        ),
+    )
+
+
+@router.post(
+    "/{document_id}/record-creation-requests/{request_id}/resolve",
+    response_model=DocumentRecordCreationRequestOut,
+)
+def post_resolve_document_record_creation_request(
+    document_id: str,
+    request_id: int,
+    payload: DocumentRecordCreationRequestResolve,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DocumentRecordCreationRequestOut:
+    actor_id = require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can resolve document record creation requests.",
+    )
+
+    def resolve_request() -> DocumentRecordCreationRequestOut:
+        resolved = resolve_document_record_creation_request(
+            db,
+            document_id=document_id,
+            request_id=request_id,
+            actor_id=actor_id,
+            record_type=payload.record_type,
+            record_id=payload.record_id,
+            resolution_comment=payload.resolution_comment,
+        )
+        return to_document_record_creation_request_out(resolved)
+
+    return execute_http_action(
+        db,
+        resolve_request,
+        commit=True,
+        handled_exceptions=(
+            *NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+            (DocumentRecordCreationRequestPersistenceUnavailable, status.HTTP_503_SERVICE_UNAVAILABLE),
+        ),
+    )
+
+
+@router.post(
+    "/{document_id}/record-creation-requests/{request_id}/cancel",
+    response_model=DocumentRecordCreationRequestOut,
+)
+def post_cancel_document_record_creation_request(
+    document_id: str,
+    request_id: int,
+    payload: DocumentRecordCreationRequestCancel,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DocumentRecordCreationRequestOut:
+    actor_id = require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can cancel document record creation requests.",
+    )
+
+    def cancel_request() -> DocumentRecordCreationRequestOut:
+        cancelled = cancel_document_record_creation_request(
+            db,
+            document_id=document_id,
+            request_id=request_id,
+            actor_id=actor_id,
+            resolution_comment=payload.resolution_comment,
+        )
+        return to_document_record_creation_request_out(cancelled)
+
+    return execute_http_action(
+        db,
+        cancel_request,
+        commit=True,
+        handled_exceptions=(
+            *NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
+            (DocumentRecordCreationRequestPersistenceUnavailable, status.HTTP_503_SERVICE_UNAVAILABLE),
+        ),
+    )
+
+
+@router.get("/{document_id}/workflows", response_model=DocumentWorkflowListOut)
+def get_document_workflows(
+    document_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DocumentWorkflowListOut:
+    require_authenticated_actor(request)
+
+    def load_workflows() -> DocumentWorkflowListOut:
+        return list_document_workflows(db, document_id=document_id)
+
+    return execute_http_action(
+        db,
+        load_workflows,
+        handled_exceptions=NOT_FOUND_ERROR_STATUS_CODES,
+    )
+
+
+@router.post("/{document_id}/workflows/{workflow_id}/execute", response_model=DocumentWorkflowExecutionOut)
+def post_execute_document_workflow(
+    document_id: str,
+    workflow_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DocumentWorkflowExecutionOut:
+    actor_id = require_actor_role(
+        request,
+        predicate=_can_execute_document_actions,
+        detail="Only OPERATIONS, ACCOUNTING, ACCOUNTANT, SETTLEMENT, OPS_ADMIN, or ADMIN sessions can execute document workflows.",
+    )
+
+    def execute_workflow() -> DocumentWorkflowExecutionOut:
+        return execute_document_workflow(
+            db,
+            document_id=document_id,
+            workflow_id=workflow_id,
+            actor_id=actor_id,
+        )
+
+    return execute_http_action(
+        db,
+        execute_workflow,
         commit=True,
         handled_exceptions=NOT_FOUND_AND_VALIDATION_ERROR_STATUS_CODES,
     )

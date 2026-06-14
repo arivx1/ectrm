@@ -35,5 +35,8 @@ jobs:
       - name: Run assistant eval gate
         run: make api-assistant-evals
 
+      - name: Run document packet split eval gate
+        run: make api-document-packet-split-evals
+
       - name: Run backend verification
         run: make api-test

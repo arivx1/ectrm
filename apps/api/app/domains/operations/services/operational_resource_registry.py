@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from apps.api.app.domains.operations.services.document_intake_work_items import (
+    DOCUMENT_RECORD_CREATION_WORK_ITEM_RESOURCE_DESCRIPTOR,
+)
 from apps.api.app.domains.operations.services.settlement_invoices import (
     TRADE_INVOICE_RESOURCE_DESCRIPTOR,
 )
@@ -20,6 +23,7 @@ OPERATIONAL_RESOURCE_DESCRIPTORS = {
     for descriptor in (
         CONFIRMATION_RESOURCE_DESCRIPTOR,
         DELIVERY_RESOURCE_DESCRIPTOR,
+        DOCUMENT_RECORD_CREATION_WORK_ITEM_RESOURCE_DESCRIPTOR,
         SHIPMENT_RESOURCE_DESCRIPTOR,
         TRADE_INVOICE_RESOURCE_DESCRIPTOR,
         TRADE_PAYMENT_RESOURCE_DESCRIPTOR,

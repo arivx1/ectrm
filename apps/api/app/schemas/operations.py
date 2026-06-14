@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -123,6 +123,48 @@ class WorkspaceBootstrapSummaryOut(BaseModel):
     settlement: WorkspaceSettlementSummaryOut
 
 
+class TradeAttentionCandidateOut(BaseModel):
+    trade_id: str
+    candidate_types: list[str] = Field(default_factory=list)
+    source_count_keys: list[str] = Field(default_factory=list)
+    priority_reason: str
+    trade_nature: str
+    book: str
+    portfolio: Optional[str]
+    counterparty: Optional[str]
+    commodity_class: str
+    commodity: str
+    trader_user: Optional[str]
+    trade_date: Optional[date]
+    execution_timestamp: Optional[datetime]
+    delivery_start: Optional[date]
+    delivery_end: Optional[date]
+    confirmation_status: str
+    nomination_status: str
+    allocation_status: str
+    pricing_status: str
+    invoice_status: str
+    payment_status: str
+    settlement_status: str
+    age_days: Optional[int]
+    supporting_records: dict[str, Any] = Field(default_factory=dict)
+    suggested_next_tool: Optional[str]
+    next_steps: list[str] = Field(default_factory=list)
+    blocking_reasons: list[str] = Field(default_factory=list)
+    recommended_action: dict[str, Any] | None = None
+
+
+class TradeAttentionCandidateListOut(BaseModel):
+    count: int
+    total_count: int
+    items: list[TradeAttentionCandidateOut] = Field(default_factory=list)
+    candidate_type_counts: dict[str, int] = Field(default_factory=dict)
+    candidate_type: Optional[str] = None
+    source_count_key: Optional[str] = None
+    description: Optional[str] = None
+    candidate_types: list[str] = Field(default_factory=list)
+
+
 class OperationalResourceDescriptorOut(BaseModel):
     resource_key: str
     filters: list[str] = Field(default_factory=list)
@@ -172,6 +214,38 @@ class OperationalResourceSurfaceOut(BaseModel):
     primary_action: OperationalResourcePrimaryActionOut | None = None
     empty_state: OperationalResourceEmptyStateOut | None = None
     summary_stats: list[OperationalResourceSummaryStatOut] = Field(default_factory=list)
+
+
+class DocumentRecordCreationWorkItemOut(BaseModel):
+    request_id: int
+    document_id: str
+    status: str
+    queue: str
+    handoff_type: str
+    routing_label: str
+    next_action_label: str
+    priority: str
+    document_kind: Optional[str]
+    target_record_type: str
+    target_record_label: str
+    owner_record_type: Optional[str]
+    owner_record_id: Optional[str]
+    required_owner_record_types: list[str] = Field(default_factory=list)
+    matched_keys: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    blocking_reasons: list[str] = Field(default_factory=list)
+    next_steps: list[str] = Field(default_factory=list)
+    captured_fields: dict[str, Any] = Field(default_factory=dict)
+    title: str
+    description: str
+    request_comment: Optional[str]
+    requested_at: datetime
+    requested_by: str
+    updated_at: datetime
+    updated_by: str
+    age_days: int
+    is_closed: bool
+    version: int
 
 
 class TradeCreditApprovalDecisionOut(BaseModel):

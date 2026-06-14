@@ -13,6 +13,7 @@ class RequestIdentity:
     correlation_id: Optional[str]
     request_method: Optional[str]
     request_path: Optional[str]
+    source_surface: Optional[str]
 
 
 _CURRENT_IDENTITY: ContextVar[RequestIdentity] = ContextVar(
@@ -24,6 +25,7 @@ _CURRENT_IDENTITY: ContextVar[RequestIdentity] = ContextVar(
         correlation_id=None,
         request_method=None,
         request_path=None,
+        source_surface=None,
     ),
 )
 
@@ -36,6 +38,7 @@ def set_request_identity(
     correlation_id: Optional[str] = None,
     request_method: Optional[str] = None,
     request_path: Optional[str] = None,
+    source_surface: Optional[str] = None,
 ) -> Token[RequestIdentity]:
     return _CURRENT_IDENTITY.set(
         RequestIdentity(
@@ -45,6 +48,7 @@ def set_request_identity(
             correlation_id=correlation_id,
             request_method=request_method,
             request_path=request_path,
+            source_surface=source_surface,
         ),
     )
 

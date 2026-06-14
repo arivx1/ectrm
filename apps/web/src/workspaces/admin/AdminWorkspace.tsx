@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type {
   CounterpartyCreditPreviewRecord,
   ExternalDataSyncStatusRecord,
+  PriceSourceReviewRecord,
   WeatherLocationRecord,
   WeatherSyncStatusRecord,
 } from '../../shared/models'
@@ -11,15 +12,25 @@ import { tradeStatusIsActive } from '../../shared/trading'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
 import { type StoredAuthSession } from '../../shared/mutation'
+import type { ExternalDataSyncProvider } from '../../entities/app/workspaceDataShared'
 import { AgentManagementPanel } from './AgentManagementPanel'
 import { AssistantApprovalInboxPanel } from './AssistantApprovalInboxPanel'
 import { AssistantControlTowerPanel } from './AssistantControlTowerPanel'
 import { AssistantOutcomeMetricsPanel } from './AssistantOutcomeMetricsPanel'
 import { CodexTaskPanel } from './CodexTaskPanel'
+import { HomeViewAdminPanel } from './HomeViewAdminPanel'
+import { JobSchedulingPanel } from './JobSchedulingPanel'
 import { ProjectionMonitoringPanel } from './ProjectionMonitoringPanel'
 import { RoadmapAdminPanel } from './RoadmapAdminPanel'
 import { UserManagementPanel } from './UserManagementPanel'
 import { WeatherOperationsPanel } from './WeatherOperationsPanel'
+import {
+  ADMIN_PRICE_SOURCES_SECTION_ID,
+  ADMIN_PRICE_SOURCE_DETAIL_PREFIX,
+  adminPriceSourceDetailAnchorId,
+  readAdminPriceSourceIdFromHash,
+} from './adminRouteAnchors'
+import type { AssistantControlTowerSupervisionIntent } from './assistantSupervisionDraft'
 import { SystemStatusPanel } from '../dashboard/SystemStatusPanel'
 
 type Trade = {
@@ -81,7 +92,6 @@ type TradingSourceRecord = {
 
 type ExternalDataProviderStatusRecord = ExternalDataSyncStatusRecord['providers'][number]
 type CounterpartyCreditPreviewRow = CounterpartyCreditPreviewRecord['rows'][number]
-type ExternalDataSyncProvider = 'EIA' | 'EIA_FUNDAMENTALS' | 'FRED' | 'CFTC' | 'CAISO' | 'ERCOT' | 'KALSHI'
 
 type SchemaEntityKey =
   | 'events'
@@ -90,6 +100,51 @@ type SchemaEntityKey =
   | 'reference_books'
   | 'reference_commodities'
   | 'reference_price_indices'
+
+type AdminSectionKey =
+  | 'overview'
+  | 'external-data'
+  | 'assistant-governance'
+  | 'automation'
+  | 'access-planning'
+  | 'explainability'
+
+const ADMIN_SECTIONS: Array<{
+  key: AdminSectionKey
+  label: string
+  description: string
+}> = [
+  {
+    key: 'overview',
+    label: 'Overview',
+    description: 'Only the posture and next places to look.',
+  },
+  {
+    key: 'external-data',
+    label: 'External Data',
+    description: 'Weather, market sources, D&B preview, and source register.',
+  },
+  {
+    key: 'assistant-governance',
+    label: 'Assistant',
+    description: 'Control tower, agents, outcomes, and approvals.',
+  },
+  {
+    key: 'automation',
+    label: 'Automation',
+    description: 'Codex dispatch, scheduled jobs, and projections.',
+  },
+  {
+    key: 'access-planning',
+    label: 'Access & Planning',
+    description: 'Users, roadmap, shared Home inventory, and governance setup.',
+  },
+  {
+    key: 'explainability',
+    label: 'Explainability',
+    description: 'System atlas, lifecycle trace, schema, and provenance.',
+  },
+]
 
 type AdminWorkspaceProps = {
   authSession: StoredAuthSession | null
@@ -106,6 +161,7 @@ type AdminWorkspaceProps = {
   priceIndices: PriceIndexRecord[]
   externalDataRuns: ExternalDataRunRecord[]
   externalDataSyncStatus: ExternalDataSyncStatusRecord | null
+  externalDataPriceSources: PriceSourceReviewRecord[]
   tradingSources: TradingSourceRecord[]
   weatherLocations: WeatherLocationRecord[]
   weatherSyncStatus: WeatherSyncStatusRecord | null
@@ -305,6 +361,90 @@ function cadenceLabel(intervalMinutes: number): string {
   return `Every ${intervalMinutes}m`
 }
 
+function successSlaLabel(hours: number | null | undefined): string {
+  if (typeof hours !== 'number') {
+    return 'SLA unknown'
+  }
+
+  if (hours < 24) {
+    return `${hours}h SLA`
+  }
+
+  const days = hours / 24
+  return `${days.toFixed(days >= 10 || Number.isInteger(days) ? 0 : 1)}d SLA`
+}
+
+function lookbackLabel(days: number | null | undefined): string {
+  if (typeof days !== 'number') {
+    return 'Snapshot pull'
+  }
+
+  if (days < 365) {
+    return `${days}d lookback`
+  }
+
+  const years = days / 365
+  return `${years.toFixed(years >= 10 || Number.isInteger(years) ? 0 : 1)}y lookback`
+}
+
+function sourceEndpointLabel(value: string | null | undefined): string {
+  if (!value) {
+    return 'No source endpoint'
+  }
+
+  try {
+    const url = new URL(value)
+    return url.pathname && url.pathname !== '/' ? `${url.hostname}${url.pathname}` : url.hostname
+  } catch {
+    return value
+  }
+}
+
+function readSelectedPriceSourceIdFromLocation(): number | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  return readAdminPriceSourceIdFromHash(window.location.hash)
+}
+
+function readAdminSectionFromHash(hash: string): AdminSectionKey | null {
+  const normalizedHash = hash.replace(/^#/, '').trim()
+
+  if (
+    normalizedHash === ADMIN_PRICE_SOURCES_SECTION_ID ||
+    normalizedHash.startsWith(ADMIN_PRICE_SOURCE_DETAIL_PREFIX)
+  ) {
+    return 'external-data'
+  }
+
+  if (
+    normalizedHash === 'assistant-agent-management' ||
+    normalizedHash === 'assistant-agent-work-packages' ||
+    normalizedHash === 'assistant-agent-profile-requests' ||
+    normalizedHash === 'assistant-agent-builder' ||
+    normalizedHash === 'assistant-agent-editor' ||
+    normalizedHash === 'assistant-outcome-metrics' ||
+    normalizedHash === 'assistant-approval-inbox'
+  ) {
+    return 'assistant-governance'
+  }
+
+  if (normalizedHash === 'job-scheduling') {
+    return 'automation'
+  }
+
+  return null
+}
+
+function readInitialAdminSection(): AdminSectionKey {
+  if (typeof window === 'undefined') {
+    return 'overview'
+  }
+
+  return readAdminSectionFromHash(window.location.hash) ?? 'overview'
+}
+
 function weatherHealthTone(status: string): 'active' | 'blocked' | 'in-progress' | 'cancelled' {
   switch (status) {
     case 'healthy':
@@ -364,10 +504,49 @@ function marketDataCategoryLabel(value: string): string {
       return 'Fundamentals'
     case 'macro':
       return 'Macro'
+    case 'market':
+      return 'Market'
     case 'positioning':
       return 'Positioning'
     default:
       return value
+  }
+}
+
+function priceSourceReviewTone(status: string): 'active' | 'blocked' | 'in-progress' | 'cancelled' {
+  switch (status) {
+    case 'current':
+    case 'loaded':
+      return 'active'
+    case 'running':
+      return 'in-progress'
+    case 'inactive':
+      return 'cancelled'
+    default:
+      return 'blocked'
+  }
+}
+
+function priceSourceReviewLabel(status: string): string {
+  switch (status) {
+    case 'current':
+      return 'Current'
+    case 'loaded':
+      return 'Loaded'
+    case 'stale':
+      return 'Stale'
+    case 'failed':
+      return 'Failed'
+    case 'running':
+      return 'Running'
+    case 'missing':
+      return 'Missing mark'
+    case 'unmapped':
+      return 'Unmapped'
+    case 'inactive':
+      return 'Inactive'
+    default:
+      return 'Unknown'
   }
 }
 
@@ -426,6 +605,12 @@ function matchesExternalDataProviderFilter(provider: ExternalDataProviderStatusR
     provider.provider,
     provider.label,
     provider.category,
+    provider.ingestion_method,
+    provider.ingestion_mode,
+    provider.source_system,
+    provider.source_endpoint,
+    provider.sync_job_name,
+    provider.default_lookback_days,
     provider.health_status,
     provider.latest_run_status,
     provider.latest_observation_at,
@@ -433,6 +618,48 @@ function matchesExternalDataProviderFilter(provider: ExternalDataProviderStatusR
     provider.error_summary,
     provider.latest_run?.id,
     provider.latest_run?.status,
+  ])
+}
+
+function matchesPriceSourceReviewFilter(source: PriceSourceReviewRecord, query: string): boolean {
+  return matchesTextFilter(query, [
+    source.price_index_code,
+    source.price_index_name,
+    source.commodity_code,
+    source.quote_type,
+    source.market,
+    source.location_code,
+    source.price_unit_code,
+    source.price_currency_code,
+    source.provider,
+    source.dataset_code,
+    source.series_id,
+    source.frequency,
+    source.source_unit,
+    source.source_currency_code,
+    source.transform_rule,
+    source.ingestion_method,
+    source.ingestion_mode,
+    source.source_system,
+    source.source_endpoint,
+    source.sync_job_name,
+    source.default_lookback_days,
+    source.review_status,
+    source.provider_health_status,
+    source.scheduler_interval_minutes,
+    source.success_sla_hours,
+    source.due_for_sync,
+    source.provider_latest_observation_at,
+    source.provider_observation_age_hours,
+    source.latest_run_status,
+    source.latest_run_id,
+    source.last_success_at,
+    source.provider_error_summary,
+    source.latest_observation_date,
+    source.latest_value,
+    source.latest_source_revision,
+    source.latest_source_published_at,
+    source.latest_downloaded_at,
   ])
 }
 
@@ -528,6 +755,7 @@ export function AdminWorkspace({
   priceIndices,
   externalDataRuns,
   externalDataSyncStatus,
+  externalDataPriceSources,
   tradingSources,
   weatherLocations,
   weatherSyncStatus,
@@ -568,10 +796,57 @@ export function AdminWorkspace({
   formatNumber,
   formatCommodityClass,
 }: AdminWorkspaceProps) {
+  const [assistantSupervisionIntent, setAssistantSupervisionIntent] =
+    useState<AssistantControlTowerSupervisionIntent | null>(null)
   const [selectedSchemaEntity, setSelectedSchemaEntity] = useState<SchemaEntityKey>('events')
+  const [selectedPriceSourceId, setSelectedPriceSourceId] = useState<number | null>(
+    readSelectedPriceSourceIdFromLocation,
+  )
+  const [activeAdminSection, setActiveAdminSection] = useState<AdminSectionKey>(readInitialAdminSection)
   const [screenFilter, setScreenFilter] = useState('')
   const effectiveScreenFilter = combineTextFilters(globalFilter, screenFilter)
   const hasScreenFilter = effectiveScreenFilter.trim().length > 0
+
+  useEffect(() => {
+    function handleHashChange() {
+      const hash = window.location.hash
+      setSelectedPriceSourceId(readSelectedPriceSourceIdFromLocation())
+      const hashSection = readAdminSectionFromHash(hash)
+      if (hashSection) {
+        setActiveAdminSection(hashSection)
+      }
+    }
+
+    handleHashChange()
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
+
+  useEffect(() => {
+    if (selectedPriceSourceId === null || activeAdminSection !== 'external-data') {
+      return
+    }
+
+    const anchorId = adminPriceSourceDetailAnchorId(selectedPriceSourceId)
+    window.requestAnimationFrame(() => {
+      document.getElementById(anchorId)?.scrollIntoView({ block: 'start' })
+    })
+  }, [activeAdminSection, selectedPriceSourceId])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const anchorId = window.location.hash.replace(/^#/, '').trim()
+    if (!anchorId) {
+      return
+    }
+
+    window.requestAnimationFrame(() => {
+      document.getElementById(anchorId)?.scrollIntoView({ block: 'start' })
+    })
+  }, [activeAdminSection])
 
   const visibleEvents = useMemo(
     () => events.filter((event) => matchesAdminEventFilter(event, effectiveScreenFilter)),
@@ -600,6 +875,17 @@ export function AdminWorkspace({
   const visibleExternalDataRuns = useMemo(
     () => externalDataRuns.filter((run) => matchesExternalDataRunFilter(run, effectiveScreenFilter)),
     [effectiveScreenFilter, externalDataRuns],
+  )
+  const visibleExternalDataPriceSources = useMemo(
+    () =>
+      externalDataPriceSources.filter((source) =>
+        matchesPriceSourceReviewFilter(source, effectiveScreenFilter),
+      ),
+    [effectiveScreenFilter, externalDataPriceSources],
+  )
+  const selectedPriceSource = useMemo(
+    () => externalDataPriceSources.find((source) => source.id === selectedPriceSourceId) ?? null,
+    [externalDataPriceSources, selectedPriceSourceId],
   )
   const visibleTradingSources = useMemo(
     () => tradingSources.filter((source) => matchesTradingSourceFilter(source, effectiveScreenFilter)),
@@ -840,6 +1126,24 @@ export function AdminWorkspace({
   const marketDataAttentionCount = marketDataProviders.filter((provider) =>
     ['failed', 'stale', 'missing', 'degraded'].includes(provider.health_status),
   ).length
+  const priceSourceAttentionCount = visibleExternalDataPriceSources.filter((source) =>
+    ['failed', 'stale', 'missing', 'unmapped'].includes(source.review_status),
+  ).length
+  const priceSourceProviderCount = useMemo(
+    () => new Set(visibleExternalDataPriceSources.map((source) => source.provider)).size,
+    [visibleExternalDataPriceSources],
+  )
+  const latestMarkedPriceSource = useMemo(
+    () =>
+      visibleExternalDataPriceSources
+        .filter((source) => source.latest_downloaded_at)
+        .sort((left, right) => {
+          const leftTime = new Date(left.latest_downloaded_at ?? '').getTime()
+          const rightTime = new Date(right.latest_downloaded_at ?? '').getTime()
+          return rightTime - leftTime
+        })[0] ?? null,
+    [visibleExternalDataPriceSources],
+  )
   const counterpartyCreditImportRuns = useMemo(
     () => visibleExternalDataRuns.filter((run) => run.job_name === 'import_counterparty_credit_snapshots'),
     [visibleExternalDataRuns],
@@ -873,75 +1177,186 @@ export function AdminWorkspace({
   }, [visibleTradingSources])
   const selectedTradeHiddenByFilter =
     hasScreenFilter && selectedTrade !== null && !matchesAdminTradeFilter(selectedTrade, effectiveScreenFilter)
+  const weatherAttentionCount = weatherSyncStatus
+    ? weatherSyncStatus.stale_location_count +
+      weatherSyncStatus.missing_location_count +
+      (weatherSyncStatus.health_status === 'failed' ? 1 : 0)
+    : 0
+  const totalExternalAttentionCount = marketDataAttentionCount + priceSourceAttentionCount + weatherAttentionCount
+  const activeAdminSectionMeta =
+    ADMIN_SECTIONS.find((section) => section.key === activeAdminSection) ?? ADMIN_SECTIONS[0]
+  const adminOverviewCards = [
+    {
+      key: 'external-data' as const,
+      eyebrow: 'External Data',
+      title:
+        totalExternalAttentionCount > 0
+          ? `${totalExternalAttentionCount} item${totalExternalAttentionCount === 1 ? '' : 's'} need attention`
+          : 'Feeds look stable',
+      detail: `${marketDataAttentionCount} provider issue${marketDataAttentionCount === 1 ? '' : 's'} · ${priceSourceAttentionCount} price source issue${priceSourceAttentionCount === 1 ? '' : 's'} · ${weatherAttentionCount} weather issue${weatherAttentionCount === 1 ? '' : 's'}`,
+      actionLabel: 'Open External Data',
+    },
+    {
+      key: 'assistant-governance' as const,
+      eyebrow: 'Assistant',
+      title: 'Governance lanes',
+      detail: 'Review agent posture, pending approvals, outcome metrics, and profile changes without mixing them into data operations.',
+      actionLabel: 'Open Assistant Governance',
+    },
+    {
+      key: 'automation' as const,
+      eyebrow: 'Automation',
+      title: projectionFreshnessLabel,
+      detail: latestTradeProjectionUpdate
+        ? `Projection monitoring, scheduled jobs, and Codex dispatch. Latest trade projection ${formatDate(latestTradeProjectionUpdate.updated_at)}.`
+        : 'Projection monitoring, scheduled jobs, and Codex dispatch.',
+      actionLabel: 'Open Automation',
+    },
+    {
+      key: 'access-planning' as const,
+      eyebrow: 'Access',
+      title: authSession ? `${authSession.user.role} signed in` : 'No admin session',
+      detail: 'Manage users, roadmap metadata, shared Home inventory, and longer-lived governance setup.',
+      actionLabel: 'Open Access & Planning',
+    },
+    {
+      key: 'explainability' as const,
+      eyebrow: 'Explainability',
+      title: `${events.length} event${events.length === 1 ? '' : 's'} loaded`,
+      detail: 'Trace domains, schema, selected trade lifecycle, and live provenance separately from operational controls.',
+      actionLabel: 'Open Explainability',
+    },
+  ]
 
   return (
     <div className="stack">
-      <SystemStatusPanel />
-      <WorkspaceLocalFilterBar
-        value={screenFilter}
-        onChange={setScreenFilter}
-        placeholder="Trade, event, provider, weather location, D&B preview row, source register, or schema concept"
-        description="Keep admin filtering local to this screen so you can narrow live operational records and explainability cards without changing the rest of the app."
-        totalCount={
-          events.length +
-          trades.length +
-          positions.length +
-          activeBooks.length +
-          activeCommodities.length +
-          priceIndices.length +
-          externalDataRuns.length +
-          tradingSources.length +
-          weatherLocations.length +
-          (counterpartyCreditPreview?.rows.length ?? 0)
-        }
-        matchedCount={
-          visibleEvents.length +
-          visibleTrades.length +
-          visiblePositions.length +
-          visibleActiveBooks.length +
-          visibleActiveCommodities.length +
-          visiblePriceIndices.length +
-          visibleExternalDataRuns.length +
-          visibleTradingSources.length +
-          visibleWeatherLocations.length +
-          visibleCounterpartyCreditPreviewRows.length
-        }
-        resultLabel="admin records"
-        globalValue={globalFilter}
-        note={
-          selectedTradeHiddenByFilter
-            ? `The selected trade trace stays synced to ${selectedTrade?.trade_id}, even though it falls outside the current admin filters. Dedicated admin sub-panels below keep their own controls.`
-            : 'Dedicated admin sub-panels below keep their own controls.'
-        }
-      />
+      <section className="surface feature-panel admin-command-center">
+        <div className="section-head">
+          <div>
+            <span className="eyebrow">Admin Console</span>
+            <h3>{activeAdminSectionMeta.label}</h3>
+          </div>
+          <p>{activeAdminSectionMeta.description}</p>
+        </div>
 
+        <div className="admin-section-tabs" role="tablist" aria-label="Admin console sections">
+          {ADMIN_SECTIONS.map((section) => (
+            <button
+              key={section.key}
+              type="button"
+              className={`admin-section-tab${activeAdminSection === section.key ? ' is-active' : ''}`}
+              aria-pressed={activeAdminSection === section.key}
+              onClick={() => setActiveAdminSection(section.key)}
+            >
+              <strong>{section.label}</strong>
+              <span>{section.description}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {activeAdminSection === 'overview' ? (
+        <section className="surface feature-panel admin-overview-panel">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Command Center</span>
+              <h3>What Needs Attention</h3>
+            </div>
+            <p>Start with posture and the next best place to inspect, instead of every privileged control at once.</p>
+          </div>
+
+          <div className="admin-summary-grid">
+            {adminSummaryCards.map((card) => (
+              <article key={card.label} className="admin-summary-card">
+                <span>
+                  <InlineTooltipLabel tooltip={card.tooltip} tooltipLabel={`More information about ${card.label}`} align="start">
+                    {card.label}
+                  </InlineTooltipLabel>
+                </span>
+                {card.valueTooltip ? (
+                  <Tooltip content={card.valueTooltip} focusable>
+                    <strong className="tooltip-trigger-hint">{card.value}</strong>
+                  </Tooltip>
+                ) : (
+                  <strong>{card.value}</strong>
+                )}
+                <p>{card.note}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="admin-overview-grid">
+            <SystemStatusPanel variant="compact" />
+            <div className="admin-overview-action-grid">
+              {adminOverviewCards.map((card) => (
+                <article key={card.key} className="admin-overview-action-card">
+                  <span className="eyebrow">{card.eyebrow}</span>
+                  <strong>{card.title}</strong>
+                  <p>{card.detail}</p>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => setActiveAdminSection(card.key)}
+                  >
+                    {card.actionLabel}
+                  </button>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {activeAdminSection === 'external-data' || activeAdminSection === 'explainability' ? (
+        <WorkspaceLocalFilterBar
+          value={screenFilter}
+          onChange={setScreenFilter}
+          placeholder="Trade, event, provider, weather location, D&B preview row, source register, or schema concept"
+          description="Keep admin filtering local to this screen so you can narrow the active Admin section without changing the rest of the app."
+          totalCount={
+            events.length +
+            trades.length +
+            positions.length +
+            activeBooks.length +
+            activeCommodities.length +
+            priceIndices.length +
+            externalDataRuns.length +
+            externalDataPriceSources.length +
+            tradingSources.length +
+            weatherLocations.length +
+            (counterpartyCreditPreview?.rows.length ?? 0)
+          }
+          matchedCount={
+            visibleEvents.length +
+            visibleTrades.length +
+            visiblePositions.length +
+            visibleActiveBooks.length +
+            visibleActiveCommodities.length +
+            visiblePriceIndices.length +
+            visibleExternalDataRuns.length +
+            visibleExternalDataPriceSources.length +
+            visibleTradingSources.length +
+            visibleWeatherLocations.length +
+            visibleCounterpartyCreditPreviewRows.length
+          }
+          resultLabel="admin records"
+          globalValue={globalFilter}
+          note={
+            selectedTradeHiddenByFilter
+              ? `The selected trade trace stays synced to ${selectedTrade?.trade_id}, even though it falls outside the current admin filters. Dedicated admin sub-panels keep their own controls.`
+              : 'Dedicated admin sub-panels keep their own controls.'
+          }
+        />
+      ) : null}
+
+      {activeAdminSection === 'external-data' ? (
       <section className="surface feature-panel admin-hero-surface">
         <div className="section-head">
           <div>
-            <span className="eyebrow">How It Works</span>
-            <h3>System Atlas</h3>
+            <span className="eyebrow">Operations</span>
+            <h3>External Data Operations</h3>
           </div>
-          <p>Read the product as a set of connected domains, events, projections, and governed records rather than isolated pages.</p>
-        </div>
-
-        <div className="admin-summary-grid">
-          {adminSummaryCards.map((card) => (
-            <article key={card.label} className="admin-summary-card">
-              <span>
-                <InlineTooltipLabel tooltip={card.tooltip} tooltipLabel={`More information about ${card.label}`} align="start">
-                  {card.label}
-                </InlineTooltipLabel>
-              </span>
-              {card.valueTooltip ? (
-                <Tooltip content={card.valueTooltip} focusable>
-                  <strong className="tooltip-trigger-hint">{card.value}</strong>
-                </Tooltip>
-              ) : (
-                <strong>{card.value}</strong>
-              )}
-              <p>{card.note}</p>
-            </article>
-          ))}
+          <p>Run and supervise external feeds, source freshness, weather coverage, credit imports, and source-register seeding from one lane.</p>
         </div>
 
         <WeatherOperationsPanel
@@ -1032,6 +1447,22 @@ export function AdminWorkspace({
             </article>
             <article className="admin-card">
               <AdminCardTitle
+                label="Price Sources"
+                tooltip="Reviewable source-to-price-index mappings loaded from the governed price source catalog."
+              />
+              <p>
+                {visibleExternalDataPriceSources.length > 0
+                  ? `${visibleExternalDataPriceSources.length} price sources across ${priceSourceProviderCount} providers.`
+                  : 'No price sources are currently in view.'}
+              </p>
+              <span>
+                {visibleExternalDataPriceSources.length > 0
+                  ? `${priceSourceAttentionCount} need attention`
+                  : 'Load or seed price-index sources to populate the catalog'}
+              </span>
+            </article>
+            <article className="admin-card">
+              <AdminCardTitle
                 label="Latest Healthy Data"
                 tooltip="Newest successfully ingested market-data observation currently available across the tracked providers."
               />
@@ -1062,12 +1493,18 @@ export function AdminWorkspace({
                   <div>
                     <strong>{provider.label}</strong>
                     <p>
-                      {provider.provider} · {marketDataCategoryLabel(provider.category)} · {provider.active_series_count} active series
+                      {provider.provider} · {marketDataCategoryLabel(provider.category)} · {provider.ingestion_method}
                     </p>
                     <div className="admin-weather-row-detail">
+                      <span>{provider.active_series_count} active series</span>
+                      <span>{provider.ingestion_mode}</span>
+                      <span>Job {provider.sync_job_name}</span>
+                      <span>Endpoint {sourceEndpointLabel(provider.source_endpoint)}</span>
                       <span>{provider.latest_observation_at ? `Latest data ${formatDate(provider.latest_observation_at)}` : 'No stored observation yet'}</span>
                       <span>{provider.observation_age_hours != null ? formatAgeHours(provider.observation_age_hours) : 'Freshness unknown'}</span>
                       <span>{provider.due_for_sync ? 'Due for sync' : `Cadence ${cadenceLabel(provider.scheduler_interval_minutes)}`}</span>
+                      <span>{successSlaLabel(provider.success_sla_hours)}</span>
+                      <span>{lookbackLabel(provider.default_lookback_days)}</span>
                     </div>
                     {provider.error_summary ? <p>{provider.error_summary}</p> : null}
                   </div>
@@ -1089,6 +1526,318 @@ export function AdminWorkspace({
                 </article>
               ))
             )}
+          </div>
+
+          {selectedPriceSourceId !== null ? (
+            <section
+              id={adminPriceSourceDetailAnchorId(selectedPriceSourceId)}
+              className="admin-price-source-view"
+              aria-labelledby="admin-price-source-view-title"
+            >
+              {selectedPriceSource ? (
+                <>
+                  <div className="admin-price-source-view-head">
+                    <div>
+                      <span className="eyebrow">Price Source View</span>
+                      <h4 id="admin-price-source-view-title">{selectedPriceSource.price_index_code}</h4>
+                      <p>
+                        {selectedPriceSource.price_index_name ?? 'Unmapped price index'} · {selectedPriceSource.source_system ?? selectedPriceSource.provider} · {selectedPriceSource.series_id}
+                      </p>
+                    </div>
+                    <div className="admin-sync-head-actions">
+                      <span className={`status-pill status-pill-${priceSourceReviewTone(selectedPriceSource.review_status)}`}>
+                        {priceSourceReviewLabel(selectedPriceSource.review_status)}
+                      </span>
+                      <a
+                        className="button button-secondary"
+                        href={`#${ADMIN_PRICE_SOURCES_SECTION_ID}`}
+                        onClick={() => setSelectedPriceSourceId(null)}
+                      >
+                        Back to inventory
+                      </a>
+                    </div>
+                  </div>
+
+                  <div className="admin-price-source-summary-grid">
+                    <article className="admin-price-source-fact">
+                      <span>Latest mark</span>
+                      <strong>
+                        {selectedPriceSource.latest_value != null
+                          ? `${formatNumber(selectedPriceSource.latest_value, 3)} ${selectedPriceSource.latest_unit_code ?? selectedPriceSource.source_unit}${selectedPriceSource.latest_currency_code ? ` ${selectedPriceSource.latest_currency_code}` : ''}`
+                          : 'No observation'}
+                      </strong>
+                      <p>
+                        {selectedPriceSource.latest_observation_date
+                          ? `Observed ${formatDateOnly(selectedPriceSource.latest_observation_date)}`
+                          : 'No observation has landed for this mapping yet'}
+                      </p>
+                    </article>
+                    <article className="admin-price-source-fact">
+                      <span>Pull cadence</span>
+                      <strong>
+                        {selectedPriceSource.scheduler_interval_minutes != null
+                          ? cadenceLabel(selectedPriceSource.scheduler_interval_minutes)
+                          : selectedPriceSource.frequency.toUpperCase()}
+                      </strong>
+                      <p>
+                        {selectedPriceSource.due_for_sync
+                          ? 'Provider is due for sync'
+                          : selectedPriceSource.provider_observation_age_hours != null
+                            ? formatAgeHours(selectedPriceSource.provider_observation_age_hours)
+                            : 'Freshness unknown'}
+                      </p>
+                    </article>
+                    <article className="admin-price-source-fact">
+                      <span>Source status</span>
+                      <strong>{weatherHealthLabel(selectedPriceSource.provider_health_status ?? 'unknown')}</strong>
+                      <p>{selectedPriceSource.latest_run_status ?? 'No run history yet'}</p>
+                    </article>
+                    <article className="admin-price-source-fact">
+                      <span>Transform</span>
+                      <strong>{selectedPriceSource.transform_rule?.trim() ? 'Configured' : 'Raw value'}</strong>
+                      <p>{selectedPriceSource.transform_rule?.trim() || 'Stored directly from provider payload'}</p>
+                    </article>
+                  </div>
+
+                  <div className="admin-price-source-detail-grid">
+                    <section className="admin-price-source-detail-section">
+                      <h5>Mapping</h5>
+                      <dl>
+                        <div>
+                          <dt>Provider</dt>
+                          <dd>{selectedPriceSource.provider}</dd>
+                        </div>
+                        <div>
+                          <dt>Dataset</dt>
+                          <dd>{selectedPriceSource.dataset_code ?? 'Provider default'}</dd>
+                        </div>
+                        <div>
+                          <dt>Series id</dt>
+                          <dd>{selectedPriceSource.series_id}</dd>
+                        </div>
+                        <div>
+                          <dt>Commodity</dt>
+                          <dd>{selectedPriceSource.commodity_code ?? 'No commodity mapping'}</dd>
+                        </div>
+                        <div>
+                          <dt>Market</dt>
+                          <dd>{selectedPriceSource.market ?? 'No market'}</dd>
+                        </div>
+                        <div>
+                          <dt>Location</dt>
+                          <dd>{selectedPriceSource.location_code ?? 'No location'}</dd>
+                        </div>
+                      </dl>
+                    </section>
+
+                    <section className="admin-price-source-detail-section">
+                      <h5>Ingestion</h5>
+                      <dl>
+                        <div>
+                          <dt>Method</dt>
+                          <dd>{selectedPriceSource.ingestion_method ?? 'Provider pull'}</dd>
+                        </div>
+                        <div>
+                          <dt>Trigger</dt>
+                          <dd>{selectedPriceSource.ingestion_mode ?? 'Manual sync'}</dd>
+                        </div>
+                        <div>
+                          <dt>Job</dt>
+                          <dd>{selectedPriceSource.sync_job_name ?? 'No job configured'}</dd>
+                        </div>
+                        <div>
+                          <dt>Lookback</dt>
+                          <dd>{lookbackLabel(selectedPriceSource.default_lookback_days)}</dd>
+                        </div>
+                        <div>
+                          <dt>Run SLA</dt>
+                          <dd>{successSlaLabel(selectedPriceSource.success_sla_hours)}</dd>
+                        </div>
+                        <div>
+                          <dt>Endpoint</dt>
+                          <dd>
+                            {selectedPriceSource.source_endpoint ? (
+                              <a href={selectedPriceSource.source_endpoint} target="_blank" rel="noreferrer">
+                                {sourceEndpointLabel(selectedPriceSource.source_endpoint)}
+                              </a>
+                            ) : (
+                              'No source endpoint'
+                            )}
+                          </dd>
+                        </div>
+                      </dl>
+                    </section>
+
+                    <section className="admin-price-source-detail-section">
+                      <h5>Latest Observation</h5>
+                      <dl>
+                        <div>
+                          <dt>Source frequency</dt>
+                          <dd>{selectedPriceSource.frequency.toUpperCase()}</dd>
+                        </div>
+                        <div>
+                          <dt>Source unit</dt>
+                          <dd>{selectedPriceSource.source_unit}{selectedPriceSource.source_currency_code ? ` ${selectedPriceSource.source_currency_code}` : ''}</dd>
+                        </div>
+                        <div>
+                          <dt>Published</dt>
+                          <dd>{selectedPriceSource.latest_source_published_at ? formatDate(selectedPriceSource.latest_source_published_at) : 'Publication time unknown'}</dd>
+                        </div>
+                        <div>
+                          <dt>Loaded</dt>
+                          <dd>{selectedPriceSource.latest_downloaded_at ? formatDate(selectedPriceSource.latest_downloaded_at) : 'Never loaded'}</dd>
+                        </div>
+                        <div>
+                          <dt>Revision</dt>
+                          <dd>{selectedPriceSource.latest_source_revision ?? 'No revision marker'}</dd>
+                        </div>
+                        <div>
+                          <dt>Run</dt>
+                          <dd>{selectedPriceSource.latest_observation_run_id ? `Run #${selectedPriceSource.latest_observation_run_id}` : 'No observation run'}</dd>
+                        </div>
+                      </dl>
+                    </section>
+
+                    <section className="admin-price-source-detail-section">
+                      <h5>Review</h5>
+                      <dl>
+                        <div>
+                          <dt>Price index active</dt>
+                          <dd>{selectedPriceSource.price_index_is_active === false ? 'Inactive' : 'Active'}</dd>
+                        </div>
+                        <div>
+                          <dt>Source active</dt>
+                          <dd>{selectedPriceSource.is_active ? 'Active' : 'Inactive'}</dd>
+                        </div>
+                        <div>
+                          <dt>Last success</dt>
+                          <dd>{selectedPriceSource.last_success_at ? formatDate(selectedPriceSource.last_success_at) : 'No successful run yet'}</dd>
+                        </div>
+                        <div>
+                          <dt>Provider latest</dt>
+                          <dd>{selectedPriceSource.provider_latest_observation_at ? formatDate(selectedPriceSource.provider_latest_observation_at) : 'No provider observation yet'}</dd>
+                        </div>
+                        <div>
+                          <dt>Created</dt>
+                          <dd>{formatDate(selectedPriceSource.created_at)}</dd>
+                        </div>
+                        <div>
+                          <dt>Updated</dt>
+                          <dd>{formatDate(selectedPriceSource.updated_at)} · v{selectedPriceSource.version}</dd>
+                        </div>
+                      </dl>
+                    </section>
+                  </div>
+                </>
+              ) : (
+                <div className="admin-price-source-view-head">
+                  <div>
+                    <span className="eyebrow">Price Source View</span>
+                    <h4 id="admin-price-source-view-title">Price source not loaded</h4>
+                    <p>The link points to source #{selectedPriceSourceId}, but that row is not in the current loaded inventory window.</p>
+                  </div>
+                  <a
+                    className="button button-secondary"
+                    href={`#${ADMIN_PRICE_SOURCES_SECTION_ID}`}
+                    onClick={() => setSelectedPriceSourceId(null)}
+                  >
+                    Back to inventory
+                  </a>
+                </div>
+              )}
+            </section>
+          ) : null}
+
+          <div id={ADMIN_PRICE_SOURCES_SECTION_ID} className="admin-run-list">
+            <div className="detail-row">
+              <span>
+                Price source inventory · {visibleExternalDataPriceSources.length} source{visibleExternalDataPriceSources.length === 1 ? '' : 's'}
+                {latestMarkedPriceSource?.latest_downloaded_at
+                  ? ` · latest mark loaded ${formatDate(latestMarkedPriceSource.latest_downloaded_at)}`
+                  : ''}
+              </span>
+            </div>
+            {visibleExternalDataPriceSources.length === 0 ? (
+              <div className="detail-row">
+                <span>{hasScreenFilter ? 'No price sources match the current local filter.' : 'No price source catalog rows are loaded yet.'}</span>
+              </div>
+            ) : (
+              visibleExternalDataPriceSources.slice(0, 40).map((source) => {
+                const latestValue =
+                  source.latest_value != null
+                    ? `${formatNumber(source.latest_value, 3)} ${source.latest_unit_code ?? source.source_unit}${source.latest_currency_code ? ` ${source.latest_currency_code}` : ''}`
+                    : 'No observation'
+                const sourceUnit = `${source.source_unit}${source.source_currency_code ? ` ${source.source_currency_code}` : ''}`
+                const sourceCadence =
+                  source.scheduler_interval_minutes != null
+                    ? cadenceLabel(source.scheduler_interval_minutes)
+                    : source.frequency.toUpperCase()
+                const sourceTransform = source.transform_rule?.trim() ? `Transform ${source.transform_rule}` : 'Raw provider value'
+                const sourceFreshness =
+                  source.provider_observation_age_hours != null
+                    ? formatAgeHours(source.provider_observation_age_hours)
+                    : 'Provider freshness unknown'
+                const sourceAnchorId = adminPriceSourceDetailAnchorId(source.id)
+                const sourceIsSelected = source.id === selectedPriceSourceId
+
+                return (
+                  <article
+                    key={`${source.provider}-${source.series_id}-${source.id}`}
+                    className={`admin-run-row admin-weather-row${sourceIsSelected ? ' admin-weather-row-selected' : ''}`}
+                  >
+                    <div>
+                      <strong>{source.price_index_code}</strong>
+                      <p>
+                        {source.price_index_name ?? 'Unmapped price index'} · {source.source_system ?? source.provider} · {source.series_id}
+                      </p>
+                      <div className="admin-weather-row-detail">
+                        <span>{source.commodity_code ?? 'No commodity'}</span>
+                        <span>{source.ingestion_method ?? 'Provider pull'}</span>
+                        <span>{source.ingestion_mode ?? 'Manual sync'}</span>
+                        <span>Cadence {sourceCadence}</span>
+                        <span>{successSlaLabel(source.success_sla_hours)}</span>
+                        <span>{lookbackLabel(source.default_lookback_days)}</span>
+                        <span>Source freq {source.frequency.toUpperCase()}</span>
+                        <span>Unit {sourceUnit}</span>
+                        <span>Dataset {source.dataset_code ?? 'Provider default'}</span>
+                        <span>Endpoint {sourceEndpointLabel(source.source_endpoint)}</span>
+                        <span>{source.location_code ?? 'No location'}</span>
+                        <span>{source.market ?? 'No market'}</span>
+                        <span>{sourceTransform}</span>
+                      </div>
+                      {source.provider_error_summary ? <p>{source.provider_error_summary}</p> : null}
+                    </div>
+                    <div className="admin-run-meta">
+                      <span className={`status-pill status-pill-${priceSourceReviewTone(source.review_status)}`}>
+                        {priceSourceReviewLabel(source.review_status)}
+                      </span>
+                      <span>
+                        {source.latest_observation_date
+                          ? `${formatDateOnly(source.latest_observation_date)} · ${latestValue}`
+                          : latestValue}
+                      </span>
+                      <span>{source.latest_source_published_at ? `Published ${formatDate(source.latest_source_published_at)}` : 'Publication time unknown'}</span>
+                      <span>{source.latest_downloaded_at ? `Loaded ${formatDate(source.latest_downloaded_at)}` : 'Never loaded'}</span>
+                      <span>{source.due_for_sync ? 'Provider due for sync' : sourceFreshness}</span>
+                      <span>{source.latest_run_id ? `Run #${source.latest_run_id}` : source.latest_run_status ?? 'No run'}</span>
+                      {source.latest_source_revision ? <span>Revision {source.latest_source_revision}</span> : null}
+                      <a
+                        className="button button-secondary"
+                        href={`#${sourceAnchorId}`}
+                        onClick={() => setSelectedPriceSourceId(source.id)}
+                      >
+                        Open source view
+                      </a>
+                    </div>
+                  </article>
+                )
+              })
+            )}
+            {visibleExternalDataPriceSources.length > 40 ? (
+              <div className="detail-row">
+                <span>Showing the first 40 matching price sources. Narrow the local filter to inspect the rest.</span>
+              </div>
+            ) : null}
           </div>
 
           <div className="admin-run-list">
@@ -1409,6 +2158,39 @@ export function AdminWorkspace({
           </div>
         </div>
       </section>
+      ) : null}
+
+      {activeAdminSection === 'explainability' ? (
+      <>
+      <section className="surface feature-panel admin-hero-surface">
+        <div className="section-head">
+          <div>
+            <span className="eyebrow">How It Works</span>
+            <h3>System Atlas</h3>
+          </div>
+          <p>Read the product as connected domains, events, projections, and governed records without mixing that educational view into daily operations.</p>
+        </div>
+
+        <div className="admin-summary-grid">
+          {adminSummaryCards.map((card) => (
+            <article key={card.label} className="admin-summary-card">
+              <span>
+                <InlineTooltipLabel tooltip={card.tooltip} tooltipLabel={`More information about ${card.label}`} align="start">
+                  {card.label}
+                </InlineTooltipLabel>
+              </span>
+              {card.valueTooltip ? (
+                <Tooltip content={card.valueTooltip} focusable>
+                  <strong className="tooltip-trigger-hint">{card.value}</strong>
+                </Tooltip>
+              ) : (
+                <strong>{card.value}</strong>
+              )}
+              <p>{card.note}</p>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <section className="admin-explainability-grid">
         <article className="surface feature-panel">
@@ -1619,84 +2401,112 @@ export function AdminWorkspace({
           </div>
         </article>
       </section>
+      </>
+      ) : null}
 
-      <RoadmapAdminPanel
-        authSession={authSession}
-        formatDate={formatDate}
-        onOpenSettings={onOpenSettings}
-        onRoadmapPublished={onRoadmapPublished}
-      />
+      {activeAdminSection === 'assistant-governance' ? (
+        <>
+          <AssistantControlTowerPanel
+            authSession={authSession}
+            formatDate={formatDate}
+            onOpenSettings={onOpenSettings}
+            onStartSupervisionIntent={setAssistantSupervisionIntent}
+          />
 
-      <AssistantControlTowerPanel
-        authSession={authSession}
-        formatDate={formatDate}
-        onOpenSettings={onOpenSettings}
-      />
-
-      <div id="assistant-agent-management">
-        <AgentManagementPanel
-          authSession={authSession}
-          formatDate={formatDate}
-          onOpenSettings={onOpenSettings}
-        />
-      </div>
-
-      <div id="assistant-outcome-metrics">
-        <AssistantOutcomeMetricsPanel
-          authSession={authSession}
-          formatDate={formatDate}
-          onOpenSettings={onOpenSettings}
-        />
-      </div>
-
-      <div id="assistant-approval-inbox">
-        <AssistantApprovalInboxPanel
-          authSession={authSession}
-          formatDate={formatDate}
-          onOpenSettings={onOpenSettings}
-          onRefreshData={onRefreshData}
-        />
-      </div>
-
-      <CodexTaskPanel
-        authSession={authSession}
-        formatDate={formatDate}
-        onOpenSettings={onOpenSettings}
-      />
-
-      <UserManagementPanel
-        authSession={authSession}
-        formatDate={formatDate}
-        onOpenSettings={onOpenSettings}
-      />
-
-      <ProjectionMonitoringPanel
-        authSession={authSession}
-        formatDate={formatDate}
-        onOpenSettings={onOpenSettings}
-        onRefreshData={onRefreshData}
-      />
-
-      <section className="surface">
-        <div className="section-head">
-          <div>
-            <span className="eyebrow">Controls</span>
-            <h3>Governance and Operations</h3>
+          <div id="assistant-agent-management">
+            <AgentManagementPanel
+              authSession={authSession}
+              formatDate={formatDate}
+              onOpenSettings={onOpenSettings}
+              controlTowerIntent={assistantSupervisionIntent}
+            />
           </div>
-          <p>Operational actions still live here, but now below the product-facing explainability layer.</p>
-        </div>
 
-        <div className="admin-grid">
-          <article className="admin-card">
-            <strong>Reference Governance</strong>
-            <p>Add maker-checker review, deactivation safeguards, and audit history for sensitive master data.</p>
-          </article>
-          <article className="admin-card">
-            <strong>Roles and Access</strong>
-            <p>Split trader, operations, and admin capabilities so only the right users can amend reference data.</p>
-          </article>
-        </div>
-      </section>
+          <div id="assistant-outcome-metrics">
+            <AssistantOutcomeMetricsPanel
+              authSession={authSession}
+              formatDate={formatDate}
+              onOpenSettings={onOpenSettings}
+            />
+          </div>
+
+          <div id="assistant-approval-inbox">
+            <AssistantApprovalInboxPanel
+              authSession={authSession}
+              formatDate={formatDate}
+              onOpenSettings={onOpenSettings}
+              onRefreshData={onRefreshData}
+            />
+          </div>
+        </>
+      ) : null}
+
+      {activeAdminSection === 'automation' ? (
+        <>
+          <CodexTaskPanel
+            authSession={authSession}
+            formatDate={formatDate}
+            onOpenSettings={onOpenSettings}
+          />
+
+          <JobSchedulingPanel
+            authSession={authSession}
+            formatDate={formatDate}
+            onOpenSettings={onOpenSettings}
+          />
+
+          <ProjectionMonitoringPanel
+            authSession={authSession}
+            formatDate={formatDate}
+            onOpenSettings={onOpenSettings}
+            onRefreshData={onRefreshData}
+          />
+        </>
+      ) : null}
+
+      {activeAdminSection === 'access-planning' ? (
+        <>
+          <RoadmapAdminPanel
+            authSession={authSession}
+            formatDate={formatDate}
+            onOpenSettings={onOpenSettings}
+            onRoadmapPublished={onRoadmapPublished}
+          />
+
+          <HomeViewAdminPanel
+            authSession={authSession}
+            formatDate={formatDate}
+            onOpenSettings={onOpenSettings}
+          />
+
+          <UserManagementPanel
+            authSession={authSession}
+            formatDate={formatDate}
+            onOpenSettings={onOpenSettings}
+          />
+
+          <section className="surface">
+            <div className="section-head">
+              <div>
+                <span className="eyebrow">Controls</span>
+                <h3>Governance and Operations</h3>
+              </div>
+              <p>Longer-lived governance setup stays separate from daily operational triage.</p>
+            </div>
+
+            <div className="admin-grid">
+              <article className="admin-card">
+                <strong>Reference Governance</strong>
+                <p>Add maker-checker review, deactivation safeguards, and audit history for sensitive master data.</p>
+              </article>
+              <article className="admin-card">
+                <strong>Roles and Access</strong>
+                <p>Split trader, operations, and admin capabilities so only the right users can amend reference data.</p>
+              </article>
+            </div>
+          </section>
+        </>
+      ) : null}
     </div>
   )
 }

@@ -1,25 +1,38 @@
 import { useMemo } from 'react'
 
 import type {
+  AssetRecord,
+  AssetStandards,
   CurrencyRecord,
   LocationRecord,
   LocationStandards,
   PortfolioRecord,
   PriceIndexRecord,
+  RailRouteRecord,
   ReferenceRecord,
+  SpatialFeatureRecord,
+  SpatialFeatureStandards,
   UnitRecord,
 } from '../../shared/models'
 import { type useReferenceDataWorkspace } from './useReferenceDataWorkspace'
 import {
+  buildAssetFieldErrors,
   buildCommodityFieldErrors,
   buildCurrencyFieldErrors,
   buildLocationFieldErrors,
+  buildRailRouteFieldErrors,
+  buildSpatialFeatureFieldErrors,
+  parseAssetCoordinatePair,
+  parseAssetGeometryInput,
   buildPriceIndexFieldErrors,
   buildUnitFieldErrors,
+  isAssetFormDirty,
   isCommodityFormDirty,
   isCurrencyFormDirty,
   isLocationFormDirty,
   isPriceIndexFormDirty,
+  isRailRouteFormDirty,
+  isSpatialFeatureFormDirty,
   isUnitFormDirty,
 } from './referenceDataFormState'
 
@@ -38,6 +51,436 @@ type EntityControllerActions = {
   submitReference: SubmitReference
   setReferenceActionError: (message: string) => void
   setReferenceActionSuccess: (message: string) => void
+}
+
+export function useReferenceDataAssetController({
+  workspace,
+  assets,
+  assetStandards,
+  beginReferenceAction,
+  currentActorId,
+  submitReference,
+  setReferenceActionError,
+}: {
+  workspace: Pick<
+    ReferenceDataWorkspaceState,
+    | 'assetForm'
+    | 'assetFormMode'
+    | 'selectedAsset'
+    | 'startCreateAsset'
+    | 'startEditAsset'
+  >
+  assets: AssetRecord[]
+  assetStandards: AssetStandards
+} & Pick<
+  EntityControllerActions,
+  'beginReferenceAction' | 'currentActorId' | 'submitReference' | 'setReferenceActionError'
+>) {
+  const {
+    assetForm,
+    assetFormMode,
+    selectedAsset,
+    startCreateAsset: startCreateAssetBase,
+    startEditAsset: startEditAssetBase,
+  } = workspace
+
+  const assetFieldErrors = useMemo(
+    () => buildAssetFieldErrors(assetForm, assetFormMode, assets, assetStandards),
+    [assetForm, assetFormMode, assetStandards, assets],
+  )
+
+  const assetFormDirty = useMemo(
+    () => isAssetFormDirty(assetForm, assetFormMode, selectedAsset, assetStandards),
+    [assetForm, assetFormMode, assetStandards, selectedAsset],
+  )
+
+  function startCreateAsset() {
+    beginReferenceAction(startCreateAssetBase)
+  }
+
+  function startEditAsset(code: string) {
+    beginReferenceAction(() => startEditAssetBase(code))
+  }
+
+  async function handleSaveAsset(e: React.FormEvent) {
+    e.preventDefault()
+    if (
+      !assetForm.code.trim() ||
+      !assetForm.name.trim() ||
+      !assetForm.asset_class.trim() ||
+      !assetForm.asset_type.trim() ||
+      !assetForm.asset_reality.trim() ||
+      !assetForm.operating_status.trim()
+    ) {
+      setReferenceActionError('Asset code, name, class, type, reality, and operating status are required.')
+      return
+    }
+
+    const capacityValue = assetForm.capacity_value.trim() ? Number(assetForm.capacity_value.trim()) : null
+    if (assetForm.capacity_value.trim() && Number.isNaN(capacityValue)) {
+      setReferenceActionError('Capacity must be numeric.')
+      return
+    }
+    if ((capacityValue === null) !== !assetForm.capacity_unit_code.trim()) {
+      setReferenceActionError('Capacity value and unit must be provided together.')
+      return
+    }
+
+    const parsedCoordinates = parseAssetCoordinatePair({
+      latitudeText: assetForm.latitude,
+      longitudeText: assetForm.longitude,
+    })
+    if (parsedCoordinates.error) {
+      setReferenceActionError(parsedCoordinates.error)
+      return
+    }
+
+    const parsedGeometry = parseAssetGeometryInput(assetForm.geometry_geojson)
+    if (parsedGeometry.error) {
+      setReferenceActionError(parsedGeometry.error)
+      return
+    }
+
+    const payload = {
+      code: assetForm.code.trim().toUpperCase(),
+      name: assetForm.name.trim(),
+      asset_class: assetForm.asset_class.trim().toUpperCase(),
+      asset_type: assetForm.asset_type.trim().toUpperCase(),
+      asset_reality: assetForm.asset_reality.trim().toUpperCase(),
+      commodity_code: assetForm.commodity_code.trim().toUpperCase() || null,
+      location_code: assetForm.location_code.trim().toUpperCase() || null,
+      latitude: parsedCoordinates.latitude,
+      longitude: parsedCoordinates.longitude,
+      geometry_geojson: parsedGeometry.value,
+      capacity_value: capacityValue,
+      capacity_unit_code: assetForm.capacity_unit_code.trim().toUpperCase() || null,
+      operator_name: assetForm.operator_name.trim() || null,
+      operating_status: assetForm.operating_status.trim().toUpperCase(),
+      description: assetForm.description.trim() || null,
+    }
+
+    if (assetFormMode === 'create') {
+      await submitReference('/reference/assets', 'POST', { ...payload, created_by: currentActorId() }, `Asset ${payload.code} created.`)
+      startEditAssetBase(payload.code)
+    } else if (selectedAsset) {
+      await submitReference(
+        `/reference/assets/${selectedAsset.code}`,
+        'PUT',
+        { ...payload, updated_by: currentActorId() },
+        `Asset ${selectedAsset.code} updated.`,
+      )
+    }
+  }
+
+  async function handleToggleAsset(record: AssetRecord) {
+    await submitReference(
+      `/reference/assets/${record.code}/${record.is_active ? 'deactivate' : 'activate'}`,
+      'POST',
+      { updated_by: currentActorId() },
+      `Asset ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
+    )
+  }
+
+  return {
+    assetFieldErrors,
+    assetFormDirty,
+    startCreateAsset,
+    startEditAsset,
+    handleSaveAsset,
+    handleToggleAsset,
+  }
+}
+
+export function useReferenceDataSpatialFeatureController({
+  workspace,
+  spatialFeatures,
+  spatialFeatureStandards,
+  beginReferenceAction,
+  currentActorId,
+  submitReference,
+  setReferenceActionError,
+}: {
+  workspace: Pick<
+    ReferenceDataWorkspaceState,
+    | 'spatialFeatureForm'
+    | 'spatialFeatureFormMode'
+    | 'selectedSpatialFeature'
+    | 'startCreateSpatialFeature'
+    | 'startEditSpatialFeature'
+  >
+  spatialFeatures: SpatialFeatureRecord[]
+  spatialFeatureStandards: SpatialFeatureStandards
+} & Pick<
+  EntityControllerActions,
+  'beginReferenceAction' | 'currentActorId' | 'submitReference' | 'setReferenceActionError'
+>) {
+  const {
+    spatialFeatureForm,
+    spatialFeatureFormMode,
+    selectedSpatialFeature,
+    startCreateSpatialFeature: startCreateSpatialFeatureBase,
+    startEditSpatialFeature: startEditSpatialFeatureBase,
+  } = workspace
+
+  const spatialFeatureFieldErrors = useMemo(
+    () =>
+      buildSpatialFeatureFieldErrors(
+        spatialFeatureForm,
+        spatialFeatureFormMode,
+        spatialFeatures,
+        spatialFeatureStandards,
+      ),
+    [spatialFeatureForm, spatialFeatureFormMode, spatialFeatureStandards, spatialFeatures],
+  )
+
+  const spatialFeatureFormDirty = useMemo(
+    () =>
+      isSpatialFeatureFormDirty(
+        spatialFeatureForm,
+        spatialFeatureFormMode,
+        selectedSpatialFeature,
+        spatialFeatureStandards,
+      ),
+    [selectedSpatialFeature, spatialFeatureForm, spatialFeatureFormMode, spatialFeatureStandards],
+  )
+
+  function startCreateSpatialFeature() {
+    beginReferenceAction(startCreateSpatialFeatureBase)
+  }
+
+  function startEditSpatialFeature(code: string) {
+    beginReferenceAction(() => startEditSpatialFeatureBase(code))
+  }
+
+  async function handleSaveSpatialFeature(e: React.FormEvent) {
+    e.preventDefault()
+    if (
+      !spatialFeatureForm.code.trim() ||
+      !spatialFeatureForm.name.trim() ||
+      !spatialFeatureForm.feature_kind.trim()
+    ) {
+      setReferenceActionError('Spatial feature code, name, kind, and geometry are required.')
+      return
+    }
+
+    const parsedLabelCoordinates = parseAssetCoordinatePair({
+      latitudeText: spatialFeatureForm.label_latitude,
+      longitudeText: spatialFeatureForm.label_longitude,
+    })
+    if (parsedLabelCoordinates.error) {
+      setReferenceActionError(parsedLabelCoordinates.error)
+      return
+    }
+
+    const parsedGeometry = parseAssetGeometryInput(spatialFeatureForm.geometry_geojson)
+    if (parsedGeometry.error) {
+      setReferenceActionError(parsedGeometry.error)
+      return
+    }
+    if (parsedGeometry.value === null) {
+      setReferenceActionError('Geometry GeoJSON is required.')
+      return
+    }
+
+    const normalizedEntityType = spatialFeatureForm.entity_type.trim().toUpperCase()
+    const normalizedEntityCode = spatialFeatureForm.entity_code.trim().toUpperCase()
+    if (Boolean(normalizedEntityType) !== Boolean(normalizedEntityCode)) {
+      setReferenceActionError('Entity type and linked code must be provided together.')
+      return
+    }
+
+    const payload = {
+      code: spatialFeatureForm.code.trim().toUpperCase(),
+      name: spatialFeatureForm.name.trim(),
+      feature_kind: spatialFeatureForm.feature_kind.trim().toUpperCase(),
+      geometry_geojson: parsedGeometry.value,
+      entity_type: normalizedEntityType || null,
+      entity_code: normalizedEntityCode || null,
+      label_latitude: parsedLabelCoordinates.latitude,
+      label_longitude: parsedLabelCoordinates.longitude,
+      is_primary: spatialFeatureForm.is_primary,
+      description: spatialFeatureForm.description.trim() || null,
+    }
+
+    if (spatialFeatureFormMode === 'create') {
+      await submitReference(
+        '/reference/spatial-features',
+        'POST',
+        { ...payload, created_by: currentActorId() },
+        `Spatial feature ${payload.code} created.`,
+      )
+      startEditSpatialFeatureBase(payload.code)
+    } else if (selectedSpatialFeature) {
+      await submitReference(
+        `/reference/spatial-features/${selectedSpatialFeature.code}`,
+        'PUT',
+        { ...payload, updated_by: currentActorId() },
+        `Spatial feature ${selectedSpatialFeature.code} updated.`,
+      )
+    }
+  }
+
+  async function handleToggleSpatialFeature(record: SpatialFeatureRecord) {
+    await submitReference(
+      `/reference/spatial-features/${record.code}/${record.is_active ? 'deactivate' : 'activate'}`,
+      'POST',
+      { updated_by: currentActorId() },
+      `Spatial feature ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
+    )
+  }
+
+  return {
+    spatialFeatureFieldErrors,
+    spatialFeatureFormDirty,
+    startCreateSpatialFeature,
+    startEditSpatialFeature,
+    handleSaveSpatialFeature,
+    handleToggleSpatialFeature,
+  }
+}
+
+export function useReferenceDataRailRouteController({
+  workspace,
+  railRoutes,
+  beginReferenceAction,
+  currentActorId,
+  submitReference,
+  setReferenceActionError,
+}: {
+  workspace: Pick<
+    ReferenceDataWorkspaceState,
+    | 'railRouteForm'
+    | 'railRouteFormMode'
+    | 'selectedRailRoute'
+    | 'startCreateRailRoute'
+    | 'startEditRailRoute'
+  >
+  railRoutes: RailRouteRecord[]
+} & Pick<
+  EntityControllerActions,
+  'beginReferenceAction' | 'currentActorId' | 'submitReference' | 'setReferenceActionError'
+>) {
+  const {
+    railRouteForm,
+    railRouteFormMode,
+    selectedRailRoute,
+    startCreateRailRoute: startCreateRailRouteBase,
+    startEditRailRoute: startEditRailRouteBase,
+  } = workspace
+
+  const railRouteFieldErrors = useMemo(
+    () => buildRailRouteFieldErrors(railRouteForm, railRouteFormMode, railRoutes),
+    [railRouteForm, railRouteFormMode, railRoutes],
+  )
+
+  const railRouteFormDirty = useMemo(
+    () => isRailRouteFormDirty(railRouteForm, railRouteFormMode, selectedRailRoute),
+    [railRouteForm, railRouteFormMode, selectedRailRoute],
+  )
+
+  function startCreateRailRoute() {
+    beginReferenceAction(startCreateRailRouteBase)
+  }
+
+  function startEditRailRoute(code: string) {
+    beginReferenceAction(() => startEditRailRouteBase(code))
+  }
+
+  async function handleSaveRailRoute(e: React.FormEvent) {
+    e.preventDefault()
+    if (!railRouteForm.code.trim() || !railRouteForm.name.trim() || !railRouteForm.rail_line_code.trim()) {
+      setReferenceActionError('Rail route code, name, and rail line code are required.')
+      return
+    }
+
+    if (!railRouteForm.route_direction.trim()) {
+      setReferenceActionError('Route direction is required.')
+      return
+    }
+
+    if (railRouteFieldErrors.route_direction) {
+      setReferenceActionError(railRouteFieldErrors.route_direction)
+      return
+    }
+
+    if (railRouteForm.placement_cutoff_time_local.trim() && railRouteFieldErrors.placement_cutoff_time_local) {
+      setReferenceActionError(railRouteFieldErrors.placement_cutoff_time_local)
+      return
+    }
+
+    if (railRouteForm.release_cutoff_time_local.trim() && railRouteFieldErrors.release_cutoff_time_local) {
+      setReferenceActionError(railRouteFieldErrors.release_cutoff_time_local)
+      return
+    }
+
+    if (railRouteForm.placement_free_time_hours.trim() && railRouteFieldErrors.placement_free_time_hours) {
+      setReferenceActionError(railRouteFieldErrors.placement_free_time_hours)
+      return
+    }
+
+    if (railRouteForm.release_free_time_hours.trim() && railRouteFieldErrors.release_free_time_hours) {
+      setReferenceActionError(railRouteFieldErrors.release_free_time_hours)
+      return
+    }
+
+    const placementFreeTimeHours = railRouteForm.placement_free_time_hours.trim()
+      ? Number.parseInt(railRouteForm.placement_free_time_hours.trim(), 10)
+      : null
+    const releaseFreeTimeHours = railRouteForm.release_free_time_hours.trim()
+      ? Number.parseInt(railRouteForm.release_free_time_hours.trim(), 10)
+      : null
+
+    const payload = {
+      code: railRouteForm.code.trim().toUpperCase(),
+      name: railRouteForm.name.trim(),
+      rail_line_code: railRouteForm.rail_line_code.trim().toUpperCase(),
+      origin_location_code: railRouteForm.origin_location_code.trim().toUpperCase() || null,
+      destination_location_code: railRouteForm.destination_location_code.trim().toUpperCase() || null,
+      service_calendar_code: railRouteForm.service_calendar_code.trim().toUpperCase() || null,
+      route_direction: railRouteForm.route_direction.trim().toUpperCase(),
+      schedule_timezone: railRouteForm.schedule_timezone.trim() || null,
+      placement_cutoff_time_local: railRouteForm.placement_cutoff_time_local.trim() || null,
+      release_cutoff_time_local: railRouteForm.release_cutoff_time_local.trim() || null,
+      placement_free_time_hours: placementFreeTimeHours,
+      release_free_time_hours: releaseFreeTimeHours,
+      description: railRouteForm.description.trim() || null,
+    }
+
+    if (railRouteFormMode === 'create') {
+      await submitReference(
+        '/reference/rail-routes',
+        'POST',
+        { ...payload, created_by: currentActorId() },
+        `Rail route ${payload.code} created.`,
+      )
+      startEditRailRouteBase(payload.code)
+    } else if (selectedRailRoute) {
+      await submitReference(
+        `/reference/rail-routes/${selectedRailRoute.code}`,
+        'PUT',
+        { ...payload, updated_by: currentActorId() },
+        `Rail route ${selectedRailRoute.code} updated.`,
+      )
+    }
+  }
+
+  async function handleToggleRailRoute(record: RailRouteRecord) {
+    await submitReference(
+      `/reference/rail-routes/${record.code}/${record.is_active ? 'deactivate' : 'activate'}`,
+      'POST',
+      { updated_by: currentActorId() },
+      `Rail route ${record.code} ${record.is_active ? 'deactivated' : 'activated'}.`,
+    )
+  }
+
+  return {
+    railRouteFieldErrors,
+    railRouteFormDirty,
+    startCreateRailRoute,
+    startEditRailRoute,
+    handleSaveRailRoute,
+    handleToggleRailRoute,
+  }
 }
 
 export function useReferenceDataCommodityController({
@@ -110,6 +553,7 @@ export function useReferenceDataCommodityController({
           name: commodityForm.name.trim(),
           description: commodityForm.description.trim() || null,
           commodity_class: commodityForm.commodity_class,
+          allowed_transport_modes: commodityForm.allowed_transport_modes,
           created_by: currentActorId(),
         },
         `Commodity ${code} created.`,
@@ -123,6 +567,7 @@ export function useReferenceDataCommodityController({
           name: commodityForm.name.trim(),
           description: commodityForm.description.trim() || null,
           commodity_class: commodityForm.commodity_class,
+          allowed_transport_modes: commodityForm.allowed_transport_modes,
           updated_by: currentActorId(),
         },
         `Commodity ${selectedCommodity.code} updated.`,
@@ -234,6 +679,7 @@ export function useReferenceDataPriceIndexController({
       currency_code: priceIndexForm.currency_code.trim().toUpperCase(),
       unit_code: priceIndexForm.unit_code.trim().toUpperCase(),
       provider: priceIndexForm.provider.trim(),
+      quote_type: priceIndexForm.quote_type,
       market: priceIndexForm.market.trim() || null,
       location_code: priceIndexForm.location_code.trim().toUpperCase() || null,
       calendar_code: priceIndexForm.calendar_code.trim().toUpperCase() || null,

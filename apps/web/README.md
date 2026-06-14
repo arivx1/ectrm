@@ -12,6 +12,8 @@ and runtime settings.
 - `Trades`: capture, inspect, amend, or cancel an individual trade
 - `Events`: review the event timeline
 - `Positions`: inspect net commodity exposure
+- `Library`: browse uploaded PDFs with search, preview, and review status in
+  one place
 - `Reference Data`: maintain controlled master data
 - `Admin`: user management, external-data visibility, and governance-oriented
   system views
@@ -27,6 +29,9 @@ From `apps/web`:
 npm install
 npm run dev
 ```
+
+From the repo root, `make dev` starts PostgreSQL, the API, and this Vite app
+together and shuts them all down on `Ctrl+C`.
 
 Useful companion commands:
 
@@ -148,10 +153,37 @@ first admin user. The Assistant workspace also requires a signed-in session
 because prompt submission is protected server-side. Most operator-facing
 workspaces now expect an authenticated session before they can load their data.
 
+## Google Calendar In Settings
+
+The Settings workspace includes a browser-side Google Calendar panel for
+pulling the next few events into the app without routing calendar traffic
+through the ECTRM API. That same panel now owns the Home timeline overlay
+preferences for the day, week, and month cards.
+
+To enable that UI locally:
+
+1. Set `GOOGLE_AUTH_CLIENT_ID` in `apps/api/.env` to a Google OAuth web client
+   ID.
+2. Restart the API so `GET /settings/public` exposes the configured client ID
+   to the web app.
+3. Make sure the Google OAuth client allows the local web origins you use,
+   such as `http://localhost:5173` and `http://127.0.0.1:5173`.
+4. Enable the Google Calendar API in the same Google Cloud project.
+
+Behavior notes:
+
+- `GOOGLE_AUTH_ENABLED=true` is only required when you also want Google-based
+  app sign-in. The calendar panel itself only needs the client ID.
+- The browser requests Google `calendar.readonly` access directly from Google.
+- The Google access token and fetched calendar events stay in browser storage
+  for the local session and are not persisted by the ECTRM API.
+
 ## Key Source Areas
 
 - `src/App.tsx`: top-level state, data loading, and workspace routing
 - `src/workspaces`: page-level workspace UIs
+- `src/workspaces/library`: dedicated uploaded-document browser and review
+  surface
 - `src/features`: workflow-specific logic, especially trade and reference-data
   flows
 - `src/entities`: API-facing data loaders and mutations

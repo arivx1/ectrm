@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import create_engine
@@ -14,6 +15,9 @@ from apps.api.app.models.event import Base
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
 from apps.api.app.models.external_series_observation import ExternalSeriesObservation
+from apps.api.app.models.price_index_observation import PriceIndexObservation
+from apps.api.app.models.reference_price_index import ReferencePriceIndex
+from apps.api.app.models.reference_price_index_source import ReferencePriceIndexSource
 
 
 class FakeFREDClient:
@@ -49,6 +53,9 @@ class FredSyncTests(unittest.TestCase):
         with self.SessionLocal() as session:
             session.query(ExternalSeriesObservation).delete()
             session.query(ExternalSeriesDefinition).delete()
+            session.query(PriceIndexObservation).delete()
+            session.query(ReferencePriceIndexSource).delete()
+            session.query(ReferencePriceIndex).delete()
             session.query(ExternalDataRun).delete()
             session.commit()
 
@@ -69,6 +76,51 @@ class FredSyncTests(unittest.TestCase):
                     description="Test series",
                     query_params=None,
                     transform_rule="field:value",
+                    is_active=True,
+                    created_at=now,
+                    created_by="test-user",
+                    updated_at=now,
+                    updated_by="test-user",
+                    version=1,
+                )
+            )
+            session.commit()
+
+    def _seed_price_index_source(self) -> None:
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                ReferencePriceIndex(
+                    code="LNG_ASIA_IMF_M",
+                    name="Asia LNG Monthly (JKM Proxy)",
+                    commodity_code="LNG",
+                    currency_code="USD",
+                    unit_code="MMBTU",
+                    provider="FRED",
+                    market="IMF",
+                    location_code=None,
+                    calendar_code=None,
+                    description="Test FRED commodity price index",
+                    is_active=True,
+                    effective_from=None,
+                    effective_to=None,
+                    created_at=now,
+                    created_by="test-user",
+                    updated_at=now,
+                    updated_by="test-user",
+                    version=1,
+                )
+            )
+            session.add(
+                ReferencePriceIndexSource(
+                    price_index_code="LNG_ASIA_IMF_M",
+                    provider="FRED",
+                    dataset_code="IMF_PRIMARY_COMMODITY_PRICES",
+                    series_id="PNGASJPUSDM",
+                    frequency="monthly",
+                    source_unit="MMBTU",
+                    source_currency_code="USD",
+                    transform_rule=None,
                     is_active=True,
                     created_at=now,
                     created_by="test-user",
@@ -189,6 +241,91 @@ class FredSyncTests(unittest.TestCase):
         self.assertEqual(run.observation_count, 1)
         self.assertEqual(len(observations), 1)
         self.assertEqual(observations[0].observation_date, date(2026, 4, 3))
+
+    def test_sync_creates_price_index_observations_for_fred_price_sources(self) -> None:
+        self._seed_price_index_source()
+        client = FakeFREDClient(
+            {
+                "PNGASJPUSDM": {
+                    "observations": [
+                        {
+                            "date": "2026-02-01",
+                            "value": "11.25",
+                            "realtime_start": "2026-03-15",
+                            "realtime_end": "2026-03-15",
+                        },
+                        {
+                            "date": "2026-03-01",
+                            "value": "10.90",
+                            "realtime_start": "2026-04-15",
+                            "realtime_end": "2026-04-15",
+                        },
+                    ]
+                }
+            }
+        )
+
+        with self.SessionLocal() as session:
+            run = sync_fred_series(
+                session,
+                client=client,
+                requested_by="spec-test",
+                lookback_days=90,
+                today=date(2026, 4, 15),
+            )
+            observations = (
+                session.query(PriceIndexObservation)
+                .order_by(PriceIndexObservation.observation_date.asc())
+                .all()
+            )
+
+        self.assertEqual(run.status, "SUCCEEDED")
+        self.assertEqual(run.series_count, 1)
+        self.assertEqual(run.observation_count, 2)
+        self.assertEqual(len(observations), 2)
+        self.assertEqual(observations[0].price_index_code, "LNG_ASIA_IMF_M")
+        self.assertEqual(observations[0].value, Decimal("11.250000"))
+        self.assertEqual(observations[0].unit_code, "MMBTU")
+        self.assertEqual(observations[0].currency_code, "USD")
+        self.assertEqual(observations[1].source_provider, "FRED")
+        self.assertEqual(observations[1].source_revision, "2026-04-15:2026-04-15")
+        self.assertEqual(client.calls[0]["series_id"], "PNGASJPUSDM")
+        self.assertEqual(client.calls[0]["observation_start"], "2026-01-15")
+
+    def test_sync_filters_fred_price_sources_by_price_index_code(self) -> None:
+        self._seed_definition()
+        self._seed_price_index_source()
+        client = FakeFREDClient(
+            {
+                "PNGASJPUSDM": {
+                    "observations": [
+                        {
+                            "date": "2026-03-01",
+                            "value": "10.90",
+                            "realtime_start": "2026-04-15",
+                            "realtime_end": "2026-04-15",
+                        },
+                    ]
+                }
+            }
+        )
+
+        with self.SessionLocal() as session:
+            run = sync_fred_series(
+                session,
+                client=client,
+                series_code="LNG_ASIA_IMF_M",
+                requested_by="spec-test",
+            )
+            external_observations = session.query(ExternalSeriesObservation).all()
+            price_observations = session.query(PriceIndexObservation).all()
+
+        self.assertEqual(run.status, "SUCCEEDED")
+        self.assertEqual(run.series_count, 1)
+        self.assertEqual(run.observation_count, 1)
+        self.assertEqual(external_observations, [])
+        self.assertEqual(len(price_observations), 1)
+        self.assertEqual(client.calls[0]["series_id"], "PNGASJPUSDM")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from apps.api.app.domains.trading.services.trade_unit_defaults import (
+    default_price_unit_code,
+    default_quantity_unit_code,
+)
+
 
 def utc(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
@@ -19,6 +24,76 @@ class ScenarioDefinition:
     trade_rows: list[dict]
     trade_leg_rows: list[dict]
     trade_price_term_rows: list[dict]
+
+
+def _apply_unit_defaults(
+    event_rows: list[dict],
+    trade_rows: list[dict],
+    trade_leg_rows: list[dict],
+    trade_price_term_rows: list[dict],
+) -> None:
+    trade_context_by_id: dict[str, dict[str, object]] = {}
+
+    for row in trade_rows:
+        quantity_unit_code = default_quantity_unit_code(
+            commodity_class=row.get("commodity_class"),
+            commodity=row.get("commodity"),
+        )
+        price_unit_code = default_price_unit_code(
+            commodity_class=row.get("commodity_class"),
+            commodity=row.get("commodity"),
+            price_index_code=row.get("price_index_code"),
+        )
+        if quantity_unit_code is not None:
+            row.setdefault("unit_of_measure", quantity_unit_code)
+        if price_unit_code is not None:
+            row.setdefault("price_unit_code", price_unit_code)
+        trade_context_by_id[row["trade_id"]] = row
+
+    for row in event_rows:
+        payload = row.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        quantity_unit_code = default_quantity_unit_code(
+            commodity_class=payload.get("commodity_class"),
+            commodity=payload.get("commodity"),
+        )
+        price_unit_code = default_price_unit_code(
+            commodity_class=payload.get("commodity_class"),
+            commodity=payload.get("commodity"),
+            price_index_code=payload.get("price_index_code"),
+        )
+        if quantity_unit_code is not None:
+            payload.setdefault("unit_of_measure", quantity_unit_code)
+        if price_unit_code is not None:
+            payload.setdefault("price_unit_code", price_unit_code)
+        for leg in payload.get("legs") or []:
+            if not isinstance(leg, dict):
+                continue
+            leg_unit_code = default_quantity_unit_code(
+                commodity_class=leg.get("commodity_class"),
+                commodity=leg.get("commodity"),
+            )
+            if leg_unit_code is not None:
+                leg.setdefault("quantity_unit_code", leg_unit_code)
+
+    for row in trade_leg_rows:
+        quantity_unit_code = default_quantity_unit_code(
+            commodity_class=row.get("commodity_class"),
+            commodity=row.get("commodity_code"),
+        )
+        if quantity_unit_code is not None:
+            row.setdefault("quantity_unit_code", quantity_unit_code)
+
+    for row in trade_price_term_rows:
+        trade_context = trade_context_by_id.get(row["trade_id"], {})
+        price_unit_code = default_price_unit_code(
+            commodity_class=trade_context.get("commodity_class"),
+            commodity=trade_context.get("commodity"),
+            price_index_code=row.get("price_index_code") or trade_context.get("price_index_code"),
+        )
+        if price_unit_code is not None:
+            row.setdefault("price_unit_code", price_unit_code)
 
 
 CORE_BOOK_ROWS = [
@@ -1009,6 +1084,25 @@ def _build_market_mix_rows() -> tuple[list[dict], list[dict], list[dict], list[d
     MARKET_MIX_TRADE_LEG_ROWS,
     MARKET_MIX_PRICE_TERM_ROWS,
 ) = _build_market_mix_rows()
+
+_apply_unit_defaults(
+    CORE_EVENT_ROWS,
+    CORE_TRADE_ROWS,
+    CORE_TRADE_LEG_ROWS,
+    CORE_PRICE_TERM_ROWS,
+)
+_apply_unit_defaults(
+    DISLOCATION_EVENT_ROWS,
+    DISLOCATION_TRADE_ROWS,
+    DISLOCATION_TRADE_LEG_ROWS,
+    DISLOCATION_PRICE_TERM_ROWS,
+)
+_apply_unit_defaults(
+    MARKET_MIX_EVENT_ROWS,
+    MARKET_MIX_TRADE_ROWS,
+    MARKET_MIX_TRADE_LEG_ROWS,
+    MARKET_MIX_PRICE_TERM_ROWS,
+)
 
 
 SCENARIOS = {

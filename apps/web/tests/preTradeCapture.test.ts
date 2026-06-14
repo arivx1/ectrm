@@ -94,6 +94,7 @@ describe('applyPreTradeScenarioToCaptureForm', () => {
       recommendationStance: 'PROCEED',
       recommendationScore: 96,
       recommendationRationale: 'Proceed is supported because all required checks passed.',
+      enrichment: null,
       recommendationOverrideReason: null,
       recommendationOverrideBy: null,
       recommendationOverrideAt: null,
@@ -146,6 +147,19 @@ describe('buildPreTradeWorkflowNote', () => {
       recommendationStance: 'PROCEED',
       recommendationScore: 96,
       recommendationRationale: 'Proceed is supported because all required checks passed.',
+      enrichment: {
+        opportunity_category: 'RISK_REDUCTION',
+        hedge_intent: 'SWAP',
+        residual_exposure_summary: 'Residual exposure falls inside desk appetite.',
+        source_freshness_summary: 'All 6 source snapshots were OK at capture.',
+        reviewer_focus: ['Confirm the desk still wants the prompt hedge.'],
+        recommendation_run_id: 99,
+        recommendation_run_key: 'run-99',
+        recommendation_stance: 'PROCEED',
+        recommendation_score: 96,
+        recommendation_headline: 'Proceed with standard controls.',
+        captured_at: '2026-04-15T15:20:00Z',
+      },
       recommendationOverrideReason: 'Credit approved the temporary utilization overage.',
       recommendationOverrideBy: 'chief.risk',
       recommendationOverrideAt: '2026-04-15T15:29:00Z',
@@ -160,6 +174,10 @@ describe('buildPreTradeWorkflowNote', () => {
     expect(note).toContain('Recommendation run: #99 • PROCEED • score 96')
     expect(note).toContain('Recommendation: Proceed with standard controls.')
     expect(note).toContain('Recommendation rationale: Proceed is supported because all required checks passed.')
+    expect(note).toContain('Opportunity category: RISK REDUCTION')
+    expect(note).toContain('Hedge intent: SWAP')
+    expect(note).toContain('Source freshness: All 6 source snapshots were OK at capture.')
+    expect(note).toContain('Reviewer focus: Confirm the desk still wants the prompt hedge.')
     expect(note).toContain('Recommendation override: Credit approved the temporary utilization overage. • chief.risk • 2026-04-15T15:29:00Z')
     expect(note).toContain('Review notes: Approved for capture once the desk locks the fixed strip.')
   })

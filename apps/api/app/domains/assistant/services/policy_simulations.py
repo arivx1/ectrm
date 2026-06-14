@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from apps.api.app.domains.assistant.services.action_requests import ACTION_SPECS
+from apps.api.app.domains.assistant.services.action_registry import ACTION_SPECS
 from apps.api.app.domains.assistant.services.action_runtime import plan_action_requests
 from apps.api.app.domains.assistant.services.policies import (
     build_effective_policy_for_agent,

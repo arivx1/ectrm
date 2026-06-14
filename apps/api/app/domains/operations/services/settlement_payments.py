@@ -9,7 +9,10 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from apps.api.app.domains.operations.services.audit_events import append_trade_audit_event
+from apps.api.app.domains.operations.services.audit_events import (
+    TradeAuditMutationContext,
+    append_trade_audit_event,
+)
 from apps.api.app.domains.operations.services.resource_views import (
     OperationalResourceDescriptor,
 )
@@ -33,6 +36,9 @@ from apps.api.app.domains.operations.services.resource_views import (
 )
 from apps.api.app.domains.operations.services.resource_views import (
     load_operational_resource_items,
+)
+from apps.api.app.domains.operations.services.settlement_due_dates import (
+    resolve_settlement_due_at,
 )
 from apps.api.app.domains.operations.services.workflow_items import SYSTEM_WORKFLOW_ACTOR
 from apps.api.app.domains.operations.services.workflow_items import set_trade_workflow_item_projection
@@ -81,6 +87,17 @@ def _normalize_required_text(value: object | None, *, field_name: str) -> str:
     return normalized
 
 
+def _append_note(existing: str | None, addition: str | None) -> str | None:
+    normalized_addition = _normalize_optional_text(addition)
+    if normalized_addition is None:
+        return existing
+    if not existing:
+        return normalized_addition
+    if normalized_addition in existing:
+        return existing
+    return f"{existing}\n{normalized_addition}"
+
+
 def _normalize_payment_reference(
     value: object | None,
     *,
@@ -89,6 +106,11 @@ def _normalize_payment_reference(
 ) -> str:
     normalized = str(value or "").strip().upper()
     return normalized or f"PAY-{trade.trade_id}-{sequence_number}"
+
+
+def _normalize_reversal_payment_reference(value: object | None, *, payment: TradePayment) -> str:
+    normalized = str(value or "").strip().upper()
+    return normalized or f"{payment.payment_reference}-REV"
 
 
 def _normalize_payment_currency_code(value: object | None, *, invoice: TradeInvoice, trade: Trade) -> str:
@@ -135,11 +157,21 @@ def _normalize_payment_status(value: object | None) -> str:
     return normalized
 
 
-def _normalize_due_at(value: datetime | None, *, invoice: TradeInvoice) -> datetime:
+def _normalize_due_at(
+    db: Session,
+    value: datetime | None,
+    *,
+    invoice: TradeInvoice,
+    due_calendar_code: str | None = None,
+) -> datetime:
     normalized = _coerce_utc(value) or _coerce_utc(invoice.due_at)
     if normalized is None:
         raise ValueError("Payment due timestamp is required.")
-    return normalized
+    return resolve_settlement_due_at(
+        db,
+        due_at=normalized,
+        due_calendar_code=due_calendar_code,
+    ).due_at
 
 
 def _normalize_received_at(value: datetime | None) -> Optional[datetime]:
@@ -288,15 +320,15 @@ def derive_invoice_payment_projection(
     if invoice.status == InvoiceStatus.DISPUTED.value:
         payment_status = due_status if outstanding_amount > ZERO else PaymentStatus.PAID.value
         settlement_status = SettlementStatus.DISPUTED.value
+    elif invoice.status == InvoiceStatus.NOT_REQUIRED.value:
+        payment_status = PaymentStatus.NOT_REQUIRED.value
+        settlement_status = SettlementStatus.SETTLED.value
     elif outstanding_amount <= ZERO and payments:
         payment_status = PaymentStatus.PAID.value
         settlement_status = SettlementStatus.SETTLED.value
     elif total_paid_amount > ZERO:
         payment_status = due_status
         settlement_status = SettlementStatus.PARTIALLY_SETTLED.value
-    elif invoice.status == InvoiceStatus.NOT_REQUIRED.value:
-        payment_status = PaymentStatus.NOT_REQUIRED.value
-        settlement_status = SettlementStatus.SETTLED.value
     else:
         payment_status = due_status
         if invoice.status in {InvoiceStatus.ISSUED.value, InvoiceStatus.APPROVED.value}:
@@ -546,6 +578,8 @@ def _to_out(
         status=effective_status,
         due_at=due_at,
         received_at=received_at,
+        reversal_of_payment_id=payment.reversal_of_payment_id,
+        reversal_reason=payment.reversal_reason,
         notes=payment.notes,
         created_at=_coerce_utc(payment.created_at) or reference_time,
         created_by=payment.created_by,
@@ -744,9 +778,11 @@ def create_trade_payment(
     payment_amount: object | None = None,
     status: object | None = None,
     due_at: datetime | None = None,
+    due_calendar_code: str | None = None,
     received_at: datetime | None = None,
     notes: object | None = None,
     now: Optional[datetime] = None,
+    mutation_context: TradeAuditMutationContext | None = None,
 ) -> TradePaymentOut:
     reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
     row = db.execute(
@@ -766,7 +802,12 @@ def create_trade_payment(
         .where(TradePayment.invoice_id == invoice_id)
         .order_by(TradePayment.due_at.asc(), TradePayment.id.asc())
     ).scalars().all()
-    next_due_at = _normalize_due_at(due_at, invoice=invoice)
+    next_due_at = _normalize_due_at(
+        db,
+        due_at,
+        invoice=invoice,
+        due_calendar_code=due_calendar_code,
+    )
     next_received_at = _normalize_received_at(received_at)
     next_status = _normalize_payment_status(status) if status is not None else _base_due_status(due_at=next_due_at, now=reference_time)
     next_payment_currency_code = _normalize_payment_currency_code(payment_currency_code, invoice=invoice, trade=trade)
@@ -827,6 +868,8 @@ def create_trade_payment(
         event_type="TradePaymentCreated",
         occurred_at=payment_out.updated_at,
         causation_id=f"trade-payment:{payment_out.payment_id}",
+        operation_key="settlement.create_trade_payment",
+        mutation_context=mutation_context,
         payload={
             "request": jsonable_encoder(
                 {
@@ -838,6 +881,7 @@ def create_trade_payment(
                         "payment_amount": payment_amount,
                         "status": status,
                         "due_at": due_at,
+                        "due_calendar_code": due_calendar_code,
                         "received_at": received_at,
                         "notes": notes,
                     }.items()
@@ -848,6 +892,117 @@ def create_trade_payment(
         },
     )
     return payment_out
+
+
+def preview_trade_payment_reversal(
+    db: Session,
+    *,
+    payment_id: int,
+    reversal_reason: object | None = None,
+    reversed_at: datetime | None = None,
+    payment_reference: object | None = None,
+    now: Optional[datetime] = None,
+) -> dict[str, object]:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    row = db.execute(
+        select(TradePayment, TradeInvoice, Trade)
+        .join(TradeInvoice, TradeInvoice.id == TradePayment.invoice_id)
+        .join(Trade, Trade.trade_id == TradePayment.trade_id)
+        .where(TradePayment.id == payment_id)
+    ).first()
+    if row is None:
+        return {
+            "preview_type": "reverse_trade_payment",
+            "status": "BLOCKED",
+            "summary": f"Payment reversal preview for payment {payment_id} is blocked.",
+            "affected_records": [],
+            "field_changes": [],
+            "expected_side_effects": [],
+            "warnings": [],
+            "blocking_reasons": [f"Payment '{payment_id}' was not found."],
+            "assumptions": [],
+        }
+
+    payment, invoice, trade = row
+    existing_reversal_id = db.execute(
+        select(TradePayment.id)
+        .where(TradePayment.reversal_of_payment_id == payment.id)
+        .limit(1)
+    ).scalars().first()
+    blocking_reasons: list[str] = []
+    if payment.reversal_of_payment_id is not None:
+        blocking_reasons.append(
+            f"Payment '{payment.payment_reference}' is already a reversal entry and cannot be reversed again."
+        )
+    if existing_reversal_id is not None:
+        blocking_reasons.append(
+            f"Payment '{payment.payment_reference}' already has reversal payment {existing_reversal_id}."
+        )
+
+    effective_status = _effective_payment_status(payment, now=reference_time)
+    if effective_status != PaymentStatus.PAID.value or Decimal(str(payment.payment_amount)) <= ZERO:
+        blocking_reasons.append(
+            f"Payment '{payment.payment_reference}' is not a positive paid cash receipt, so it cannot be reversed through an offsetting entry."
+        )
+
+    normalized_reversal_reason = _normalize_optional_text(reversal_reason)
+    if normalized_reversal_reason is None:
+        blocking_reasons.append("Reversal reason is required.")
+
+    normalized_reversed_at = _coerce_utc(reversed_at) or reference_time
+    normalized_payment_reference = _normalize_reversal_payment_reference(payment_reference, payment=payment)
+    return {
+        "preview_type": "reverse_trade_payment",
+        "status": "BLOCKED" if blocking_reasons else "READY",
+        "summary": (
+            f"Payment reversal will append offsetting payment {normalized_payment_reference} for invoice {invoice.invoice_number}."
+            if not blocking_reasons
+            else f"Payment reversal preview for payment {payment.payment_reference} is blocked."
+        ),
+        "affected_records": [
+            {
+                "type": "trade_payment",
+                "id": str(payment.id),
+                "label": f"Payment {payment.payment_reference}",
+                "summary": (
+                    f"{effective_status} payment for {payment.payment_currency_code} "
+                    f"{float(payment.payment_amount):.2f} on invoice {invoice.invoice_number}."
+                ),
+            },
+            {
+                "type": "trade_invoice",
+                "id": str(invoice.id),
+                "label": f"Invoice {invoice.invoice_number}",
+                "summary": f"Invoice status is {invoice.status} on trade {trade.trade_id}.",
+            },
+        ],
+        "field_changes": [
+            {"field": "payment_reference", "current_value": None, "proposed_value": normalized_payment_reference},
+            {
+                "field": "payment_amount",
+                "current_value": None,
+                "proposed_value": -float(payment.payment_amount),
+            },
+            {
+                "field": "reversal_of_payment_id",
+                "current_value": None,
+                "proposed_value": payment.id,
+            },
+            {
+                "field": "reversed_at",
+                "current_value": None,
+                "proposed_value": normalized_reversed_at.isoformat(),
+            },
+        ],
+        "expected_side_effects": [
+            "Create an offsetting payment ledger row linked back to the original payment.",
+            "Refresh payment workflow projections and invoice outstanding balance.",
+            "Append a TradePaymentReversed audit event after execution.",
+        ],
+        "warnings": [],
+        "blocking_reasons": blocking_reasons,
+        "assumptions": [],
+    }
 
 
 def update_trade_payment(
@@ -875,6 +1030,7 @@ def update_trade_payment(
     next_payment_amount = Decimal(str(payment.payment_amount))
     next_status = payment.status
     next_due_at = _coerce_utc(payment.due_at) or reference_time
+    next_due_calendar_code = None
     next_received_at = _coerce_utc(payment.received_at)
     next_notes = payment.notes
 
@@ -894,8 +1050,22 @@ def update_trade_payment(
         next_payment_amount = _normalize_payment_amount(changes.get("payment_amount"), invoice=invoice)
     if "status" in changes:
         next_status = _normalize_payment_status(changes.get("status"))
+    if "due_calendar_code" in changes:
+        next_due_calendar_code = str(changes.get("due_calendar_code") or "").strip() or None
     if "due_at" in changes:
-        next_due_at = _normalize_due_at(changes.get("due_at"), invoice=invoice)  # type: ignore[arg-type]
+        next_due_at = _normalize_due_at(
+            db,
+            changes.get("due_at"),  # type: ignore[arg-type]
+            invoice=invoice,
+            due_calendar_code=next_due_calendar_code,
+        )
+    elif next_due_calendar_code is not None:
+        next_due_at = _normalize_due_at(
+            db,
+            next_due_at,
+            invoice=invoice,
+            due_calendar_code=next_due_calendar_code,
+        )
     if "received_at" in changes:
         next_received_at = _normalize_received_at(changes.get("received_at"))  # type: ignore[arg-type]
     if "notes" in changes:
@@ -972,3 +1142,113 @@ def update_trade_payment(
         },
     )
     return payment_out
+
+
+def reverse_trade_payment(
+    db: Session,
+    *,
+    payment_id: int,
+    actor_id: str,
+    reversal_reason: object | None,
+    payment_reference: object | None = None,
+    reversed_at: datetime | None = None,
+    notes: object | None = None,
+    now: Optional[datetime] = None,
+    mutation_context: TradeAuditMutationContext | None = None,
+) -> TradePaymentOut:
+    reference_time = _coerce_utc(now) or datetime.now(timezone.utc)
+    row = db.execute(
+        select(TradePayment, TradeInvoice, Trade)
+        .join(TradeInvoice, TradeInvoice.id == TradePayment.invoice_id)
+        .join(Trade, Trade.trade_id == TradePayment.trade_id)
+        .where(TradePayment.id == payment_id)
+    ).first()
+    if row is None:
+        raise LookupError(f"Payment '{payment_id}' was not found.")
+
+    payment, invoice, trade = row
+    if payment.reversal_of_payment_id is not None:
+        raise ValueError(f"Payment '{payment.payment_reference}' is already a reversal entry.")
+
+    existing_reversal_id = db.execute(
+        select(TradePayment.id)
+        .where(TradePayment.reversal_of_payment_id == payment.id)
+        .limit(1)
+    ).scalars().first()
+    if existing_reversal_id is not None:
+        raise ValueError(
+            f"Payment '{payment.payment_reference}' already has reversal payment {existing_reversal_id}."
+        )
+
+    effective_status = _effective_payment_status(payment, now=reference_time)
+    if effective_status != PaymentStatus.PAID.value or Decimal(str(payment.payment_amount)) <= ZERO:
+        raise ValueError(
+            f"Payment '{payment.payment_reference}' is not a positive paid cash receipt and cannot be reversed."
+        )
+
+    normalized_reversal_reason = _normalize_required_text(reversal_reason, field_name="Reversal reason")
+    normalized_reversed_at = _coerce_utc(reversed_at) or reference_time
+    reversal = TradePayment(
+        trade_id=payment.trade_id,
+        invoice_id=payment.invoice_id,
+        payment_reference=_normalize_reversal_payment_reference(payment_reference, payment=payment),
+        payment_currency_code=payment.payment_currency_code,
+        payment_amount=-Decimal(str(payment.payment_amount)),
+        status=PaymentStatus.PAID.value,
+        due_at=normalized_reversed_at,
+        received_at=normalized_reversed_at,
+        reversal_of_payment_id=payment.id,
+        reversal_reason=normalized_reversal_reason,
+        notes=_append_note(None, _normalize_optional_text(notes)),
+        created_at=reference_time,
+        created_by=actor_id,
+        updated_at=reference_time,
+        updated_by=actor_id,
+        version=1,
+    )
+    db.add(reversal)
+    db.flush()
+
+    workflow_item = synchronize_trade_payment_projection(
+        db,
+        trade=trade,
+        actor_id=actor_id,
+        now=reference_time,
+    )
+    payments = db.execute(
+        select(TradePayment)
+        .where(TradePayment.invoice_id == invoice.id)
+        .order_by(TradePayment.due_at.asc(), TradePayment.id.asc())
+    ).scalars().all()
+    reversal_out = _to_out(
+        reversal,
+        invoice,
+        trade,
+        workflow_item,
+        payments_for_invoice=payments,
+        now=reference_time,
+    )
+    append_trade_audit_event(
+        db,
+        trade_id=reversal_out.trade_id,
+        actor_id=actor_id,
+        event_type="TradePaymentReversed",
+        occurred_at=reversal_out.updated_at,
+        causation_id=f"trade-payment:reverse:{reversal_out.payment_id}",
+        operation_key="settlement.reverse_trade_payment",
+        mutation_context=mutation_context,
+        payload={
+            "request": jsonable_encoder(
+                {
+                    "payment_id": payment_id,
+                    "reversal_reason": normalized_reversal_reason,
+                    "payment_reference": payment_reference,
+                    "reversed_at": reversed_at,
+                    "notes": notes,
+                }
+            ),
+            "original_payment_id": payment.id,
+            "reversal_payment": _audit_payment_payload(reversal_out),
+        },
+    )
+    return reversal_out

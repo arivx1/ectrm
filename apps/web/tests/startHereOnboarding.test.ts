@@ -12,11 +12,13 @@ const authenticatedSession = {
   sessionId: 'session-1',
   accessToken: 'token-1',
   expiresAt: '2026-04-12T18:00:00Z',
+  showStartHere: true,
   user: {
     user_id: 'ops_admin',
     email: 'ops@example.com',
     display_name: 'Ops Admin',
     role: 'OPS_ADMIN',
+    default_assistant_persona: 'admin',
   },
 } as const
 
@@ -49,6 +51,18 @@ test('dismissing the signed-in onboarding hides only that auth session', () => {
     true,
   )
   assert.equal(shouldPresentStartHereOnboarding(nextSnapshot, null), true)
+})
+
+test('start-here onboarding stays hidden when the signed-in session is not marked for first-login onboarding', () => {
+  const snapshot = getDefaultStartHereOnboardingSnapshot()
+
+  assert.equal(
+    shouldPresentStartHereOnboarding(snapshot, {
+      ...authenticatedSession,
+      showStartHere: false,
+    }),
+    false,
+  )
 })
 
 test('start-here onboarding snapshot normalization drops invalid values safely', () => {

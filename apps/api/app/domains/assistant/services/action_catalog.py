@@ -19,6 +19,34 @@ class AssistantActionCatalogEntry:
 
 ASSISTANT_ACTION_CATALOG: tuple[AssistantActionCatalogEntry, ...] = (
     AssistantActionCatalogEntry(
+        name="create_trade",
+        label="Create trade",
+        description=(
+            "Create a new trade through the canonical event-led trade service when the user is reflecting a "
+            "real-world booking with sufficiently structured economics."
+        ),
+        policy_key="assistant.actions.trade_create.v1",
+        risk_level="HIGH",
+        max_scope="TEAM",
+        reviewer_roles=("TRADER", "DESK_LEAD", "ADMIN"),
+        workspaces=("assistant", "trades", "events", "admin"),
+        planner_priority=12,
+    ),
+    AssistantActionCatalogEntry(
+        name="amend_trade",
+        label="Amend trade",
+        description=(
+            "Amend an existing trade through the canonical event-led trade service when the requested economics "
+            "or lifecycle fields are specific and grounded in current state."
+        ),
+        policy_key="assistant.actions.trade_amend.v1",
+        risk_level="HIGH",
+        max_scope="TEAM",
+        reviewer_roles=("TRADER", "DESK_LEAD", "ADMIN"),
+        workspaces=("assistant", "trades", "events", "admin"),
+        planner_priority=14,
+    ),
+    AssistantActionCatalogEntry(
         name="cancel_trade",
         label="Cancel trade",
         description=(
@@ -31,6 +59,90 @@ ASSISTANT_ACTION_CATALOG: tuple[AssistantActionCatalogEntry, ...] = (
         reviewer_roles=("OPS_ADMIN", "ADMIN"),
         workspaces=("assistant", "trades", "admin"),
         planner_priority=10,
+    ),
+    AssistantActionCatalogEntry(
+        name="create_settlement_report_preset",
+        label="Create settlement report preset",
+        description=(
+            "Create a settlement report filter preset through the typed reports preset service when the user "
+            "asks to save a named settlement lens for later reuse."
+        ),
+        policy_key="assistant.actions.settlement_report_preset_create.v1",
+        risk_level="LOW",
+        max_scope="TEAM",
+        reviewer_roles=("TRADER", "DESK_LEAD", "OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "settlement", "reports"),
+        planner_priority=66,
+    ),
+    AssistantActionCatalogEntry(
+        name="create_home_view_instance",
+        label="Create Home view instance",
+        description=(
+            "Create a personal Home view instance through the typed Home definition service when the user asks "
+            "to save a named, reusable Home screen configuration."
+        ),
+        policy_key="assistant.actions.home_view_instance_create.v1",
+        risk_level="LOW",
+        max_scope="TEAM",
+        reviewer_roles=("TRADER", "DESK_LEAD", "OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "dashboard", "reports"),
+        planner_priority=67,
+    ),
+    AssistantActionCatalogEntry(
+        name="record_delivery_event",
+        label="Record delivery event",
+        description=(
+            "Log a governed delivery movement event when the user is synchronizing the internal record to match "
+            "observed logistics execution."
+        ),
+        policy_key="assistant.actions.delivery_event.v1",
+        risk_level="MEDIUM",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "operations", "shipments", "scheduling", "admin"),
+        planner_priority=34,
+    ),
+    AssistantActionCatalogEntry(
+        name="reverse_delivery_event",
+        label="Reverse delivery event",
+        description=(
+            "Reverse a previously logged delivery movement event through an append-only correction record when the "
+            "existing event no longer reflects reality."
+        ),
+        policy_key="assistant.actions.delivery_event_reverse.v1",
+        risk_level="MEDIUM",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "operations", "shipments", "scheduling", "admin"),
+        planner_priority=35,
+    ),
+    AssistantActionCatalogEntry(
+        name="create_manual_accrual_entry",
+        label="Create manual accrual entry",
+        description=(
+            "Append a manual accrual adjustment entry on an existing accrual lot when the controller needs the "
+            "ledger to reflect delivered or billing evidence that the system-managed accrual sync does not cover."
+        ),
+        policy_key="assistant.actions.accrual_manual_create.v1",
+        risk_level="HIGH",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "settlement", "reports", "operations", "admin"),
+        planner_priority=44,
+    ),
+    AssistantActionCatalogEntry(
+        name="reverse_accrual_entry",
+        label="Reverse accrual entry",
+        description=(
+            "Reverse a prior manual accrual entry through an immutable offsetting ledger entry when the recorded "
+            "accrual adjustment no longer reflects reality."
+        ),
+        policy_key="assistant.actions.accrual_manual_reverse.v1",
+        risk_level="HIGH",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "settlement", "reports", "operations", "admin"),
+        planner_priority=46,
     ),
     AssistantActionCatalogEntry(
         name="issue_trade_confirmation",
@@ -75,6 +187,34 @@ ASSISTANT_ACTION_CATALOG: tuple[AssistantActionCatalogEntry, ...] = (
         planner_priority=30,
     ),
     AssistantActionCatalogEntry(
+        name="record_trade_actualization",
+        label="Record trade actualization",
+        description=(
+            "Record or update executed physical-delivery actualization quantities when the user is reflecting "
+            "real-world movement completion in the system of record."
+        ),
+        policy_key="assistant.actions.trade_actualization.v1",
+        risk_level="HIGH",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "operations", "shipments", "admin"),
+        planner_priority=36,
+    ),
+    AssistantActionCatalogEntry(
+        name="void_trade_actualization",
+        label="Void trade actualization",
+        description=(
+            "Void a mistaken physical-delivery actualization through the governed actualization service when the "
+            "platform should stop treating that recorded quantity as live execution state."
+        ),
+        policy_key="assistant.actions.trade_actualization_void.v1",
+        risk_level="HIGH",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "operations", "shipments", "admin"),
+        planner_priority=37,
+    ),
+    AssistantActionCatalogEntry(
         name="issue_trade_invoice",
         label="Issue invoice",
         description=(
@@ -89,6 +229,20 @@ ASSISTANT_ACTION_CATALOG: tuple[AssistantActionCatalogEntry, ...] = (
         planner_priority=50,
     ),
     AssistantActionCatalogEntry(
+        name="void_trade_invoice",
+        label="Void invoice",
+        description=(
+            "Void an existing invoice through the governed settlement service when the internal record should no "
+            "longer claim that invoice as a live settlement obligation."
+        ),
+        policy_key="assistant.actions.invoice_void.v1",
+        risk_level="HIGH",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "settlement", "admin"),
+        planner_priority=55,
+    ),
+    AssistantActionCatalogEntry(
         name="create_trade_payment",
         label="Create payment",
         description=(
@@ -101,6 +255,48 @@ ASSISTANT_ACTION_CATALOG: tuple[AssistantActionCatalogEntry, ...] = (
         reviewer_roles=("OPS_ADMIN", "ADMIN"),
         workspaces=("assistant", "settlement", "admin"),
         planner_priority=60,
+    ),
+    AssistantActionCatalogEntry(
+        name="reverse_trade_payment",
+        label="Reverse payment",
+        description=(
+            "Reverse an applied payment through an offsetting payment ledger entry when the recorded cash receipt "
+            "no longer reflects reality."
+        ),
+        policy_key="assistant.actions.payment_reverse.v1",
+        risk_level="HIGH",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "settlement", "admin"),
+        planner_priority=62,
+    ),
+    AssistantActionCatalogEntry(
+        name="create_accounting_entry",
+        label="Create accounting entry",
+        description=(
+            "Create a balanced internal accounting posting tied to the relevant trade, accrual, invoice, or "
+            "payment evidence when the platform needs to reflect controller-approved ledger reality."
+        ),
+        policy_key="assistant.actions.accounting_entry_create.v1",
+        risk_level="HIGH",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "settlement", "reports", "operations", "admin"),
+        planner_priority=64,
+    ),
+    AssistantActionCatalogEntry(
+        name="reverse_accounting_entry",
+        label="Reverse accounting entry",
+        description=(
+            "Reverse an existing internal accounting posting with an offsetting balanced entry when the original "
+            "posting no longer matches the intended accounting state."
+        ),
+        policy_key="assistant.actions.accounting_entry_reverse.v1",
+        risk_level="HIGH",
+        max_scope="TEAM",
+        reviewer_roles=("OPS_ADMIN", "ADMIN"),
+        workspaces=("assistant", "settlement", "reports", "operations", "admin"),
+        planner_priority=66,
     ),
     AssistantActionCatalogEntry(
         name="reprocess_document_ingestion",

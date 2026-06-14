@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -26,22 +28,34 @@ from apps.api.app.routes.external_data import (
     list_external_series_definitions,
     list_external_series_observations,
     list_latest_price_index_observations,
+    list_market_news_headlines,
     list_price_index_observations,
     list_external_data_runs,
+    list_price_sources_for_review,
+    tag_market_news_headlines,
+    trigger_alpha_vantage_sync,
+    trigger_bls_ppi_sync,
     trigger_caiso_sync,
     trigger_kalshi_sync,
     trigger_cftc_sync,
     trigger_eia_fundamentals_sync,
     trigger_eia_sync,
+    trigger_eia_wholesale_power_sync,
     trigger_ercot_sync,
     trigger_fred_sync,
+    trigger_miso_sync,
+    trigger_nyiso_sync,
+    trigger_usda_nass_sync,
+    trigger_world_bank_sync,
     update_external_series_definition,
 )
 from apps.api.app.schemas.external_data import (
     EIASyncRequest,
     ExternalSeriesDefinitionUpsertRequest,
     ExternalSeriesSyncRequest,
+    MarketNewsTaggingRequest,
 )
+from apps.api.app.domains.reference_data.services.external_data.market_news import MarketNewsClientError
 
 
 class ExternalDataApiTests(unittest.TestCase):
@@ -91,6 +105,23 @@ class ExternalDataApiTests(unittest.TestCase):
                         created_at=datetime.now(timezone.utc),
                         created_by="system",
                         updated_at=datetime.now(timezone.utc),
+                        updated_by="system",
+                        version=1,
+                    ),
+                    ReferencePriceIndexSource(
+                        id=1,
+                        price_index_code="WTI_CUSHING_D",
+                        provider="EIA",
+                        dataset_code=None,
+                        series_id="PET.RWTC.D",
+                        frequency="daily",
+                        source_unit="BBL",
+                        source_currency_code="USD",
+                        transform_rule=None,
+                        is_active=True,
+                        created_at=datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc),
+                        created_by="system",
+                        updated_at=datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc),
                         updated_by="system",
                         version=1,
                     ),
@@ -360,6 +391,33 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(payload.status, "SUCCEEDED")
         self.assertEqual(payload.observation_count, 2)
 
+    def test_list_price_sources_for_review_includes_mapping_latest_mark_and_run_status(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            payload = list_price_sources_for_review(provider="eia", is_active=True, limit=50, offset=0, db=session)
+
+        self.assertEqual(len(payload), 1)
+        source = payload[0]
+        self.assertEqual(source.price_index_code, "WTI_CUSHING_D")
+        self.assertEqual(source.price_index_name, "WTI Cushing Spot Daily")
+        self.assertEqual(source.commodity_code, "WTI")
+        self.assertEqual(source.provider, "EIA")
+        self.assertEqual(source.series_id, "PET.RWTC.D")
+        self.assertEqual(source.ingestion_method, "EIA API pull")
+        self.assertEqual(source.ingestion_mode, "Admin manual sync or login-triggered due check")
+        self.assertEqual(source.source_system, "U.S. Energy Information Administration")
+        self.assertEqual(source.sync_job_name, "sync_eia_price_data")
+        self.assertEqual(source.scheduler_interval_minutes, 60)
+        self.assertEqual(source.success_sla_hours, 48)
+        self.assertIsInstance(source.due_for_sync, bool)
+        self.assertEqual(source.default_lookback_days, 30)
+        self.assertEqual(source.latest_observation_date, date(2026, 3, 10))
+        self.assertEqual(source.latest_value, 67.2)
+        self.assertEqual(source.latest_source_published_at, datetime(2026, 3, 10, 17, 0))
+        self.assertEqual(source.latest_run_id, 2)
+        self.assertEqual(source.latest_run_status, "SUCCEEDED")
+        self.assertIn(source.review_status, {"current", "stale"})
+
     def test_get_latest_price_index_observation_returns_latest_date(self) -> None:
         self._seed_rows()
         with self.SessionLocal() as session:
@@ -378,6 +436,116 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(payload[0].price_index_code, "WTI_CUSHING_D")
         self.assertEqual(payload[0].observation_date, date(2026, 3, 10))
         self.assertEqual(payload[0].value, 67.2)
+
+    @patch("apps.api.app.routes.external_data.load_market_news_headlines")
+    def test_list_market_news_headlines_normalizes_filters(self, mock_load_market_news_headlines) -> None:
+        mock_load_market_news_headlines.return_value = {
+            "generated_at": datetime(2026, 5, 25, 12, 0, tzinfo=timezone.utc),
+            "commodity": "WTI",
+            "search_query": "cushing storage WTI crude oil when:4d",
+            "count": 1,
+            "items": [
+                {
+                    "title": "WTI rallies on storage draw",
+                    "source": "Reuters",
+                    "published_at": datetime(2026, 5, 25, 11, 30, tzinfo=timezone.utc),
+                    "link": "https://news.google.com/rss/articles/wti",
+                }
+            ],
+        }
+
+        payload = list_market_news_headlines(
+            commodity=" wti ",
+            query="cushing storage",
+            limit=3,
+            lookback_days=4,
+        )
+
+        mock_load_market_news_headlines.assert_called_once_with(
+            query="cushing storage",
+            commodity="WTI",
+            limit=3,
+            lookback_days=4,
+        )
+        self.assertEqual(payload.commodity, "WTI")
+        self.assertEqual(payload.count, 1)
+        self.assertEqual(payload.items[0].title, "WTI rallies on storage draw")
+
+    @patch("apps.api.app.routes.external_data.load_market_news_headlines")
+    def test_list_market_news_headlines_maps_client_errors_to_bad_gateway(
+        self,
+        mock_load_market_news_headlines,
+    ) -> None:
+        mock_load_market_news_headlines.side_effect = MarketNewsClientError("feed unavailable")
+
+        with self.assertRaises(HTTPException) as raised:
+            list_market_news_headlines(query="oil")
+
+        self.assertEqual(getattr(raised.exception, "status_code", None), 502)
+        self.assertEqual(getattr(raised.exception, "detail", None), "feed unavailable")
+
+    @patch("apps.api.app.routes.external_data.build_market_news_ai_tags", new_callable=AsyncMock)
+    def test_tag_market_news_headlines_returns_ai_enrichment(
+        self,
+        mock_build_market_news_ai_tags,
+    ) -> None:
+        request = MarketNewsTaggingRequest.model_validate(
+            {
+                "commodity": "BEEF",
+                "items": [
+                    {
+                        "id": "headline-0",
+                        "title": "Beef output breaks all-time high in U.S.",
+                        "source": "Market Wire",
+                        "published_at": None,
+                        "deterministic": {
+                            "supply": {"direction": "neutral", "horizon": "near_term"},
+                            "demand": {"direction": "neutral", "horizon": "near_term"},
+                            "market_location": {"label": "United States", "scope": "country"},
+                        },
+                    }
+                ],
+            }
+        )
+        mock_build_market_news_ai_tags.return_value = {
+            "generated_at": datetime(2026, 5, 25, 12, 0, tzinfo=timezone.utc),
+            "provider": "openai",
+            "model": "gpt-5-mini",
+            "items": [
+                {
+                    "id": "headline-0",
+                    "supply": {
+                        "direction": "up",
+                        "horizon": "immediate",
+                        "confidence": 0.91,
+                        "rationale": "Record output signals supply up.",
+                        "source": "ai",
+                    },
+                    "demand": {
+                        "direction": "neutral",
+                        "horizon": "near_term",
+                        "confidence": 0.8,
+                        "rationale": "No demand driver.",
+                        "source": "ai",
+                    },
+                    "market_location": {
+                        "label": "United States",
+                        "scope": "country",
+                        "confidence": 0.9,
+                        "rationale": "The headline names U.S.",
+                        "source": "ai",
+                    },
+                }
+            ],
+            "warnings": [],
+        }
+
+        payload = asyncio.run(tag_market_news_headlines(request))
+
+        mock_build_market_news_ai_tags.assert_awaited_once_with(request)
+        self.assertEqual(payload.provider, "openai")
+        self.assertEqual(payload.items[0].supply.direction, "up")
+        self.assertEqual(payload.items[0].market_location.label, "United States")
 
     def test_list_latest_price_index_observations_returns_latest_row_per_requested_code(self) -> None:
         self._seed_rows()
@@ -449,10 +617,20 @@ class ExternalDataApiTests(unittest.TestCase):
                 ["wti_cushing_d", "BRENT_DATED_D", "WTI_CUSHING_D", "UNKNOWN_CODE"],
                 db=session,
             )
+            history_payload = list_latest_price_index_observations(
+                ["wti_cushing_d", "BRENT_DATED_D"],
+                limit_per_code=2,
+                db=session,
+            )
 
         self.assertEqual([row.price_index_code for row in payload], ["WTI_CUSHING_D", "BRENT_DATED_D"])
         self.assertEqual(payload[0].value, 67.2)
         self.assertEqual(payload[1].value, 69.1)
+        self.assertEqual(
+            [row.price_index_code for row in history_payload],
+            ["WTI_CUSHING_D", "WTI_CUSHING_D", "BRENT_DATED_D", "BRENT_DATED_D"],
+        )
+        self.assertEqual([row.value for row in history_payload], [67.2, 66.1, 69.1, 68.9])
 
     def test_list_external_series_definitions_filters_by_provider(self) -> None:
         self._seed_rows()
@@ -708,8 +886,8 @@ class ExternalDataApiTests(unittest.TestCase):
                         provider="CAISO",
                         job_name="sync_caiso_power_series",
                         status="SUCCEEDED",
-                        started_at=now - timedelta(minutes=10),
-                        finished_at=now - timedelta(minutes=9),
+                        started_at=now - timedelta(minutes=4),
+                        finished_at=now - timedelta(minutes=3),
                         requested_by="scheduler",
                         series_count=1,
                         observation_count=1,
@@ -792,11 +970,11 @@ class ExternalDataApiTests(unittest.TestCase):
                         source_frequency="5MIN",
                         source_published_at=None,
                         source_revision="rev-3",
-                        downloaded_at=now - timedelta(minutes=10),
+                        downloaded_at=now - timedelta(minutes=3),
                         run_id=14,
                         raw_payload={},
-                        created_at=now - timedelta(minutes=10),
-                        updated_at=now - timedelta(minutes=10),
+                        created_at=now - timedelta(minutes=3),
+                        updated_at=now - timedelta(minutes=3),
                     ),
                     ExternalSeriesObservation(
                         id=13,
@@ -821,14 +999,35 @@ class ExternalDataApiTests(unittest.TestCase):
             payload = get_external_data_sync_status(db=session)
 
         providers = {row.provider: row for row in payload.providers}
-        self.assertEqual(payload.provider_count, 7)
+        self.assertEqual(payload.provider_count, 14)
         self.assertEqual(providers["EIA"].health_status, "healthy")
         self.assertEqual(providers["EIA_FUNDAMENTALS"].health_status, "healthy")
         self.assertEqual(providers["FRED"].health_status, "healthy")
+        self.assertEqual(providers["ALPHA_VANTAGE"].health_status, "unknown")
+        self.assertEqual(providers["BLS_PPI"].health_status, "unknown")
+        self.assertEqual(providers["WORLD_BANK"].health_status, "unknown")
+        self.assertEqual(providers["USDA_NASS"].health_status, "unknown")
+        self.assertEqual(providers["EIA_WHOLESALE_POWER"].health_status, "unknown")
         self.assertEqual(providers["CFTC"].health_status, "failed")
         self.assertEqual(providers["CAISO"].health_status, "healthy")
         self.assertEqual(providers["ERCOT"].health_status, "unknown")
+        self.assertEqual(providers["MISO"].health_status, "unknown")
+        self.assertEqual(providers["NYISO"].health_status, "unknown")
         self.assertEqual(providers["KALSHI"].health_status, "healthy")
+        self.assertEqual(providers["EIA"].ingestion_method, "EIA API pull")
+        self.assertEqual(providers["EIA"].ingestion_mode, "Admin manual sync or login-triggered due check")
+        self.assertEqual(providers["EIA"].source_system, "U.S. Energy Information Administration")
+        self.assertEqual(providers["EIA"].source_endpoint, "https://api.eia.gov/v2")
+        self.assertEqual(providers["EIA"].sync_job_name, "sync_eia_price_data")
+        self.assertEqual(providers["EIA"].default_lookback_days, 30)
+        self.assertEqual(providers["ALPHA_VANTAGE"].ingestion_method, "Alpha Vantage API pull")
+        self.assertEqual(
+            providers["ALPHA_VANTAGE"].ingestion_mode,
+            "Admin manual sync or opt-in scheduler due check",
+        )
+        self.assertIsNone(providers["ALPHA_VANTAGE"].default_lookback_days)
+        self.assertEqual(providers["CAISO"].ingestion_method, "CAISO OASIS API pull")
+        self.assertIsNone(providers["CAISO"].default_lookback_days)
         self.assertFalse(providers["CAISO"].due_for_sync)
         self.assertFalse(providers["KALSHI"].due_for_sync)
         self.assertEqual(providers["CFTC"].error_summary, "boom")
@@ -872,6 +1071,28 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(payload.status, "SUCCEEDED")
         sync_mock.assert_called_once()
 
+    def test_trigger_eia_wholesale_power_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch(
+                "apps.api.app.routes.external_data.sync_eia_wholesale_power_series",
+                return_value=expected_run,
+            ) as sync_mock:
+                payload = trigger_eia_wholesale_power_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="PJM_WEST_ONPEAK_DA",
+                        lookback_days=30,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+        self.assertEqual(sync_mock.call_args.kwargs["price_index_code"], "PJM_WEST_ONPEAK_DA")
+
     def test_trigger_fred_sync_returns_run_payload(self) -> None:
         self._seed_rows()
         with self.SessionLocal() as session:
@@ -889,6 +1110,93 @@ class ExternalDataApiTests(unittest.TestCase):
         self.assertEqual(payload.id, 2)
         self.assertEqual(payload.status, "SUCCEEDED")
         sync_mock.assert_called_once()
+
+    def test_trigger_alpha_vantage_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch(
+                "apps.api.app.routes.external_data.sync_alpha_vantage_prices",
+                return_value=expected_run,
+            ) as sync_mock:
+                payload = trigger_alpha_vantage_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="SPY_US_ALPHA_Q",
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+        self.assertEqual(sync_mock.call_args.kwargs["price_index_code"], "SPY_US_ALPHA_Q")
+
+    def test_trigger_bls_ppi_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch(
+                "apps.api.app.routes.external_data.sync_bls_ppi_series",
+                return_value=expected_run,
+            ) as sync_mock:
+                payload = trigger_bls_ppi_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="STEEL_MILL_PRODUCTS_BLS_PPI_M",
+                        lookback_days=1460,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+        self.assertEqual(sync_mock.call_args.kwargs["price_index_code"], "STEEL_MILL_PRODUCTS_BLS_PPI_M")
+
+    def test_trigger_world_bank_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch(
+                "apps.api.app.routes.external_data.sync_world_bank_series",
+                return_value=expected_run,
+            ) as sync_mock:
+                payload = trigger_world_bank_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="BRENT_WORLD_BANK_M",
+                        lookback_days=900,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+        self.assertEqual(sync_mock.call_args.kwargs["price_index_code"], "BRENT_WORLD_BANK_M")
+
+    def test_trigger_usda_nass_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch(
+                "apps.api.app.routes.external_data.sync_usda_nass_series",
+                return_value=expected_run,
+            ) as sync_mock:
+                payload = trigger_usda_nass_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="CORN_US_NASS_M",
+                        lookback_days=1095,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+        self.assertEqual(sync_mock.call_args.kwargs["price_index_code"], "CORN_US_NASS_M")
 
     def test_trigger_cftc_sync_returns_run_payload(self) -> None:
         self._seed_rows()
@@ -934,6 +1242,42 @@ class ExternalDataApiTests(unittest.TestCase):
                 payload = trigger_ercot_sync(
                     ExternalSeriesSyncRequest(
                         series_code="ERCOT_HB_HOUSTON_RT15M",
+                        lookback_days=1,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+
+    def test_trigger_miso_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch("apps.api.app.routes.external_data.sync_miso_series", return_value=expected_run) as sync_mock:
+                payload = trigger_miso_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="MISO_INDIANA_HUB_RT5M",
+                        lookback_days=1,
+                        requested_by="anthony",
+                    ),
+                    db=session,
+                )
+
+        self.assertEqual(payload.id, 2)
+        self.assertEqual(payload.status, "SUCCEEDED")
+        sync_mock.assert_called_once()
+
+    def test_trigger_nyiso_sync_returns_run_payload(self) -> None:
+        self._seed_rows()
+        with self.SessionLocal() as session:
+            expected_run = session.query(ExternalDataRun).filter(ExternalDataRun.id == 2).one()
+            with patch("apps.api.app.routes.external_data.sync_nyiso_series", return_value=expected_run) as sync_mock:
+                payload = trigger_nyiso_sync(
+                    ExternalSeriesSyncRequest(
+                        series_code="NYISO_NYC_RT5M",
                         lookback_days=1,
                         requested_by="anthony",
                     ),

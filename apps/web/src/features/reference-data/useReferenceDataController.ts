@@ -2,6 +2,8 @@ import { useState } from 'react'
 
 import { submitReferenceMutation } from '../../entities/reference-data/api'
 import type {
+  AssetRecord,
+  AssetStandards,
   CounterpartyCreditProfileRecord,
   CounterpartyCreditReportRow,
   CounterpartyExternalCreditSnapshotRecord,
@@ -12,18 +14,24 @@ import type {
   LocationStandards,
   PortfolioRecord,
   PriceIndexRecord,
+  RailRouteRecord,
   ReferenceRecord,
+  SpatialFeatureRecord,
+  SpatialFeatureStandards,
   Trade,
   UnitRecord,
 } from '../../shared/models'
 import { getMutationContext } from '../../shared/mutation'
 import { useReferenceDataDerivedState } from './referenceDataDerived'
 import {
+  useReferenceDataAssetController,
   useReferenceDataCommodityController,
   useReferenceDataCurrencyController,
   useReferenceDataLocationController,
   useReferenceDataPortfolioController,
   useReferenceDataPriceIndexController,
+  useReferenceDataRailRouteController,
+  useReferenceDataSpatialFeatureController,
   useReferenceDataUnitController,
 } from './useReferenceDataEntityControllers'
 import { useReferenceDataBookController } from './useReferenceDataBookController'
@@ -46,13 +54,19 @@ export type { BookPasteIssue, BookPasteSummary } from './referenceDataHelpers'
 type UseReferenceDataControllerArgs = {
   apiBase: string
   reloadData: () => Promise<void>
+  onOpenRailRouteScheduling: (code: string, label: string | null) => void
   trades: Trade[]
   books: ReferenceRecord[]
+  assets: AssetRecord[]
   commodities: ReferenceRecord[]
   priceIndices: PriceIndexRecord[]
   currencies: CurrencyRecord[]
   units: UnitRecord[]
   locations: LocationRecord[]
+  railRoutes: RailRouteRecord[]
+  spatialFeatures: SpatialFeatureRecord[]
+  assetStandards: AssetStandards
+  spatialFeatureStandards: SpatialFeatureStandards
   counterparties: CounterpartyRecord[]
   counterpartyCreditProfiles: CounterpartyCreditProfileRecord[]
   counterpartyExternalCreditSnapshots: CounterpartyExternalCreditSnapshotRecord[]
@@ -72,13 +86,19 @@ type UseReferenceDataControllerArgs = {
 export function useReferenceDataController({
   apiBase,
   reloadData,
+  onOpenRailRouteScheduling,
   trades,
   books,
+  assets,
   commodities,
   priceIndices,
   currencies,
   units,
   locations,
+  railRoutes,
+  spatialFeatures,
+  assetStandards,
+  spatialFeatureStandards,
   counterparties,
   counterpartyCreditProfiles,
   counterpartyExternalCreditSnapshots,
@@ -100,11 +120,16 @@ export function useReferenceDataController({
 
   const workspace = useReferenceDataWorkspace({
     books,
+    assets,
     commodities,
     priceIndices,
     currencies,
     units,
     locations,
+    railRoutes,
+    spatialFeatures,
+    assetStandards,
+    spatialFeatureStandards,
     counterparties,
     portfolios,
     activeBooks,
@@ -175,6 +200,26 @@ export function useReferenceDataController({
     submitReference,
   })
 
+  const assetController = useReferenceDataAssetController({
+    workspace,
+    assets,
+    assetStandards,
+    beginReferenceAction,
+    currentActorId,
+    submitReference,
+    setReferenceActionError,
+  })
+
+  const spatialFeatureController = useReferenceDataSpatialFeatureController({
+    workspace,
+    spatialFeatures,
+    spatialFeatureStandards,
+    beginReferenceAction,
+    currentActorId,
+    submitReference,
+    setReferenceActionError,
+  })
+
   const commodityController = useReferenceDataCommodityController({
     workspace,
     commodities,
@@ -235,6 +280,15 @@ export function useReferenceDataController({
     setReferenceActionSuccess,
   })
 
+  const railRouteController = useReferenceDataRailRouteController({
+    workspace,
+    railRoutes,
+    beginReferenceAction,
+    currentActorId,
+    submitReference,
+    setReferenceActionError,
+  })
+
   const counterpartyController = useReferenceDataCounterpartyController({
     workspace,
     counterpartyStandards,
@@ -262,10 +316,14 @@ export function useReferenceDataController({
 
   return {
     ...workspace,
+    openRailRouteScheduling: onOpenRailRouteScheduling,
     activeBooks,
     activeCommodities,
     activeCurrencies,
+    activeUnits,
     activeLocations,
+    assetStandards,
+    spatialFeatureStandards,
     locationStandards,
     counterpartyStandards,
     commodityClassOrder,
@@ -275,11 +333,14 @@ export function useReferenceDataController({
     selectedBookUsage,
     counterpartyCreditReportByCode: derived.counterpartyCreditReportByCode,
     ...bookController,
+    ...assetController,
+    ...spatialFeatureController,
     ...commodityController,
     ...priceIndexController,
     ...currencyController,
     ...unitController,
     ...locationController,
+    ...railRouteController,
     ...counterpartyController,
     ...portfolioController,
   }

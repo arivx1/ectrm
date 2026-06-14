@@ -2,21 +2,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   acceptAdminAssistantAgentHealthWorkPackage,
+  activateAssistantAgentProfileRequest,
   approveAssistantAgentProfileRequest,
   buildAssistantAgentDraft,
   createAssistantAgentProfileRequest,
   createAssistantAgent,
   createAssistantAgentEval,
   deleteAssistantAgentEval,
+  generateAssistantAgentSelfUpdateDraft,
   getAdminAssistantAgentHealthReview,
   getAdminAssistantAutonomyReview,
   listAdminAssistantAgentEvalRuns,
   listAdminAssistantAgentEvals,
   listAdminAssistantAgents,
+  listAdminAssistantAgentRevisions,
   listAdminAssistantAgentWorkPackages,
   listAdminAssistantProfileRequests,
   listAdminAssistantRoleArchetypes,
   loadAssistantRuntimeSettings,
+  previewAdminAssistantAgentDraftContext,
+  previewAssistantPromptContext,
+  publishAssistantAgentRevision,
   rejectAssistantAgentProfileRequest,
   runAssistantAgentEval,
   runAssistantAgentEvalSuite,
@@ -58,24 +64,39 @@ import type {
   AssistantAgentEvalRun,
   AssistantAgentEvalRunStatus,
   AssistantAgentHealthReview,
+  AssistantAgentRevision,
+  AssistantAgentRevisionPayload,
+  AssistantAgentSkillDefinition,
+  AssistantAgentSkillKey,
+  AssistantAgentSelfUpdateDraft,
   AssistantAgentWorkPackage,
   AssistantAgentWorkPackageStatus,
   AssistantAutonomyReviewBrief,
   AssistantAgentCapability,
   AssistantAgentEvalGateStatus,
+  AssistantAgentOrchestrationPattern,
   AssistantAgentProfileKind,
+  AssistantAgentProfileRequestKind,
   AssistantAgentProfileRequest,
   AssistantAgentRoleArchetype,
   AssistantAgentScope,
   AssistantAgentStatus,
+  AssistantPromptContext,
   AssistantPolicyDecision,
   AssistantPolicySimulation,
   AssistantPolicySimulationPhase,
   AssistantProvider,
   AssistantProviderStatus,
+  AssistantRuntimeSettings,
+  AssistantToolDefinition,
   ViewKey,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import { AssistantConstructionExplainerPanel } from '../assistant/AssistantConstructionExplainerPanel'
+import {
+  buildDraftConstructionDiffSummary,
+  buildDraftPreviewAgent,
+} from './assistantAgentConstructionDraft'
 import {
   AGENT_BUILDER_TEMPLATES,
   AGENT_BUILDER_WORKSPACE_OPTIONS,
@@ -87,20 +108,50 @@ import {
   getAgentBuilderTemplate,
   suggestAgentBuilderAgentId,
   type AgentBuilderDraft,
+  type AgentBuilderTemplateAvailability,
   type AgentBuilderTemplateKey,
   type AgentRoleProfileFit,
   type AgentRoleProfileFitStatus,
 } from './assistantAgentBuilder'
+import {
+  applyControlTowerSupervisionDraft,
+  controlTowerSignalTypeLabel,
+  controlTowerSupervisionModeLabel,
+  type AssistantControlTowerAgentSupervisionIntent,
+  type AssistantControlTowerSupervisionIntent,
+} from './assistantSupervisionDraft'
 
 type AgentManagementPanelProps = {
   authSession: StoredAuthSession | null
   formatDate: (value: string | null | undefined) => string
   onOpenSettings: () => void
+  controlTowerIntent?: AssistantControlTowerSupervisionIntent | null
 }
 
 type FlashMessage = {
   tone: 'success' | 'error'
   message: string
+}
+
+type AgentWorkPackageDraft = {
+  notes: string
+  prUrl: string
+  commitSha: string
+  evalIds: string
+  testNames: string
+  docPaths: string
+  owner: string
+}
+
+type AgentWorkPackageFilters = {
+  status: '' | AssistantAgentWorkPackageStatus
+  sourceAgentId: string
+  staleOnly: boolean
+  hasPr: boolean
+  hasCommit: boolean
+  hasEval: boolean
+  hasTests: boolean
+  hasDocs: boolean
 }
 
 type AgentForm = AgentBuilderDraft
@@ -131,6 +182,20 @@ type AgentEvalForm = {
   expected_action_types: AssistantActionType[]
 }
 
+type AgentManagementSectionKey =
+  | 'overview'
+  | 'work-packages'
+  | 'profile-requests'
+  | 'builder'
+  | 'editor'
+
+type AgentManagementSection = {
+  key: AgentManagementSectionKey
+  hash: string
+  label: string
+  summary: string
+}
+
 const STATUS_OPTIONS: AssistantAgentStatus[] = ['DRAFT', 'ACTIVE', 'PAUSED', 'RETIRED']
 const SCOPE_OPTIONS: AssistantAgentScope[] = ['PERSONAL', 'TEAM', 'ORGANIZATION']
 const PROVIDER_OPTIONS: Array<AssistantProvider | ''> = ['', 'openai', 'anthropic', 'google']
@@ -145,6 +210,76 @@ const AUTHORITY_OPTIONS: AssistantAgentAuthorityLevel[] = [
   'EXECUTE',
   'EXTERNAL_COMMIT',
 ]
+const ORCHESTRATION_PATTERN_OPTIONS: AssistantAgentOrchestrationPattern[] = [
+  'SINGLE',
+  'MANAGER',
+  'TRIAGE',
+  'PARALLEL',
+  'EVALUATOR',
+]
+const DEFAULT_AGENT_WORK_PACKAGE_FILTERS: AgentWorkPackageFilters = {
+  status: '',
+  sourceAgentId: '',
+  staleOnly: false,
+  hasPr: false,
+  hasCommit: false,
+  hasEval: false,
+  hasTests: false,
+  hasDocs: false,
+}
+
+const STALE_WORK_PACKAGE_THRESHOLD_HOURS = 72
+const STALE_WORK_PACKAGE_THRESHOLD_MS = STALE_WORK_PACKAGE_THRESHOLD_HOURS * 60 * 60 * 1000
+const AGENT_MANAGEMENT_SECTIONS: AgentManagementSection[] = [
+  {
+    key: 'overview',
+    hash: 'assistant-agent-management',
+    label: 'Overview',
+    summary: 'Status, queues, and next actions',
+  },
+  {
+    key: 'work-packages',
+    hash: 'assistant-agent-work-packages',
+    label: 'Work Packages',
+    summary: 'Health review backlog',
+  },
+  {
+    key: 'profile-requests',
+    hash: 'assistant-agent-profile-requests',
+    label: 'Profile Requests',
+    summary: 'Custom intake and approvals',
+  },
+  {
+    key: 'builder',
+    hash: 'assistant-agent-builder',
+    label: 'Builder',
+    summary: 'Roster, roles, and new drafts',
+  },
+  {
+    key: 'editor',
+    hash: 'assistant-agent-editor',
+    label: 'Editor & Evals',
+    summary: 'Saved agent review and tests',
+  },
+]
+
+function readAgentManagementSectionFromHash(hash: string): AgentManagementSectionKey | null {
+  const normalizedHash = hash.replace(/^#/, '').trim()
+  const section = AGENT_MANAGEMENT_SECTIONS.find((entry) => entry.hash === normalizedHash)
+  return section?.key ?? null
+}
+
+function readInitialAgentManagementSection(): AgentManagementSectionKey {
+  if (typeof window === 'undefined') {
+    return 'overview'
+  }
+  return readAgentManagementSectionFromHash(window.location.hash) ?? 'overview'
+}
+
+function agentManagementSectionHash(sectionKey: AgentManagementSectionKey): string {
+  return AGENT_MANAGEMENT_SECTIONS.find((section) => section.key === sectionKey)?.hash ?? 'assistant-agent-management'
+}
+
 function createEmptyProfileRequestForm(): ProfileRequestForm {
   return {
     requested_agent_id: '',
@@ -212,19 +347,95 @@ function normalizeAgentEvalPayload(form: AgentEvalForm): UpdateAssistantAgentEva
 
 function normalizeProfileRequestPayload(form: ProfileRequestForm): CreateAssistantAgentProfileRequestInput {
   return {
+    request_kind: 'NEW_SPECIALIZATION',
+    target_agent_id: null,
     requested_agent_id: form.requested_agent_id.trim() || null,
+    change_summary: form.proposed_mission.trim() || null,
     business_problem: form.business_problem.trim(),
     proposed_mission: form.proposed_mission.trim(),
     human_owner_role: form.human_owner_role.trim(),
     requested_workspaces: form.requested_workspaces,
     work_objects: splitLines(form.work_objects),
     requested_inputs_tools: form.requested_inputs_tools,
+    requested_action_types: [],
+    requested_skills: [],
     expected_outputs: splitLines(form.expected_outputs),
     requested_authority_ceiling: form.requested_authority_ceiling,
     stop_conditions: splitLines(form.stop_conditions),
     success_metrics: splitLines(form.success_metrics),
     proposed_eval_cases: splitLines(form.proposed_eval_cases),
   }
+}
+
+function applyProfileRequestToAgentForm(
+  current: AgentForm,
+  request: AssistantAgentProfileRequest,
+): AgentForm {
+  const capabilities = capabilitiesForProfileRequest(request)
+  const allowedActionTypes = capabilities.includes('ACTION') ? [...request.requested_action_types] : []
+
+  return {
+    ...current,
+    specialization_summary: request.proposed_mission,
+    human_owner_role: request.human_owner_role || current.human_owner_role,
+    authority_ceiling: request.requested_authority_ceiling,
+    activation_notes: request.approval_notes
+      ? `Approved profile request #${request.request_id}: ${request.approval_notes}`
+      : `Approved profile request #${request.request_id}.`,
+    profile_request_id: request.request_id,
+    capabilities,
+    allowed_workspaces:
+      request.requested_workspaces.length > 0 ? [...request.requested_workspaces] : current.allowed_workspaces,
+    skills: [...request.requested_skills],
+    allowed_tools: [...request.requested_inputs_tools],
+    allowed_action_types: allowedActionTypes,
+  }
+}
+
+function capabilitiesForProfileRequest(
+  request: AssistantAgentProfileRequest,
+): AssistantAgentCapability[] {
+  if (request.requested_authority_ceiling === 'OBSERVE') {
+    return ['READ']
+  }
+  if (request.requested_authority_ceiling === 'EXPLAIN') {
+    return ['READ', 'EXPLAIN']
+  }
+  if (request.requested_action_types.length > 0 && request.requested_authority_ceiling === 'STAGE') {
+    return ['READ', 'EXPLAIN', 'DRAFT', 'ACTION']
+  }
+  if (
+    request.requested_action_types.length > 0 &&
+    (request.requested_authority_ceiling === 'EXECUTE' ||
+      request.requested_authority_ceiling === 'EXTERNAL_COMMIT')
+  ) {
+    return ['READ', 'EXPLAIN', 'DRAFT', 'ACTION']
+  }
+  return ['READ', 'EXPLAIN', 'DRAFT']
+}
+
+function getProfileRequestLinkedAgent(
+  request: AssistantAgentProfileRequest,
+  agents: AssistantAdminAgent[],
+): AssistantAdminAgent | null {
+  const linkedAgentId = request.linked_agent_id || request.target_agent_id || request.requested_agent_id
+  if (!linkedAgentId) {
+    return null
+  }
+  return agents.find((agent) => agent.agent_id === linkedAgentId) ?? null
+}
+
+function getPublishedProfileRequestRevisionId(
+  request: AssistantAgentProfileRequest,
+  agent: AssistantAdminAgent | null,
+): number | null {
+  if (request.linked_revision_id) {
+    return request.linked_revision_id
+  }
+  if (!agent || agent.profile_request_id !== request.request_id) {
+    return null
+  }
+  return agent.published_revision_id ?? null
 }
 
 function hasAdministrativeAccess(session: StoredAuthSession | null): boolean {
@@ -247,9 +458,14 @@ function toAgentForm(agent: AssistantAdminAgent): AgentForm {
     human_owner_role: agent.human_owner_role ?? '',
     authority_ceiling: agent.authority_ceiling ?? '',
     activation_notes: agent.activation_notes ?? '',
+    orchestration_pattern: agent.orchestration_pattern,
+    parent_agent_id: agent.parent_agent_id ?? '',
+    managed_agent_ids: [...agent.managed_agent_ids],
+    delegation_guidance: agent.delegation_guidance ?? '',
     profile_request_id: agent.profile_request_id ?? null,
     allowed_workspaces: [...agent.allowed_workspaces],
     capabilities: [...agent.capabilities],
+    skills: [...agent.skills],
     allowed_tools: [...agent.allowed_tools],
     allowed_action_types: [...agent.allowed_action_types],
     daily_token_allocation:
@@ -257,6 +473,110 @@ function toAgentForm(agent: AssistantAdminAgent): AgentForm {
         ? ''
         : String(agent.daily_token_allocation),
     system_prompt: agent.system_prompt,
+  }
+}
+
+function toAgentFormFromSelfUpdateDraft(draft: AssistantAgentSelfUpdateDraft): AgentForm {
+  return toAgentFormFromRevisionPayload({
+    name: draft.name,
+    description: draft.description,
+    status: draft.status,
+    scope: draft.scope,
+    provider: draft.provider,
+    model: draft.model,
+    role_key: draft.role_key ?? null,
+    profile_kind: draft.profile_kind,
+    specialization_summary: draft.specialization_summary ?? null,
+    human_owner_role: draft.human_owner_role ?? null,
+    authority_ceiling: draft.authority_ceiling ?? null,
+    activation_notes: draft.activation_notes ?? null,
+    orchestration_pattern: draft.orchestration_pattern,
+    parent_agent_id: draft.parent_agent_id ?? null,
+    managed_agent_ids: [...draft.managed_agent_ids],
+    delegation_guidance: draft.delegation_guidance ?? null,
+    profile_request_id: draft.profile_request_id ?? null,
+    allowed_workspaces: [...draft.allowed_workspaces],
+    capabilities: [...draft.capabilities],
+    skills: [...draft.skills],
+    allowed_tools: [...draft.allowed_tools],
+    allowed_action_types: [...draft.allowed_action_types],
+    daily_token_allocation: draft.daily_token_allocation ?? null,
+    system_prompt: draft.system_prompt,
+  }, draft.agent_id)
+}
+
+function toAgentFormFromRevisionPayload(payload: AssistantAgentRevisionPayload, agentId: string): AgentForm {
+  return {
+    agent_id: agentId,
+    name: payload.name,
+    description: payload.description,
+    status: payload.status,
+    scope: payload.scope,
+    provider: payload.provider ?? '',
+    model: payload.model ?? '',
+    role_key: payload.role_key ?? '',
+    profile_kind: payload.profile_kind ?? 'CUSTOM',
+    specialization_summary: payload.specialization_summary ?? '',
+    human_owner_role: payload.human_owner_role ?? '',
+    authority_ceiling: payload.authority_ceiling ?? '',
+    activation_notes: payload.activation_notes ?? '',
+    orchestration_pattern: payload.orchestration_pattern,
+    parent_agent_id: payload.parent_agent_id ?? '',
+    managed_agent_ids: [...payload.managed_agent_ids],
+    delegation_guidance: payload.delegation_guidance ?? '',
+    profile_request_id: payload.profile_request_id ?? null,
+    allowed_workspaces: [...payload.allowed_workspaces],
+    capabilities: [...payload.capabilities],
+    skills: [...payload.skills],
+    allowed_tools: [...payload.allowed_tools],
+    allowed_action_types: [...payload.allowed_action_types],
+    daily_token_allocation:
+      payload.daily_token_allocation === null || payload.daily_token_allocation === undefined
+        ? ''
+        : String(payload.daily_token_allocation),
+    system_prompt: payload.system_prompt,
+  }
+}
+
+function toRevisionFromSelfUpdateDraft(draft: AssistantAgentSelfUpdateDraft): AssistantAgentRevision {
+  return {
+    revision_id: draft.revision_id,
+    agent_id: draft.agent_id,
+    version: draft.revision_version,
+    change_summary: draft.change_summary,
+    diff_summary: draft.diff_summary,
+    payload: {
+      name: draft.name,
+      description: draft.description,
+      status: draft.status,
+      scope: draft.scope,
+      provider: draft.provider,
+      model: draft.model,
+      role_key: draft.role_key ?? null,
+      profile_kind: draft.profile_kind,
+      specialization_summary: draft.specialization_summary ?? null,
+      human_owner_role: draft.human_owner_role ?? null,
+      authority_ceiling: draft.authority_ceiling ?? null,
+      activation_notes: draft.activation_notes ?? null,
+      orchestration_pattern: draft.orchestration_pattern,
+      parent_agent_id: draft.parent_agent_id ?? null,
+      managed_agent_ids: [...draft.managed_agent_ids],
+      delegation_guidance: draft.delegation_guidance ?? null,
+      profile_request_id: draft.profile_request_id ?? null,
+      allowed_workspaces: draft.allowed_workspaces,
+      capabilities: draft.capabilities,
+      skills: draft.skills,
+      allowed_tools: draft.allowed_tools,
+      allowed_action_types: draft.allowed_action_types,
+      daily_token_allocation: draft.daily_token_allocation ?? null,
+      system_prompt: draft.system_prompt,
+    },
+    created_at: draft.created_at,
+    created_by: draft.created_by,
+    published_at: draft.published_at,
+    published_by: draft.published_by,
+    restored_from_revision_id: null,
+    is_published: Boolean(draft.published_at),
   }
 }
 
@@ -279,14 +599,25 @@ function normalizeAgentPayload(form: AgentForm): CreateAssistantAgentInput {
     human_owner_role: form.human_owner_role.trim() ? form.human_owner_role.trim() : null,
     authority_ceiling: form.authority_ceiling || null,
     activation_notes: form.activation_notes.trim() ? form.activation_notes.trim() : null,
+    orchestration_pattern: form.orchestration_pattern,
+    parent_agent_id: form.parent_agent_id.trim() ? form.parent_agent_id.trim() : null,
+    managed_agent_ids: form.managed_agent_ids,
+    delegation_guidance: form.delegation_guidance.trim() ? form.delegation_guidance.trim() : null,
     profile_request_id: form.profile_request_id,
     allowed_workspaces: form.allowed_workspaces,
     capabilities: form.capabilities,
+    skills: form.skills,
     allowed_tools: form.allowed_tools,
     allowed_action_types: form.allowed_action_types,
     daily_token_allocation: dailyTokenAllocation,
     system_prompt: form.system_prompt.trim(),
   }
+}
+
+function normalizeAgentUpdatePayload(form: AgentForm): UpdateAssistantAgentInput {
+  const payload: Partial<CreateAssistantAgentInput> = { ...normalizeAgentPayload(form) }
+  delete payload.agent_id
+  return payload as UpdateAssistantAgentInput
 }
 
 function normalizeDailyTokenAllocation(value: string): number | null {
@@ -444,6 +775,16 @@ function profileRequestStatusTone(
   return 'planned'
 }
 
+function profileRequestKindLabel(kind: AssistantAgentProfileRequestKind): string {
+  if (kind === 'EDIT_EXISTING') {
+    return 'Edit existing agent'
+  }
+  if (kind === 'NARROW_ACCESS') {
+    return 'Narrow access'
+  }
+  return 'New specialization'
+}
+
 function titleFromAgentId(agentId: string | null): string {
   if (!agentId) {
     return ''
@@ -461,13 +802,18 @@ function renderPromptList(title: string, values: readonly string[]): string {
 
 function buildPromptFromProfileRequest(request: AssistantAgentProfileRequest): string {
   return [
-    `You are ${titleFromAgentId(request.requested_agent_id) || 'a specialized managed agent'} inside the ECTRM operator console.`,
+    `You are ${
+      titleFromAgentId(request.requested_agent_id || request.target_agent_id) || 'a specialized managed agent'
+    } inside the ECTRM operator console.`,
+    request.change_summary ? `Requested change: ${request.change_summary}` : '',
     `Business problem: ${request.business_problem}`,
     `Mission: ${request.proposed_mission}`,
     renderPromptList('Expected outputs', request.expected_outputs),
     renderPromptList('Stop conditions', request.stop_conditions),
     renderPromptList('Success metrics', request.success_metrics),
-  ].join('\n\n')
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 }
 
 function describeEffectivePolicy(agent: AssistantAdminAgent): string {
@@ -489,6 +835,327 @@ function findRoleForForm(
 ): AssistantAgentRoleArchetype | null {
   const roleKey = form.role_key.trim()
   return roleKey ? roleArchetypes.find((role) => role.role_key === roleKey) ?? null : null
+}
+
+function orchestrationPatternLabel(pattern: AssistantAgentOrchestrationPattern): string {
+  switch (pattern) {
+    case 'MANAGER':
+      return 'Manager'
+    case 'TRIAGE':
+      return 'Triage'
+    case 'PARALLEL':
+      return 'Parallel'
+    case 'EVALUATOR':
+      return 'Evaluator'
+    default:
+      return 'Single'
+  }
+}
+
+function agentHierarchyLabel(agent: Pick<AssistantAdminAgent, 'agent_id' | 'name' | 'role_key'>): string {
+  return `${agent.name} (${agent.agent_id})${agent.role_key ? ` · ${agent.role_key}` : ''}`
+}
+
+function findAgentLabelById(
+  agentId: string,
+  agentRecords: readonly Pick<AssistantAdminAgent, 'agent_id' | 'name' | 'role_key'>[],
+): string {
+  const record = agentRecords.find((agent) => agent.agent_id === agentId)
+  return record ? agentHierarchyLabel(record) : agentId
+}
+
+function describeRoleKeyList(roleKeys: readonly string[]): string {
+  return roleKeys.length > 0 ? roleKeys.map((roleKey) => titleFromAgentId(roleKey) || roleKey).join(' · ') : 'None'
+}
+
+function resolveRecommendedHierarchyAgents(
+  role: AssistantAgentRoleArchetype,
+  agentRecords: AssistantAdminAgent[],
+  currentAgentId: string,
+): {
+  parentAgent: AssistantAdminAgent | null
+  managedAgents: AssistantAdminAgent[]
+} {
+  const normalizedCurrentAgentId = currentAgentId.trim()
+  const availableAgents = agentRecords.filter((agent) => agent.agent_id !== normalizedCurrentAgentId)
+  const parentAgent =
+    role.recommended_parent_role_keys
+      .map((roleKey) => availableAgents.find((agent) => agent.role_key === roleKey) ?? null)
+      .find((agent) => agent !== null) ?? null
+  const seenManagedIds = new Set<string>()
+  const managedAgents: AssistantAdminAgent[] = []
+
+  for (const roleKey of role.recommended_managed_role_keys) {
+    for (const agent of availableAgents) {
+      if (agent.role_key !== roleKey || seenManagedIds.has(agent.agent_id)) {
+        continue
+      }
+      managedAgents.push(agent)
+      seenManagedIds.add(agent.agent_id)
+    }
+  }
+
+  return { parentAgent, managedAgents }
+}
+
+function applyRoleHierarchyRecommendations(
+  form: AgentForm,
+  role: AssistantAgentRoleArchetype,
+  agentRecords: AssistantAdminAgent[],
+): AgentForm {
+  const recommendation = resolveRecommendedHierarchyAgents(role, agentRecords, form.agent_id)
+  return {
+    ...form,
+    orchestration_pattern: role.recommended_orchestration_pattern,
+    parent_agent_id: recommendation.parentAgent?.agent_id ?? '',
+    managed_agent_ids: recommendation.managedAgents.map((agent) => agent.agent_id),
+    delegation_guidance: role.delegation_guidance.join(' '),
+  }
+}
+
+function describeHierarchyPlan(
+  form: AgentForm,
+  agentRecords: readonly Pick<AssistantAdminAgent, 'agent_id' | 'name' | 'role_key'>[],
+): string {
+  const segments = [orchestrationPatternLabel(form.orchestration_pattern)]
+  if (form.parent_agent_id.trim()) {
+    segments.push(`reports to ${findAgentLabelById(form.parent_agent_id.trim(), agentRecords)}`)
+  }
+  if (form.managed_agent_ids.length > 0) {
+    segments.push(
+      `${form.managed_agent_ids.length} managed subordinate${form.managed_agent_ids.length === 1 ? '' : 's'}`,
+    )
+  }
+  return segments.join(' · ')
+}
+
+type AgentHierarchyEditorProps = {
+  form: AgentForm
+  setForm: React.Dispatch<React.SetStateAction<AgentForm>>
+  role: AssistantAgentRoleArchetype | null
+  agentRecords: AssistantAdminAgent[]
+}
+
+type AgentSkillSelectorProps = {
+  selectedSkills: AssistantAgentSkillKey[]
+  availableSkills: AssistantAgentSkillDefinition[]
+  onToggle: (skillName: AssistantAgentSkillKey) => void
+  description: string
+}
+
+function AgentSkillSelector({
+  selectedSkills,
+  availableSkills,
+  onToggle,
+  description,
+}: AgentSkillSelectorProps) {
+  return (
+    <div className="assistant-admin-option-group">
+      <strong>Skills</strong>
+      <p>{description}</p>
+      <div className="chip-row">
+        {availableSkills.map((skill) => (
+          <button
+            key={skill.name}
+            type="button"
+            className={`entity-chip ${selectedSkills.includes(skill.name) ? '' : 'entity-chip-soft'}`}
+            onClick={() => onToggle(skill.name)}
+            title={skill.description}
+          >
+            {skill.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function AgentHierarchyEditor({
+  form,
+  setForm,
+  role,
+  agentRecords,
+}: AgentHierarchyEditorProps) {
+  const selectableAgents = agentRecords.filter((agent) => agent.agent_id !== form.agent_id.trim())
+  const recommendedHierarchy = role
+    ? resolveRecommendedHierarchyAgents(role, agentRecords, form.agent_id)
+    : null
+
+  return (
+    <div className="assistant-builder-preview assistant-profile-panel">
+      <div className="assistant-admin-section-head">
+        <div>
+          <span className="eyebrow">Hierarchy</span>
+          <h4>{orchestrationPatternLabel(form.orchestration_pattern)} orchestration</h4>
+        </div>
+        <span>
+          {role
+            ? `Recommended ${orchestrationPatternLabel(role.recommended_orchestration_pattern)}`
+            : 'Optional for custom agents'}
+        </span>
+      </div>
+
+      <div className="assistant-admin-form-grid">
+        <label className="field">
+          <span>Orchestration Pattern</span>
+          <select
+            className="control"
+            value={form.orchestration_pattern}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                orchestration_pattern: event.target.value as AssistantAgentOrchestrationPattern,
+                managed_agent_ids:
+                  event.target.value === 'SINGLE' ? [] : current.managed_agent_ids,
+              }))
+            }
+          >
+            {ORCHESTRATION_PATTERN_OPTIONS.map((pattern) => (
+              <option key={pattern} value={pattern}>
+                {orchestrationPatternLabel(pattern)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Parent Agent</span>
+          <select
+            className="control"
+            value={form.parent_agent_id}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                parent_agent_id: event.target.value,
+              }))
+            }
+          >
+            <option value="">No parent agent</option>
+            {selectableAgents.map((agent) => (
+              <option key={agent.agent_id} value={agent.agent_id}>
+                {agentHierarchyLabel(agent)}
+              </option>
+            ))}
+          </select>
+          <small className="form-note">
+            Use a parent when this agent should report conclusions upward instead of owning final synthesis itself.
+          </small>
+        </label>
+      </div>
+
+      <div className="assistant-admin-option-group">
+        <strong>Managed subordinates</strong>
+        <p>
+          Pick the concrete agents this manager can consult. Save stays blocked if you keep subordinates on a
+          single-agent pattern.
+        </p>
+        <div className="chip-row">
+          {selectableAgents.map((agent) => (
+            <button
+              key={agent.agent_id}
+              type="button"
+              className={`entity-chip ${form.managed_agent_ids.includes(agent.agent_id) ? '' : 'entity-chip-soft'}`}
+              disabled={form.orchestration_pattern === 'SINGLE'}
+              onClick={() =>
+                setForm((current) => ({
+                  ...current,
+                  managed_agent_ids: toggleSelection(current.managed_agent_ids, agent.agent_id),
+                }))
+              }
+              title={agent.role_key ?? agent.agent_id}
+            >
+              {agent.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <label className="field">
+        <span>Delegation Guidance</span>
+        <textarea
+          className="control"
+          value={form.delegation_guidance}
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              delegation_guidance: event.target.value,
+            }))
+          }
+          placeholder="Describe when this agent should delegate, what it still owns, and when it should stop."
+        />
+      </label>
+
+      <div className="assistant-builder-preview-grid">
+        <div className="assistant-sidebar-block">
+          <strong>Current plan</strong>
+          <p>{describeHierarchyPlan(form, agentRecords)}</p>
+          <small>
+            {form.managed_agent_ids.length > 0
+              ? form.managed_agent_ids.map((agentId) => findAgentLabelById(agentId, agentRecords)).join(' · ')
+              : 'No managed subordinates selected'}
+          </small>
+        </div>
+        <div className="assistant-sidebar-block">
+          <strong>Recommended topology</strong>
+          <p>
+            {role
+              ? `${orchestrationPatternLabel(role.recommended_orchestration_pattern)} · parent ${describeRoleKeyList(
+                  role.recommended_parent_role_keys,
+                )}`
+              : 'No role recommendation selected'}
+          </p>
+          <small>
+            {role
+              ? `Managed roles: ${describeRoleKeyList(role.recommended_managed_role_keys)}`
+              : 'Custom agents can stay single until a reusable delegation pattern proves out.'}
+          </small>
+        </div>
+        <div className="assistant-sidebar-block">
+          <strong>Resolved recommendations</strong>
+          <p>
+            {recommendedHierarchy?.parentAgent
+              ? `Parent: ${recommendedHierarchy.parentAgent.name}`
+              : 'No recommended parent agent loaded'}
+          </p>
+          <small>
+            {recommendedHierarchy && recommendedHierarchy.managedAgents.length > 0
+              ? recommendedHierarchy.managedAgents.map((agent) => agent.name).join(' · ')
+              : 'No recommended subordinate agents are currently loaded'}
+          </small>
+        </div>
+      </div>
+
+      {form.orchestration_pattern !== 'SINGLE' && !form.skills.includes('inter_agent_consultation') ? (
+        <small className="form-note">
+          Add the Inter-Agent Consultation skill before saving a multi-agent orchestration pattern.
+        </small>
+      ) : null}
+
+      {role ? (
+        <div className="toolbar settings-actions">
+          <button
+            type="button"
+            className="button button-ghost"
+            onClick={() => setForm((current) => applyRoleHierarchyRecommendations(current, role, agentRecords))}
+          >
+            Apply Role Hierarchy
+          </button>
+          <button
+            type="button"
+            className="button button-ghost"
+            onClick={() =>
+              setForm((current) => ({
+                ...current,
+                parent_agent_id: '',
+                managed_agent_ids: [],
+              }))
+            }
+          >
+            Clear Wiring
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 function fitStatusLabel(status: AgentRoleProfileFitStatus): string {
@@ -518,6 +1185,27 @@ function roleCatalogStatusLabel(role: AssistantAgentRoleArchetype): string {
     return 'Phase 1'
   }
   return 'Future'
+}
+
+function roleCatalogSyncSummary(role: AssistantAgentRoleArchetype): string {
+  if (role.current_profile_ids.length > 0) {
+    return `Synced defaults: ${role.current_profile_ids.join(' · ')}`
+  }
+  if (role.catalog_status === 'PHASE_1') {
+    return 'Pilot blueprint only until a human saves a role-derived profile.'
+  }
+  if (role.catalog_status === 'TEMPLATE') {
+    return 'Role preset only; not auto-synchronized into the managed roster.'
+  }
+  return 'No synchronized default profile.'
+}
+
+function templateAvailabilityLabel(availability: AgentBuilderTemplateAvailability): string {
+  return availability === 'SEEDED_DEFAULT' ? 'Seeded default' : 'Template only'
+}
+
+function templateAvailabilityTone(availability: AgentBuilderTemplateAvailability): 'active' | 'planned' {
+  return availability === 'SEEDED_DEFAULT' ? 'active' : 'planned'
 }
 
 function listSummary(values: readonly string[], emptyLabel: string): string {
@@ -633,17 +1321,115 @@ function agentWorkPackageNextStatuses(
   return []
 }
 
+function workPackageDraftFromRecord(workPackage: AssistantAgentWorkPackage): AgentWorkPackageDraft {
+  return {
+    notes: workPackage.notes ?? '',
+    prUrl: workPackage.implementation_evidence.pr_url ?? '',
+    commitSha: workPackage.implementation_evidence.commit_sha ?? '',
+    evalIds: workPackage.implementation_evidence.eval_ids.join(', '),
+    testNames: workPackage.implementation_evidence.test_names.join('\n'),
+    docPaths: workPackage.implementation_evidence.doc_paths.join('\n'),
+    owner: workPackage.implementation_evidence.owner ?? '',
+  }
+}
+
+function splitDraftLines(value: string): string[] {
+  return Array.from(
+    new Set(
+      value
+        .split(/\r?\n|,/)
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+  )
+}
+
+function parseDraftEvalIds(value: string): number[] {
+  const ids: number[] = []
+  const seen = new Set<number>()
+  for (const entry of splitDraftLines(value)) {
+    const resolved = Number.parseInt(entry, 10)
+    if (!Number.isFinite(resolved) || resolved <= 0 || seen.has(resolved)) {
+      continue
+    }
+    ids.push(resolved)
+    seen.add(resolved)
+  }
+  return ids
+}
+
+function workPackageHasImplementationEvidence(workPackage: AssistantAgentWorkPackage): boolean {
+  return Boolean(
+    workPackage.implementation_evidence.pr_url ||
+      workPackage.implementation_evidence.commit_sha ||
+      workPackage.implementation_evidence.eval_ids.length > 0 ||
+      workPackage.implementation_evidence.test_names.length > 0 ||
+      workPackage.implementation_evidence.doc_paths.length > 0,
+  )
+}
+
+function isStaleOpenWorkPackage(workPackage: AssistantAgentWorkPackage, now = Date.now()): boolean {
+  if (workPackage.status !== 'ACCEPTED' && workPackage.status !== 'IN_PROGRESS') {
+    return false
+  }
+  if (workPackageHasImplementationEvidence(workPackage)) {
+    return false
+  }
+
+  const updatedAt = Date.parse(workPackage.updated_at)
+  if (!Number.isFinite(updatedAt)) {
+    return false
+  }
+
+  return now - updatedAt >= STALE_WORK_PACKAGE_THRESHOLD_MS
+}
+
+function applyLocalWorkPackageFilters(
+  workPackages: AssistantAgentWorkPackage[],
+  filters: AgentWorkPackageFilters,
+): AssistantAgentWorkPackage[] {
+  const now = Date.now()
+  return workPackages.filter((workPackage) => {
+    if (filters.sourceAgentId && !workPackage.source_agent_ids.includes(filters.sourceAgentId)) {
+      return false
+    }
+    if (filters.staleOnly && !isStaleOpenWorkPackage(workPackage, now)) {
+      return false
+    }
+    return true
+  })
+}
+
+function hasActiveWorkPackageFilters(filters: AgentWorkPackageFilters): boolean {
+  return Boolean(
+    filters.status ||
+      filters.sourceAgentId ||
+      filters.staleOnly ||
+      filters.hasPr ||
+      filters.hasCommit ||
+      filters.hasEval ||
+      filters.hasTests ||
+      filters.hasDocs,
+  )
+}
+
 function PromptProfilePreview({
   form,
   role,
+  agentRecords,
 }: {
   form: AgentForm
   role: AssistantAgentRoleArchetype | null
+  agentRecords: AssistantAdminAgent[]
 }) {
   const previewLines = [
     `${describeProfileKind(form.profile_kind)}${role ? ` · ${role.name}` : ''}`,
+    'Build recipe: hierarchy + role + skills + capabilities + workspaces + tools + actions + prompt',
     form.human_owner_role ? `Owner: ${form.human_owner_role}` : null,
     form.authority_ceiling ? `Authority: ${form.authority_ceiling}` : null,
+    `Hierarchy: ${describeHierarchyPlan(form, agentRecords)}`,
+    form.delegation_guidance ? `Delegation: ${form.delegation_guidance}` : null,
+    form.skills.length > 0 ? `Skills: ${form.skills.join(' · ')}` : 'Skills: none selected',
     form.specialization_summary ? `Specialization: ${form.specialization_summary}` : null,
     form.system_prompt ? form.system_prompt : 'Prompt instructions are still blank.',
   ].filter(Boolean)
@@ -690,18 +1476,92 @@ function RoleProfileFitSummary({ fit }: { fit: AgentRoleProfileFit }) {
   )
 }
 
+function describeChangedValue(current: string, next: string): string {
+  return current === next ? next : `${current} -> ${next}`
+}
+
+function summarizeCapabilitySelection(values: readonly AssistantAgentCapability[]): string {
+  return values.length > 0 ? values.join(' · ') : 'No capabilities selected'
+}
+
+function formatAssistantSkillLabel(
+  skill: AssistantAgentSkillKey,
+  definitionsByName: ReadonlyMap<AssistantAgentSkillKey, AssistantAgentSkillDefinition>,
+): string {
+  return (
+    definitionsByName.get(skill)?.label ??
+    skill
+      .split('_')
+      .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+      .join(' ')
+  )
+}
+
+function summarizeSkillSelection(
+  values: readonly AssistantAgentSkillKey[],
+  definitionsByName: ReadonlyMap<AssistantAgentSkillKey, AssistantAgentSkillDefinition>,
+): string {
+  return values.length > 0
+    ? values.map((skill) => formatAssistantSkillLabel(skill, definitionsByName)).join(' · ')
+    : 'No explicit skill set'
+}
+
+function summarizeToolSelection(values: readonly string[]): string {
+  return values.length > 0 ? `${values.length} explicit tool${values.length === 1 ? '' : 's'}` : 'No explicit tool subset'
+}
+
+function summarizeActionSelection(values: readonly AssistantActionType[]): string {
+  return values.length > 0
+    ? `${values.length} governed action${values.length === 1 ? '' : 's'}`
+    : 'No explicit governed actions'
+}
+
+function buildAdminAgentConstructionPreviewContext(agent: AssistantAdminAgent): string {
+  return [
+    'Admin managed-agent construction review',
+    `agent_id: ${agent.agent_id}`,
+    `agent_name: ${agent.name}`,
+    `profile_kind: ${agent.profile_kind}`,
+    agent.role_key ? `role_key: ${agent.role_key}` : null,
+    agent.human_owner_role ? `human_owner_role: ${agent.human_owner_role}` : null,
+    agent.authority_ceiling ? `authority_ceiling: ${agent.authority_ceiling}` : null,
+    `status: ${agent.status}`,
+    `workspaces: ${agent.allowed_workspaces.map((workspace) => workspaceLabel(workspace)).join(', ')}`,
+    `capabilities: ${agent.capabilities.join(', ') || 'none'}`,
+    `skills: ${agent.skills.join(', ') || 'none'}`,
+    `tools: ${agent.allowed_tools.join(', ') || 'none'}`,
+    `actions: ${agent.allowed_action_types.join(', ') || 'none'}`,
+    `orchestration_pattern: ${agent.orchestration_pattern}`,
+    agent.parent_agent_id ? `parent_agent_id: ${agent.parent_agent_id}` : null,
+    agent.managed_agent_ids.length > 0 ? `managed_agent_ids: ${agent.managed_agent_ids.join(', ')}` : null,
+    agent.delegation_guidance ? `delegation_guidance: ${agent.delegation_guidance}` : null,
+    'review_goal: Show the saved context, policy, hierarchy, skills, and prompt layers before an admin edits or publishes the agent.',
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n')
+}
+
 export function AgentManagementPanel({
   authSession,
   formatDate,
   onOpenSettings,
+  controlTowerIntent = null,
 }: AgentManagementPanelProps) {
   const requestSequenceRef = useRef(0)
+  const agentPromptPreviewSequenceRef = useRef(0)
+  const draftPromptPreviewSequenceRef = useRef(0)
+  const appliedSupervisionIntentIdRef = useRef<number | null>(null)
   const adminEnabled = hasAdministrativeAccess(authSession)
 
+  const [activeAgentSection, setActiveAgentSection] = useState<AgentManagementSectionKey>(() =>
+    readInitialAgentManagementSection(),
+  )
   const [agentRecords, setAgentRecords] = useState<AssistantAdminAgent[]>([])
   const [profileRequests, setProfileRequests] = useState<AssistantAgentProfileRequest[]>([])
   const [agentEvalRecords, setAgentEvalRecords] = useState<AssistantAgentEval[]>([])
+  const [availableSkills, setAvailableSkills] = useState<AssistantAgentSkillDefinition[]>([])
   const [availableTools, setAvailableTools] = useState<string[]>([])
+  const [availableToolDefinitions, setAvailableToolDefinitions] = useState<AssistantToolDefinition[]>([])
   const [availableActionDefinitions, setAvailableActionDefinitions] = useState<AssistantActionDefinition[]>([])
   const [roleArchetypes, setRoleArchetypes] = useState<AssistantAgentRoleArchetype[]>([])
   const [agentsLoading, setAgentsLoading] = useState(false)
@@ -740,15 +1600,32 @@ export function AgentManagementPanel({
   const [autonomyReview, setAutonomyReview] = useState<AssistantAutonomyReviewBrief | null>(null)
   const [autonomyReviewLoading, setAutonomyReviewLoading] = useState(false)
   const [autonomyReviewError, setAutonomyReviewError] = useState('')
+  const [selfUpdateBrief, setSelfUpdateBrief] = useState('')
+  const [selfUpdateDraft, setSelfUpdateDraft] = useState<AssistantAgentSelfUpdateDraft | null>(null)
+  const [selfUpdateLoading, setSelfUpdateLoading] = useState(false)
+  const [selfUpdateError, setSelfUpdateError] = useState('')
+  const [agentRevisions, setAgentRevisions] = useState<AssistantAgentRevision[]>([])
+  const [agentRevisionsLoading, setAgentRevisionsLoading] = useState(false)
+  const [agentRevisionsError, setAgentRevisionsError] = useState('')
+  const [publishingRevisionId, setPublishingRevisionId] = useState<number | null>(null)
+  const [agentPromptPreview, setAgentPromptPreview] = useState<AssistantPromptContext | null>(null)
+  const [agentPromptPreviewLoading, setAgentPromptPreviewLoading] = useState(false)
+  const [agentPromptPreviewError, setAgentPromptPreviewError] = useState('')
+  const [draftPromptPreview, setDraftPromptPreview] = useState<AssistantPromptContext | null>(null)
+  const [draftPromptPreviewLoading, setDraftPromptPreviewLoading] = useState(false)
+  const [draftPromptPreviewError, setDraftPromptPreviewError] = useState('')
   const [agentHealthReview, setAgentHealthReview] = useState<AssistantAgentHealthReview | null>(null)
   const [agentHealthReviewLoading, setAgentHealthReviewLoading] = useState(false)
   const [agentHealthReviewError, setAgentHealthReviewError] = useState('')
   const [agentWorkPackages, setAgentWorkPackages] = useState<AssistantAgentWorkPackage[]>([])
+  const [trackedWorkPackageKeys, setTrackedWorkPackageKeys] = useState<string[]>([])
   const [agentWorkPackagesLoading, setAgentWorkPackagesLoading] = useState(false)
   const [agentWorkPackageError, setAgentWorkPackageError] = useState('')
   const [acceptingWorkPackageId, setAcceptingWorkPackageId] = useState<string | null>(null)
   const [transitioningWorkPackageId, setTransitioningWorkPackageId] = useState<string | null>(null)
-  const [workPackageTransitionNotes, setWorkPackageTransitionNotes] = useState<Record<string, string>>({})
+  const [agentWorkPackageFilters, setAgentWorkPackageFilters] =
+    useState<AgentWorkPackageFilters>(DEFAULT_AGENT_WORK_PACKAGE_FILTERS)
+  const [workPackageDrafts, setWorkPackageDrafts] = useState<Record<string, AgentWorkPackageDraft>>({})
   const [selectedAgentEvalId, setSelectedAgentEvalId] = useState<number | null>(null)
   const [agentEvalForm, setAgentEvalForm] = useState<AgentEvalForm>(() => createEmptyAgentEvalForm())
   const [agentEvalRuns, setAgentEvalRuns] = useState<AssistantAgentEvalRun[]>([])
@@ -758,6 +1635,8 @@ export function AgentManagementPanel({
   const [deletingAgentEvalId, setDeletingAgentEvalId] = useState<number | null>(null)
   const [runningAgentEvalId, setRunningAgentEvalId] = useState<number | null>(null)
   const [runningAgentEvalSuite, setRunningAgentEvalSuite] = useState(false)
+  const [activeSupervisionIntent, setActiveSupervisionIntent] =
+    useState<AssistantControlTowerAgentSupervisionIntent | null>(null)
 
   const selectedAgent = useMemo(
     () => agentRecords.find((agent) => agent.agent_id === selectedAgentId) ?? null,
@@ -774,8 +1653,6 @@ export function AgentManagementPanel({
     () => selectedAgentEvalRecords.find((record) => record.eval_id === selectedAgentEvalId) ?? null,
     [selectedAgentEvalId, selectedAgentEvalRecords],
   )
-  const selectedAgentEvals = selectedAgentEvalRecords
-  const selectedEvalRecord = selectedAgentEval
   const selectedCreateTemplate = useMemo(
     () => (selectedCreateTemplateKey ? getAgentBuilderTemplate(selectedCreateTemplateKey) : null),
     [selectedCreateTemplateKey],
@@ -836,22 +1713,75 @@ export function AgentManagementPanel({
     () => buildAssistantActionDefinitionMap(availableActionDefinitions),
     [availableActionDefinitions],
   )
+  const skillDefinitionsByName = useMemo(
+    () => new Map(availableSkills.map((skill) => [skill.name, skill])),
+    [availableSkills],
+  )
   const actionTypeOptions = useMemo(
     () => assistantActionTypeOptions(availableActionDefinitions),
     [availableActionDefinitions],
   )
+  const adminConstructionRuntimeSettings = useMemo<
+    Pick<AssistantRuntimeSettings, 'available_skills' | 'available_tools' | 'available_action_types'>
+  >(
+    () => ({
+      available_skills: availableSkills,
+      available_tools: availableToolDefinitions,
+      available_action_types: availableActionDefinitions,
+    }),
+    [availableActionDefinitions, availableSkills, availableToolDefinitions],
+  )
+  const draftPreviewAgent = useMemo(
+    () =>
+      selectedAgent && editForm.agent_id === selectedAgent.agent_id
+        ? buildDraftPreviewAgent(selectedAgent, editForm)
+        : null,
+    [editForm, selectedAgent],
+  )
+  const draftConstructionDiffRows = useMemo(
+    () =>
+      selectedAgent && editForm.agent_id === selectedAgent.agent_id
+        ? buildDraftConstructionDiffSummary(selectedAgent, editForm)
+        : [],
+    [editForm, selectedAgent],
+  )
   const createWorkspaceSummary = createForm.allowed_workspaces.map((workspace) => workspaceLabel(workspace)).join(' · ')
   const createCapabilitySummary = createForm.capabilities.join(' · ')
+  const createSkillSummary = summarizeSkillSelection(createForm.skills, skillDefinitionsByName)
   const createLiveToolSummary = describeLiveToolPlan(createForm, availableTools)
   const createActionSummary = describeActionPlan(createForm)
+  const editSkillSummary = summarizeSkillSelection(editForm.skills, skillDefinitionsByName)
   const editActionSummary = describeActionPlan(editForm)
+  const supervisionPolicyMessages = useMemo(
+    () =>
+      activeSupervisionIntent
+        ? [...editProfileFit.errors.slice(0, 1), ...editProfileFit.warnings.slice(0, 2)]
+        : [],
+    [activeSupervisionIntent, editProfileFit],
+  )
   const openAiBuilderReady = Boolean(openAiProviderStatus?.configured)
   const createBlockedByProfilePolicy = createProfileFit.errors.length > 0
   const editBlockedByProfilePolicy = editProfileFit.errors.length > 0
   const pendingProfileRequestCount = profileRequests.filter((request) => request.status === 'REQUESTED').length
   const trackedWorkPackageIds = useMemo(
-    () => new Set(agentWorkPackages.map((workPackage) => workPackage.work_package_id)),
-    [agentWorkPackages],
+    () => new Set(trackedWorkPackageKeys),
+    [trackedWorkPackageKeys],
+  )
+  const workPackageSourceAgentOptions = useMemo(() => {
+    const options = agentRecords.map((agent) => ({
+      agent_id: agent.agent_id,
+      name: agent.name,
+    }))
+    if (!agentWorkPackageFilters.sourceAgentId) {
+      return options
+    }
+    return options.some((agent) => agent.agent_id === agentWorkPackageFilters.sourceAgentId)
+      ? options
+      : [...options, { agent_id: agentWorkPackageFilters.sourceAgentId, name: agentWorkPackageFilters.sourceAgentId }]
+  }, [agentRecords, agentWorkPackageFilters.sourceAgentId])
+  const workPackageFiltersActive = useMemo(
+    () => hasActiveWorkPackageFilters(agentWorkPackageFilters),
+    [agentWorkPackageFilters],
   )
   const profileRequestReady = Boolean(
     profileRequestForm.business_problem.trim() &&
@@ -864,6 +1794,17 @@ export function AgentManagementPanel({
       splitLines(profileRequestForm.proposed_eval_cases).length > 0,
   )
   const agentEvalReady = Boolean(selectedAgent && agentEvalForm.name.trim() && agentEvalForm.prompt.trim())
+
+  function handleSelectAgentSection(sectionKey: AgentManagementSectionKey) {
+    setActiveAgentSection(sectionKey)
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const nextUrl = new URL(window.location.href)
+    nextUrl.hash = agentManagementSectionHash(sectionKey)
+    window.history.replaceState(null, '', nextUrl.toString())
+  }
 
   const refreshAgents = useCallback(
     async (preferredAgentId: string | null = null) => {
@@ -891,6 +1832,8 @@ export function AgentManagementPanel({
         setProfileRequests(nextProfileRequests)
         setAgentEvalRecords(nextAgentEvals)
         setRoleArchetypes(nextRoles)
+        setAvailableSkills(runtimeSettings.available_skills)
+        setAvailableToolDefinitions(runtimeSettings.available_tools)
         setAvailableTools(runtimeSettings.available_tools.map((tool) => tool.name))
         setAvailableActionDefinitions(runtimeSettings.available_action_types)
         setOpenAiProviderStatus(
@@ -919,6 +1862,8 @@ export function AgentManagementPanel({
         setProfileRequests([])
         setAgentEvalRecords([])
         setRoleArchetypes([])
+        setAvailableSkills([])
+        setAvailableToolDefinitions([])
         setAvailableTools([])
         setAvailableActionDefinitions([])
         setOpenAiProviderStatus(null)
@@ -933,9 +1878,82 @@ export function AgentManagementPanel({
     [adminEnabled],
   )
 
+  const loadAgentRevisions = useCallback(
+    async (agentId: string | null) => {
+      if (!adminEnabled || !agentId) {
+        setAgentRevisions([])
+        setAgentRevisionsError('')
+        setAgentRevisionsLoading(false)
+        return
+      }
+
+      setAgentRevisionsLoading(true)
+      setAgentRevisionsError('')
+      try {
+        const revisions = await listAdminAssistantAgentRevisions(appConfig.apiBase, agentId)
+        setAgentRevisions(revisions)
+      } catch (error) {
+        setAgentRevisions([])
+        setAgentRevisionsError(
+          error instanceof Error ? error.message : 'Could not load assistant agent revisions.',
+        )
+      } finally {
+        setAgentRevisionsLoading(false)
+      }
+    },
+    [adminEnabled],
+  )
+
+  const loadAgentPromptPreview = useCallback(
+    async (agent: AssistantAdminAgent | null) => {
+      if (!adminEnabled || !authSession || !agent) {
+        agentPromptPreviewSequenceRef.current += 1
+        setAgentPromptPreview(null)
+        setAgentPromptPreviewError('')
+        setAgentPromptPreviewLoading(false)
+        return
+      }
+
+      const requestId = agentPromptPreviewSequenceRef.current + 1
+      agentPromptPreviewSequenceRef.current = requestId
+      setAgentPromptPreviewLoading(true)
+      setAgentPromptPreviewError('')
+      try {
+        const preview = await previewAssistantPromptContext(
+          appConfig.apiBase,
+          {
+            agent_id: agent.agent_id,
+            workspace: 'admin',
+            context: buildAdminAgentConstructionPreviewContext(agent),
+            use_live_tools: agent.capabilities.includes('READ'),
+          },
+          { accessToken: authSession.accessToken },
+        )
+        if (agentPromptPreviewSequenceRef.current !== requestId) {
+          return
+        }
+        setAgentPromptPreview(preview)
+      } catch (error) {
+        if (agentPromptPreviewSequenceRef.current !== requestId) {
+          return
+        }
+        setAgentPromptPreview(null)
+        setAgentPromptPreviewError(
+          error instanceof Error ? error.message : 'Could not load agent construction preview.',
+        )
+      } finally {
+        if (agentPromptPreviewSequenceRef.current === requestId) {
+          setAgentPromptPreviewLoading(false)
+        }
+      }
+    },
+    [adminEnabled, authSession],
+  )
+
   const loadAgentWorkPackages = useCallback(async () => {
     if (!adminEnabled) {
       setAgentWorkPackages([])
+      setTrackedWorkPackageKeys([])
       setAgentWorkPackageError('')
       setAgentWorkPackagesLoading(false)
       return
@@ -944,27 +1962,62 @@ export function AgentManagementPanel({
     setAgentWorkPackagesLoading(true)
     setAgentWorkPackageError('')
     try {
-      const records = await listAdminAssistantAgentWorkPackages(appConfig.apiBase)
-      setAgentWorkPackages(records)
+      const records = await listAdminAssistantAgentWorkPackages(appConfig.apiBase, {
+        status: agentWorkPackageFilters.status || undefined,
+        hasPr: agentWorkPackageFilters.hasPr || undefined,
+        hasCommit: agentWorkPackageFilters.hasCommit || undefined,
+        hasEval: agentWorkPackageFilters.hasEval || undefined,
+        hasTests: agentWorkPackageFilters.hasTests || undefined,
+        hasDocs: agentWorkPackageFilters.hasDocs || undefined,
+      })
+      const filteredRecords = applyLocalWorkPackageFilters(records, agentWorkPackageFilters)
+      setAgentWorkPackages(filteredRecords)
+      if (hasActiveWorkPackageFilters(agentWorkPackageFilters)) {
+        const allRecords = await listAdminAssistantAgentWorkPackages(appConfig.apiBase)
+        setTrackedWorkPackageKeys(allRecords.map((workPackage) => workPackage.work_package_id))
+      } else {
+        setTrackedWorkPackageKeys(filteredRecords.map((workPackage) => workPackage.work_package_id))
+      }
     } catch (error) {
       setAgentWorkPackages([])
+      setTrackedWorkPackageKeys([])
       setAgentWorkPackageError(
         error instanceof Error ? error.message : 'Could not load tracked agent work packages.',
       )
     } finally {
       setAgentWorkPackagesLoading(false)
     }
-  }, [adminEnabled])
+  }, [adminEnabled, agentWorkPackageFilters])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined
+    }
+
+    const applyHashSection = () => {
+      const sectionKey = readAgentManagementSectionFromHash(window.location.hash)
+      if (sectionKey) {
+        setActiveAgentSection(sectionKey)
+      }
+    }
+
+    applyHashSection()
+    window.addEventListener('hashchange', applyHashSection)
+    return () => window.removeEventListener('hashchange', applyHashSection)
+  }, [])
 
   useEffect(() => {
     requestSequenceRef.current += 1
     setAgentFlash(null)
 
     if (!adminEnabled) {
+      appliedSupervisionIntentIdRef.current = null
       setAgentRecords([])
       setProfileRequests([])
       setAgentEvalRecords([])
       setRoleArchetypes([])
+      setAvailableSkills([])
+      setAvailableToolDefinitions([])
       setAvailableTools([])
       setAvailableActionDefinitions([])
       setAgentsError('')
@@ -994,15 +2047,31 @@ export function AgentManagementPanel({
       setAutonomyReview(null)
       setAutonomyReviewError('')
       setAutonomyReviewLoading(false)
+      setSelfUpdateBrief('')
+      setSelfUpdateDraft(null)
+      setSelfUpdateError('')
+      setSelfUpdateLoading(false)
+      setAgentRevisions([])
+      setAgentRevisionsError('')
+      setAgentRevisionsLoading(false)
+      setPublishingRevisionId(null)
+      setAgentPromptPreview(null)
+      setAgentPromptPreviewError('')
+      setAgentPromptPreviewLoading(false)
+      setDraftPromptPreview(null)
+      setDraftPromptPreviewError('')
+      setDraftPromptPreviewLoading(false)
       setAgentHealthReview(null)
       setAgentHealthReviewError('')
       setAgentHealthReviewLoading(false)
       setAgentWorkPackages([])
+      setTrackedWorkPackageKeys([])
       setAgentWorkPackageError('')
       setAgentWorkPackagesLoading(false)
       setAcceptingWorkPackageId(null)
       setTransitioningWorkPackageId(null)
-      setWorkPackageTransitionNotes({})
+      setAgentWorkPackageFilters(DEFAULT_AGENT_WORK_PACKAGE_FILTERS)
+      setWorkPackageDrafts({})
       setSelectedAgentEvalId(null)
       setAgentEvalForm(createEmptyAgentEvalForm())
       setAgentEvalRuns([])
@@ -1012,6 +2081,7 @@ export function AgentManagementPanel({
       setDeletingAgentEvalId(null)
       setRunningAgentEvalId(null)
       setRunningAgentEvalSuite(false)
+      setActiveSupervisionIntent(null)
       setSimulationPrompt('')
       setSimulationContext('')
       setSimulationWorkspace('assistant')
@@ -1040,6 +2110,20 @@ export function AgentManagementPanel({
       setAutonomyReview(null)
       setAutonomyReviewError('')
       setAutonomyReviewLoading(false)
+      setSelfUpdateBrief('')
+      setSelfUpdateDraft(null)
+      setSelfUpdateError('')
+      setSelfUpdateLoading(false)
+      setAgentRevisions([])
+      setAgentRevisionsError('')
+      setAgentRevisionsLoading(false)
+      setPublishingRevisionId(null)
+      setAgentPromptPreview(null)
+      setAgentPromptPreviewError('')
+      setAgentPromptPreviewLoading(false)
+      setDraftPromptPreview(null)
+      setDraftPromptPreviewError('')
+      setDraftPromptPreviewLoading(false)
       setSelectedAgentEvalId(null)
       setAgentEvalForm(createEmptyAgentEvalForm())
       setAgentEvalRuns([])
@@ -1058,6 +2142,20 @@ export function AgentManagementPanel({
     setAutonomyReview(null)
     setAutonomyReviewError('')
     setAutonomyReviewLoading(false)
+    setSelfUpdateBrief('')
+    setSelfUpdateDraft(null)
+    setSelfUpdateError('')
+    setSelfUpdateLoading(false)
+    setAgentRevisions([])
+    setAgentRevisionsError('')
+    setAgentRevisionsLoading(false)
+    setPublishingRevisionId(null)
+    setAgentPromptPreview(null)
+    setAgentPromptPreviewError('')
+    setAgentPromptPreviewLoading(false)
+    setDraftPromptPreview(null)
+    setDraftPromptPreviewError('')
+    setDraftPromptPreviewLoading(false)
     setAgentEvalRuns([])
     setAgentEvalRunsLoading(false)
     setAgentEvalError('')
@@ -1073,6 +2171,147 @@ export function AgentManagementPanel({
         : selectedAgent.allowed_workspaces[0] ?? 'assistant',
     )
   }, [selectedAgent, selectedAgentEvalRecords])
+
+  useEffect(() => {
+    void loadAgentRevisions(selectedAgent?.agent_id ?? null)
+  }, [loadAgentRevisions, selectedAgent?.agent_id])
+
+  useEffect(() => {
+    void loadAgentPromptPreview(selectedAgent)
+  }, [loadAgentPromptPreview, selectedAgent])
+
+  useEffect(() => {
+    if (
+      !adminEnabled ||
+      !selectedAgent ||
+      editForm.agent_id !== selectedAgent.agent_id ||
+      draftConstructionDiffRows.length === 0
+    ) {
+      draftPromptPreviewSequenceRef.current += 1
+      setDraftPromptPreview(null)
+      setDraftPromptPreviewError('')
+      setDraftPromptPreviewLoading(false)
+      return
+    }
+
+    const requestId = draftPromptPreviewSequenceRef.current + 1
+    draftPromptPreviewSequenceRef.current = requestId
+    setDraftPromptPreviewLoading(true)
+    setDraftPromptPreviewError('')
+
+    const timeoutId = window.setTimeout(() => {
+      void previewAdminAssistantAgentDraftContext(
+        appConfig.apiBase,
+        selectedAgent.agent_id,
+        normalizeAgentUpdatePayload(editForm),
+      )
+        .then((preview) => {
+          if (draftPromptPreviewSequenceRef.current !== requestId) {
+            return
+          }
+          setDraftPromptPreview(preview)
+        })
+        .catch((error) => {
+          if (draftPromptPreviewSequenceRef.current !== requestId) {
+            return
+          }
+          setDraftPromptPreview(null)
+          setDraftPromptPreviewError(
+            error instanceof Error ? error.message : 'Could not load draft construction preview.',
+          )
+        })
+        .finally(() => {
+          if (draftPromptPreviewSequenceRef.current === requestId) {
+            setDraftPromptPreviewLoading(false)
+          }
+        })
+    }, 250)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [adminEnabled, draftConstructionDiffRows.length, editForm, selectedAgent])
+
+  useEffect(() => {
+    if (!controlTowerIntent) {
+      return
+    }
+    if (appliedSupervisionIntentIdRef.current === controlTowerIntent.intent_id) {
+      return
+    }
+    if (
+      controlTowerIntent.kind === 'agent_supervision' &&
+      activeSupervisionIntent?.intent_id === controlTowerIntent.intent_id
+    ) {
+      return
+    }
+    setAgentFlash(null)
+
+    if (controlTowerIntent.kind === 'work_package_review') {
+      setActiveSupervisionIntent(null)
+      setActiveAgentSection('work-packages')
+      setAgentWorkPackageFilters({
+        ...DEFAULT_AGENT_WORK_PACKAGE_FILTERS,
+        sourceAgentId:
+          controlTowerIntent.work_package_filters.source_agent_id ?? controlTowerIntent.agent_id,
+        status: controlTowerIntent.work_package_filters.status ?? '',
+        staleOnly: controlTowerIntent.work_package_filters.stale_only ?? false,
+      })
+      if (selectedAgentId !== controlTowerIntent.agent_id) {
+        setSelectedAgentId(controlTowerIntent.agent_id)
+      }
+      setAgentFlash({
+        tone: 'success',
+        message: `Filtered the work package backlog to ${controlTowerSignalTypeLabel(controlTowerIntent.signal_type).toLowerCase()} follow-up for ${controlTowerIntent.agent_name ?? controlTowerIntent.agent_id}.`,
+      })
+      appliedSupervisionIntentIdRef.current = controlTowerIntent.intent_id
+      return
+    }
+
+    setActiveSupervisionIntent(controlTowerIntent)
+    setActiveAgentSection('editor')
+    if (selectedAgentId !== controlTowerIntent.agent_id) {
+      setSelectedAgentId(controlTowerIntent.agent_id)
+    }
+  }, [activeSupervisionIntent?.intent_id, controlTowerIntent, selectedAgentId])
+
+  useEffect(() => {
+    if (!activeSupervisionIntent || !selectedAgent) {
+      return
+    }
+    if (selectedAgent.agent_id !== activeSupervisionIntent.agent_id) {
+      return
+    }
+    if (appliedSupervisionIntentIdRef.current === activeSupervisionIntent.intent_id) {
+      return
+    }
+
+    const preparedOn = new Date().toISOString().slice(0, 10)
+    setEditForm(
+      applyControlTowerSupervisionDraft(
+        toAgentForm(selectedAgent),
+        activeSupervisionIntent,
+        preparedOn,
+      ),
+    )
+    setAgentFlash({
+      tone: 'success',
+      message: `${controlTowerSupervisionModeLabel(activeSupervisionIntent.mode)} draft loaded for ${selectedAgent.name}. Review the scope below, then save when ready.`,
+    })
+    appliedSupervisionIntentIdRef.current = activeSupervisionIntent.intent_id
+  }, [activeSupervisionIntent, selectedAgent])
+
+  useEffect(() => {
+    if (!activeSupervisionIntent) {
+      return
+    }
+    if (selectedAgentId === activeSupervisionIntent.agent_id || agentsLoading) {
+      return
+    }
+    if (!selectedAgent || selectedAgent.agent_id !== activeSupervisionIntent.agent_id) {
+      setActiveSupervisionIntent(null)
+    }
+  }, [activeSupervisionIntent, agentsLoading, selectedAgent, selectedAgentId])
 
   useEffect(() => {
     if (selectedAgentEval) {
@@ -1126,7 +2365,7 @@ export function AgentManagementPanel({
     setBuilderWarnings([])
     setSelectedCreateTemplateKey(null)
     setSelectedCreateRoleKey(role.role_key)
-    setCreateForm(buildAgentBuilderDraftFromRole(role, availableTools))
+    setCreateForm(applyRoleHierarchyRecommendations(buildAgentBuilderDraftFromRole(role, availableTools), role, agentRecords))
     setBuilderBrief((current) =>
       current.trim()
         ? current
@@ -1139,8 +2378,9 @@ export function AgentManagementPanel({
     setBuilderWarnings([])
     setSelectedCreateTemplateKey(templateKey)
     const draft = buildAgentBuilderDraft(templateKey, availableTools)
+    const role = roleArchetypes.find((entry) => entry.role_key === draft.role_key)
     setSelectedCreateRoleKey(draft.role_key || null)
-    setCreateForm(draft)
+    setCreateForm(role ? applyRoleHierarchyRecommendations(draft, role, agentRecords) : draft)
     setBuilderBrief((current) =>
       current.trim()
         ? current
@@ -1171,6 +2411,36 @@ export function AgentManagementPanel({
     })
   }
 
+  function handleLoadSupervisionDraft(mode: AssistantControlTowerAgentSupervisionIntent['mode']) {
+    if (!selectedAgent) {
+      return
+    }
+
+    const nextIntent: AssistantControlTowerAgentSupervisionIntent = {
+      intent_id: Date.now(),
+      agent_id: selectedAgent.agent_id,
+      agent_name: selectedAgent.name,
+      signal_type: activeSupervisionIntent?.signal_type ?? 'POLICY_WARNING',
+      kind: 'agent_supervision',
+      mode,
+    }
+
+    appliedSupervisionIntentIdRef.current = null
+    setActiveSupervisionIntent(nextIntent)
+    setActiveAgentSection('editor')
+    setAgentFlash(null)
+  }
+
+  function handleClearSupervisionDraft() {
+    if (!selectedAgent) {
+      return
+    }
+
+    setEditForm(toAgentForm(selectedAgent))
+    setActiveSupervisionIntent(null)
+    setAgentFlash(null)
+  }
+
   async function handleGenerateDraftWithOpenAi() {
     if (!builderBrief.trim()) {
       return
@@ -1193,6 +2463,7 @@ export function AgentManagementPanel({
           model: createForm.model || null,
           allowed_workspaces: createForm.allowed_workspaces,
           capabilities: createForm.capabilities,
+          skills: createForm.skills,
           allowed_tools: createForm.allowed_tools,
           allowed_action_types: createForm.allowed_action_types,
           system_prompt: createForm.system_prompt || undefined,
@@ -1213,9 +2484,14 @@ export function AgentManagementPanel({
         human_owner_role: createForm.human_owner_role,
         authority_ceiling: createForm.authority_ceiling,
         activation_notes: createForm.activation_notes,
+        orchestration_pattern: createForm.orchestration_pattern,
+        parent_agent_id: createForm.parent_agent_id,
+        managed_agent_ids: [...createForm.managed_agent_ids],
+        delegation_guidance: createForm.delegation_guidance,
         profile_request_id: createForm.profile_request_id,
         allowed_workspaces: [...suggestion.allowed_workspaces],
         capabilities: [...suggestion.capabilities],
+        skills: [...suggestion.skills],
         allowed_tools: [...suggestion.allowed_tools],
         allowed_action_types: [...suggestion.allowed_action_types],
         daily_token_allocation: createForm.daily_token_allocation,
@@ -1246,7 +2522,7 @@ export function AgentManagementPanel({
       const totalProfiles = payload.total_profiles ?? payload.total_templates
       setAgentFlash({
         tone: 'success',
-        message: `Pilot lineup synchronized: ${payload.created_count} created, ${payload.updated_count} updated across ${totalProfiles} role profiles.`,
+        message: `Pilot lineup synchronized: ${payload.created_count} created, ${payload.updated_count} updated across ${totalProfiles} seeded defaults.`,
       })
     } catch (error) {
       setAgentFlash({
@@ -1367,9 +2643,53 @@ export function AgentManagementPanel({
     }
   }
 
+  async function handleActivateProfileRequest(request: AssistantAgentProfileRequest) {
+    const linkedAgentId = request.linked_agent_id || request.target_agent_id
+    if (!linkedAgentId) {
+      setAgentFlash({
+        tone: 'error',
+        message: 'Choose or link an agent before marking this request as applied.',
+      })
+      return
+    }
+    const linkedAgent = getProfileRequestLinkedAgent(request, agentRecords)
+    const linkedRevisionId = getPublishedProfileRequestRevisionId(request, linkedAgent)
+    if (!linkedAgent || linkedAgent.profile_request_id !== request.request_id || !linkedRevisionId) {
+      setAgentFlash({
+        tone: 'error',
+        message:
+          'Save the approved request into the linked agent first. Mark Applied requires a published revision that carries this profile request ID.',
+      })
+      return
+    }
+
+    setDecidingProfileRequestId(request.request_id)
+    setAgentFlash(null)
+
+    try {
+      await activateAssistantAgentProfileRequest(appConfig.apiBase, request.request_id, {
+        linked_agent_id: linkedAgentId,
+        linked_revision_id: linkedRevisionId,
+      })
+      await refreshAgents(linkedAgentId)
+      setAgentFlash({
+        tone: 'success',
+        message: `Profile request #${request.request_id} is now marked as applied to ${linkedAgentId} via revision #${linkedRevisionId}.`,
+      })
+    } catch (error) {
+      setAgentFlash({
+        tone: 'error',
+        message: error instanceof Error ? error.message : 'Could not mark profile request as applied.',
+      })
+    } finally {
+      setDecidingProfileRequestId(null)
+    }
+  }
+
   function handleApplyProfileRequestToDraft(request: AssistantAgentProfileRequest) {
     if (request.status === 'ACTIVATED' && request.linked_agent_id) {
       setSelectedAgentId(request.linked_agent_id)
+      setActiveAgentSection('editor')
       setAgentFlash({
         tone: 'success',
         message: `Opened the agent linked to profile request #${request.request_id}.`,
@@ -1380,6 +2700,36 @@ export function AgentManagementPanel({
       setAgentFlash({
         tone: 'error',
         message: 'Only approved custom profile requests can be loaded into a draft.',
+      })
+      return
+    }
+
+    if (request.request_kind !== 'NEW_SPECIALIZATION') {
+      const targetAgentId = request.target_agent_id
+      if (!targetAgentId) {
+        setAgentFlash({
+          tone: 'error',
+          message: 'This change request is missing a target agent.',
+        })
+        return
+      }
+      const targetAgent = agentRecords.find((agent) => agent.agent_id === targetAgentId) ?? null
+      if (!targetAgent) {
+        setSelectedAgentId(targetAgentId)
+        setActiveAgentSection('editor')
+        setAgentFlash({
+          tone: 'success',
+          message: `Opened target agent ${targetAgentId}; load the latest record before reviewing request #${request.request_id}.`,
+        })
+        return
+      }
+
+      setSelectedAgentId(targetAgent.agent_id)
+      setEditForm(applyProfileRequestToAgentForm(toAgentForm(targetAgent), request))
+      setActiveAgentSection('editor')
+      setAgentFlash({
+        tone: 'success',
+        message: `Loaded request #${request.request_id} into the review draft for ${targetAgent.name}.`,
       })
       return
     }
@@ -1418,14 +2768,20 @@ export function AgentManagementPanel({
       activation_notes: request.approval_notes
         ? `Approved profile request #${request.request_id}: ${request.approval_notes}`
         : `Approved profile request #${request.request_id}.`,
+      orchestration_pattern: 'SINGLE',
+      parent_agent_id: '',
+      managed_agent_ids: [],
+      delegation_guidance: '',
       profile_request_id: request.request_id,
       allowed_workspaces: [...request.requested_workspaces],
       capabilities,
+      skills: [],
       allowed_tools: allowedTools,
       allowed_action_types: [],
       daily_token_allocation: '',
       system_prompt: buildPromptFromProfileRequest(request),
     })
+    setActiveAgentSection('builder')
     setAgentFlash({
       tone: 'success',
       message: `Loaded profile request #${request.request_id} into the builder as a draft-only custom agent.`,
@@ -1486,33 +2842,18 @@ export function AgentManagementPanel({
     setSavingAgent(true)
 
     try {
-      const payload = normalizeAgentPayload(editForm)
+      const savedProfileRequestId = editForm.profile_request_id
+      const payload = normalizeAgentUpdatePayload(editForm)
       const updated = await updateAssistantAgent(
         appConfig.apiBase,
         selectedAgent.agent_id,
-        {
-          name: payload.name,
-          description: payload.description,
-          status: payload.status,
-          scope: payload.scope,
-          provider: payload.provider,
-          model: payload.model,
-          role_key: payload.role_key,
-          profile_kind: payload.profile_kind,
-          specialization_summary: payload.specialization_summary,
-          human_owner_role: payload.human_owner_role,
-          authority_ceiling: payload.authority_ceiling,
-          activation_notes: payload.activation_notes,
-          profile_request_id: payload.profile_request_id,
-          allowed_workspaces: payload.allowed_workspaces,
-          capabilities: payload.capabilities,
-          allowed_tools: payload.allowed_tools,
-          allowed_action_types: payload.allowed_action_types,
-          daily_token_allocation: payload.daily_token_allocation,
-          system_prompt: payload.system_prompt,
-        } satisfies UpdateAssistantAgentInput,
+        payload,
       )
       await refreshAgents(updated.agent_id)
+      setActiveSupervisionIntent(null)
+      if (savedProfileRequestId) {
+        setActiveAgentSection('profile-requests')
+      }
       setAgentFlash({
         tone: 'success',
         message: `${updated.name} saved as version ${updated.version}.`,
@@ -1580,6 +2921,98 @@ export function AgentManagementPanel({
     }
   }
 
+  async function handleGenerateSelfUpdateDraft() {
+    if (!selectedAgent) {
+      return
+    }
+
+    setSelfUpdateLoading(true)
+    setSelfUpdateError('')
+    setSelfUpdateDraft(null)
+    setAgentFlash(null)
+
+    try {
+      const draft = await generateAssistantAgentSelfUpdateDraft(appConfig.apiBase, selectedAgent.agent_id, {
+        brief: selfUpdateBrief,
+      })
+      setSelfUpdateDraft(draft)
+      await loadAgentRevisions(selectedAgent.agent_id)
+      setAgentFlash({
+        tone: 'success',
+        message: `Stored self-update draft revision v${draft.revision_version} for ${selectedAgent.name}. Review the diff, then publish when ready.`,
+      })
+    } catch (error) {
+      setSelfUpdateError(
+        error instanceof Error ? error.message : 'Could not generate the self-update draft.',
+      )
+    } finally {
+      setSelfUpdateLoading(false)
+    }
+  }
+
+  function handleApplySelfUpdateDraft() {
+    if (!selfUpdateDraft) {
+      return
+    }
+
+    setEditForm(toAgentFormFromSelfUpdateDraft(selfUpdateDraft))
+    setActiveAgentSection('editor')
+    setAgentFlash({
+      tone: 'success',
+      message: `${selfUpdateDraft.name} self-update draft revision loaded into the editor. Review the narrowed scope and prompt before saving.`,
+    })
+  }
+
+  function handleLoadRevisionIntoEditor(revision: AssistantAgentRevision) {
+    setEditForm(toAgentFormFromRevisionPayload(revision.payload, revision.agent_id))
+    setActiveAgentSection('editor')
+    setAgentFlash({
+      tone: 'success',
+      message: `Revision v${revision.version} loaded into the editor for review.`,
+    })
+  }
+
+  async function handlePublishAgentRevision(revision: AssistantAgentRevision) {
+    if (!selectedAgent) {
+      return
+    }
+
+    setPublishingRevisionId(revision.revision_id)
+    setSelfUpdateError('')
+    setAgentRevisionsError('')
+    setAgentFlash(null)
+
+    try {
+      const published = await publishAssistantAgentRevision(
+        appConfig.apiBase,
+        selectedAgent.agent_id,
+        revision.revision_id,
+      )
+      await refreshAgents(published.agent_id)
+      await loadAgentRevisions(published.agent_id)
+      setActiveSupervisionIntent(null)
+      setSelfUpdateDraft((current) =>
+        current && current.revision_id === revision.revision_id
+          ? {
+              ...current,
+              published_at: published.published_at ?? current.published_at,
+              published_by: published.published_by ?? current.published_by,
+            }
+          : current,
+      )
+      setAgentFlash({
+        tone: 'success',
+        message: `Revision v${revision.version} is now published to ${published.name}.`,
+      })
+    } catch (error) {
+      setAgentRevisionsError(
+        error instanceof Error ? error.message : 'Could not publish the assistant agent revision.',
+      )
+    } finally {
+      setPublishingRevisionId(null)
+    }
+  }
+
   async function handleGenerateAgentHealthReview() {
     setAgentHealthReviewLoading(true)
     setAgentHealthReviewError('')
@@ -1625,9 +3058,25 @@ export function AgentManagementPanel({
     workPackage: AssistantAgentWorkPackage,
     status: AssistantAgentWorkPackageStatus,
   ) {
-    const notes = workPackageTransitionNotes[workPackage.work_package_id]?.trim()
-    if (status === 'IMPLEMENTED' && !notes) {
-      setAgentWorkPackageError('Add an implementation evidence note before marking the package implemented.')
+    const draft = workPackageDrafts[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)
+    const notes = draft.notes.trim()
+    const implementationEvidence = {
+      prUrl: draft.prUrl.trim() || undefined,
+      commitSha: draft.commitSha.trim() || undefined,
+      evalIds: parseDraftEvalIds(draft.evalIds),
+      testNames: splitDraftLines(draft.testNames),
+      docPaths: splitDraftLines(draft.docPaths),
+      owner: draft.owner.trim() || undefined,
+    }
+    const hasEvidenceArtifact = Boolean(
+      implementationEvidence.prUrl ||
+        implementationEvidence.commitSha ||
+        implementationEvidence.evalIds.length > 0 ||
+        implementationEvidence.testNames.length > 0 ||
+        implementationEvidence.docPaths.length > 0,
+    )
+    if (status === 'IMPLEMENTED' && !hasEvidenceArtifact) {
+      setAgentWorkPackageError('Add a PR, commit, eval, test, or doc artifact before marking the package implemented.')
       return
     }
 
@@ -1643,10 +3092,11 @@ export function AgentManagementPanel({
           status,
           updatedBy: authSession?.user.user_id,
           notes: notes || undefined,
+          implementationEvidence,
         },
       )
       await loadAgentWorkPackages()
-      setWorkPackageTransitionNotes((current) => {
+      setWorkPackageDrafts((current) => {
         const next = { ...current }
         delete next[workPackage.work_package_id]
         return next
@@ -1669,6 +3119,7 @@ export function AgentManagementPanel({
     setAgentEvalForm(toAgentEvalForm(record))
     setAgentEvalRuns([])
     setAgentEvalError('')
+    setActiveAgentSection('editor')
   }
 
   function handleResetAgentEvalForm() {
@@ -1680,6 +3131,7 @@ export function AgentManagementPanel({
     setAgentEvalForm(createEmptyAgentEvalForm(selectedAgent))
     setAgentEvalRuns([])
     setAgentEvalError('')
+    setActiveAgentSection('editor')
   }
 
   async function handleSaveAgentEval() {
@@ -1879,7 +3331,77 @@ export function AgentManagementPanel({
             </article>
           </div>
 
-          <div className="assistant-profile-request-panel">
+          <div className="assistant-agent-section-tabs" role="tablist" aria-label="Managed agent sections">
+            {AGENT_MANAGEMENT_SECTIONS.map((section) => (
+              <button
+                key={section.key}
+                type="button"
+                role="tab"
+                aria-selected={activeAgentSection === section.key}
+                className={`assistant-agent-section-tab ${
+                  activeAgentSection === section.key ? 'is-active' : ''
+                }`}
+                onClick={() => handleSelectAgentSection(section.key)}
+              >
+                <strong>{section.label}</strong>
+                <span>{section.summary}</span>
+              </button>
+            ))}
+          </div>
+
+          {activeAgentSection === 'overview' ? (
+            <div className="assistant-agent-overview-grid">
+              <button
+                type="button"
+                className="assistant-agent-overview-card"
+                onClick={() => handleSelectAgentSection('builder')}
+              >
+                <span>Roster + Builder</span>
+                <strong>{agentRecords.length} agents</strong>
+                <p>{roleArchetypes.length} role archetypes ready for new governed drafts.</p>
+              </button>
+              <button
+                type="button"
+                className="assistant-agent-overview-card"
+                onClick={() => handleSelectAgentSection('profile-requests')}
+              >
+                <span>Profile Requests</span>
+                <strong>{pendingProfileRequestCount} pending</strong>
+                <p>{approvedProfileRequests.length} approved or active requests waiting in the queue.</p>
+              </button>
+              <button
+                type="button"
+                className="assistant-agent-overview-card"
+                onClick={() => handleSelectAgentSection('work-packages')}
+              >
+                <span>Health Backlog</span>
+                <strong>{agentWorkPackages.length} tracked</strong>
+                <p>
+                  {workPackageFiltersActive
+                    ? `${trackedWorkPackageKeys.length} total packages before filters.`
+                    : 'Generate or refresh work packages from autonomy review signals.'}
+                </p>
+              </button>
+              <button
+                type="button"
+                className="assistant-agent-overview-card"
+                onClick={() => handleSelectAgentSection('editor')}
+              >
+                <span>Selected Agent</span>
+                <strong>{selectedAgent?.name ?? 'None selected'}</strong>
+                <p>
+                  {selectedAgent
+                    ? `${selectedAgentEvalRecords.length} eval case${
+                        selectedAgentEvalRecords.length === 1 ? '' : 's'
+                      } available for the saved profile.`
+                    : 'Pick an agent from the roster before editing saved construction.'}
+                </p>
+              </button>
+            </div>
+          ) : null}
+
+          {activeAgentSection === 'work-packages' ? (
+          <div id="assistant-agent-work-packages" className="assistant-profile-request-panel">
             <div className="assistant-admin-section-head">
               <div>
                 <span className="eyebrow">Health Review</span>
@@ -1889,7 +3411,9 @@ export function AgentManagementPanel({
                 {agentHealthReview
                   ? `${agentHealthReview.work_package_count} candidate package${agentHealthReview.work_package_count === 1 ? '' : 's'} · ${agentHealthReview.pause_count} pause signal${agentHealthReview.pause_count === 1 ? '' : 's'}`
                   : 'Generate from autonomy briefs'}
-                {` · ${agentWorkPackages.length} tracked`}
+                {workPackageFiltersActive
+                  ? ` · ${agentWorkPackages.length} shown of ${trackedWorkPackageKeys.length} tracked`
+                  : ` · ${agentWorkPackages.length} tracked`}
               </span>
             </div>
 
@@ -1910,6 +3434,86 @@ export function AgentManagementPanel({
               >
                 {agentWorkPackagesLoading ? 'Refreshing Backlog...' : 'Refresh Backlog'}
               </button>
+            </div>
+
+            <div className="assistant-work-package-filter-grid">
+              <label className="field">
+                <span>Status</span>
+                <select
+                  className="control"
+                  value={agentWorkPackageFilters.status}
+                  onChange={(event) =>
+                    setAgentWorkPackageFilters((current) => ({
+                      ...current,
+                      status: event.target.value as AgentWorkPackageFilters['status'],
+                    }))
+                  }
+                >
+                  <option value="">All tracked statuses</option>
+                  <option value="ACCEPTED">Accepted</option>
+                  <option value="IN_PROGRESS">In Progress</option>
+                  <option value="IMPLEMENTED">Implemented</option>
+                  <option value="DISMISSED">Dismissed</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Source Agent</span>
+                <select
+                  className="control"
+                  value={agentWorkPackageFilters.sourceAgentId}
+                  onChange={(event) =>
+                    setAgentWorkPackageFilters((current) => ({
+                      ...current,
+                      sourceAgentId: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="">All source agents</option>
+                  {workPackageSourceAgentOptions.map((agent) => (
+                    <option key={agent.agent_id} value={agent.agent_id}>
+                      {agent.name} ({agent.agent_id})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="field">
+                <span>Backlog Filters</span>
+                <div className="toolbar settings-actions assistant-work-package-filter-pills">
+                  {([
+                    ['staleOnly', `Stale ${STALE_WORK_PACKAGE_THRESHOLD_HOURS}h+`],
+                    ['hasPr', 'PR'],
+                    ['hasCommit', 'Commit'],
+                    ['hasEval', 'Eval'],
+                    ['hasTests', 'Tests'],
+                    ['hasDocs', 'Docs'],
+                  ] as const).map(([filterKey, label]) => {
+                    const active = agentWorkPackageFilters[filterKey]
+                    return (
+                      <button
+                        key={filterKey}
+                        type="button"
+                        className={active ? 'button button-secondary' : 'button button-ghost'}
+                        onClick={() =>
+                          setAgentWorkPackageFilters((current) => ({
+                            ...current,
+                            [filterKey]: !current[filterKey],
+                          }))
+                        }
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                  <button
+                    type="button"
+                    className="button button-ghost"
+                    onClick={() => setAgentWorkPackageFilters(DEFAULT_AGENT_WORK_PACKAGE_FILTERS)}
+                    disabled={!workPackageFiltersActive}
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+              </div>
             </div>
 
             {agentHealthReviewError ? (
@@ -1959,7 +3563,10 @@ export function AgentManagementPanel({
                             key={`${workPackage.work_package_id}-${agentId}`}
                             type="button"
                             className="button button-ghost"
-                            onClick={() => setSelectedAgentId(agentId)}
+                            onClick={() => {
+                              setSelectedAgentId(agentId)
+                              setActiveAgentSection('editor')
+                            }}
                           >
                             Open {agentId}
                           </button>
@@ -1975,7 +3582,7 @@ export function AgentManagementPanel({
               <div className="assistant-builder-preview-grid">
                 {agentWorkPackages.slice(0, 3).map((workPackage) => {
                   const nextStatuses = agentWorkPackageNextStatuses(workPackage.status)
-                  const transitionNote = workPackageTransitionNotes[workPackage.work_package_id] ?? ''
+                  const draft = workPackageDrafts[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)
                   const isTransitioning = transitioningWorkPackageId === workPackage.work_package_id
                   return (
                     <div key={`tracked-${workPackage.work_package_id}`} className="assistant-sidebar-block">
@@ -1988,20 +3595,178 @@ export function AgentManagementPanel({
                         {workPackage.accepted_by ? ` · accepted by ${workPackage.accepted_by}` : ''}
                       </small>
                       {workPackage.notes ? <small>{workPackage.notes}</small> : null}
+                      {workPackage.implemented_by || workPackage.implemented_at ? (
+                        <small>
+                          {workPackage.implemented_by ? `implemented by ${workPackage.implemented_by}` : 'implemented'}
+                          {workPackage.implemented_at ? ` · ${formatDate(workPackage.implemented_at)}` : ''}
+                        </small>
+                      ) : null}
+                      {(workPackage.implementation_evidence.pr_url ||
+                        workPackage.implementation_evidence.commit_sha ||
+                        workPackage.implementation_evidence.eval_ids.length > 0 ||
+                        workPackage.implementation_evidence.test_names.length > 0 ||
+                        workPackage.implementation_evidence.doc_paths.length > 0 ||
+                        workPackage.implementation_evidence.owner) ? (
+                        <small>
+                          {workPackage.implementation_evidence.owner
+                            ? `owner ${workPackage.implementation_evidence.owner}`
+                            : 'evidence ready'}
+                          {workPackage.implementation_evidence.pr_url ? ' · PR linked' : ''}
+                          {workPackage.implementation_evidence.commit_sha ? ' · commit linked' : ''}
+                          {workPackage.implementation_evidence.eval_ids.length > 0
+                            ? ` · ${workPackage.implementation_evidence.eval_ids.length} eval${workPackage.implementation_evidence.eval_ids.length === 1 ? '' : 's'}`
+                            : ''}
+                          {workPackage.implementation_evidence.test_names.length > 0
+                            ? ` · ${workPackage.implementation_evidence.test_names.length} test${workPackage.implementation_evidence.test_names.length === 1 ? '' : 's'}`
+                            : ''}
+                          {workPackage.implementation_evidence.doc_paths.length > 0
+                            ? ` · ${workPackage.implementation_evidence.doc_paths.length} doc${workPackage.implementation_evidence.doc_paths.length === 1 ? '' : 's'}`
+                            : ''}
+                        </small>
+                      ) : null}
+                      {workPackage.implementation_evidence.pr_url ? (
+                        <small>
+                          PR:{' '}
+                          <a
+                            href={workPackage.implementation_evidence.pr_url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Open linked pull request
+                          </a>
+                        </small>
+                      ) : null}
+                      {workPackage.implementation_evidence.commit_sha ? (
+                        <small>Commit: {workPackage.implementation_evidence.commit_sha}</small>
+                      ) : null}
+                      {workPackage.implementation_evidence.eval_ids.length > 0 ? (
+                        <small>Eval IDs: {workPackage.implementation_evidence.eval_ids.join(', ')}</small>
+                      ) : null}
+                      {workPackage.implementation_evidence.test_names.length > 0 ? (
+                        <small>Tests: {workPackage.implementation_evidence.test_names.join(', ')}</small>
+                      ) : null}
+                      {workPackage.implementation_evidence.doc_paths.length > 0 ? (
+                        <small>Docs: {workPackage.implementation_evidence.doc_paths.join(', ')}</small>
+                      ) : null}
                       {nextStatuses.length > 0 ? (
                         <div className="assistant-profile-request-decision-grid">
                           <label className="field">
-                            <span>Evidence Or Decision Note</span>
+                            <span>Decision Note</span>
                             <textarea
                               className="control"
-                              value={transitionNote}
+                              value={draft.notes}
                               onChange={(event) =>
-                                setWorkPackageTransitionNotes((current) => ({
+                                setWorkPackageDrafts((current) => ({
                                   ...current,
-                                  [workPackage.work_package_id]: event.target.value,
+                                  [workPackage.work_package_id]: {
+                                    ...(current[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)),
+                                    notes: event.target.value,
+                                  },
                                 }))
                               }
-                              placeholder="What changed, why it closed, or what proves the implementation."
+                              placeholder="What changed, why this moved, or any helpful handoff context."
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Implementation Owner</span>
+                            <input
+                              className="control"
+                              value={draft.owner}
+                              onChange={(event) =>
+                                setWorkPackageDrafts((current) => ({
+                                  ...current,
+                                  [workPackage.work_package_id]: {
+                                    ...(current[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)),
+                                    owner: event.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="Owner or reviewer shepherding the implementation."
+                            />
+                          </label>
+                          <label className="field">
+                            <span>PR URL</span>
+                            <input
+                              className="control"
+                              value={draft.prUrl}
+                              onChange={(event) =>
+                                setWorkPackageDrafts((current) => ({
+                                  ...current,
+                                  [workPackage.work_package_id]: {
+                                    ...(current[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)),
+                                    prUrl: event.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="https://github.com/org/repo/pull/123"
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Commit SHA</span>
+                            <input
+                              className="control"
+                              value={draft.commitSha}
+                              onChange={(event) =>
+                                setWorkPackageDrafts((current) => ({
+                                  ...current,
+                                  [workPackage.work_package_id]: {
+                                    ...(current[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)),
+                                    commitSha: event.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="abc123def456"
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Eval IDs</span>
+                            <input
+                              className="control"
+                              value={draft.evalIds}
+                              onChange={(event) =>
+                                setWorkPackageDrafts((current) => ({
+                                  ...current,
+                                  [workPackage.work_package_id]: {
+                                    ...(current[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)),
+                                    evalIds: event.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="12, 18, 25"
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Test Names</span>
+                            <textarea
+                              className="control"
+                              value={draft.testNames}
+                              onChange={(event) =>
+                                setWorkPackageDrafts((current) => ({
+                                  ...current,
+                                  [workPackage.work_package_id]: {
+                                    ...(current[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)),
+                                    testNames: event.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="apps.api.tests.test_assistant_api&#10;npm test -- assistantApi.test.ts"
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Doc Paths</span>
+                            <textarea
+                              className="control"
+                              value={draft.docPaths}
+                              onChange={(event) =>
+                                setWorkPackageDrafts((current) => ({
+                                  ...current,
+                                  [workPackage.work_package_id]: {
+                                    ...(current[workPackage.work_package_id] ?? workPackageDraftFromRecord(workPackage)),
+                                    docPaths: event.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="docs/engineering/agent-knowledge-base.md"
                             />
                           </label>
                           <div className="toolbar settings-actions">
@@ -2010,7 +3775,7 @@ export function AgentManagementPanel({
                                 key={`${workPackage.work_package_id}-${status}`}
                                 type="button"
                                 className={status === 'DISMISSED' ? 'button button-ghost' : 'button button-secondary'}
-                                disabled={isTransitioning || (status === 'IMPLEMENTED' && !transitionNote.trim())}
+                                disabled={isTransitioning}
                                 onClick={() => void handleUpdateAgentWorkPackageStatus(workPackage, status)}
                               >
                                 {status === 'IN_PROGRESS'
@@ -2029,6 +3794,7 @@ export function AgentManagementPanel({
               </div>
             ) : null}
           </div>
+          ) : null}
 
           {agentsLoading ? <div className="feedback-banner feedback-banner-success">Loading assistant agents from Admin...</div> : null}
           {agentsError ? <div className="feedback-banner feedback-banner-error">{agentsError}</div> : null}
@@ -2038,7 +3804,8 @@ export function AgentManagementPanel({
             </div>
           ) : null}
 
-          <div className="assistant-profile-request-panel">
+          {activeAgentSection === 'profile-requests' ? (
+          <div id="assistant-agent-profile-requests" className="assistant-profile-request-panel">
             <div className="assistant-admin-section-head">
               <div>
                 <span className="eyebrow">Custom Requests</span>
@@ -2286,21 +4053,46 @@ export function AgentManagementPanel({
                     <p>Requests appear here before they can become active custom profiles.</p>
                   </div>
                 ) : (
-                  profileRequests.map((request) => (
+                  profileRequests.map((request) => {
+                    const linkedAgent = getProfileRequestLinkedAgent(request, agentRecords)
+                    const linkedRevisionId = getPublishedProfileRequestRevisionId(request, linkedAgent)
+                    const requestDiffRows = request.applied_diff_summary
+                    const readyToMarkApplied = Boolean(
+                      request.status === 'APPROVED' &&
+                        request.request_kind !== 'NEW_SPECIALIZATION' &&
+                        linkedAgent &&
+                        linkedAgent.profile_request_id === request.request_id &&
+                        linkedRevisionId,
+                    )
+                    return (
                     <article key={request.request_id} className="assistant-profile-request-card">
                       <div className="assistant-provider-head">
                         <strong>
                           #{request.request_id}{' '}
-                          {titleFromAgentId(request.requested_agent_id) || 'Custom specialization'}
+                          {titleFromAgentId(request.requested_agent_id || request.target_agent_id) ||
+                            'Custom specialization'}
                         </strong>
                         <span className={`status-pill status-pill-${profileRequestStatusTone(request.status)}`}>
                           {request.status}
                         </span>
                       </div>
+                      <small>
+                        {profileRequestKindLabel(request.request_kind)}
+                        {request.target_agent_id ? ` · target ${titleFromAgentId(request.target_agent_id)}` : ''}
+                      </small>
+                      {request.change_summary ? <p>{request.change_summary}</p> : null}
                       <p>{request.business_problem}</p>
                       <small>
                         {request.human_owner_role} · {request.requested_authority_ceiling} ·{' '}
                         {request.requested_workspaces.map((workspace) => workspaceLabel(workspace)).join(' · ')}
+                      </small>
+                      <small>
+                        {request.requested_skills.length} skill
+                        {request.requested_skills.length === 1 ? '' : 's'} ·{' '}
+                        {request.requested_inputs_tools.length} tool
+                        {request.requested_inputs_tools.length === 1 ? '' : 's'} ·{' '}
+                        {request.requested_action_types.length} action
+                        {request.requested_action_types.length === 1 ? '' : 's'}
                       </small>
                       <small>
                         {request.proposed_eval_cases.length} eval case
@@ -2308,6 +4100,31 @@ export function AgentManagementPanel({
                         {request.requested_by}
                         {request.reviewed_by ? ` · reviewed by ${request.reviewed_by}` : ''}
                       </small>
+                      {linkedRevisionId ? (
+                        <small>
+                          Applied revision proof: {linkedAgent?.name ?? request.linked_agent_id} revision #
+                          {linkedRevisionId}
+                        </small>
+                      ) : request.status === 'APPROVED' && request.request_kind !== 'NEW_SPECIALIZATION' ? (
+                        <small>
+                          Save the review draft into the target agent before marking this request applied.
+                        </small>
+                      ) : null}
+                      {requestDiffRows.length > 0 ? (
+                        <div className="assistant-profile-request-review-note">
+                          <strong>Saved configuration diff</strong>
+                          {requestDiffRows.slice(0, 8).map((diffRow) => (
+                            <p key={`${request.request_id}-${diffRow.field_key}`}>
+                              <strong>{diffRow.label}:</strong> {diffRow.current_value}
+                              {' -> '}
+                              {diffRow.next_value}
+                            </p>
+                          ))}
+                          {requestDiffRows.length > 8 ? (
+                            <small>{requestDiffRows.length - 8} more saved change(s) in the linked revision.</small>
+                          ) : null}
+                        </div>
+                      ) : null}
 
                       {request.status === 'REQUESTED' ? (
                         <div className="assistant-profile-request-decision-grid">
@@ -2378,18 +4195,34 @@ export function AgentManagementPanel({
                             className="button button-secondary"
                             onClick={() => handleApplyProfileRequestToDraft(request)}
                           >
-                            {request.status === 'ACTIVATED' ? 'Open Linked Agent' : 'Load Builder Draft'}
+                            {request.status === 'ACTIVATED'
+                              ? 'Open Linked Agent'
+                              : request.request_kind === 'NEW_SPECIALIZATION'
+                                ? 'Load Builder Draft'
+                                : 'Load Review Draft'}
                           </button>
+                          {request.status === 'APPROVED' && request.request_kind !== 'NEW_SPECIALIZATION' ? (
+                            <button
+                              type="button"
+                              className="button button-ghost"
+                              disabled={decidingProfileRequestId === request.request_id || !readyToMarkApplied}
+                              onClick={() => void handleActivateProfileRequest(request)}
+                            >
+                              Mark Applied
+                            </button>
+                          ) : null}
                         </div>
                       ) : null}
                     </article>
-                  ))
+                  )})
                 )}
               </div>
             </div>
           </div>
+          ) : null}
 
-          <div className="assistant-admin-grid">
+          {activeAgentSection === 'builder' ? (
+          <div id="assistant-agent-builder" className="assistant-admin-grid">
             <div className="assistant-admin-column">
               <div className="assistant-admin-section-head">
                 <div>
@@ -2420,6 +4253,7 @@ export function AgentManagementPanel({
                         onClick={() => {
                           setAgentFlash(null)
                           setSelectedAgentId(agent.agent_id)
+                          setActiveAgentSection('editor')
                         }}
                       >
                         <div className="assistant-provider-head">
@@ -2446,8 +4280,13 @@ export function AgentManagementPanel({
                           {agent.scope}
                           {` · ${describeProfileKind(agent.profile_kind)}`}
                           {agent.role_key ? ` · ${agent.role_key}` : ''}
+                          {` · ${orchestrationPatternLabel(agent.orchestration_pattern)}`}
+                          {agent.managed_agent_ids.length > 0
+                            ? ` · ${agent.managed_agent_ids.length} managed`
+                            : ''}
                           {agent.provider ? ` · ${agent.provider}` : ' · inherited provider'}
                           {agent.model ? ` · ${agent.model}` : ''}
+                          {agent.skills.length > 0 ? ` · ${agent.skills.length} skills` : ''}
                           {agent.allowed_tools.length > 0 ? ` · ${agent.allowed_tools.length} live tools` : ''}
                           {agent.allowed_action_types.length > 0 ? ` · ${agent.allowed_action_types.length} actions` : ''}
                         </small>
@@ -2466,7 +4305,7 @@ export function AgentManagementPanel({
                   <span className="eyebrow">Create</span>
                   <h4>Builder Draft</h4>
                 </div>
-                <span>Start from a role preset or shape one from scratch</span>
+                <span>Start from a Phase 1 pilot blueprint, browse the full role catalog, or shape one from scratch</span>
               </div>
 
               <div className="assistant-role-catalog-shell">
@@ -2505,6 +4344,11 @@ export function AgentManagementPanel({
                         <small>
                           {role.allowed_workspaces.map((workspace) => workspaceLabel(workspace)).join(' · ')}
                         </small>
+                        <small>
+                          {orchestrationPatternLabel(role.recommended_orchestration_pattern)} · manages{' '}
+                          {role.recommended_managed_role_keys.length}
+                        </small>
+                        <small>{roleCatalogSyncSummary(role)}</small>
                       </button>
                     ))}
                   </div>
@@ -2531,6 +4375,19 @@ export function AgentManagementPanel({
                         <small>{selectedCreateRole.capability_ceiling.join(' · ')}</small>
                       </div>
                       <div className="assistant-sidebar-block">
+                        <strong>Skills + recipe</strong>
+                        <p>{summarizeSkillSelection(selectedCreateRole.skills, skillDefinitionsByName)}</p>
+                        <small>Role + skills + capabilities + tools + actions + prompt guidance</small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Hierarchy</strong>
+                        <p>{orchestrationPatternLabel(selectedCreateRole.recommended_orchestration_pattern)}</p>
+                        <small>
+                          Parent roles: {describeRoleKeyList(selectedCreateRole.recommended_parent_role_keys)} ·
+                          managed roles: {describeRoleKeyList(selectedCreateRole.recommended_managed_role_keys)}
+                        </small>
+                      </div>
+                      <div className="assistant-sidebar-block">
                         <strong>Actions</strong>
                         <p>{actionSummary(selectedCreateRole.maximum_action_types, actionDefinitionsByName)}</p>
                         <small>{selectedCreateRole.approval_rules.join(' ')}</small>
@@ -2543,6 +4400,11 @@ export function AgentManagementPanel({
                             ? `${selectedCreateRole.eval_gate.status}: ${selectedCreateRole.required_eval_coverage.join(' · ')}`
                             : selectedCreateRole.required_eval_coverage.join(' · ')}
                         </small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Availability</strong>
+                        <p>{roleCatalogSyncSummary(selectedCreateRole)}</p>
+                        <small>{roleCatalogStatusLabel(selectedCreateRole)}</small>
                       </div>
                     </div>
                     <div className="toolbar settings-actions">
@@ -2571,9 +4433,12 @@ export function AgentManagementPanel({
                     >
                       <div className="assistant-provider-head">
                         <strong>{template.name}</strong>
-                        <span className="status-pill status-pill-planned">{template.scope}</span>
+                        <span className={`status-pill status-pill-${templateAvailabilityTone(template.availability)}`}>
+                          {templateAvailabilityLabel(template.availability)}
+                        </span>
                       </div>
                       <p>{template.summary}</p>
+                      <small>{template.scope} scope</small>
                       <small>
                         {template.allowed_workspaces.map((workspace) => workspaceLabel(workspace)).join(' · ')}
                       </small>
@@ -2589,7 +4454,7 @@ export function AgentManagementPanel({
                     </div>
                     <span>
                       {selectedCreateTemplate
-                        ? selectedCreateTemplate.best_for
+                        ? templateAvailabilityLabel(selectedCreateTemplate.availability)
                         : 'Use the controls below to assemble a custom managed agent.'}
                     </span>
                   </div>
@@ -2603,9 +4468,26 @@ export function AgentManagementPanel({
                           <small>{selectedCreateTemplate.description}</small>
                         </div>
                         <div className="assistant-sidebar-block">
+                          <strong>Availability</strong>
+                          <p>{selectedCreateTemplate.best_for}</p>
+                          <small>{selectedCreateTemplate.availability_note}</small>
+                        </div>
+                        <div className="assistant-sidebar-block">
                           <strong>Workspace coverage</strong>
                           <p>{createWorkspaceSummary}</p>
                           <small>{createCapabilitySummary}</small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Skill plan</strong>
+                          <p>{createSkillSummary}</p>
+                          <small>Make the specialization visible before anyone reads the prompt.</small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Hierarchy plan</strong>
+                          <p>{describeHierarchyPlan(createForm, agentRecords)}</p>
+                          <small>
+                            {createForm.delegation_guidance || 'No delegation guidance drafted yet.'}
+                          </small>
                         </div>
                         <div className="assistant-sidebar-block">
                           <strong>Live tool plan</strong>
@@ -2649,8 +4531,8 @@ export function AgentManagementPanel({
                     <div className="empty-state">
                       <strong>Choose a starting point</strong>
                       <p>
-                        Role presets seed the draft with workspace access, governed tool defaults,
-                        action guardrails, and a starter system prompt you can still edit line by line.
+                        Pilot blueprints seed the draft with governed workspaces, tool defaults,
+                        authority boundaries, and a starter system prompt you can still edit line by line.
                       </p>
                     </div>
                   )}
@@ -2991,8 +4873,15 @@ export function AgentManagementPanel({
                     />
                   </label>
 
+                  <AgentHierarchyEditor
+                    form={createForm}
+                    setForm={setCreateForm}
+                    role={createFormRole}
+                    agentRecords={agentRecords}
+                  />
+
                   <RoleProfileFitSummary fit={createProfileFit} />
-                  <PromptProfilePreview form={createForm} role={createFormRole} />
+                  <PromptProfilePreview form={createForm} role={createFormRole} agentRecords={agentRecords} />
 
                   {createFormRole ? (
                     <div className="toolbar settings-actions">
@@ -3047,6 +4936,18 @@ export function AgentManagementPanel({
                       ))}
                     </div>
                   </div>
+
+                  <AgentSkillSelector
+                    selectedSkills={createForm.skills}
+                    availableSkills={availableSkills}
+                    description="Make the agent's build recipe explicit: which reusable specialties should users expect?"
+                    onToggle={(skillName) =>
+                      setCreateForm((current) => ({
+                        ...current,
+                        skills: toggleSelection(current.skills, skillName),
+                      }))
+                    }
+                  />
 
                   <div className="assistant-admin-option-group">
                     <strong>Allowed live tools</strong>
@@ -3133,8 +5034,10 @@ export function AgentManagementPanel({
               </form>
             </div>
           </div>
+          ) : null}
 
-          <div className="assistant-admin-editor">
+          {activeAgentSection === 'editor' ? (
+          <div id="assistant-agent-editor" className="assistant-admin-editor">
             <div className="assistant-admin-section-head">
               <div>
                 <span className="eyebrow">Edit</span>
@@ -3196,233 +5099,156 @@ export function AgentManagementPanel({
                   ) : null}
                 </div>
 
+                {activeSupervisionIntent && activeSupervisionIntent.agent_id === selectedAgent.agent_id ? (
+                  <div className={`assistant-supervision-banner is-${activeSupervisionIntent.mode}`}>
+                    <div className="assistant-admin-section-head">
+                      <div>
+                        <span className="eyebrow">Supervision Draft</span>
+                        <h4>{controlTowerSupervisionModeLabel(activeSupervisionIntent.mode)}</h4>
+                      </div>
+                      <span>{controlTowerSignalTypeLabel(activeSupervisionIntent.signal_type)}</span>
+                    </div>
+                    <p>
+                      Prepared from the Control Tower for {selectedAgent.name}. Existing policy and eval guardrails
+                      still apply, and nothing changes until this form is saved by a human supervisor.
+                    </p>
+
+                    <div className="assistant-supervision-summary-grid">
+                      <div className="assistant-sidebar-block">
+                        <strong>Status</strong>
+                        <p>{describeChangedValue(selectedAgent.status, editForm.status)}</p>
+                        <small>
+                          {activeSupervisionIntent.mode === 'pause'
+                            ? 'Pause uses the existing typed status update path.'
+                            : 'Narrowing keeps the status unchanged until you decide otherwise.'}
+                        </small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Capabilities</strong>
+                        <p>
+                          {describeChangedValue(
+                            summarizeCapabilitySelection(selectedAgent.capabilities),
+                            summarizeCapabilitySelection(editForm.capabilities),
+                          )}
+                        </p>
+                        <small>{summarizeCapabilitySelection(editForm.capabilities)}</small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Skills</strong>
+                        <p>
+                          {describeChangedValue(
+                            summarizeSkillSelection(selectedAgent.skills, skillDefinitionsByName),
+                            summarizeSkillSelection(editForm.skills, skillDefinitionsByName),
+                          )}
+                        </p>
+                        <small>{editSkillSummary}</small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Live tools</strong>
+                        <p>
+                          {describeChangedValue(
+                            summarizeToolSelection(selectedAgent.allowed_tools),
+                            summarizeToolSelection(editForm.allowed_tools),
+                          )}
+                        </p>
+                        <small>{listSummary(editForm.allowed_tools, 'No explicit live tool subset yet')}</small>
+                      </div>
+                      <div className="assistant-sidebar-block">
+                        <strong>Governed actions</strong>
+                        <p>
+                          {describeChangedValue(
+                            summarizeActionSelection(selectedAgent.allowed_action_types),
+                            summarizeActionSelection(editForm.allowed_action_types),
+                          )}
+                        </p>
+                        <small>{actionSummary(editForm.allowed_action_types, actionDefinitionsByName)}</small>
+                      </div>
+                    </div>
+
+                    {supervisionPolicyMessages.length > 0 ? (
+                      <div
+                        className={`assistant-profile-fit-messages ${
+                          editProfileFit.errors.length > 0 ? 'is-error' : 'is-warning'
+                        }`}
+                      >
+                        {supervisionPolicyMessages.map((message) => (
+                          <small key={message}>{message}</small>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="assistant-control-tower-actions assistant-supervision-actions">
+                      <button
+                        type="button"
+                        className={
+                          activeSupervisionIntent.mode === 'pause'
+                            ? 'button button-primary'
+                            : 'button button-secondary'
+                        }
+                        onClick={() => handleLoadSupervisionDraft('pause')}
+                      >
+                        Load Pause Draft
+                      </button>
+                      <button
+                        type="button"
+                        className={
+                          activeSupervisionIntent.mode === 'narrow'
+                            ? 'button button-primary'
+                            : 'button button-secondary'
+                        }
+                        onClick={() => handleLoadSupervisionDraft('narrow')}
+                      >
+                        Load Narrowing Draft
+                      </button>
+                      {editForm.capabilities.includes('ACTION') ? (
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() => setEditForm((current) => toggleCapability(current, 'ACTION'))}
+                        >
+                          Disable ACTION
+                        </button>
+                      ) : null}
+                      {editCanStageActions && editForm.allowed_action_types.length > 0 ? (
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() =>
+                            setEditForm((current) => ({
+                              ...current,
+                              allowed_action_types: [],
+                            }))
+                          }
+                        >
+                          Clear Actions
+                        </button>
+                      ) : null}
+                      {editCanUseLiveTools && editForm.allowed_tools.length > 0 ? (
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() =>
+                            setEditForm((current) => ({
+                              ...current,
+                              allowed_tools: [],
+                            }))
+                          }
+                        >
+                          Clear Tool Picks
+                        </button>
+                      ) : null}
+                      <button type="button" className="button button-ghost" onClick={handleClearSupervisionDraft}>
+                        Clear Draft
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="assistant-builder-preview assistant-agent-eval-catalog">
                   <div className="assistant-admin-section-head">
                     <div>
                       <span className="eyebrow">Eval Catalog</span>
-                      <h4>Saved Behavior Cases</h4>
-                    </div>
-                    <span>
-                      {selectedAgentEvals.length} persisted case
-                      {selectedAgentEvals.length === 1 ? '' : 's'}
-                    </span>
-                  </div>
-
-                  {selectedAgentEvals.length === 0 ? (
-                    <div className="empty-state">
-                      <strong>No eval cases yet</strong>
-                      <p>
-                        Add at least one persisted case for custom action-capable profiles before activation.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="assistant-builder-warning-list">
-                      {selectedAgentEvals.map((record) => (
-                        <article key={record.eval_id} className="assistant-profile-request-card">
-                          <div className="assistant-provider-head">
-                            <strong>{record.name}</strong>
-                            <span className="status-pill status-pill-planned">
-                              {workspaceLabel(record.workspace)}
-                            </span>
-                          </div>
-                          <p>{record.prompt}</p>
-                          <small>{describeAgentEval(record)}</small>
-                          <small>
-                            {record.use_live_tools ? 'Uses live tools' : 'No live tools'} · updated{' '}
-                            {formatDate(record.updated_at)} by {record.updated_by}
-                          </small>
-                          <div className="toolbar settings-actions">
-                            <button
-                              type="button"
-                              className="button button-secondary"
-                              onClick={() => handleEditAgentEval(record)}
-                            >
-                              Edit Case
-                            </button>
-                            <button
-                              type="button"
-                              className="button button-ghost"
-                              disabled={deletingAgentEvalId === record.eval_id}
-                              onClick={() => void handleDeleteAgentEval(record.eval_id)}
-                            >
-                              {deletingAgentEvalId === record.eval_id ? 'Deleting...' : 'Delete'}
-                            </button>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="assistant-admin-section-head">
-                    <div>
-                      <span className="eyebrow">
-                        {selectedEvalRecord ? `Editing #${selectedEvalRecord.eval_id}` : 'New Case'}
-                      </span>
-                      <h4>{selectedEvalRecord?.name || 'Add Eval Case'}</h4>
-                    </div>
-                    <span>Cases are stored independently from the agent prompt.</span>
-                  </div>
-
-                  <div className="assistant-builder-preview-grid">
-                    <label className="field">
-                      <span>Case Name</span>
-                      <input
-                        className="control"
-                        value={agentEvalForm.name}
-                        onChange={(event) =>
-                          setAgentEvalForm((current) => ({ ...current, name: event.target.value }))
-                        }
-                        placeholder="Blocks stale weather evidence"
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Workspace</span>
-                      <select
-                        className="control"
-                        value={agentEvalForm.workspace}
-                        onChange={(event) =>
-                          setAgentEvalForm((current) => ({
-                            ...current,
-                            workspace: event.target.value as ViewKey,
-                          }))
-                        }
-                      >
-                        {WORKSPACE_OPTIONS.map((workspace) => (
-                          <option key={workspace} value={workspace}>
-                            {workspaceLabel(workspace)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-
-                  <label className="field">
-                    <span>Prompt</span>
-                    <textarea
-                      className="control"
-                      value={agentEvalForm.prompt}
-                      onChange={(event) =>
-                        setAgentEvalForm((current) => ({ ...current, prompt: event.target.value }))
-                      }
-                      placeholder="Ask the agent to handle the scenario being guarded."
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Context</span>
-                    <textarea
-                      className="control"
-                      value={agentEvalForm.context}
-                      onChange={(event) =>
-                        setAgentEvalForm((current) => ({ ...current, context: event.target.value }))
-                      }
-                      placeholder="Optional fixture context, selected work object, or evidence notes."
-                    />
-                  </label>
-
-                  <div className="assistant-builder-preview-grid">
-                    <label className="field">
-                      <span>Expected Text</span>
-                      <textarea
-                        className="control"
-                        value={agentEvalForm.expected_substrings}
-                        onChange={(event) =>
-                          setAgentEvalForm((current) => ({
-                            ...current,
-                            expected_substrings: event.target.value,
-                          }))
-                        }
-                        placeholder="One required substring per line"
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Expected Tool Names</span>
-                      <textarea
-                        className="control"
-                        value={agentEvalForm.expected_tool_names}
-                        onChange={(event) =>
-                          setAgentEvalForm((current) => ({
-                            ...current,
-                            expected_tool_names: event.target.value,
-                          }))
-                        }
-                        placeholder="get_workspace_summary&#10;list_workflow_items"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="assistant-admin-option-grid">
-                    <label className="projection-integrity-toggle">
-                      <input
-                        type="checkbox"
-                        checked={agentEvalForm.use_live_tools}
-                        onChange={(event) =>
-                          setAgentEvalForm((current) => ({
-                            ...current,
-                            use_live_tools: event.target.checked,
-                          }))
-                        }
-                      />
-                      <span>
-                        <strong>Use live tools</strong>
-                        <span>Run the case with governed tool access when the harness executes it.</span>
-                      </span>
-                    </label>
-
-                    <div className="assistant-admin-option-group">
-                      <strong>Expected governed actions</strong>
-                      <p>Select actions the case should stage or exercise when relevant.</p>
-                      <div className="chip-row">
-                        {actionTypeOptions.map((actionType) => (
-                          <button
-                            key={actionType}
-                            type="button"
-                            className={`entity-chip ${agentEvalForm.expected_action_types.includes(actionType) ? '' : 'entity-chip-soft'}`}
-                            onClick={() =>
-                              setAgentEvalForm((current) => ({
-                                ...current,
-                                expected_action_types: toggleSelection(
-                                  current.expected_action_types,
-                                  actionType,
-                                ),
-                              }))
-                            }
-                          >
-                            {formatAssistantActionTypeLabel(actionType, actionDefinitionsByName)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="toolbar settings-actions">
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      disabled={savingAgentEval || !agentEvalReady}
-                      onClick={() => void handleSaveAgentEval()}
-                    >
-                      {savingAgentEval
-                        ? 'Saving Eval...'
-                        : selectedAgentEval
-                          ? 'Update Eval Case'
-                          : 'Create Eval Case'}
-                    </button>
-                    <button
-                      type="button"
-                      className="button button-ghost"
-                      onClick={handleResetAgentEvalForm}
-                    >
-                      Clear Eval Form
-                    </button>
-                  </div>
-                </div>
-
-                <div className="assistant-builder-preview assistant-policy-simulator">
-                  <div className="assistant-admin-section-head">
-                    <div>
-                      <span className="eyebrow">Eval Catalog</span>
-                      <h4>Regression Cases</h4>
+                      <h4>Behavior Regression Cases</h4>
                     </div>
                     <span>
                       {selectedAgentEvalRecords.length} saved case
@@ -3465,11 +5291,16 @@ export function AgentManagementPanel({
                           className={`assistant-admin-agent-card ${
                             selectedAgentEval?.eval_id === record.eval_id ? 'is-selected' : ''
                           }`}
-                          onClick={() => setSelectedAgentEvalId(record.eval_id)}
+                          onClick={() => handleEditAgentEval(record)}
                         >
                           <div>
                             <strong>{record.name}</strong>
                             <span>{workspaceLabel(record.workspace)} · {agentEvalExpectationSummary(record)}</span>
+                            <small>{describeAgentEval(record)}</small>
+                            <small>
+                              {record.use_live_tools ? 'Uses live tools' : 'No live tools'} · updated{' '}
+                              {formatDate(record.updated_at)} by {record.updated_by}
+                            </small>
                           </div>
                           {record.latest_run ? (
                             <span className={`status-pill status-pill-${evalRunStatusTone(record.latest_run.status)}`}>
@@ -3611,9 +5442,16 @@ export function AgentManagementPanel({
                       type="button"
                       className="button button-primary"
                       onClick={() => void handleSaveAgentEval()}
-                      disabled={savingAgentEval}
+                      disabled={savingAgentEval || !agentEvalReady}
                     >
                       {savingAgentEval ? 'Saving Eval...' : selectedAgentEval ? 'Save Eval Case' : 'Create Eval Case'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-ghost"
+                      onClick={handleResetAgentEvalForm}
+                    >
+                      Clear Eval Form
                     </button>
                     {selectedAgentEval ? (
                       <>
@@ -3904,6 +5742,180 @@ export function AgentManagementPanel({
                   ) : null}
                 </div>
 
+                <div className="assistant-builder-preview assistant-policy-simulator">
+                  <div className="assistant-admin-section-head">
+                    <div>
+                      <span className="eyebrow">Self-Update</span>
+                      <h4>Learning Draft</h4>
+                    </div>
+                    <span>Turn feedback and failing evals into a reviewable prompt/config draft</span>
+                  </div>
+
+                  <label className="field">
+                    <span>Optional focus</span>
+                    <textarea
+                      className="control"
+                      value={selfUpdateBrief}
+                      onChange={(event) => setSelfUpdateBrief(event.target.value)}
+                      placeholder="Focus on repeated unsupported workflow staging or missing evidence language."
+                    />
+                    <small className="form-note">
+                      Leave blank to let the server build the draft from recent mistakes and governance signals.
+                    </small>
+                  </label>
+
+                  <div className="toolbar settings-actions">
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => void handleGenerateSelfUpdateDraft()}
+                      disabled={selfUpdateLoading}
+                    >
+                      {selfUpdateLoading ? 'Generating Draft...' : 'Generate Self-Update Draft'}
+                    </button>
+                    {selfUpdateDraft ? (
+                      <button
+                        type="button"
+                        className="button button-primary"
+                        onClick={() => handleApplySelfUpdateDraft()}
+                      >
+                        Apply To Editor
+                      </button>
+                    ) : null}
+                    {selfUpdateDraft ? (
+                      <button
+                        type="button"
+                        className="button button-primary"
+                        onClick={() => void handlePublishAgentRevision(toRevisionFromSelfUpdateDraft(selfUpdateDraft))}
+                        disabled={publishingRevisionId === selfUpdateDraft.revision_id}
+                      >
+                        {publishingRevisionId === selfUpdateDraft.revision_id
+                          ? 'Publishing...'
+                          : 'Publish Draft Revision'}
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {selfUpdateError ? (
+                    <div className="feedback-banner feedback-banner-error">{selfUpdateError}</div>
+                  ) : null}
+
+                  {agentRevisionsError ? (
+                    <div className="feedback-banner feedback-banner-error">{agentRevisionsError}</div>
+                  ) : null}
+
+                  {selfUpdateDraft ? (
+                    <>
+                      <div className="assistant-builder-preview-grid">
+                        <div className="assistant-sidebar-block">
+                          <strong>Draft revision</strong>
+                          <p>v{selfUpdateDraft.revision_version}</p>
+                          <small>
+                            Stored {formatDate(selfUpdateDraft.created_at)} by {selfUpdateDraft.created_by}
+                          </small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Suggested changes</strong>
+                          <p>{selfUpdateDraft.change_summary.length}</p>
+                          <small>{selfUpdateDraft.change_summary[0] ?? 'No change summary returned.'}</small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Needs-work feedback</strong>
+                          <p>{selfUpdateDraft.evidence.recent_needs_work_feedback.length}</p>
+                          <small>{selfUpdateDraft.evidence.recent_needs_work_feedback[0] ?? 'No comments captured.'}</small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Failing evals</strong>
+                          <p>{selfUpdateDraft.evidence.failing_eval_cases.length}</p>
+                          <small>{selfUpdateDraft.evidence.failing_eval_cases[0] ?? 'No failing evals captured.'}</small>
+                        </div>
+                        <div className="assistant-sidebar-block">
+                          <strong>Visible diffs</strong>
+                          <p>{selfUpdateDraft.diff_summary.length}</p>
+                          <small>{selfUpdateDraft.diff_summary[0]?.label ?? 'No field-level diff returned.'}</small>
+                        </div>
+                      </div>
+
+                      <div className="assistant-builder-warning-list">
+                        {selfUpdateDraft.change_summary.map((summary) => (
+                          <small key={summary} className="form-note">
+                            {summary}
+                          </small>
+                        ))}
+                      </div>
+
+                      {selfUpdateDraft.diff_summary.length > 0 ? (
+                        <div className="assistant-builder-warning-list">
+                          {selfUpdateDraft.diff_summary.map((entry) => (
+                            <small key={`${entry.field_key}-${entry.next_value}`} className="form-note">
+                              {entry.label}: {entry.current_value}{' -> '}{entry.next_value}
+                            </small>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {selfUpdateDraft.warnings.length > 0 ? (
+                        <div className="assistant-builder-warning-list">
+                          {selfUpdateDraft.warnings.map((warning) => (
+                            <small key={warning} className="form-note">
+                              {warning}
+                            </small>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : null}
+
+                  <div className="assistant-builder-warning-list">
+                    <strong>Recent revisions</strong>
+                    {agentRevisionsLoading ? (
+                      <small className="form-note">Loading recent revision history...</small>
+                    ) : agentRevisions.length === 0 ? (
+                      <small className="form-note">
+                        No stored revisions yet. Generate a self-update draft or save the agent to start revision history.
+                      </small>
+                    ) : (
+                      agentRevisions.map((revision) => (
+                        <div key={revision.revision_id} className="assistant-sidebar-block">
+                          <strong>
+                            v{revision.version} {revision.is_published ? 'Published' : 'Draft'}
+                          </strong>
+                          <p>{revision.change_summary[0] ?? 'No change summary recorded.'}</p>
+                          <small>
+                            {formatDate(revision.created_at)} by {revision.created_by}
+                          </small>
+                          <small>
+                            {revision.diff_summary.length > 0
+                              ? `${revision.diff_summary.length} visible diffs`
+                              : revision.is_published
+                                ? 'Matches the current published revision.'
+                                : 'No field-level diff summary available.'}
+                          </small>
+                          <div className="toolbar settings-actions">
+                            <button
+                              type="button"
+                              className="button button-secondary"
+                              onClick={() => handleLoadRevisionIntoEditor(revision)}
+                            >
+                              Load Into Editor
+                            </button>
+                            {!revision.is_published ? (
+                              <button
+                                type="button"
+                                className="button button-primary"
+                                onClick={() => void handlePublishAgentRevision(revision)}
+                                disabled={publishingRevisionId === revision.revision_id}
+                              >
+                                {publishingRevisionId === revision.revision_id ? 'Publishing...' : 'Publish'}
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
                 <div className="assistant-admin-form-grid">
                   <label className="field">
                     <span>Agent ID</span>
@@ -4162,8 +6174,127 @@ export function AgentManagementPanel({
                     />
                   </label>
 
+                  <AgentHierarchyEditor
+                    form={editForm}
+                    setForm={setEditForm}
+                    role={editFormRole}
+                    agentRecords={agentRecords}
+                  />
+
                   <RoleProfileFitSummary fit={editProfileFit} />
-                  <PromptProfilePreview form={editForm} role={editFormRole} />
+                  <PromptProfilePreview form={editForm} role={editFormRole} agentRecords={agentRecords} />
+
+                  <div className="assistant-admin-construction-review">
+                    <div className="assistant-admin-section-head">
+                      <div>
+                        <span className="eyebrow">Construction Provenance</span>
+                        <h4>Saved Construction Preview</h4>
+                      </div>
+                      <button
+                        type="button"
+                        className="button button-ghost"
+                        onClick={() => void loadAgentPromptPreview(selectedAgent)}
+                        disabled={agentPromptPreviewLoading}
+                      >
+                        {agentPromptPreviewLoading ? 'Refreshing...' : 'Refresh Preview'}
+                      </button>
+                    </div>
+                    <p>
+                      This server-built preview reflects the last saved agent profile. Save current edits to update
+                      the effective prompt, context, hierarchy, tool, and action construction.
+                    </p>
+                    {agentPromptPreviewError ? (
+                      <div className="assistant-profile-fit-messages is-error">
+                        <small>{agentPromptPreviewError}</small>
+                      </div>
+                    ) : null}
+                    {agentPromptPreview ? (
+                      <AssistantConstructionExplainerPanel
+                        activeAgent={selectedAgent}
+                        activeGroundingSections={agentPromptPreview.sections}
+                        agents={agentRecords}
+                        promptPreview={agentPromptPreview}
+                        runtimeSettings={adminConstructionRuntimeSettings}
+                        selectedRun={null}
+                        includeContext={true}
+                        useLiveTools={selectedAgent.capabilities.includes('READ')}
+                        onSelectAgent={setSelectedAgentId}
+                      />
+                    ) : (
+                      <small>
+                        {agentPromptPreviewLoading
+                          ? 'Loading the server-owned prompt construction preview.'
+                          : 'Prompt construction preview is not loaded yet.'}
+                      </small>
+                    )}
+                  </div>
+
+                  <div className="assistant-admin-construction-review assistant-admin-draft-construction-review">
+                    <div className="assistant-admin-section-head">
+                      <div>
+                        <span className="eyebrow">Pending Construction</span>
+                        <h4>Unsaved Draft Construction</h4>
+                      </div>
+                      <span>
+                        {draftConstructionDiffRows.length > 0
+                          ? `${draftConstructionDiffRows.length} pending change${
+                              draftConstructionDiffRows.length === 1 ? '' : 's'
+                            }`
+                          : 'No pending changes'}
+                      </span>
+                    </div>
+                    <p>
+                      This pre-save review compares the current form against the saved agent, then asks the backend
+                      to build the unsaved prompt construction without persisting the profile.
+                    </p>
+                    {draftPromptPreviewError ? (
+                      <div className="assistant-profile-fit-messages is-error">
+                        <small>{draftPromptPreviewError}</small>
+                      </div>
+                    ) : null}
+                    {draftConstructionDiffRows.length > 0 ? (
+                      <>
+                        <div className="assistant-construction-diff-list">
+                          {draftConstructionDiffRows.slice(0, 10).map((diffRow) => (
+                            <div key={`draft-${diffRow.field_key}`} className="assistant-construction-diff-row">
+                              <strong>{diffRow.label}</strong>
+                              <p>
+                                {diffRow.current_value}
+                                {' -> '}
+                                {diffRow.next_value}
+                              </p>
+                            </div>
+                          ))}
+                          {draftConstructionDiffRows.length > 10 ? (
+                            <small>
+                              {draftConstructionDiffRows.length - 10} additional construction field
+                              {draftConstructionDiffRows.length - 10 === 1 ? '' : 's'} will change on save.
+                            </small>
+                          ) : null}
+                        </div>
+                        {draftPromptPreviewLoading ? (
+                          <small>Refreshing the backend-owned unsaved draft preview.</small>
+                        ) : null}
+                        {draftPreviewAgent && draftPromptPreview ? (
+                          <AssistantConstructionExplainerPanel
+                            activeAgent={draftPreviewAgent}
+                            activeGroundingSections={draftPromptPreview.sections}
+                            agents={agentRecords}
+                            promptPreview={draftPromptPreview}
+                            runtimeSettings={adminConstructionRuntimeSettings}
+                            selectedRun={null}
+                            includeContext={true}
+                            useLiveTools={draftPreviewAgent.capabilities.includes('READ')}
+                            onSelectAgent={setSelectedAgentId}
+                          />
+                        ) : !draftPromptPreviewLoading && !draftPromptPreviewError ? (
+                          <small>Authoritative draft prompt preview is not loaded yet.</small>
+                        ) : null}
+                      </>
+                    ) : (
+                      <small>No pending construction changes. The edit form currently matches the saved agent.</small>
+                    )}
+                  </div>
 
                   {editFormRole ? (
                     <div className="toolbar settings-actions">
@@ -4171,7 +6302,11 @@ export function AgentManagementPanel({
                         type="button"
                         className="button button-ghost"
                         onClick={() => {
-                          const roleDraft = buildAgentBuilderDraftFromRole(editFormRole, availableTools)
+                          const roleDraft = applyRoleHierarchyRecommendations(
+                            buildAgentBuilderDraftFromRole(editFormRole, availableTools),
+                            editFormRole,
+                            agentRecords,
+                          )
                           setEditForm((current) => ({
                             ...current,
                             profile_kind: 'ROLE_DERIVED',
@@ -4180,10 +6315,15 @@ export function AgentManagementPanel({
                             human_owner_role: roleDraft.human_owner_role,
                             authority_ceiling: roleDraft.authority_ceiling,
                             activation_notes: current.activation_notes || roleDraft.activation_notes,
+                            orchestration_pattern: roleDraft.orchestration_pattern,
+                            parent_agent_id: roleDraft.parent_agent_id,
+                            managed_agent_ids: [...roleDraft.managed_agent_ids],
+                            delegation_guidance: roleDraft.delegation_guidance,
                             specialization_summary:
                               current.specialization_summary || roleDraft.specialization_summary,
                             allowed_workspaces: roleDraft.allowed_workspaces,
                             capabilities: roleDraft.capabilities,
+                            skills: roleDraft.skills,
                             allowed_tools: roleDraft.allowed_tools,
                             allowed_action_types: roleDraft.allowed_action_types,
                             system_prompt: current.system_prompt.trim() ? current.system_prompt : roleDraft.system_prompt,
@@ -4236,6 +6376,18 @@ export function AgentManagementPanel({
                       ))}
                     </div>
                   </div>
+
+                  <AgentSkillSelector
+                    selectedSkills={editForm.skills}
+                    availableSkills={availableSkills}
+                    description="Keep the specialization explicit so users can see how this agent is built."
+                    onToggle={(skillName) =>
+                      setEditForm((current) => ({
+                        ...current,
+                        skills: toggleSelection(current.skills, skillName),
+                      }))
+                    }
+                  />
 
                   <div className="assistant-admin-option-group">
                     <strong>Allowed live tools</strong>
@@ -4312,6 +6464,7 @@ export function AgentManagementPanel({
               </form>
             )}
           </div>
+          ) : null}
         </>
       )}
     </section>

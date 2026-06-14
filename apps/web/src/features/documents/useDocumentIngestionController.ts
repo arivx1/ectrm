@@ -10,18 +10,29 @@ import {
 } from 'react'
 import {
   executeDocumentActionPlan,
+  getGmailInboxMessageDetail,
   getDocumentProcessorSettings,
+  importGmailInboxDocuments,
+  listGmailInboxMessages,
   listDocumentIngestions,
   listDocumentSchemaRegistry,
   reprocessDocumentIngestion,
+  updateDocumentLogicalDocuments,
   updateDocumentIngestion,
   updateDocumentPage,
   uploadPdfDocument,
+  type UpdateDocumentLogicalDocumentsInput,
 } from '../../entities/documents/api'
 import { ApiError } from '../../shared/api'
+import {
+  getCollapsibleCardStateValue,
+  saveCollapsibleCardStateValue,
+} from '../../shared/collapsibleCardState'
 import { appConfig } from '../../shared/config'
 import type {
   DocumentExtractedFieldRecord,
+  DocumentGmailInboxMessageDetailRecord,
+  DocumentGmailInboxMessageSummaryRecord,
   DocumentIngestionPageRecord,
   DocumentIngestionRecord,
   DocumentKindSchemaRecord,
@@ -30,6 +41,11 @@ import type {
   DocumentTableBlockRecord,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import {
+  aiConfidenceThresholdFractionFromPercent,
+  aiConfidenceThresholdPercentFromSettings,
+  normalizeAiConfidenceThresholdPercent,
+} from './documentIngestionThreshold'
 import {
   buildBlankRow,
   buildBlankTableBlock,
@@ -45,31 +61,94 @@ import { useDocumentPagePreviewCache } from './useDocumentPagePreviewCache'
 
 type DocumentDraftUpdater = (document: DocumentIngestionRecord) => DocumentIngestionRecord
 type PageDraftUpdater = (page: DocumentIngestionPageRecord) => DocumentIngestionPageRecord
+type DocumentProcessorSelectionValue = 'builtin' | 'openai' | 'anthropic' | 'google' | ''
+
+function resolveProcessorModelOptions(
+  settings: DocumentProcessorRuntimeSettingsRecord | null,
+  provider: DocumentProcessorSelectionValue,
+): string[] {
+  if (!settings || provider === '' || provider === 'builtin') {
+    return []
+  }
+
+  const configuredProvider = settings.providers.find(
+    (candidate) => candidate.provider === provider,
+  )
+  if (!configuredProvider) {
+    return []
+  }
+
+  const modelOptions = configuredProvider.available_models ?? []
+  if (modelOptions.length > 0) {
+    return modelOptions
+  }
+
+  return configuredProvider.default_model ? [configuredProvider.default_model] : []
+}
+
+function isSelectableProcessorProvider(
+  settings: DocumentProcessorRuntimeSettingsRecord | null,
+  provider: DocumentProcessorSelectionValue,
+): boolean {
+  if (provider === '' || provider === 'builtin') {
+    return true
+  }
+
+  return settings?.providers.some((candidate) => candidate.provider === provider && candidate.configured) ?? false
+}
+
+function resolveDefaultProcessorModel(
+  settings: DocumentProcessorRuntimeSettingsRecord | null,
+  provider: DocumentProcessorSelectionValue,
+): string {
+  return resolveProcessorModelOptions(settings, provider)[0] ?? ''
+}
 
 export type DocumentIngestionController = {
   documents: DocumentIngestionRecord[]
   processorSettings: DocumentProcessorRuntimeSettingsRecord | null
-  reprocessProviderByDocument: Record<string, 'builtin' | 'openai' | 'anthropic' | 'google' | ''>
+  reprocessProviderByDocument: Record<string, DocumentProcessorSelectionValue>
+  systemAiConfidenceThresholdPercent: number
+  aiConfidenceThresholdOverridePercent: number | null
+  effectiveAiConfidenceThresholdPercent: number
   schemaRegistry: DocumentSchemaRegistryRecord | null
   schemaByKind: Record<string, DocumentKindSchemaRecord>
   loading: boolean
   loadError: string
   uploading: boolean
   uploadError: string
+  gmailImporting: boolean
+  gmailImportError: string
+  gmailImportSummary: string
+  gmailMessageQuery: string
+  gmailMessages: DocumentGmailInboxMessageSummaryRecord[]
+  gmailMessagesLoading: boolean
+  gmailMessagesError: string
+  gmailNextPageToken: string | null
+  selectedGmailMessageId: string | null
+  selectedGmailMessage: DocumentGmailInboxMessageDetailRecord | null
+  selectedGmailMessageLoading: boolean
+  selectedGmailMessageError: string
   displayName: string
-  selectedProcessorProvider: 'builtin' | 'openai' | 'anthropic' | 'google' | ''
+  selectedProcessorProvider: DocumentProcessorSelectionValue
+  selectedProcessorModel: string
   selectedFile: File | null
   isDragActive: boolean
+  lastUploadedDocumentId: string | null
+  lastImportedDocumentIds: string[]
   expandedDocumentIds: Record<string, boolean>
   savingTarget: string | null
   saveErrors: Record<string, string>
   pagePreviewUrls: Record<number, string>
   pagePreviewLoading: Record<number, boolean>
   pagePreviewErrors: Record<number, string>
+  clearPagePreviewsForDocument: (documentId: string) => void
   fileInputRef: MutableRefObject<HTMLInputElement | null>
   setDisplayName: (value: string) => void
-  setSelectedProcessorProvider: (value: 'builtin' | 'openai' | 'anthropic' | 'google' | '') => void
-  setDocumentReprocessProvider: (documentId: string, value: 'builtin' | 'openai' | 'anthropic' | 'google' | '') => void
+  setSelectedProcessorProvider: (value: DocumentProcessorSelectionValue) => void
+  setSelectedProcessorModel: (value: string) => void
+  setAiConfidenceThresholdOverridePercent: (value: number | null) => void
+  setDocumentReprocessProvider: (documentId: string, value: DocumentProcessorSelectionValue) => void
   toggleDocumentExpanded: (documentId: string) => void
   updateSelectedFile: (file: File | null) => void
   openFilePicker: () => void
@@ -79,10 +158,21 @@ export type DocumentIngestionController = {
   handleDropzoneDragLeave: (event: DragEvent<HTMLDivElement>) => void
   handleDropzoneDrop: (event: DragEvent<HTMLDivElement>) => void
   handleSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>
+  handleImportGmailInbox: () => Promise<void>
+  setGmailMessageQuery: (value: string) => void
+  handleRefreshGmailMessages: () => Promise<void>
+  handleLoadMoreGmailMessages: () => Promise<void>
+  handleSelectGmailMessage: (messageId: string) => Promise<void>
   updateDocumentDraft: (documentId: string, updater: DocumentDraftUpdater) => void
   updatePageDraft: (documentId: string, pageId: number, updater: PageDraftUpdater) => void
   handleSaveDocument: (document: DocumentIngestionRecord) => Promise<void>
+  handleVerifyDocument: (document: DocumentIngestionRecord) => Promise<void>
+  handleSetDocumentKind: (document: DocumentIngestionRecord, documentKind: string) => Promise<void>
   handleSavePage: (document: DocumentIngestionRecord, page: DocumentIngestionPageRecord) => Promise<void>
+  handleSaveLogicalDocuments: (
+    document: DocumentIngestionRecord,
+    payload: UpdateDocumentLogicalDocumentsInput,
+  ) => Promise<void>
   handleReprocessDocument: (document: DocumentIngestionRecord) => Promise<void>
   handleExecuteActionPlan: (document: DocumentIngestionRecord) => Promise<void>
   setSchemaFieldValue: (documentId: string, pageId: number, fieldKey: string, label: string, nextValue: string) => void
@@ -113,20 +203,50 @@ export function useDocumentIngestionController({
   const [reprocessProviderByDocument, setReprocessProviderByDocument] = useState<
     Record<string, 'builtin' | 'openai' | 'anthropic' | 'google' | ''>
   >({})
+  const [aiConfidenceThresholdOverridePercent, setAiConfidenceThresholdOverridePercentState] = useState<number | null>(
+    null,
+  )
   const [schemaRegistry, setSchemaRegistry] = useState<DocumentSchemaRegistryRecord | null>(null)
   const [expandedDocumentIds, setExpandedDocumentIds] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
+  const [gmailImporting, setGmailImporting] = useState(false)
+  const [gmailImportError, setGmailImportError] = useState('')
+  const [gmailImportSummary, setGmailImportSummary] = useState('')
+  const [gmailMessageQuery, setGmailMessageQuery] = useState('')
+  const [gmailMessages, setGmailMessages] = useState<DocumentGmailInboxMessageSummaryRecord[]>([])
+  const [gmailMessagesLoading, setGmailMessagesLoading] = useState(false)
+  const [gmailMessagesError, setGmailMessagesError] = useState('')
+  const [gmailNextPageToken, setGmailNextPageToken] = useState<string | null>(null)
+  const [selectedGmailMessageId, setSelectedGmailMessageId] = useState<string | null>(null)
+  const [selectedGmailMessage, setSelectedGmailMessage] = useState<DocumentGmailInboxMessageDetailRecord | null>(null)
+  const [selectedGmailMessageLoading, setSelectedGmailMessageLoading] = useState(false)
+  const [selectedGmailMessageError, setSelectedGmailMessageError] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [selectedProcessorProvider, setSelectedProcessorProvider] = useState<'builtin' | 'openai' | 'anthropic' | 'google' | ''>('')
+  const [selectedProcessorProviderState, setSelectedProcessorProviderState] =
+    useState<DocumentProcessorSelectionValue>('')
+  const [selectedProcessorModel, setSelectedProcessorModelState] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isDragActive, setIsDragActive] = useState(false)
+  const [lastUploadedDocumentId, setLastUploadedDocumentId] = useState<string | null>(null)
+  const [lastImportedDocumentIds, setLastImportedDocumentIds] = useState<string[]>([])
   const [savingTarget, setSavingTarget] = useState<string | null>(null)
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({})
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const dragDepthRef = useRef(0)
+  const selectedProcessorProvider = selectedProcessorProviderState
+  const systemAiConfidenceThresholdPercent = useMemo(
+    () => aiConfidenceThresholdPercentFromSettings(processorSettings),
+    [processorSettings],
+  )
+  const effectiveAiConfidenceThresholdPercent =
+    aiConfidenceThresholdOverridePercent ?? systemAiConfidenceThresholdPercent
+
+  function documentExpansionCardKey(documentId: string): string {
+    return `document-ingestion.review.${documentId}`
+  }
 
   const schemaByKind = useMemo(() => {
     const entries = schemaRegistry?.document_kinds ?? []
@@ -149,23 +269,132 @@ export function useDocumentIngestionController({
     expandedDocumentIds,
   })
 
+  async function loadSelectedGmailMessage(session: StoredAuthSession, messageId: string) {
+    setSelectedGmailMessageId(messageId)
+    setSelectedGmailMessageLoading(true)
+    setSelectedGmailMessageError('')
+    try {
+      const detail = await getGmailInboxMessageDetail(appConfig.apiBase, session, messageId)
+      setSelectedGmailMessage(detail)
+    } catch (error) {
+      setSelectedGmailMessage(null)
+      if (error instanceof ApiError || error instanceof Error) {
+        setSelectedGmailMessageError(error.message)
+      } else {
+        setSelectedGmailMessageError('Unable to load the Gmail message.')
+      }
+    } finally {
+      setSelectedGmailMessageLoading(false)
+    }
+  }
+
+  async function refreshGmailMessages(
+    session: StoredAuthSession,
+    options: {
+      query?: string | null
+      pageToken?: string | null
+      append?: boolean
+      preserveSelection?: boolean
+      reloadSelection?: boolean
+    } = {},
+  ) {
+    const resolvedQuery =
+      options.query?.trim() ||
+      gmailMessageQuery.trim() ||
+      processorSettings?.gmail_inbox?.query?.trim() ||
+      ''
+
+    setGmailMessagesLoading(true)
+    setGmailMessagesError('')
+    try {
+      const result = await listGmailInboxMessages(appConfig.apiBase, session, {
+        query: resolvedQuery,
+        page_size: 20,
+        page_token: options.pageToken ?? null,
+      })
+      setGmailMessageQuery(resolvedQuery)
+      setGmailNextPageToken(result.next_page_token)
+      setGmailMessages((current) => {
+        if (!options.append) {
+          return result.messages
+        }
+        const merged = [...current]
+        for (const message of result.messages) {
+          if (!merged.some((existing) => existing.message_id === message.message_id)) {
+            merged.push(message)
+          }
+        }
+        return merged
+      })
+
+      if (options.append) {
+        return
+      }
+
+      const selectedMessageId =
+        options.preserveSelection && selectedGmailMessageId
+          ? result.messages.some((message) => message.message_id === selectedGmailMessageId)
+            ? selectedGmailMessageId
+            : null
+          : null
+
+      const nextSelectedMessageId = selectedMessageId ?? result.messages[0]?.message_id ?? null
+      if (!nextSelectedMessageId) {
+        setSelectedGmailMessageId(null)
+        setSelectedGmailMessage(null)
+        setSelectedGmailMessageError('')
+        return
+      }
+
+      if (!options.reloadSelection && nextSelectedMessageId === selectedGmailMessageId) {
+        setSelectedGmailMessageId(nextSelectedMessageId)
+        return
+      }
+
+      await loadSelectedGmailMessage(session, nextSelectedMessageId)
+    } catch (error) {
+      if (error instanceof ApiError || error instanceof Error) {
+        setGmailMessagesError(error.message)
+      } else {
+        setGmailMessagesError('Unable to load Gmail inbox messages.')
+      }
+    } finally {
+      setGmailMessagesLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (!authSession) {
       setDocuments([])
       setProcessorSettings(null)
       setReprocessProviderByDocument({})
+      setAiConfidenceThresholdOverridePercentState(null)
       setSchemaRegistry(null)
-      setExpandedDocumentIds({})
       setLoadError('')
       setLoading(false)
       setUploadError('')
       setUploading(false)
+      setGmailImporting(false)
+      setGmailImportError('')
+      setGmailImportSummary('')
+      setGmailMessageQuery('')
+      setGmailMessages([])
+      setGmailMessagesLoading(false)
+      setGmailMessagesError('')
+      setGmailNextPageToken(null)
+      setSelectedGmailMessageId(null)
+      setSelectedGmailMessage(null)
+      setSelectedGmailMessageLoading(false)
+      setSelectedGmailMessageError('')
       setSavingTarget(null)
       setSaveErrors({})
       setDisplayName('')
-      setSelectedProcessorProvider('')
+      setSelectedProcessorProviderState('')
+      setSelectedProcessorModelState('')
       setSelectedFile(null)
       setIsDragActive(false)
+      setLastUploadedDocumentId(null)
+      setLastImportedDocumentIds([])
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
@@ -183,11 +412,67 @@ export function useDocumentIngestionController({
           listDocumentSchemaRegistry(appConfig.apiBase, session),
           listDocumentIngestions(appConfig.apiBase, session),
         ])
+        const configuredGmailInbox = nextProcessorSettings.gmail_inbox?.configured
+          ? nextProcessorSettings.gmail_inbox
+          : null
+        const nextGmailQuery = configuredGmailInbox?.query?.trim() ?? ''
+        let nextGmailMessages: DocumentGmailInboxMessageSummaryRecord[] = []
+        let nextGmailPageToken: string | null = null
+        let nextSelectedGmailMessage: DocumentGmailInboxMessageDetailRecord | null = null
+        let nextSelectedGmailMessageId: string | null = null
+        let nextGmailMessagesError = ''
+        let nextSelectedGmailMessageError = ''
+
+        if (configuredGmailInbox && nextGmailQuery) {
+          try {
+            const gmailBrowseResult = await listGmailInboxMessages(appConfig.apiBase, session, {
+              query: nextGmailQuery,
+              page_size: 20,
+            })
+            nextGmailMessages = gmailBrowseResult.messages
+            nextGmailPageToken = gmailBrowseResult.next_page_token
+            nextSelectedGmailMessageId = gmailBrowseResult.messages[0]?.message_id ?? null
+            if (nextSelectedGmailMessageId) {
+              try {
+                nextSelectedGmailMessage = await getGmailInboxMessageDetail(
+                  appConfig.apiBase,
+                  session,
+                  nextSelectedGmailMessageId,
+                )
+              } catch (error) {
+                nextSelectedGmailMessageError =
+                  error instanceof Error ? error.message : 'Unable to load the Gmail message.'
+              }
+            }
+          } catch (error) {
+            nextGmailMessagesError =
+              error instanceof Error ? error.message : 'Unable to load Gmail inbox messages.'
+          }
+        }
         if (!cancelled) {
           setProcessorSettings(nextProcessorSettings)
           setSchemaRegistry(nextRegistry)
           setDocuments(nextDocuments)
-          setSelectedProcessorProvider((current) => {
+          setGmailMessageQuery(nextGmailQuery)
+          setGmailMessages(nextGmailMessages)
+          setGmailMessagesError(nextGmailMessagesError)
+          setGmailNextPageToken(nextGmailPageToken)
+          setSelectedGmailMessageId(nextSelectedGmailMessageId)
+          setSelectedGmailMessage(nextSelectedGmailMessage)
+          setSelectedGmailMessageError(nextSelectedGmailMessageError)
+          setExpandedDocumentIds((current) => ({
+            ...current,
+            ...Object.fromEntries(
+              nextDocuments.map((document) => [
+                document.document_id,
+                getCollapsibleCardStateValue(
+                  documentExpansionCardKey(document.document_id),
+                  current[document.document_id] ?? false,
+                ),
+              ]),
+            ),
+          }))
+          setSelectedProcessorProviderState((current) => {
             const configuredProviders = new Set(
               nextProcessorSettings.providers.filter((provider) => provider.configured).map((provider) => provider.provider),
             )
@@ -208,6 +493,8 @@ export function useDocumentIngestionController({
       } finally {
         if (!cancelled) {
           setLoading(false)
+          setGmailMessagesLoading(false)
+          setSelectedGmailMessageLoading(false)
         }
       }
     }
@@ -254,6 +541,27 @@ export function useDocumentIngestionController({
     }
   }, [authSession, hasProcessingDocuments])
 
+  useEffect(() => {
+    if (selectedProcessorProvider === '' || selectedProcessorProvider === 'builtin') {
+      if (selectedProcessorModel) {
+        setSelectedProcessorModelState('')
+      }
+      return
+    }
+
+    const modelOptions = resolveProcessorModelOptions(processorSettings, selectedProcessorProvider)
+    if (modelOptions.length === 0) {
+      if (selectedProcessorModel) {
+        setSelectedProcessorModelState('')
+      }
+      return
+    }
+
+    if (!selectedProcessorModel || !modelOptions.includes(selectedProcessorModel)) {
+      setSelectedProcessorModelState(modelOptions[0] ?? '')
+    }
+  }, [processorSettings, selectedProcessorModel, selectedProcessorProvider])
+
   function replaceDocument(nextDocument: DocumentIngestionRecord) {
     setReprocessProviderByDocument((current) => {
       if (!(nextDocument.document_id in current)) {
@@ -272,6 +580,31 @@ export function useDocumentIngestionController({
       nextDocuments[index] = nextDocument
       return nextDocuments
     })
+  }
+
+  function setSelectedProcessorProvider(value: DocumentProcessorSelectionValue) {
+    const nextValue = isSelectableProcessorProvider(processorSettings, value) ? value : 'builtin'
+    setSelectedProcessorProviderState(nextValue)
+    setSelectedProcessorModelState((current) => {
+      if (nextValue === '' || nextValue === 'builtin') {
+        return ''
+      }
+      const modelOptions = resolveProcessorModelOptions(processorSettings, nextValue)
+      if (current && modelOptions.includes(current)) {
+        return current
+      }
+      return resolveDefaultProcessorModel(processorSettings, nextValue)
+    })
+  }
+
+  function setSelectedProcessorModel(value: string) {
+    setSelectedProcessorModelState(value)
+  }
+
+  function setAiConfidenceThresholdOverridePercent(value: number | null) {
+    setAiConfidenceThresholdOverridePercentState(
+      typeof value === 'number' ? normalizeAiConfidenceThresholdPercent(value) : null,
+    )
   }
 
   function updateDocumentDraft(documentId: string, updater: DocumentDraftUpdater) {
@@ -324,10 +657,14 @@ export function useDocumentIngestionController({
   }
 
   function toggleDocumentExpanded(documentId: string) {
-    setExpandedDocumentIds((current) => ({
-      ...current,
-      [documentId]: !current[documentId],
-    }))
+    setExpandedDocumentIds((current) => {
+      const nextExpanded = !current[documentId]
+      saveCollapsibleCardStateValue(documentExpansionCardKey(documentId), nextExpanded)
+      return {
+        ...current,
+        [documentId]: nextExpanded,
+      }
+    })
   }
 
   function setDocumentReprocessProvider(
@@ -415,6 +752,7 @@ export function useDocumentIngestionController({
 
     setUploading(true)
     setUploadError('')
+    setLastUploadedDocumentId(null)
     try {
       const uploaded = await uploadPdfDocument(
         appConfig.apiBase,
@@ -422,6 +760,10 @@ export function useDocumentIngestionController({
         selectedFile,
         displayName,
         selectedProcessorProvider || null,
+        selectedProcessorProvider === 'builtin' ? null : selectedProcessorModel || null,
+        selectedProcessorProvider === 'builtin'
+          ? null
+          : aiConfidenceThresholdFractionFromPercent(effectiveAiConfidenceThresholdPercent),
       )
       replaceDocument(uploaded)
       setExpandedDocumentIds((current) => ({ ...current, [uploaded.document_id]: true }))
@@ -431,6 +773,7 @@ export function useDocumentIngestionController({
         fileInputRef.current.value = ''
       }
       formElement.reset()
+      setLastUploadedDocumentId(uploaded.document_id)
     } catch (error) {
       if (error instanceof ApiError || error instanceof Error) {
         setUploadError(error.message)
@@ -440,6 +783,83 @@ export function useDocumentIngestionController({
     } finally {
       setUploading(false)
     }
+  }
+
+  async function handleImportGmailInbox() {
+    if (!authSession) {
+      setGmailImportError('Sign in before importing Gmail inbox attachments.')
+      return
+    }
+
+    setGmailImporting(true)
+    setGmailImportError('')
+    setGmailImportSummary('')
+    setLastImportedDocumentIds([])
+    try {
+      const result = await importGmailInboxDocuments(appConfig.apiBase, authSession)
+      const refreshedDocuments = await listDocumentIngestions(appConfig.apiBase, authSession)
+      setDocuments(refreshedDocuments)
+      setLastImportedDocumentIds(
+        result.imported_documents.map((document) => document.document_id),
+      )
+      if (result.imported_documents.length > 0) {
+        setExpandedDocumentIds((current) => ({
+          ...current,
+          ...Object.fromEntries(result.imported_documents.map((document) => [document.document_id, true])),
+        }))
+      }
+      const warningSuffix = result.warnings.length > 0 ? ` ${result.warnings.length} warning(s) recorded.` : ''
+      setGmailImportSummary(
+        `Imported ${result.imported_count} Gmail PDF attachment${result.imported_count === 1 ? '' : 's'} and skipped ${result.skipped_count}.${warningSuffix}`,
+      )
+      if (processorSettings?.gmail_inbox?.configured) {
+        await refreshGmailMessages(authSession, {
+          preserveSelection: true,
+          reloadSelection: true,
+        })
+      }
+    } catch (error) {
+      if (error instanceof ApiError || error instanceof Error) {
+        setGmailImportError(error.message)
+      } else {
+        setGmailImportError('Unable to import Gmail inbox attachments.')
+      }
+    } finally {
+      setGmailImporting(false)
+    }
+  }
+
+  async function handleRefreshGmailMessages() {
+    if (!authSession) {
+      setGmailMessagesError('Sign in before browsing Gmail inbox messages.')
+      return
+    }
+    await refreshGmailMessages(authSession, {
+      query: gmailMessageQuery,
+      preserveSelection: true,
+      reloadSelection: true,
+    })
+  }
+
+  async function handleLoadMoreGmailMessages() {
+    if (!authSession || !gmailNextPageToken) {
+      return
+    }
+    await refreshGmailMessages(authSession, {
+      query: gmailMessageQuery,
+      pageToken: gmailNextPageToken,
+      append: true,
+      preserveSelection: true,
+      reloadSelection: false,
+    })
+  }
+
+  async function handleSelectGmailMessage(messageId: string) {
+    if (!authSession) {
+      setSelectedGmailMessageError('Sign in before opening Gmail inbox messages.')
+      return
+    }
+    await loadSelectedGmailMessage(authSession, messageId)
   }
 
   async function handleSaveDocument(document: DocumentIngestionRecord) {
@@ -459,6 +879,54 @@ export function useDocumentIngestionController({
       replaceDocument(updated)
     } catch (error) {
       setSaveError(target, error instanceof Error ? error.message : 'Unable to save the document review state.')
+    } finally {
+      setSavingTarget(null)
+    }
+  }
+
+  async function handleVerifyDocument(document: DocumentIngestionRecord) {
+    if (!authSession) {
+      return
+    }
+    const target = `document:${document.document_id}`
+    clearSaveError(target)
+    setSavingTarget(target)
+    try {
+      const verifiedDocument = await updateDocumentIngestion(
+        appConfig.apiBase,
+        authSession,
+        document.document_id,
+        {
+          review_status: 'VERIFIED',
+          verification_mode: 'STATUS_ONLY',
+          review_notes: document.review_notes,
+        },
+      )
+      replaceDocument(verifiedDocument)
+    } catch (error) {
+      setSaveError(target, error instanceof Error ? error.message : 'Unable to verify the document.')
+    } finally {
+      setSavingTarget(null)
+    }
+  }
+
+  async function handleSetDocumentKind(document: DocumentIngestionRecord, documentKind: string) {
+    if (!authSession) {
+      return
+    }
+    const target = `document-kind:${document.document_id}`
+    clearSaveError(target)
+    setSavingTarget(target)
+    try {
+      const updated = await updateDocumentIngestion(
+        appConfig.apiBase,
+        authSession,
+        document.document_id,
+        { document_kind: documentKind },
+      )
+      replaceDocument(updated)
+    } catch (error) {
+      setSaveError(target, error instanceof Error ? error.message : 'Unable to save the document type.')
     } finally {
       setSavingTarget(null)
     }
@@ -487,6 +955,31 @@ export function useDocumentIngestionController({
     }
   }
 
+  async function handleSaveLogicalDocuments(
+    document: DocumentIngestionRecord,
+    payload: UpdateDocumentLogicalDocumentsInput,
+  ) {
+    if (!authSession) {
+      return
+    }
+    const target = `logical-documents:${document.document_id}`
+    clearSaveError(target)
+    setSavingTarget(target)
+    try {
+      const updated = await updateDocumentLogicalDocuments(
+        appConfig.apiBase,
+        authSession,
+        document.document_id,
+        payload,
+      )
+      replaceDocument(updated)
+    } catch (error) {
+      setSaveError(target, error instanceof Error ? error.message : 'Unable to save the packet split.')
+    } finally {
+      setSavingTarget(null)
+    }
+  }
+
   async function handleReprocessDocument(document: DocumentIngestionRecord) {
     if (!authSession) {
       return
@@ -504,6 +997,10 @@ export function useDocumentIngestionController({
         authSession,
         documentId,
         reprocessProvider,
+        null,
+        reprocessProvider === 'builtin'
+          ? null
+          : aiConfidenceThresholdFractionFromPercent(effectiveAiConfidenceThresholdPercent),
       )
       replaceDocument(updated)
       setExpandedDocumentIds((current) => ({ ...current, [documentId]: true }))
@@ -811,25 +1308,46 @@ export function useDocumentIngestionController({
     documents,
     processorSettings,
     reprocessProviderByDocument,
+    systemAiConfidenceThresholdPercent,
+    aiConfidenceThresholdOverridePercent,
+    effectiveAiConfidenceThresholdPercent,
     schemaRegistry,
     schemaByKind,
     loading,
     loadError,
     uploading,
     uploadError,
+    gmailImporting,
+    gmailImportError,
+    gmailImportSummary,
+    gmailMessageQuery,
+    gmailMessages,
+    gmailMessagesLoading,
+    gmailMessagesError,
+    gmailNextPageToken,
+    selectedGmailMessageId,
+    selectedGmailMessage,
+    selectedGmailMessageLoading,
+    selectedGmailMessageError,
     displayName,
     selectedProcessorProvider,
+    selectedProcessorModel,
     selectedFile,
     isDragActive,
+    lastUploadedDocumentId,
+    lastImportedDocumentIds,
     expandedDocumentIds,
     savingTarget,
     saveErrors,
     pagePreviewUrls,
     pagePreviewLoading,
     pagePreviewErrors,
+    clearPagePreviewsForDocument,
     fileInputRef,
     setDisplayName,
     setSelectedProcessorProvider,
+    setSelectedProcessorModel,
+    setAiConfidenceThresholdOverridePercent,
     setDocumentReprocessProvider,
     toggleDocumentExpanded,
     updateSelectedFile,
@@ -840,10 +1358,18 @@ export function useDocumentIngestionController({
     handleDropzoneDragLeave,
     handleDropzoneDrop,
     handleSubmit,
+    handleImportGmailInbox,
+    setGmailMessageQuery,
+    handleRefreshGmailMessages,
+    handleLoadMoreGmailMessages,
+    handleSelectGmailMessage,
     updateDocumentDraft,
     updatePageDraft,
     handleSaveDocument,
+    handleVerifyDocument,
+    handleSetDocumentKind,
     handleSavePage,
+    handleSaveLogicalDocuments,
     handleReprocessDocument,
     handleExecuteActionPlan,
     setSchemaFieldValue,

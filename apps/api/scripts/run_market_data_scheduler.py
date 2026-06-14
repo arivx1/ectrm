@@ -16,17 +16,37 @@ if REPO_ROOT not in sys.path:
 from apps.api.app.config import settings
 from apps.api.app.db.engine import SessionLocal
 from apps.api.app.domains.reference_data.services.external_data import (
+    sync_alpha_vantage_prices,
+    sync_bls_ppi_series,
     sync_caiso_series,
     sync_cftc_series,
     sync_eia_fundamental_series,
     sync_eia_series,
+    sync_eia_wholesale_power_series,
     sync_ercot_series,
     sync_fred_series,
     sync_kalshi_series,
+    sync_miso_series,
+    sync_nyiso_series,
+    sync_usda_nass_series,
+    sync_world_bank_series,
 )
 from apps.api.app.domains.reference_data.services.external_data.sync_status import build_external_data_sync_status
 
-DEFAULT_PROVIDERS = ("EIA", "EIA_FUNDAMENTALS", "FRED", "CFTC", "CAISO", "ERCOT", "KALSHI")
+DEFAULT_PROVIDERS = (
+    "EIA",
+    "EIA_FUNDAMENTALS",
+    "FRED",
+    "BLS_PPI",
+    "WORLD_BANK",
+    "EIA_WHOLESALE_POWER",
+    "CFTC",
+    "CAISO",
+    "ERCOT",
+    "MISO",
+    "NYISO",
+    "KALSHI",
+)
 
 
 def main() -> int:
@@ -35,7 +55,22 @@ def main() -> int:
         "--provider",
         dest="providers",
         action="append",
-        choices=("eia", "eia-fundamentals", "fred", "cftc", "caiso", "ercot", "kalshi"),
+        choices=(
+            "eia",
+            "eia-fundamentals",
+            "fred",
+            "alpha-vantage",
+            "bls-ppi",
+            "world-bank",
+            "usda-nass",
+            "eia-wholesale-power",
+            "cftc",
+            "caiso",
+            "ercot",
+            "miso",
+            "nyiso",
+            "kalshi",
+        ),
     )
     parser.add_argument("--poll-seconds", dest="poll_seconds", type=int, default=60)
     parser.add_argument("--requested-by", dest="requested_by", default="scheduler")
@@ -103,6 +138,35 @@ def _sync_provider(*, provider: str, requested_by: str, db):
             lookback_days=settings.FRED_SYNC_DEFAULT_LOOKBACK_DAYS,
             requested_by=requested_by,
         )
+    if provider == "ALPHA_VANTAGE":
+        return sync_alpha_vantage_prices(
+            db,
+            requested_by=requested_by,
+        )
+    if provider == "BLS_PPI":
+        return sync_bls_ppi_series(
+            db,
+            lookback_days=settings.BLS_PPI_SYNC_DEFAULT_LOOKBACK_DAYS,
+            requested_by=requested_by,
+        )
+    if provider == "WORLD_BANK":
+        return sync_world_bank_series(
+            db,
+            lookback_days=settings.WORLD_BANK_SYNC_DEFAULT_LOOKBACK_DAYS,
+            requested_by=requested_by,
+        )
+    if provider == "USDA_NASS":
+        return sync_usda_nass_series(
+            db,
+            lookback_days=settings.USDA_NASS_SYNC_DEFAULT_LOOKBACK_DAYS,
+            requested_by=requested_by,
+        )
+    if provider == "EIA_WHOLESALE_POWER":
+        return sync_eia_wholesale_power_series(
+            db,
+            lookback_days=settings.EIA_WHOLESALE_POWER_SYNC_DEFAULT_LOOKBACK_DAYS,
+            requested_by=requested_by,
+        )
     if provider == "CFTC":
         return sync_cftc_series(
             db,
@@ -116,6 +180,16 @@ def _sync_provider(*, provider: str, requested_by: str, db):
         )
     if provider == "ERCOT":
         return sync_ercot_series(
+            db,
+            requested_by=requested_by,
+        )
+    if provider == "MISO":
+        return sync_miso_series(
+            db,
+            requested_by=requested_by,
+        )
+    if provider == "NYISO":
+        return sync_nyiso_series(
             db,
             requested_by=requested_by,
         )

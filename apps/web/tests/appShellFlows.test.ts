@@ -5,11 +5,60 @@ import {
   buildAuthInterruptionContinueLabel,
   resolveAuthInterruptionResumeAction,
 } from '../src/entities/app/useAuthInterruptionFlow.ts'
-import { DEFAULT_APP_VIEW_KEY } from '../src/entities/app/useAppRouteState.ts'
+import {
+  DEFAULT_APP_VIEW_KEY,
+  resolveAppBackAction,
+} from '../src/entities/app/useAppRouteState.ts'
 import { resolveStartHereRoutingAction } from '../src/entities/app/useStartHereRouting.ts'
 
-test('the app default route starts at the prompt home', () => {
+test('the app default route starts at Home', () => {
   assert.equal(DEFAULT_APP_VIEW_KEY, 'prompt')
+})
+
+test('app back uses tracked in-app history before falling back to home', () => {
+  assert.deepEqual(
+    resolveAppBackAction({
+      appHistoryIndex: 2,
+      activeNavigationSectionKey: null,
+      currentView: 'trades',
+    }),
+    { kind: 'history-back' },
+  )
+
+  assert.deepEqual(
+    resolveAppBackAction({
+      appHistoryIndex: 0,
+      activeNavigationSectionKey: null,
+      currentView: 'trades',
+    }),
+    {
+      kind: 'fallback',
+      view: 'prompt',
+    },
+  )
+
+  assert.deepEqual(
+    resolveAppBackAction({
+      appHistoryIndex: 0,
+      activeNavigationSectionKey: null,
+      currentView: 'prompt',
+    }),
+    { kind: 'noop' },
+  )
+})
+
+test('app back leaves section landing views through the default home fallback', () => {
+  assert.deepEqual(
+    resolveAppBackAction({
+      appHistoryIndex: 0,
+      activeNavigationSectionKey: 'trading',
+      currentView: 'prompt',
+    }),
+    {
+      kind: 'fallback',
+      view: 'prompt',
+    },
+  )
 })
 
 test('auth interruption labels prioritize the trade amendment flow', () => {
@@ -27,7 +76,7 @@ test('auth interruption labels prioritize the trade amendment flow', () => {
 test('auth interruption labels fall back to the active section landing or workspace label', () => {
   assert.equal(
     buildAuthInterruptionContinueLabel({
-      currentView: 'dashboard',
+      currentView: 'prompt',
       selectedTradeId: null,
       inspectorTab: 'overview',
       activeNavigationSectionLabel: 'Overview',
@@ -56,8 +105,8 @@ test('auth interruption resume restores the saved url before any trade-specific 
         continueLabel: 'trade TRD-1001 in Trade Capture',
         inspectorTab: 'amend',
       },
-      currentUrl: '/?view=dashboard',
-      currentView: 'dashboard',
+      currentUrl: '/?view=prompt',
+      currentView: 'prompt',
       selectedTradeId: null,
       selectedTradeRecordId: null,
       inspectorTab: 'overview',
@@ -136,7 +185,7 @@ test('start-here return routing resumes only after sign-in or from settings', ()
       authSessionId: null,
       previousAuthSessionId: null,
       authInterruptionActive: false,
-      currentView: 'dashboard',
+      currentView: 'prompt',
       startHereReturnIntent: 'operations',
     }),
     { kind: 'noop' },
@@ -147,7 +196,7 @@ test('start-here return routing resumes only after sign-in or from settings', ()
       authSessionId: 'session-1',
       previousAuthSessionId: null,
       authInterruptionActive: false,
-      currentView: 'dashboard',
+      currentView: 'prompt',
       startHereReturnIntent: 'operations',
     }),
     {
@@ -177,7 +226,7 @@ test('start-here return routing clears stale intents once the user is active els
       authSessionId: 'session-1',
       previousAuthSessionId: 'session-1',
       authInterruptionActive: false,
-      currentView: 'dashboard',
+      currentView: 'prompt',
       startHereReturnIntent: 'risk',
     }),
     { kind: 'clear' },

@@ -62,6 +62,14 @@
   backdrop-filter: blur(16px);
 }
 
+.side-rail-prompt {
+  gap: 0.95rem;
+}
+
+.side-rail-prompt .brand-lockup p {
+  display: none;
+}
+
 .brand-lockup h1,
 .hero h2,
 .section-head h3 {
@@ -107,6 +115,21 @@
   text-transform: uppercase;
 }
 
+.brand-mark-row {
+  --brand-mark-row-item-inline-size: 5.35rem;
+
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.brand-mark-row .brand-mark {
+  box-sizing: border-box;
+  justify-content: center;
+  inline-size: var(--brand-mark-row-item-inline-size);
+}
+
 .brand-mark {
   padding: 0.45rem 0.78rem;
   border-radius: 999px;
@@ -114,6 +137,52 @@
   background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(18, 42, 56, 0.08);
   box-shadow: 0 10px 30px rgba(17, 30, 41, 0.06);
+}
+
+.product-switch-button {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.product-switch {
+  --brand-mark-row-item-inline-size: 6.2rem;
+}
+
+.brand-mark.product-switch-button {
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.product-switch-button:hover,
+.product-switch-button:focus-visible {
+  border-color: rgba(18, 124, 108, 0.24);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.product-switch-button.is-active {
+  color: #f4fffb;
+  border-color: rgba(18, 124, 108, 0.34);
+  background: linear-gradient(135deg, rgba(18, 124, 108, 0.96), rgba(11, 42, 71, 0.92));
+  box-shadow:
+    0 18px 34px rgba(18, 42, 56, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.product-switch-button:focus-visible {
+  box-shadow:
+    0 0 0 3px rgb(var(--theme-highlight-rgb, 78 167 255) / 0.18),
+    0 18px 34px rgba(18, 42, 56, 0.14);
 }
 
 .eyebrow {
@@ -194,8 +263,13 @@
   align-items: stretch;
 }
 
+.nav-section-header-leaf {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .nav-section-toggle {
   align-items: center;
+  min-height: 5.25rem;
 }
 
 .nav-section-toggle-button {
@@ -203,6 +277,7 @@
   align-items: center;
   justify-content: center;
   width: 3.4rem;
+  min-height: 5.25rem;
   padding: 0.9rem 0.75rem;
 }
 
@@ -219,6 +294,14 @@
   display: grid;
   gap: 0.12rem;
   min-width: 0;
+}
+
+.nav-section-kicker {
+  min-height: 0.86rem;
+}
+
+.nav-section-kicker-empty {
+  visibility: hidden;
 }
 
 .nav-section-indicator {
@@ -313,3 +396,2742 @@
   padding: 2rem 2.4rem 2.4rem;
 }
 
+.main-stage-prompt {
+  padding-top: 1.4rem;
+}
+
+.workspace-topbar {
+  --workspace-topbar-control-height: 3.5rem;
+
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.workspace-topbar-prompt,
+.workspace-topbar-persistent {
+  align-items: center;
+  padding-bottom: 0.9rem;
+  border-bottom: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.workspace-topbar-copy {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 0.22rem;
+  min-width: 0;
+}
+
+.workspace-topbar-title-row,
+.hero-title-with-back {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: var(--workspace-topbar-control-height, 3.5rem);
+  min-width: 0;
+}
+
+.hero-title-with-back {
+  flex: 1 1 30rem;
+  flex-wrap: wrap;
+}
+
+.hero-title-with-back h2 {
+  min-width: 0;
+}
+
+.workspace-topbar-copy strong {
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: inherit;
+}
+
+.workspace-topbar-title-stack {
+  display: grid;
+  grid-template-areas: "title";
+  min-width: 0;
+}
+
+.workspace-topbar-title-stack > strong {
+  grid-area: title;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-topbar-title-sizer {
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.workspace-topbar-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  justify-self: end;
+  width: 100%;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.workspace-topbar-command-actions,
+.workspace-topbar-account-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.workspace-topbar-command-actions {
+  justify-content: flex-start;
+}
+
+.workspace-topbar-account-actions {
+  justify-content: flex-end;
+}
+
+.workspace-topbar-account-actions > .hero-session-pill {
+  box-sizing: border-box;
+  height: var(--workspace-topbar-control-height, 3.5rem);
+  min-height: var(--workspace-topbar-control-height, 3.5rem);
+  white-space: nowrap;
+}
+
+.workspace-topbar-token,
+.workspace-topbar-data-metric {
+  display: grid;
+  align-content: center;
+  box-sizing: border-box;
+  gap: 0.04rem;
+  height: var(--workspace-topbar-control-height, 3.5rem);
+  min-width: 0;
+  min-height: var(--workspace-topbar-control-height, 3.5rem);
+  overflow: hidden;
+  padding: 0.32rem 0.58rem;
+  border: 1px solid rgb(var(--theme-highlight-rgb, 78 167 255) / 0.2);
+  border-radius: 0.7rem;
+  background:
+    linear-gradient(180deg, rgb(var(--theme-highlight-rgb, 78 167 255) / 0.08), transparent),
+    rgba(255, 255, 255, 0.05);
+}
+
+.workspace-topbar-token {
+  width: 7.8rem;
+}
+
+.workspace-topbar-token-link {
+  color: inherit;
+  text-decoration: none;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.workspace-topbar-token-link:hover,
+.workspace-topbar-token-link:focus-visible {
+  border-color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.42);
+  background-color: rgb(var(--theme-highlight-rgb, 78 167 255) / 0.1);
+  box-shadow: 0 0 0 3px rgb(var(--theme-highlight-rgb, 78 167 255) / 0.12);
+}
+
+.workspace-topbar-db-size {
+  display: grid;
+  grid-template-columns:
+    minmax(4.8rem, 0.96fr)
+    minmax(3.7rem, 0.74fr)
+    repeat(2, minmax(5.25rem, 1.05fr));
+  align-items: stretch;
+  gap: 0.35rem;
+  height: var(--workspace-topbar-control-height, 3.5rem);
+  min-width: min(100%, 20.05rem);
+  min-height: var(--workspace-topbar-control-height, 3.5rem);
+}
+
+.workspace-topbar-data-metric {
+  min-width: 0;
+  width: 100%;
+}
+
+.workspace-topbar-token-label,
+.workspace-topbar-metric-label {
+  color: var(--color-copy-muted, #66717c);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.1;
+}
+
+.workspace-topbar-token strong,
+.workspace-topbar-data-metric strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.98rem;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-topbar-data-metric-data-out strong,
+.workspace-topbar-data-metric-data-in strong {
+  overflow: visible;
+  font-size: 0.88rem;
+  line-height: 1;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.workspace-topbar-token small,
+.workspace-topbar-data-metric small {
+  display: none;
+  color: var(--color-copy-muted, #66717c);
+  line-height: 1.4;
+}
+
+.workspace-topbar-session,
+.workspace-topbar-error {
+  color: var(--color-copy-muted, currentColor);
+  line-height: 1.4;
+}
+
+.workspace-topbar-error {
+  color: #9a4338;
+}
+
+.workspace-topbar-signout {
+  white-space: nowrap;
+}
+
+.nexus-crm-workspace {
+  display: grid;
+  align-content: start;
+  min-height: 24rem;
+}
+
+.nexus-crm-card {
+  display: grid;
+  gap: 1.1rem;
+  min-height: 12rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.95rem;
+  background:
+    linear-gradient(180deg, rgb(var(--theme-highlight-rgb, 78 167 255) / 0.08), transparent),
+    rgba(255, 255, 255, 0.48);
+  box-shadow: 0 18px 44px rgba(18, 42, 56, 0.06);
+}
+
+.nexus-crm-card h2 {
+  margin: 0;
+  color: #13293d;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: clamp(1.7rem, 3vw, 2.2rem);
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+
+.nexus-crm-heading-row {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.nexus-crm-heading-row > div:first-child {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.nexus-crm-heading-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.nexus-attio-sync-button {
+  min-height: 2.45rem;
+  white-space: nowrap;
+}
+
+.nexus-crm-subview-tabs {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0.28rem;
+  padding: 0.22rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  border-radius: 0.64rem;
+  background: rgba(255, 255, 255, 0.46);
+}
+
+.nexus-crm-detail-tabs {
+  justify-self: start;
+  margin-top: 0.1rem;
+  background: rgba(248, 251, 252, 0.82);
+}
+
+.nexus-crm-subview-tab {
+  min-height: 2rem;
+  padding: 0 0.8rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: #53606f;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.nexus-crm-subview-tab:hover,
+.nexus-crm-subview-tab:focus-visible {
+  color: #13293d;
+  outline: none;
+}
+
+.nexus-crm-subview-tab.is-active {
+  background: rgba(18, 126, 108, 0.12);
+  color: #0f685a;
+  box-shadow: inset 0 0 0 1px rgba(18, 126, 108, 0.18);
+}
+
+.nexus-client-base {
+  display: grid;
+  gap: 0.8rem;
+  min-width: 0;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.nexus-sync-status {
+  padding: 0.62rem 0.75rem;
+  border: 1px solid rgba(18, 124, 108, 0.16);
+  border-radius: 0.58rem;
+  background: rgba(18, 124, 108, 0.08);
+  color: #0f685a;
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.nexus-sync-review-overlay,
+.nexus-contact-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1.2rem;
+  background: rgba(12, 24, 35, 0.34);
+  backdrop-filter: blur(10px);
+}
+
+.nexus-contact-dialog {
+  display: grid;
+  gap: 1rem;
+  width: min(42rem, 100%);
+  max-height: min(44rem, calc(100dvh - 2.4rem));
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.12);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 70px rgba(12, 24, 35, 0.24);
+}
+
+.nexus-sync-review-dialog {
+  display: grid;
+  gap: 1rem;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  width: min(48rem, 100%);
+  max-height: min(42rem, calc(100dvh - 2.4rem));
+  overflow: hidden;
+  padding: 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.12);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 70px rgba(12, 24, 35, 0.24);
+}
+
+.nexus-sync-review-head,
+.nexus-contact-dialog-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.nexus-sync-review-head h3,
+.nexus-contact-dialog-head h3 {
+  margin: 0.18rem 0 0;
+  color: #13293d;
+  font-size: 1.35rem;
+  line-height: 1.15;
+}
+
+.nexus-contact-dialog-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.78rem;
+}
+
+.nexus-contact-dialog-field {
+  display: grid;
+  gap: 0.34rem;
+  min-width: 0;
+}
+
+.nexus-contact-dialog-field-wide,
+.nexus-contact-dialog-actions {
+  grid-column: 1 / -1;
+}
+
+.nexus-contact-dialog-field span {
+  color: #66717c;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.nexus-contact-dialog-field input,
+.nexus-contact-dialog-field-readonly strong {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 2.9rem;
+  padding: 0.7rem 0.82rem;
+  border: 1px solid rgba(18, 42, 56, 0.12);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.72);
+  color: #13293d;
+  font: inherit;
+}
+
+.nexus-contact-dialog-field input:focus {
+  border-color: rgba(18, 124, 108, 0.28);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(18, 124, 108, 0.12);
+}
+
+.nexus-contact-dialog-field-readonly strong {
+  display: flex;
+  align-items: center;
+  background: rgba(18, 126, 108, 0.08);
+  color: #13293d;
+  font-weight: 900;
+}
+
+.nexus-contact-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 0.55rem;
+  padding-top: 0.25rem;
+}
+
+.nexus-sync-review-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 5.4rem;
+  padding: 0.32rem 0.58rem;
+  border-radius: 0.5rem;
+  background: rgba(18, 126, 108, 0.1);
+  color: #0f685a;
+  font-size: 0.82rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.nexus-sync-review-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.nexus-sync-review-meta span {
+  padding: 0.22rem 0.46rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  border-radius: 999px;
+  color: #53606f;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.nexus-sync-review-body {
+  display: grid;
+  gap: 1rem;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.nexus-sync-review-section {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.nexus-sync-review-section h4 {
+  margin: 0;
+  color: #13293d;
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.nexus-sync-review-list,
+.nexus-sync-review-warning-list {
+  display: grid;
+  gap: 0.42rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nexus-sync-review-row {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem 0.8rem;
+  padding: 0.62rem 0.72rem;
+  border: 1px solid rgba(18, 42, 56, 0.09);
+  border-radius: 0.5rem;
+  background: rgba(248, 251, 252, 0.88);
+}
+
+.nexus-sync-review-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #13293d;
+}
+
+.nexus-sync-review-row span {
+  color: #53606f;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.nexus-sync-review-row small {
+  grid-column: 1 / -1;
+  color: #6d7886;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.nexus-sync-review-warning-list li {
+  padding: 0.55rem 0.68rem;
+  border: 1px solid rgba(176, 100, 36, 0.18);
+  border-radius: 0.5rem;
+  background: rgba(176, 100, 36, 0.08);
+  color: #7d4d22;
+  font-size: 0.84rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.nexus-sync-review-actions {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 0.55rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.nexus-client-name {
+  color: #13293d;
+  font-weight: 800;
+}
+
+.nexus-contact-name,
+.nexus-contact-company,
+.nexus-contact-email {
+  overflow-wrap: anywhere;
+}
+
+.nexus-contact-name {
+  color: #13293d;
+  font-weight: 800;
+}
+
+.nexus-contact-company {
+  color: #53606f;
+  font-weight: 800;
+}
+
+.nexus-contact-source {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.8rem;
+  padding: 0.14rem 0.42rem;
+  border-radius: 999px;
+  background: rgba(18, 126, 108, 0.1);
+  color: #0f685a;
+  font-size: 0.76rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.nexus-muted-cell {
+  color: #7b8794;
+  font-weight: 700;
+}
+
+.nexus-section-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.nexus-section-head strong {
+  color: #13293d;
+  font-size: 0.95rem;
+}
+
+.nexus-client-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  color: #53606f;
+  font-weight: 700;
+}
+
+.nexus-client-status::before {
+  width: 0.48rem;
+  height: 0.48rem;
+  border-radius: 50%;
+  background: var(--theme-accent, #127c6c);
+  content: "";
+}
+
+.nexus-client-contact-count,
+.nexus-client-todo-count {
+  color: #13293d;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.nexus-client-next-action {
+  color: #66717c;
+  font-weight: 700;
+}
+
+.nexus-client-entry-row {
+  background: rgba(236, 244, 241, 0.68);
+}
+
+.nexus-client-entry-row td {
+  padding: 0.18rem 0.3rem;
+}
+
+.nexus-client-entry-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2rem;
+  border: 1px solid rgba(18, 42, 56, 0.12);
+  border-radius: 0.12rem;
+  padding: 0.24rem 0.36rem;
+  background: rgba(255, 255, 255, 0.9);
+  color: #13293d;
+  font: inherit;
+  font-size: 0.84rem;
+  line-height: 1.2;
+}
+
+.nexus-client-entry-input:focus {
+  border-color: rgba(18, 124, 108, 0.34);
+  outline: none;
+  box-shadow: inset 0 0 0 1px rgba(18, 124, 108, 0.24);
+}
+
+.nexus-client-entry-add {
+  min-height: 2rem;
+  padding: 0.28rem 0.48rem;
+  border-radius: 0.14rem;
+  font-size: 0.76rem;
+}
+
+.nexus-client-entry-next-action {
+  display: grid;
+  gap: 0.16rem;
+}
+
+.nexus-client-entry-status {
+  color: #8a5d20;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.nexus-client-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.nexus-client-detail-head > div {
+  display: grid;
+  gap: 0.36rem;
+  min-width: 0;
+}
+
+.nexus-client-back {
+  flex: 0 0 auto;
+}
+
+.nexus-contact-form,
+.nexus-todo-form,
+.nexus-tool-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.nexus-todo-form-global,
+.nexus-tool-form {
+  grid-template-columns: minmax(0, 1fr) minmax(10rem, 16rem) auto;
+}
+
+.nexus-contact-form-copy {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.nexus-contact-form-copy span {
+  color: #66717c;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.nexus-contact-form-copy strong {
+  color: #13293d;
+  font-size: 0.96rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.nexus-contact-field,
+.nexus-todo-field,
+.nexus-tool-field {
+  display: grid;
+  gap: 0.34rem;
+  min-width: 0;
+}
+
+.nexus-contact-field span,
+.nexus-todo-field span,
+.nexus-tool-field span {
+  color: #66717c;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.nexus-contact-field input,
+.nexus-todo-field input,
+.nexus-todo-field select,
+.nexus-tool-field input,
+.nexus-client-link-field input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 2.9rem;
+  padding: 0.7rem 0.82rem;
+  border: 1px solid rgba(18, 42, 56, 0.12);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.72);
+  color: #13293d;
+  font: inherit;
+}
+
+.nexus-contact-field input:focus,
+.nexus-todo-field input:focus,
+.nexus-todo-field select:focus,
+.nexus-tool-field input:focus,
+.nexus-client-link-field input:focus {
+  border-color: rgba(18, 124, 108, 0.28);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(18, 124, 108, 0.12);
+}
+
+.nexus-client-contacts,
+.nexus-client-todos {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.nexus-attio-section {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+  padding-top: 0.9rem;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.nexus-attio-head > div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.nexus-attio-open {
+  flex: 0 0 auto;
+}
+
+.nexus-attio-company {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.72rem 0;
+  border-top: 1px solid rgba(18, 42, 56, 0.06);
+  border-bottom: 1px solid rgba(18, 42, 56, 0.06);
+}
+
+.nexus-attio-company-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.nexus-attio-company-title strong {
+  min-width: 0;
+  color: #13293d;
+  font-size: 1rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.nexus-attio-company-title span {
+  flex: 0 0 auto;
+  color: #127c6c;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.nexus-attio-company p {
+  margin: 0;
+  color: #53606f;
+  line-height: 1.5;
+}
+
+.nexus-attio-domain-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.38rem;
+}
+
+.nexus-attio-domain-list span {
+  padding: 0.18rem 0.42rem;
+  border: 1px solid rgba(18, 124, 108, 0.14);
+  border-radius: 0.24rem;
+  background: rgba(18, 124, 108, 0.08);
+  color: #0f685a;
+  font-size: 0.76rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.nexus-attio-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.nexus-attio-column {
+  display: grid;
+  align-content: start;
+  gap: 0.62rem;
+  min-width: 0;
+}
+
+.nexus-attio-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nexus-attio-list li {
+  display: grid;
+  min-width: 0;
+  min-height: 3rem;
+  padding: 0.62rem 0.72rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.nexus-attio-list li > div {
+  display: grid;
+  gap: 0.14rem;
+  min-width: 0;
+}
+
+.nexus-attio-list strong,
+.nexus-attio-list a {
+  color: #13293d;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.nexus-attio-list a:hover,
+.nexus-attio-list a:focus-visible {
+  color: #0f685a;
+  text-decoration: underline;
+}
+
+.nexus-attio-list span {
+  color: #66717c;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.nexus-attio-empty {
+  min-height: 5.8rem;
+  display: grid;
+  place-items: center;
+  padding: 0.85rem;
+  border: 1px dashed rgba(18, 42, 56, 0.14);
+  border-radius: 0.58rem;
+  color: #66717c;
+  font-weight: 700;
+  text-align: center;
+}
+
+.nexus-attio-empty-compact {
+  min-height: 3.2rem;
+  font-size: 0.84rem;
+}
+
+.nexus-attio-error,
+.nexus-attio-warning {
+  color: #9a4338;
+}
+
+.nexus-contact-error-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.62rem 0.75rem;
+  border: 1px solid rgba(154, 67, 56, 0.18);
+  border-radius: 0.58rem;
+  background: rgba(154, 67, 56, 0.08);
+  color: #9a4338;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.nexus-contact-error-bar span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.nexus-contact-error-bar .button {
+  flex: 0 0 auto;
+  min-height: 1.85rem;
+  padding: 0 0.7rem;
+}
+
+.nexus-attio-warning {
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.nexus-notion-section,
+.nexus-grain-section,
+.nexus-engagement-section,
+.nexus-linear-section {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  padding-top: 0.9rem;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.nexus-notion-head > div:first-child,
+.nexus-grain-head > div:first-child,
+.nexus-engagement-head > div:first-child,
+.nexus-linear-head > div:first-child {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.nexus-notion-count,
+.nexus-grain-count,
+.nexus-engagement-count,
+.nexus-linear-count {
+  flex: 0 0 auto;
+  color: #127c6c;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.nexus-linear-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: end;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.nexus-section-head .nexus-engagement-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: end;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.nexus-engagement-actions .nexus-engagement-action-button {
+  flex: 0 0 auto;
+  min-height: 1.95rem;
+  padding: 0.36rem 0.62rem;
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.nexus-engagement-collapse-button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #103045;
+  cursor: pointer;
+}
+
+.nexus-engagement-collapse-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.nexus-engagement-collapse-button:focus-visible {
+  outline: 2px solid rgba(18, 124, 108, 0.3);
+  outline-offset: 3px;
+}
+
+.nexus-engagement-toggle-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.nexus-engagement-body {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.nexus-engagement-body[hidden] {
+  display: none;
+}
+
+.nexus-engagement-summary {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.7rem 0.78rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  border-radius: 0.58rem;
+  background: rgba(20, 124, 108, 0.08);
+}
+
+.nexus-engagement-summary-title {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.nexus-engagement-summary-title strong {
+  color: #13293d;
+  font-weight: 850;
+}
+
+.nexus-engagement-summary-title span {
+  color: #66717c;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.nexus-engagement-summary ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #253746;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.nexus-engagement-query {
+  min-width: 0;
+  padding: 0.46rem 0.58rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.5rem;
+  background: rgba(248, 251, 252, 0.78);
+  color: #5f6b77;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.nexus-notion-list,
+.nexus-grain-list,
+.nexus-engagement-list,
+.nexus-linear-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nexus-notion-list li,
+.nexus-grain-list li,
+.nexus-engagement-list li,
+.nexus-linear-list li {
+  display: grid;
+  min-width: 0;
+  min-height: 3rem;
+  padding: 0.62rem 0.72rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.nexus-notion-list li > div,
+.nexus-grain-list li > div,
+.nexus-engagement-list li > div,
+.nexus-linear-list li > div {
+  display: grid;
+  gap: 0.14rem;
+  min-width: 0;
+}
+
+.nexus-notion-list strong,
+.nexus-notion-list a,
+.nexus-grain-list strong,
+.nexus-grain-list a,
+.nexus-engagement-list strong,
+.nexus-engagement-list a,
+.nexus-linear-list strong,
+.nexus-linear-list a {
+  color: #13293d;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.nexus-notion-list a:hover,
+.nexus-notion-list a:focus-visible,
+.nexus-grain-list a:hover,
+.nexus-grain-list a:focus-visible,
+.nexus-engagement-list a:hover,
+.nexus-engagement-list a:focus-visible,
+.nexus-linear-list a:hover,
+.nexus-linear-list a:focus-visible {
+  color: #0f685a;
+  text-decoration: underline;
+}
+
+.nexus-notion-list span,
+.nexus-grain-list span,
+.nexus-engagement-list span,
+.nexus-linear-list span {
+  color: #66717c;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.nexus-notion-empty,
+.nexus-grain-empty,
+.nexus-engagement-empty,
+.nexus-linear-empty {
+  min-height: 5.2rem;
+  display: grid;
+  place-items: center;
+  padding: 0.85rem;
+  border: 1px dashed rgba(18, 42, 56, 0.14);
+  border-radius: 0.58rem;
+  color: #66717c;
+  font-weight: 700;
+  text-align: center;
+}
+
+.nexus-notion-error,
+.nexus-notion-warning,
+.nexus-grain-error,
+.nexus-grain-warning,
+.nexus-engagement-error,
+.nexus-engagement-warning,
+.nexus-linear-error,
+.nexus-linear-warning {
+  color: #9a4338;
+}
+
+.nexus-notion-warning,
+.nexus-grain-warning,
+.nexus-engagement-warning,
+.nexus-linear-warning {
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.nexus-client-link-manager {
+  display: grid;
+  gap: 0.62rem;
+  min-width: 0;
+}
+
+.nexus-client-link-form {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.78fr) minmax(12rem, 1.22fr) auto;
+  align-items: end;
+  gap: 0.58rem;
+  min-width: 0;
+}
+
+.nexus-client-link-form .button {
+  min-height: 2.9rem;
+  white-space: nowrap;
+}
+
+.nexus-client-link-field {
+  display: grid;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.nexus-client-link-field span {
+  color: #66717c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.nexus-client-link-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nexus-client-link-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: 2.9rem;
+  padding: 0.58rem 0.68rem;
+  border: 1px solid rgba(18, 124, 108, 0.14);
+  border-radius: 0.5rem;
+  background: rgba(18, 124, 108, 0.06);
+}
+
+.nexus-client-link-list li > div {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.nexus-client-link-list a {
+  color: #13293d;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.nexus-client-link-list a:hover,
+.nexus-client-link-list a:focus-visible {
+  color: #0f685a;
+  text-decoration: underline;
+}
+
+.nexus-client-link-list span,
+.nexus-client-link-empty {
+  color: #66717c;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.nexus-client-link-empty {
+  min-height: 2.7rem;
+  display: grid;
+  place-items: center;
+  padding: 0.62rem 0.72rem;
+  border: 1px dashed rgba(18, 42, 56, 0.12);
+  border-radius: 0.5rem;
+  text-align: center;
+}
+
+.nexus-client-link-remove {
+  flex: 0 0 auto;
+  min-height: 2rem;
+  padding: 0 0.68rem;
+}
+
+.nexus-contact-list,
+.nexus-todo-list,
+.nexus-tool-list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nexus-contact-list li,
+.nexus-todo-list li,
+.nexus-tool-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: 2.9rem;
+  padding: 0.66rem 0.75rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.58rem;
+  background: rgba(255, 255, 255, 0.62);
+  color: #13293d;
+}
+
+.nexus-contact-list li > div,
+.nexus-todo-list li > div,
+.nexus-tool-list li > div {
+  display: grid;
+  gap: 0.14rem;
+  min-width: 0;
+}
+
+.nexus-contact-list strong,
+.nexus-contact-list a,
+.nexus-todo-list strong,
+.nexus-tool-list strong {
+  color: inherit;
+  font-weight: 800;
+  line-height: 1.25;
+  text-decoration: none;
+}
+
+.nexus-contact-list a:hover,
+.nexus-contact-list a:focus-visible {
+  color: #0f685a;
+  outline: none;
+}
+
+.nexus-contact-list span,
+.nexus-todo-list span,
+.nexus-tool-list span {
+  color: #66717c;
+  font-size: 0.8rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.nexus-tool-name {
+  color: #13293d;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.nexus-tool-link {
+  color: #66717c;
+  font-size: 0.8rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.nexus-tool-link-empty {
+  color: #8a95a1;
+  font-style: italic;
+}
+
+.nexus-boolean-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.7rem;
+  padding: 0.12rem 0.34rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.18rem;
+  background: rgba(18, 42, 56, 0.04);
+  color: #7a8590;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.15;
+}
+
+.nexus-boolean-cell.is-true {
+  border-color: rgba(18, 124, 108, 0.18);
+  background: rgba(18, 124, 108, 0.1);
+  color: #0f685a;
+}
+
+.nexus-tool-entry-boolean {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.34rem;
+  min-height: 2rem;
+  color: #66717c;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.15;
+}
+
+.nexus-tool-entry-boolean input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: #127c6c;
+}
+
+.nexus-todo-client-link,
+.nexus-tool-open {
+  flex: 0 0 auto;
+}
+
+.nexus-contact-empty,
+.nexus-todo-empty,
+.nexus-tool-empty {
+  min-height: 7rem;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  border: 1px dashed rgba(18, 42, 56, 0.14);
+  border-radius: 0.65rem;
+  color: #66717c;
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .nexus-attio-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nexus-crm-heading-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nexus-crm-heading-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nexus-engagement-head {
+    align-items: center;
+    flex-direction: row;
+    gap: 0.55rem;
+  }
+
+  .nexus-engagement-head > div:first-child {
+    min-width: 0;
+  }
+
+  .nexus-section-head .nexus-engagement-actions {
+    flex-wrap: nowrap;
+    justify-content: end;
+    gap: 0.34rem;
+  }
+
+  .nexus-engagement-count {
+    font-size: 0.72rem;
+  }
+
+  .nexus-engagement-actions .nexus-engagement-action-button {
+    min-height: 1.82rem;
+    padding: 0.3rem 0.48rem;
+    font-size: 0.7rem;
+  }
+
+  .nexus-engagement-collapse-button {
+    width: 1.85rem;
+    height: 1.85rem;
+  }
+
+  .nexus-engagement-toggle-indicator {
+    width: 1.85rem;
+    height: 1.85rem;
+    font-size: 1rem;
+  }
+
+  .nexus-todo-form-global,
+  .nexus-tool-form,
+  .nexus-client-link-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nexus-client-link-list li {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nexus-client-link-remove {
+    align-self: start;
+  }
+
+  .nexus-sync-review-overlay,
+  .nexus-contact-dialog-overlay {
+    align-items: stretch;
+    padding: 0.75rem;
+  }
+
+  .nexus-sync-review-dialog,
+  .nexus-contact-dialog {
+    max-height: calc(100dvh - 1.5rem);
+  }
+
+  .nexus-sync-review-head,
+  .nexus-contact-dialog-head,
+  .nexus-sync-review-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nexus-contact-dialog-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nexus-sync-review-count,
+  .nexus-sync-review-actions .button {
+    width: 100%;
+  }
+
+  .nexus-sync-review-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nexus-sync-review-row span {
+    white-space: normal;
+  }
+}
+
+.profile-avatar-menu {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-avatar-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--workspace-topbar-control-height, 3.5rem);
+  height: var(--workspace-topbar-control-height, 3.5rem);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(126, 154, 184, 0.28);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 30% 25%, rgba(61, 214, 160, 0.22), transparent 42%),
+    linear-gradient(135deg, rgba(24, 51, 74, 0.98), rgba(8, 15, 24, 0.98));
+  color: var(--terminal-text, #eef4ff);
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.profile-avatar-trigger:hover,
+.profile-avatar-trigger:focus-visible,
+.profile-avatar-trigger[aria-expanded="true"] {
+  border-color: rgba(61, 214, 160, 0.42);
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(61, 214, 160, 0.14),
+    0 14px 30px rgba(0, 0, 0, 0.28);
+}
+
+.profile-avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-avatar-initials {
+  color: inherit;
+  font-size: 0.86rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.profile-avatar-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.profile-avatar-popover {
+  position: absolute;
+  top: calc(100% + 0.65rem);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 0.35rem;
+  width: min(17rem, calc(100vw - 2rem));
+  padding: 0.65rem;
+  border: 1px solid rgba(126, 154, 184, 0.2);
+  border-radius: 0.95rem;
+  background:
+    radial-gradient(circle at top right, rgba(78, 167, 255, 0.16), transparent 34%),
+    linear-gradient(180deg, rgba(12, 24, 36, 0.99), rgba(7, 14, 23, 0.99));
+  box-shadow: 0 24px 54px rgba(0, 0, 0, 0.34);
+}
+
+.profile-avatar-popover-head {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.45rem 0.45rem 0.55rem;
+  border-bottom: 1px solid rgba(126, 154, 184, 0.14);
+}
+
+.profile-avatar-popover-head strong {
+  color: var(--terminal-text, #eef4ff);
+  font-size: 0.95rem;
+  line-height: 1.2;
+}
+
+.profile-avatar-popover-head small,
+.profile-avatar-menu-error {
+  color: var(--terminal-muted, #98a8b8);
+  line-height: 1.4;
+}
+
+.profile-avatar-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 2.35rem;
+  padding: 0.56rem 0.65rem;
+  border: 0;
+  border-radius: 0.65rem;
+  background: transparent;
+  color: var(--terminal-text-soft, #d9e5f2);
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-avatar-menu-item:hover,
+.profile-avatar-menu-item:focus-visible {
+  outline: none;
+  background: rgba(78, 167, 255, 0.11);
+  color: var(--terminal-text, #eef4ff);
+}
+
+.profile-avatar-menu-item-danger {
+  color: #ffb4ab;
+}
+
+.profile-avatar-menu-item:disabled {
+  color: var(--terminal-dim, #738395);
+  cursor: wait;
+}
+
+.profile-avatar-menu-error {
+  padding: 0.3rem 0.45rem 0.1rem;
+  color: #ffb4ab;
+}
+
+.hero-badge-actions .profile-avatar-menu {
+  justify-self: start;
+}
+
+.app-back-button {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  gap: 0.42rem;
+  height: var(--workspace-topbar-control-height, 3.5rem);
+  min-height: var(--workspace-topbar-control-height, 3.5rem);
+  padding: 0.5rem 0.82rem;
+  border-radius: 0.9rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.app-back-button::before {
+  content: "<";
+  font-weight: 800;
+  line-height: 1;
+}
+
+.app-back-button-mobile {
+  display: none;
+}
+
+.terminal-command-trigger {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  justify-content: space-between;
+  gap: 0.8rem;
+  height: var(--workspace-topbar-control-height, 3.5rem);
+  width: clamp(14rem, 24vw, 19.5rem);
+  min-width: 0;
+  min-height: var(--workspace-topbar-control-height, 3.5rem);
+  padding: 0.5rem 0.9rem;
+  border-radius: 1rem;
+  text-align: left;
+}
+
+.terminal-command-trigger-mobile {
+  min-width: 0;
+  padding-inline: 0.82rem;
+}
+
+.terminal-command-trigger-copy {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.terminal-command-trigger-copy strong {
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.terminal-command-trigger-copy small {
+  color: #66717c;
+  line-height: 1.35;
+}
+
+.terminal-command-trigger-shortcut {
+  white-space: nowrap;
+  color: #7a848e;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.terminal-shortcut-trigger {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  gap: 0.55rem;
+  height: var(--workspace-topbar-control-height, 3.5rem);
+  min-height: var(--workspace-topbar-control-height, 3.5rem);
+  padding: 0.5rem 0.82rem;
+  border-radius: 1rem;
+}
+
+.terminal-workspace-set-launcher {
+  display: grid;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+  padding: 0.95rem;
+  border: 1px solid rgba(126, 154, 184, 0.18);
+  border-radius: 1.1rem;
+  background:
+    radial-gradient(circle at top right, rgba(61, 214, 160, 0.1), transparent 32%),
+    linear-gradient(180deg, rgba(10, 18, 28, 0.95), rgba(8, 15, 24, 0.98));
+  box-shadow: var(--terminal-shadow);
+}
+
+.terminal-workspace-set-head,
+.terminal-workspace-set-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.terminal-workspace-set-copy {
+  display: grid;
+  gap: 0.24rem;
+  min-width: min(100%, 24rem);
+}
+
+.terminal-workspace-set-eyebrow,
+.terminal-workspace-set-select-field span,
+.terminal-workspace-set-target-copy span {
+  color: var(--terminal-dim);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.terminal-workspace-set-copy strong {
+  color: var(--terminal-text);
+  font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
+  font-size: 1.08rem;
+  letter-spacing: -0.04em;
+}
+
+.terminal-workspace-set-copy p,
+.terminal-workspace-set-toolbar small,
+.terminal-workspace-set-target-copy p,
+.terminal-workspace-set-target-copy small,
+.terminal-workspace-set-note {
+  margin: 0;
+  color: var(--terminal-muted);
+  line-height: 1.45;
+}
+
+.terminal-workspace-set-select-field {
+  display: grid;
+  gap: 0.38rem;
+  min-width: min(100%, 14rem);
+}
+
+.terminal-workspace-set-select {
+  width: 100%;
+  border: 1px solid var(--terminal-line);
+  border-radius: 0.82rem;
+  background: rgba(8, 15, 24, 0.92);
+  color: var(--terminal-text);
+  padding: 0.62rem 0.72rem;
+  font: 700 0.85rem/1.2 "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+
+.terminal-workspace-set-toolbar {
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.terminal-workspace-set-toolbar small {
+  max-width: 42rem;
+}
+
+.terminal-workspace-set-targets {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.terminal-workspace-set-target {
+  display: grid;
+  gap: 0.7rem;
+  align-content: space-between;
+  padding: 0.82rem;
+  border: 1px solid var(--terminal-line);
+  border-radius: 0.95rem;
+  background: linear-gradient(180deg, rgba(8, 15, 24, 0.92), rgba(13, 24, 37, 0.8));
+}
+
+.terminal-workspace-set-target-copy {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.terminal-workspace-set-target-copy strong {
+  color: var(--terminal-text-soft);
+  line-height: 1.2;
+}
+
+.terminal-workspace-set-popout {
+  justify-self: start;
+  padding: 0.52rem 0.68rem;
+  border-radius: 0.75rem;
+}
+
+.terminal-shortcut-trigger kbd,
+.terminal-shortcut-card kbd,
+.terminal-shortcut-workspace-row kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.8rem;
+  padding: 0.24rem 0.46rem;
+  border: 1px solid rgba(18, 42, 56, 0.12);
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.84);
+  color: #13293d;
+  font: 700 0.72rem/1.2 "IBM Plex Mono", "SFMono-Regular", monospace;
+  box-shadow: inset 0 -1px 0 rgba(18, 42, 56, 0.08);
+}
+
+.terminal-command-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 4.5rem 1rem 1rem;
+}
+
+.terminal-shortcut-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 31;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 4.5rem 1rem 1rem;
+}
+
+.terminal-command-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(18, 42, 56, 0.44);
+  backdrop-filter: blur(10px);
+}
+
+.terminal-command-dialog {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 0.95rem;
+  width: min(52rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 6rem);
+  padding: 1rem;
+  overflow: hidden;
+}
+
+.terminal-shortcut-dialog {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 1rem;
+  width: min(58rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 6rem);
+  padding: 1rem;
+  overflow: auto;
+}
+
+.terminal-command-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.terminal-command-head-copy {
+  display: grid;
+  gap: 0.22rem;
+  min-width: 0;
+}
+
+.terminal-command-head-copy strong {
+  color: #13293d;
+  font-size: 1.08rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.terminal-command-head-copy p {
+  color: #66717c;
+  line-height: 1.5;
+}
+
+.terminal-command-input-shell {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.82rem 0.9rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.terminal-command-prompt {
+  color: #127c6c;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.terminal-command-input {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #13293d;
+  font: inherit;
+  line-height: 1.4;
+  outline: none;
+}
+
+.terminal-command-input::placeholder {
+  color: #7a848e;
+}
+
+.terminal-command-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.terminal-command-hints span {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.36rem 0.62rem;
+  border-radius: 999px;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  background: rgba(255, 255, 255, 0.7);
+  color: #66717c;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.terminal-command-results {
+  display: grid;
+  gap: 0.9rem;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+.terminal-command-group {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.terminal-command-group-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.terminal-command-group-head strong {
+  color: #13293d;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.terminal-command-group-head small {
+  color: #7a848e;
+  font-size: 0.74rem;
+}
+
+.terminal-command-group-results {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.terminal-command-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.9rem;
+  width: 100%;
+  padding: 0.88rem 0.95rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.72);
+  text-align: left;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
+.terminal-command-result:hover,
+.terminal-command-result.is-active {
+  transform: translateY(-1px);
+  border-color: rgba(18, 124, 108, 0.22);
+  background: linear-gradient(135deg, rgba(18, 124, 108, 0.08), rgba(255, 255, 255, 0.9));
+  box-shadow: 0 18px 40px rgba(17, 30, 41, 0.08);
+}
+
+.terminal-command-result-copy {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.terminal-command-result-copy strong {
+  color: #13293d;
+  font-size: 0.96rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.terminal-command-result-copy p {
+  margin: 0;
+  color: #66717c;
+  line-height: 1.45;
+}
+
+.terminal-command-result-kind {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.62rem;
+  border-radius: 999px;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  background: rgba(18, 42, 56, 0.04);
+  color: #5f6a74;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.terminal-command-state {
+  padding: 1rem;
+}
+
+.terminal-command-state strong {
+  color: #13293d;
+}
+
+.terminal-command-state-loading {
+  border-color: rgba(18, 124, 108, 0.18);
+}
+
+.terminal-command-state-unsupported {
+  border-color: rgba(154, 67, 56, 0.18);
+}
+
+.terminal-command-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(18, 42, 56, 0.08);
+}
+
+.terminal-command-footer small {
+  color: #66717c;
+  line-height: 1.45;
+}
+
+.terminal-shortcut-grid,
+.terminal-shortcut-workspace-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.terminal-shortcut-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.terminal-shortcut-card,
+.terminal-shortcut-workspace-row,
+.terminal-shortcut-workspaces {
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.terminal-shortcut-card,
+.terminal-shortcut-workspaces {
+  padding: 0.9rem;
+}
+
+.terminal-shortcut-card {
+  display: grid;
+  gap: 0.72rem;
+}
+
+.terminal-shortcut-card-copy {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.terminal-shortcut-card-copy span {
+  color: #66717c;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.terminal-shortcut-card-copy strong,
+.terminal-shortcut-workspace-row strong {
+  color: #13293d;
+}
+
+.terminal-shortcut-card-copy p,
+.terminal-shortcut-card small,
+.terminal-shortcut-workspace-row p {
+  margin: 0;
+  color: #66717c;
+  line-height: 1.45;
+}
+
+.terminal-shortcut-key-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.terminal-shortcut-workspaces {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.terminal-shortcut-workspace-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.terminal-shortcut-workspace-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: start;
+  padding: 0.75rem;
+}
+
+.app-shell.app-shell-terminal-mode {
+  grid-template-columns: 16.5rem minmax(0, 1fr);
+}
+
+.app-shell-terminal-mode .app-aura {
+  filter: blur(92px);
+}
+
+.app-shell-terminal-mode .side-rail {
+  gap: 0.8rem;
+  padding: 1rem 0.85rem 0.95rem;
+}
+
+.app-shell-terminal-mode .side-rail-prompt {
+  gap: 0.68rem;
+}
+
+.app-shell-terminal-mode .brand-lockup h1 {
+  margin-top: 0.55rem;
+  font-size: clamp(1.7rem, 3vw, 2.2rem);
+}
+
+.app-shell-terminal-mode .brand-lockup p {
+  display: none;
+}
+
+.app-shell-terminal-mode .nav-stack,
+.app-shell-terminal-mode .stack,
+.app-shell-terminal-mode .detail-list,
+.app-shell-terminal-mode .timeline,
+.app-shell-terminal-mode .reference-groups,
+.app-shell-terminal-mode .reference-list,
+.app-shell-terminal-mode .position-list,
+.app-shell-terminal-mode .stack-form,
+.app-shell-terminal-mode .skeleton-stack {
+  gap: 0.72rem;
+}
+
+.app-shell-terminal-mode .nav-item {
+  padding: 0.78rem 0.82rem;
+  border-radius: 0.98rem;
+}
+
+.app-shell-terminal-mode .nav-item strong {
+  font-size: 0.92rem;
+}
+
+.app-shell-terminal-mode .nav-item span {
+  font-size: 0.63rem;
+}
+
+.app-shell-terminal-mode .product-switch-button.is-active {
+  color: var(--terminal-bg);
+  border-color: rgba(61, 214, 160, 0.48);
+  background: linear-gradient(135deg, rgba(61, 214, 160, 0.96), rgba(137, 211, 255, 0.9));
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.32),
+    0 0 0 1px rgba(61, 214, 160, 0.16);
+}
+
+.app-shell-terminal-mode .nexus-crm-card {
+  border-color: rgba(126, 154, 184, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba(78, 167, 255, 0.13), transparent 42%),
+    linear-gradient(180deg, rgba(13, 24, 37, 0.96), rgba(8, 15, 24, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.app-shell-terminal-mode .nexus-crm-card h2 {
+  color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .nexus-crm-subview-tabs {
+  border-color: rgba(126, 154, 184, 0.18);
+  background: rgba(8, 15, 24, 0.72);
+}
+
+.app-shell-terminal-mode .nexus-sync-status {
+  border-color: rgba(61, 214, 160, 0.2);
+  background: rgba(61, 214, 160, 0.08);
+  color: var(--terminal-accent);
+}
+
+.app-shell-terminal-mode .nexus-crm-subview-tab {
+  color: var(--terminal-muted);
+}
+
+.app-shell-terminal-mode .nexus-crm-subview-tab:hover,
+.app-shell-terminal-mode .nexus-crm-subview-tab:focus-visible,
+.app-shell-terminal-mode .nexus-crm-subview-tab.is-active {
+  color: var(--terminal-accent);
+}
+
+.app-shell-terminal-mode .nexus-crm-subview-tab.is-active {
+  background: rgba(61, 214, 160, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(61, 214, 160, 0.22);
+}
+
+.app-shell-terminal-mode .nexus-client-base {
+  border-top-color: rgba(126, 154, 184, 0.18);
+}
+
+.app-shell-terminal-mode .nexus-attio-section,
+.app-shell-terminal-mode .nexus-attio-company,
+.app-shell-terminal-mode .nexus-notion-section,
+.app-shell-terminal-mode .nexus-grain-section,
+.app-shell-terminal-mode .nexus-engagement-section,
+.app-shell-terminal-mode .nexus-linear-section {
+  border-color: rgba(126, 154, 184, 0.18);
+}
+
+.app-shell-terminal-mode .nexus-client-name,
+.app-shell-terminal-mode .nexus-client-contact-count,
+.app-shell-terminal-mode .nexus-client-todo-count,
+.app-shell-terminal-mode .nexus-contact-name,
+.app-shell-terminal-mode .nexus-tool-name,
+.app-shell-terminal-mode .nexus-attio-company-title strong,
+.app-shell-terminal-mode .nexus-attio-list strong,
+.app-shell-terminal-mode .nexus-attio-list a,
+.app-shell-terminal-mode .nexus-notion-list strong,
+.app-shell-terminal-mode .nexus-notion-list a,
+.app-shell-terminal-mode .nexus-grain-list strong,
+.app-shell-terminal-mode .nexus-grain-list a,
+.app-shell-terminal-mode .nexus-engagement-list strong,
+.app-shell-terminal-mode .nexus-engagement-list a,
+.app-shell-terminal-mode .nexus-linear-list strong,
+.app-shell-terminal-mode .nexus-linear-list a,
+.app-shell-terminal-mode .nexus-client-link-list a,
+.app-shell-terminal-mode .nexus-contact-list a,
+.app-shell-terminal-mode .nexus-contact-form-copy strong,
+.app-shell-terminal-mode .nexus-contact-dialog-head h3,
+.app-shell-terminal-mode .nexus-contact-dialog-field-readonly strong,
+.app-shell-terminal-mode .nexus-boolean-cell.is-true,
+.app-shell-terminal-mode .nexus-section-head strong,
+.app-shell-terminal-mode .nexus-contact-list li,
+.app-shell-terminal-mode .nexus-todo-list li,
+.app-shell-terminal-mode .nexus-tool-list li,
+.app-shell-terminal-mode .nexus-attio-list li,
+.app-shell-terminal-mode .nexus-notion-list li,
+.app-shell-terminal-mode .nexus-grain-list li,
+.app-shell-terminal-mode .nexus-engagement-list li,
+.app-shell-terminal-mode .nexus-linear-list li,
+.app-shell-terminal-mode .nexus-client-link-list li {
+  color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .nexus-contact-list li,
+.app-shell-terminal-mode .nexus-todo-list li,
+.app-shell-terminal-mode .nexus-tool-list li,
+.app-shell-terminal-mode .nexus-attio-list li,
+.app-shell-terminal-mode .nexus-notion-list li,
+.app-shell-terminal-mode .nexus-grain-list li,
+.app-shell-terminal-mode .nexus-engagement-list li,
+.app-shell-terminal-mode .nexus-linear-list li,
+.app-shell-terminal-mode .nexus-client-link-list li {
+  border-color: rgba(126, 154, 184, 0.18);
+  background: rgba(13, 24, 37, 0.72);
+}
+
+.app-shell-terminal-mode .nexus-client-status,
+.app-shell-terminal-mode .nexus-client-next-action,
+.app-shell-terminal-mode .nexus-contact-company,
+.app-shell-terminal-mode .nexus-contact-form-copy span,
+.app-shell-terminal-mode .nexus-contact-field span,
+.app-shell-terminal-mode .nexus-contact-dialog-field span,
+.app-shell-terminal-mode .nexus-contact-list span,
+.app-shell-terminal-mode .nexus-muted-cell,
+.app-shell-terminal-mode .nexus-todo-field span,
+.app-shell-terminal-mode .nexus-todo-list span,
+.app-shell-terminal-mode .nexus-tool-field span,
+.app-shell-terminal-mode .nexus-tool-link,
+.app-shell-terminal-mode .nexus-boolean-cell,
+.app-shell-terminal-mode .nexus-tool-entry-boolean,
+.app-shell-terminal-mode .nexus-tool-list span,
+.app-shell-terminal-mode .nexus-client-link-field span,
+.app-shell-terminal-mode .nexus-client-link-list span,
+.app-shell-terminal-mode .nexus-client-link-empty,
+.app-shell-terminal-mode .nexus-attio-company p,
+.app-shell-terminal-mode .nexus-attio-list span,
+.app-shell-terminal-mode .nexus-notion-list span,
+.app-shell-terminal-mode .nexus-grain-list span,
+.app-shell-terminal-mode .nexus-engagement-list span,
+.app-shell-terminal-mode .nexus-linear-list span {
+  color: var(--terminal-muted);
+}
+
+.app-shell-terminal-mode .nexus-engagement-query {
+  border-color: rgba(126, 154, 184, 0.16);
+  background: rgba(8, 15, 24, 0.72);
+  color: var(--terminal-muted);
+}
+
+.app-shell-terminal-mode .nexus-engagement-collapse-button {
+  color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .nexus-engagement-collapse-button:focus-visible {
+  outline-color: rgba(61, 214, 160, 0.34);
+}
+
+.app-shell-terminal-mode .nexus-engagement-toggle-indicator {
+  border-color: rgba(126, 154, 184, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.app-shell-terminal-mode .nexus-engagement-summary {
+  border-color: rgba(61, 214, 160, 0.2);
+  background: rgba(61, 214, 160, 0.08);
+}
+
+.app-shell-terminal-mode .nexus-engagement-summary-title strong,
+.app-shell-terminal-mode .nexus-engagement-summary ul {
+  color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .nexus-engagement-summary-title span {
+  color: var(--terminal-muted);
+}
+
+.app-shell-terminal-mode .nexus-attio-company-title span,
+.app-shell-terminal-mode .nexus-attio-list a:hover,
+.app-shell-terminal-mode .nexus-attio-list a:focus-visible,
+.app-shell-terminal-mode .nexus-notion-count,
+.app-shell-terminal-mode .nexus-grain-count,
+.app-shell-terminal-mode .nexus-engagement-count,
+.app-shell-terminal-mode .nexus-linear-count,
+.app-shell-terminal-mode .nexus-notion-list a:hover,
+.app-shell-terminal-mode .nexus-grain-list a:hover,
+.app-shell-terminal-mode .nexus-engagement-list a:hover,
+.app-shell-terminal-mode .nexus-linear-list a:hover,
+.app-shell-terminal-mode .nexus-grain-list a:focus-visible,
+.app-shell-terminal-mode .nexus-engagement-list a:focus-visible,
+.app-shell-terminal-mode .nexus-linear-list a:focus-visible,
+.app-shell-terminal-mode .nexus-client-link-list a:hover,
+.app-shell-terminal-mode .nexus-client-link-list a:focus-visible,
+.app-shell-terminal-mode .nexus-contact-list a:hover,
+.app-shell-terminal-mode .nexus-contact-list a:focus-visible,
+.app-shell-terminal-mode .nexus-notion-list a:focus-visible {
+  color: var(--terminal-accent);
+}
+
+.app-shell-terminal-mode .nexus-attio-domain-list span {
+  border-color: rgba(61, 214, 160, 0.2);
+  background: rgba(61, 214, 160, 0.1);
+  color: var(--terminal-accent);
+}
+
+.app-shell-terminal-mode .nexus-boolean-cell {
+  border-color: rgba(126, 154, 184, 0.16);
+  background: rgba(126, 154, 184, 0.08);
+}
+
+.app-shell-terminal-mode .nexus-boolean-cell.is-true {
+  border-color: rgba(61, 214, 160, 0.22);
+  background: rgba(61, 214, 160, 0.12);
+}
+
+.app-shell-terminal-mode .nexus-contact-source {
+  background: rgba(61, 214, 160, 0.12);
+  color: var(--terminal-accent);
+}
+
+.app-shell-terminal-mode .nexus-tool-entry-boolean input {
+  accent-color: var(--terminal-accent);
+}
+
+.app-shell-terminal-mode .nexus-client-entry-input,
+.app-shell-terminal-mode .nexus-contact-field input,
+.app-shell-terminal-mode .nexus-contact-dialog-field input,
+.app-shell-terminal-mode .nexus-contact-dialog-field-readonly strong,
+.app-shell-terminal-mode .nexus-todo-field input,
+.app-shell-terminal-mode .nexus-todo-field select,
+.app-shell-terminal-mode .nexus-tool-field input,
+.app-shell-terminal-mode .nexus-client-link-field input {
+  border-color: rgba(126, 154, 184, 0.18);
+  background: rgba(8, 15, 24, 0.86);
+  color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .nexus-contact-dialog {
+  border-color: rgba(126, 154, 184, 0.2);
+  background: rgba(13, 24, 37, 0.96);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+}
+
+.app-shell-terminal-mode .nexus-contact-dialog-field-readonly strong {
+  background: rgba(61, 214, 160, 0.1);
+}
+
+.app-shell-terminal-mode .nexus-client-entry-row {
+  background: rgba(18, 35, 52, 0.58);
+}
+
+.app-shell-terminal-mode .nexus-client-entry-status {
+  color: #ddb979;
+}
+
+.app-shell-terminal-mode .nexus-contact-empty,
+.app-shell-terminal-mode .nexus-todo-empty,
+.app-shell-terminal-mode .nexus-tool-empty,
+.app-shell-terminal-mode .nexus-attio-empty,
+.app-shell-terminal-mode .nexus-notion-empty,
+.app-shell-terminal-mode .nexus-grain-empty,
+.app-shell-terminal-mode .nexus-engagement-empty,
+.app-shell-terminal-mode .nexus-linear-empty,
+.app-shell-terminal-mode .nexus-client-link-empty {
+  border-color: rgba(126, 154, 184, 0.22);
+  color: var(--terminal-muted);
+}
+
+.app-shell-terminal-mode .nexus-attio-error,
+.app-shell-terminal-mode .nexus-attio-warning,
+.app-shell-terminal-mode .nexus-contact-error-bar,
+.app-shell-terminal-mode .nexus-notion-error,
+.app-shell-terminal-mode .nexus-notion-warning,
+.app-shell-terminal-mode .nexus-grain-error,
+.app-shell-terminal-mode .nexus-grain-warning,
+.app-shell-terminal-mode .nexus-engagement-error,
+.app-shell-terminal-mode .nexus-engagement-warning,
+.app-shell-terminal-mode .nexus-linear-error,
+.app-shell-terminal-mode .nexus-linear-warning {
+  color: #ffb199;
+}
+
+.app-shell-terminal-mode .nexus-contact-error-bar {
+  border-color: rgba(255, 177, 153, 0.2);
+  background: rgba(255, 177, 153, 0.08);
+}
+
+.app-shell-terminal-mode .main-stage {
+  padding: 1.2rem 1.5rem 2rem;
+}
+
+.app-shell-terminal-mode .main-stage-prompt {
+  padding-top: 0.95rem;
+}
+
+.app-shell-terminal-mode .workspace-topbar {
+  margin-bottom: 0.7rem;
+}
+
+.app-shell-terminal-mode .workspace-topbar-prompt,
+.app-shell-terminal-mode .workspace-topbar-persistent {
+  padding-bottom: 0.55rem;
+}
+
+.app-shell-terminal-mode .workspace-topbar-copy strong {
+  font-size: 0.92rem;
+}
+
+.app-shell-terminal-mode .workspace-topbar-actions {
+  gap: 0.55rem;
+}
+
+.app-shell-terminal-mode .workspace-topbar-token,
+.app-shell-terminal-mode .workspace-topbar-data-metric {
+  padding: 0.32rem 0.58rem;
+}
+
+.app-shell-terminal-mode .terminal-command-trigger {
+  border-color: rgba(126, 154, 184, 0.18);
+  background: linear-gradient(180deg, rgba(13, 24, 37, 0.98), rgba(8, 15, 24, 0.98));
+  color: var(--terminal-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.app-shell-terminal-mode .terminal-shortcut-trigger {
+  border-color: rgba(126, 154, 184, 0.18);
+  background: rgba(10, 18, 28, 0.9);
+  color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .terminal-command-trigger-copy small,
+.app-shell-terminal-mode .terminal-command-trigger-shortcut {
+  color: var(--terminal-muted);
+}
+
+.app-shell-terminal-mode .terminal-command-overlay,
+.app-shell-terminal-mode .terminal-shortcut-overlay {
+  padding-top: 4rem;
+}
+
+.app-shell-terminal-mode .terminal-command-backdrop {
+  background: rgba(3, 8, 14, 0.72);
+}
+
+.app-shell-terminal-mode .terminal-command-dialog,
+.app-shell-terminal-mode .terminal-shortcut-dialog {
+  border-color: var(--terminal-line-strong);
+  background:
+    radial-gradient(circle at top right, rgba(78, 167, 255, 0.14), transparent 30%),
+    linear-gradient(180deg, rgba(11, 20, 31, 0.98), rgba(8, 15, 24, 0.99));
+  box-shadow: var(--terminal-shadow);
+}
+
+.app-shell-terminal-mode .terminal-command-head-copy strong,
+.app-shell-terminal-mode .terminal-command-result-copy strong,
+.app-shell-terminal-mode .terminal-command-group-head strong,
+.app-shell-terminal-mode .terminal-shortcut-card-copy strong,
+.app-shell-terminal-mode .terminal-shortcut-workspace-row strong {
+  color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .terminal-command-head-copy p,
+.app-shell-terminal-mode .terminal-command-result-copy p,
+.app-shell-terminal-mode .terminal-command-footer small,
+.app-shell-terminal-mode .terminal-command-group-head small,
+.app-shell-terminal-mode .terminal-command-state p,
+.app-shell-terminal-mode .terminal-shortcut-card-copy p,
+.app-shell-terminal-mode .terminal-shortcut-card small,
+.app-shell-terminal-mode .terminal-shortcut-card-copy span,
+.app-shell-terminal-mode .terminal-shortcut-workspace-row p {
+  color: var(--terminal-muted);
+}
+
+.app-shell-terminal-mode .terminal-command-input-shell,
+.app-shell-terminal-mode .terminal-command-hints span,
+.app-shell-terminal-mode .terminal-command-result,
+.app-shell-terminal-mode .terminal-command-result-kind,
+.app-shell-terminal-mode .terminal-shortcut-card,
+.app-shell-terminal-mode .terminal-shortcut-workspace-row,
+.app-shell-terminal-mode .terminal-shortcut-workspaces,
+.app-shell-terminal-mode .terminal-shortcut-trigger kbd,
+.app-shell-terminal-mode .terminal-shortcut-card kbd,
+.app-shell-terminal-mode .terminal-shortcut-workspace-row kbd {
+  border-color: var(--terminal-line);
+  background: rgba(10, 18, 28, 0.9);
+}
+
+.app-shell-terminal-mode .terminal-command-prompt {
+  color: var(--terminal-accent-strong);
+}
+
+.app-shell-terminal-mode .terminal-command-input {
+  color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .terminal-command-input::placeholder,
+.app-shell-terminal-mode .terminal-command-hints span,
+.app-shell-terminal-mode .terminal-command-result-kind,
+.app-shell-terminal-mode .terminal-shortcut-trigger kbd,
+.app-shell-terminal-mode .terminal-shortcut-card kbd,
+.app-shell-terminal-mode .terminal-shortcut-workspace-row kbd {
+  color: var(--terminal-dim);
+}
+
+.app-shell-terminal-mode .terminal-command-result:hover,
+.app-shell-terminal-mode .terminal-command-result.is-active {
+  border-color: rgba(61, 214, 160, 0.24);
+  background: linear-gradient(180deg, rgba(13, 31, 44, 0.98), rgba(8, 18, 27, 0.98));
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.28);
+}
+
+.app-shell-terminal-mode .terminal-command-state strong {
+  color: var(--terminal-text);
+}
+
+.app-shell-terminal-mode .hero {
+  margin-bottom: 0.7rem;
+  padding: 0.95rem 1.05rem;
+  border-radius: 1.1rem;
+}
+
+.app-shell-terminal-mode .hero h2 {
+  max-width: 18ch;
+  font-size: clamp(2rem, 3vw, 2.8rem);
+}
+
+.app-shell-terminal-mode .hero p {
+  margin-top: 0.65rem;
+  font-size: 0.94rem;
+  line-height: 1.5;
+}
+
+.app-shell-terminal-mode .hero-badge {
+  min-width: 13rem;
+  padding: 0.82rem 0.95rem;
+  border-radius: 1rem;
+}
+
+.app-shell-terminal-mode .hero-badge strong {
+  font-size: 1.45rem;
+}
+
+.app-shell-terminal-mode .surface,
+.app-shell-terminal-mode .side-card {
+  border-radius: 1.05rem;
+}

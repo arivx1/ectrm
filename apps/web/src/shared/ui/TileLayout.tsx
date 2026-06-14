@@ -32,10 +32,19 @@ import {
 } from '../../entities/layouts/api'
 import { TileLayoutSectionContext, type TileLayoutSectionContextValue } from './tileLayoutSections'
 import { appConfig } from '../config'
-import type { PersonalizableWorkspaceId, WorkspaceLayoutState, WorkspaceTileSpan } from '../layouts'
+import type { PersonalizableWorkspaceId, WorkspaceLayoutState } from '../layouts'
 import type { StoredAuthSession } from '../mutation'
-
-export type TileSpan = WorkspaceTileSpan
+import {
+  availableSpansForTile,
+  createDefaultLayout,
+  defaultSpanForTile,
+  layoutsMatch,
+  sanitizeLayout,
+  sanitizeSectionOrder,
+  type TileSpan,
+  type WorkspaceTileLayoutSpec,
+} from '../tileLayoutState'
+import { resolveWorkspaceLayoutPresets } from '../workspaceLayoutPresets'
 
 export type WorkspaceTile = {
   id: string
@@ -63,7 +72,6 @@ type TileLayoutProps = {
 }
 
 type TileLayoutState = WorkspaceLayoutState
-type WorkspaceTileLayoutSpec = Pick<WorkspaceTile, 'id' | 'span' | 'availableSpans'>
 type WorkspaceTileSectionLayoutSpec = WorkspaceTileSection
 
 const STORAGE_VERSION = 'v1'
@@ -73,159 +81,35 @@ const TILE_SPAN_LABELS: Record<TileSpan, string> = {
   half: 'Half',
   side: 'Side',
 }
+const LEGACY_SETTLEMENT_TILE_ORDER = [
+  'settlement-summary',
+  'settlement-status',
+  'settlement-disputes',
+  'settlement-document-record-creation',
+  'settlement-queue',
+]
 
 function uniqueValues<T extends string>(values: T[]): T[] {
   return [...new Set(values)]
 }
 
-function defaultSpanForTile(tile: Pick<WorkspaceTile, 'span'>): TileSpan {
-  return tile.span ?? 'full'
+function arraysMatch(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
-function availableSpansForTile(tile: Pick<WorkspaceTile, 'span' | 'availableSpans'>): TileSpan[] {
-  const defaultSpan = defaultSpanForTile(tile)
-  const configuredSpans = tile.availableSpans?.length ? uniqueValues(tile.availableSpans) : []
-  return configuredSpans.includes(defaultSpan) ? configuredSpans : uniqueValues([defaultSpan, ...configuredSpans])
-}
-
-function sanitizeSectionOrder(itemIds: string[], candidate: unknown): string[] {
-  const knownIds = new Set(itemIds)
-  const candidateOrder = Array.isArray(candidate) ? candidate.filter((value): value is string => typeof value === 'string') : []
-  const knownOrder = uniqueValues(candidateOrder.filter((value) => knownIds.has(value)))
-
-  return [...knownOrder, ...itemIds.filter((itemId) => !knownOrder.includes(itemId))]
-}
-
-function normalizeSectionOrders(
-  sections: WorkspaceTileSectionLayoutSpec[],
-  candidate: unknown,
-): Record<string, string[]> {
-  const defaultSections = Object.fromEntries(sections.map((section) => [section.id, [...section.itemIds]]))
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    return defaultSections
-  }
-
-  const candidateRecord = candidate as Record<string, unknown>
-  return Object.fromEntries(
-    sections.map((section) => [section.id, sanitizeSectionOrder(section.itemIds, candidateRecord[section.id])]),
-  )
-}
-
-function createDefaultLayout(
-  tileIds: string[],
-  sections: WorkspaceTileSectionLayoutSpec[] = [],
+function migrateWorkspaceLayoutOrder(
+  workspaceId: PersonalizableWorkspaceId,
+  layout: TileLayoutState,
+  defaultOrder: string[],
 ): TileLayoutState {
-  return {
-    order: [...tileIds],
-    hidden: [],
-    spans: {},
-    sections: Object.fromEntries(sections.map((section) => [section.id, [...section.itemIds]])),
-  }
-}
-
-function normalizeSpanOverrides(
-  tiles: WorkspaceTileLayoutSpec[],
-  candidate: unknown,
-): Record<string, TileSpan> {
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    return {}
-  }
-
-  const spansById: Record<string, TileSpan> = {}
-  const tilesById = new Map(tiles.map((tile) => [tile.id, tile]))
-
-  for (const [tileId, rawSpan] of Object.entries(candidate as Record<string, unknown>)) {
-    if (typeof rawSpan !== 'string') {
-      continue
-    }
-
-    const tile = tilesById.get(tileId)
-    if (!tile) {
-      continue
-    }
-
-    const normalizedSpan = rawSpan.toLowerCase() as TileSpan
-    const allowedSpans = availableSpansForTile(tile)
-    const defaultSpan = defaultSpanForTile(tile)
-    if (allowedSpans.includes(normalizedSpan) && normalizedSpan !== defaultSpan) {
-      spansById[tileId] = normalizedSpan
+  if (workspaceId === 'settlement' && arraysMatch(layout.order, LEGACY_SETTLEMENT_TILE_ORDER)) {
+    return {
+      ...layout,
+      order: [...defaultOrder],
     }
   }
 
-  return spansById
-}
-
-function sanitizeLayout(
-  tiles: WorkspaceTileLayoutSpec[],
-  sections: WorkspaceTileSectionLayoutSpec[],
-  candidate: unknown,
-): TileLayoutState {
-  const tileIds = tiles.map((tile) => tile.id)
-  const defaultLayout = createDefaultLayout(tileIds, sections)
-  if (!candidate || typeof candidate !== 'object') {
-    return defaultLayout
-  }
-
-  const candidateRecord = candidate as Record<string, unknown>
-  const knownIds = new Set(tileIds)
-  const candidateOrder = Array.isArray(candidateRecord.order)
-    ? candidateRecord.order.filter((value): value is string => typeof value === 'string')
-    : []
-  const candidateHidden = Array.isArray(candidateRecord.hidden)
-    ? candidateRecord.hidden.filter((value): value is string => typeof value === 'string')
-    : []
-  const knownOrder = uniqueValues(candidateOrder.filter((value) => knownIds.has(value)))
-  const fullOrder = [...knownOrder, ...tileIds.filter((tileId) => !knownOrder.includes(tileId))]
-
-  return {
-    order: fullOrder,
-    hidden: uniqueValues(candidateHidden.filter((value) => knownIds.has(value))),
-    spans: normalizeSpanOverrides(tiles, candidateRecord.spans),
-    sections: normalizeSectionOrders(sections, candidateRecord.sections),
-  }
-}
-
-function layoutsMatch(left: TileLayoutState, right: TileLayoutState): boolean {
-  if (left.order.length !== right.order.length || left.hidden.length !== right.hidden.length) {
-    return false
-  }
-
-  if (left.order.some((tileId, index) => tileId !== right.order[index])) {
-    return false
-  }
-
-  if (left.hidden.some((tileId, index) => tileId !== right.hidden[index])) {
-    return false
-  }
-
-  const leftSections = Object.entries(left.sections).sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
-  const rightSections = Object.entries(right.sections).sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
-  if (leftSections.length !== rightSections.length) {
-    return false
-  }
-
-  if (
-    leftSections.some(([sectionId, itemIds], index) => {
-      const matchingSection = rightSections[index]
-      if (!matchingSection || sectionId !== matchingSection[0] || itemIds.length !== matchingSection[1].length) {
-        return true
-      }
-
-      return itemIds.some((itemId, itemIndex) => itemId !== matchingSection[1][itemIndex])
-    })
-  ) {
-    return false
-  }
-
-  const leftSpans = Object.entries(left.spans).sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
-  const rightSpans = Object.entries(right.spans).sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
-  if (leftSpans.length !== rightSpans.length) {
-    return false
-  }
-
-  return leftSpans.every(
-    ([tileId, span], index) => tileId === rightSpans[index]?.[0] && span === rightSpans[index]?.[1],
-  )
+  return layout
 }
 
 function storageKey(workspaceId: string): string {
@@ -288,10 +172,12 @@ function replaceVisibleOrder(currentOrder: string[], hiddenIds: string[], nextVi
 
 function SortableTileCard({
   tile,
+  isCustomizingLayout,
   onHide,
   onSpanChange,
 }: {
   tile: WorkspaceTile
+  isCustomizingLayout: boolean
   onHide: (tileId: string) => void
   onSpanChange: (tileId: string, nextSpan: TileSpan) => void
 }) {
@@ -305,6 +191,9 @@ function SortableTileCard({
   return (
     <section
       ref={setNodeRef}
+      id={tile.id}
+      tabIndex={-1}
+      data-terminal-shortcut-target="workspace-tile"
       style={style}
       className={`surface workspace-tile workspace-tile-span-${tile.span ?? 'full'} ${isDragging ? 'is-dragging' : ''}`}
     >
@@ -314,42 +203,44 @@ function SortableTileCard({
           <h3>{tile.title}</h3>
           <p>{tile.description}</p>
         </div>
-        <div className="workspace-tile-controls">
-          {availableSpans.length > 1 ? (
-            <div className="workspace-tile-size-group" role="group" aria-label={`Resize ${tile.title} tile`}>
-              {availableSpans.map((span) => (
-                <button
-                  key={span}
-                  type="button"
-                  className={`workspace-tile-size-button ${tile.span === span ? 'is-active' : ''}`}
-                  onClick={() => onSpanChange(tile.id, span)}
-                  aria-pressed={tile.span === span}
-                >
-                  {TILE_SPAN_LABELS[span]}
-                </button>
-              ))}
+        {isCustomizingLayout ? (
+          <div className="workspace-tile-controls">
+            {availableSpans.length > 1 ? (
+              <div className="workspace-tile-size-group" role="group" aria-label={`Resize ${tile.title} tile`}>
+                {availableSpans.map((span) => (
+                  <button
+                    key={span}
+                    type="button"
+                    className={`workspace-tile-size-button ${tile.span === span ? 'is-active' : ''}`}
+                    onClick={() => onSpanChange(tile.id, span)}
+                    aria-pressed={tile.span === span}
+                  >
+                    {TILE_SPAN_LABELS[span]}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <div className="workspace-tile-tools">
+              <button
+                type="button"
+                className="button button-ghost workspace-tile-handle"
+                aria-label={`Drag ${tile.title} tile`}
+                {...attributes}
+                {...listeners}
+              >
+                Move
+              </button>
+              <button
+                type="button"
+                className="button button-ghost workspace-tile-remove"
+                onClick={() => onHide(tile.id)}
+                aria-label={`Remove ${tile.title} tile from the workspace`}
+              >
+                Remove
+              </button>
             </div>
-          ) : null}
-          <div className="workspace-tile-tools">
-            <button
-              type="button"
-              className="button button-ghost workspace-tile-handle"
-              aria-label={`Drag ${tile.title} tile`}
-              {...attributes}
-              {...listeners}
-            >
-              Move
-            </button>
-            <button
-              type="button"
-              className="button button-ghost workspace-tile-remove"
-              onClick={() => onHide(tile.id)}
-              aria-label={`Remove ${tile.title} tile from the workspace`}
-            >
-              Remove
-            </button>
           </div>
-        </div>
+        ) : null}
       </div>
 
       <div className="workspace-tile-body">{tile.content}</div>
@@ -366,6 +257,8 @@ export function TileLayout({
   headerContent,
   toolbarDescription,
 }: TileLayoutProps) {
+  const toolbarDescriptionId = useId()
+  const presetSelectId = useId()
   const tileDefinitionSignature = JSON.stringify(
     tiles.map((tile) => ({
       id: tile.id,
@@ -387,12 +280,22 @@ export function TileLayout({
     () => JSON.parse(sectionDefinitionSignature) as WorkspaceTileSectionLayoutSpec[],
     [sectionDefinitionSignature],
   )
-  const tileIds = tileLayoutSpec.map((tile) => tile.id)
-  const [layout, setLayout] = useState<TileLayoutState>(() => readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec))
-  const toolbarDescriptionId = useId()
+  const tileIds = useMemo(() => tileLayoutSpec.map((tile) => tile.id), [tileLayoutSpec])
+  const [layout, setLayout] = useState<TileLayoutState>(() =>
+    migrateWorkspaceLayoutOrder(workspaceId, readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec), tileIds),
+  )
+  const [isCustomizingLayout, setIsCustomizingLayout] = useState(false)
   const remoteHydrationInFlightRef = useRef(false)
   const remoteSnapshotRef = useRef<string | null>(null)
   const accessToken = authSession?.accessToken ?? null
+  const layoutPresets = useMemo(
+    () => resolveWorkspaceLayoutPresets(workspaceId, tileLayoutSpec, sectionLayoutSpec),
+    [sectionLayoutSpec, tileLayoutSpec, workspaceId],
+  )
+  const activePreset = useMemo(
+    () => layoutPresets.find((preset) => layoutsMatch(layout, preset.layout)) ?? null,
+    [layout, layoutPresets],
+  )
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -406,10 +309,14 @@ export function TileLayout({
 
   useEffect(() => {
     setLayout((current) => {
-      const nextLayout = sanitizeLayout(tileLayoutSpec, sectionLayoutSpec, current)
+      const nextLayout = migrateWorkspaceLayoutOrder(
+        workspaceId,
+        sanitizeLayout(tileLayoutSpec, sectionLayoutSpec, current),
+        tileIds,
+      )
       return layoutsMatch(current, nextLayout) ? current : nextLayout
     })
-  }, [sectionLayoutSpec, tileLayoutSpec])
+  }, [sectionLayoutSpec, tileIds, tileLayoutSpec, workspaceId])
 
   useEffect(() => {
     if (!accessToken) {
@@ -430,13 +337,21 @@ export function TileLayout({
         }
 
         if (record) {
-          const nextLayout = sanitizeLayout(tileLayoutSpec, sectionLayoutSpec, record)
+          const nextLayout = migrateWorkspaceLayoutOrder(
+            workspaceId,
+            sanitizeLayout(tileLayoutSpec, sectionLayoutSpec, record),
+            tileIds,
+          )
           setLayout(nextLayout)
           remoteSnapshotRef.current = JSON.stringify(nextLayout)
           return
         }
 
-        const fallbackLayout = readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec)
+        const fallbackLayout = migrateWorkspaceLayoutOrder(
+          workspaceId,
+          readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec),
+          tileIds,
+        )
         setLayout(fallbackLayout)
         remoteSnapshotRef.current = hasStoredLayout(workspaceId) ? null : JSON.stringify(fallbackLayout)
       } catch {
@@ -444,7 +359,11 @@ export function TileLayout({
           return
         }
 
-        const fallbackLayout = readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec)
+        const fallbackLayout = migrateWorkspaceLayoutOrder(
+          workspaceId,
+          readStoredLayout(workspaceId, tileLayoutSpec, sectionLayoutSpec),
+          tileIds,
+        )
         setLayout(fallbackLayout)
         remoteSnapshotRef.current = JSON.stringify(fallbackLayout)
       } finally {
@@ -459,7 +378,7 @@ export function TileLayout({
     return () => {
       cancelled = true
     }
-  }, [accessToken, sectionLayoutSpec, tileLayoutSpec, workspaceId])
+  }, [accessToken, sectionLayoutSpec, tileIds, tileLayoutSpec, workspaceId])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -516,6 +435,10 @@ export function TileLayout({
   }
   const visibleTiles = orderedTiles.filter((tile) => !hiddenSet.has(tile.id))
   const hiddenTiles = orderedTiles.filter((tile) => hiddenSet.has(tile.id))
+  const presetSelectValue = activePreset?.id ?? 'custom'
+  const presetStatus = activePreset
+    ? activePreset.description
+    : 'A saved personal variation is active. Choose a monitor preset to reapply a terminal-friendly starting layout.'
 
   function handleDragEnd(event: DragEndEvent) {
     const activeId = String(event.active.id)
@@ -597,6 +520,15 @@ export function TileLayout({
     })
   }
 
+  function handleApplyPreset(presetId: string) {
+    const preset = layoutPresets.find((candidate) => candidate.id === presetId)
+    if (!preset) {
+      return
+    }
+
+    setLayout(preset.layout)
+  }
+
   function handleMoveSectionItem(sectionId: string, itemIds: string[], activeId: string, overId: string) {
     if (activeId === overId) {
       return
@@ -638,6 +570,7 @@ export function TileLayout({
   }
 
   const sectionContextValue: TileLayoutSectionContextValue = {
+    isCustomizingLayout,
     getSectionOrder: (sectionId, itemIds) => sanitizeSectionOrder(itemIds, layout.sections[sectionId]),
     moveSectionItem: handleMoveSectionItem,
   }
@@ -646,44 +579,94 @@ export function TileLayout({
     <TileLayoutSectionContext.Provider value={sectionContextValue}>
       <div className="tile-layout-shell">
         {headerContent}
-        <section className="surface tile-layout-toolbar">
-          <div className="tile-layout-toolbar-head">
-            <div>
-              <span className="eyebrow">Layout</span>
-              <h3>{workspaceLabel} Tiles</h3>
+        {isCustomizingLayout ? (
+          <section className="surface tile-layout-toolbar">
+            <div className="tile-layout-toolbar-head">
+              <div>
+                <span className="eyebrow">Layout</span>
+                <h3>{workspaceLabel} Tiles</h3>
+              </div>
+              <span className="entity-chip entity-chip-soft">
+                {visibleTiles.length} of {tiles.length} on screen
+              </span>
             </div>
+            <p id={toolbarDescriptionId}>{resolvedToolbarDescription}</p>
+            {layoutPresets.length > 0 ? (
+              <div className="tile-layout-preset-bar">
+                <label className="tile-layout-preset-picker" htmlFor={presetSelectId}>
+                  <span className="eyebrow">Monitor preset</span>
+                  <select
+                    id={presetSelectId}
+                    className="control"
+                    value={presetSelectValue}
+                    onChange={(event) => {
+                      if (event.target.value !== 'custom') {
+                        handleApplyPreset(event.target.value)
+                      }
+                    }}
+                  >
+                    <option value="custom">Personal layout</option>
+                    {layoutPresets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="tile-layout-preset-note">{presetStatus}</p>
+              </div>
+            ) : null}
+            <div className="tile-layout-toolbar-actions">
+              {hiddenTiles.length > 0 ? (
+                hiddenTiles.map((tile) => (
+                  <button
+                    key={tile.id}
+                    type="button"
+                    className="button button-ghost tile-layout-add-button"
+                    onClick={() => handleShowTile(tile.id)}
+                  >
+                    Add {tile.title}
+                  </button>
+                ))
+              ) : (
+                <span className="entity-chip">All tiles are visible</span>
+              )}
+              <button type="button" className="button button-secondary tile-layout-reset-button" onClick={handleResetLayout}>
+                Reset layout
+              </button>
+              <button type="button" className="button button-primary" onClick={() => setIsCustomizingLayout(false)}>
+                Done
+              </button>
+            </div>
+          </section>
+        ) : (
+          <section className="surface tile-layout-customize-bar">
             <span className="entity-chip entity-chip-soft">
-              {visibleTiles.length} of {tiles.length} on screen
+              {visibleTiles.length} of {tiles.length} tiles visible
             </span>
-          </div>
-          <p id={toolbarDescriptionId}>{resolvedToolbarDescription}</p>
-          <div className="tile-layout-toolbar-actions">
-            {hiddenTiles.length > 0 ? (
-              hiddenTiles.map((tile) => (
-                <button
-                  key={tile.id}
-                  type="button"
-                  className="button button-ghost tile-layout-add-button"
-                  onClick={() => handleShowTile(tile.id)}
-                >
-                  Add {tile.title}
-                </button>
-              ))
-            ) : (
-              <span className="entity-chip">All tiles are visible</span>
-            )}
-            <button type="button" className="button button-secondary tile-layout-reset-button" onClick={handleResetLayout}>
-              Reset layout
+            <button
+              type="button"
+              className="button button-secondary"
+              aria-expanded={false}
+              onClick={() => setIsCustomizingLayout(true)}
+            >
+              Customize view
             </button>
-          </div>
-        </section>
+          </section>
+        )}
 
         {visibleTiles.length > 0 ? (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={visibleTiles.map((tile) => tile.id)} strategy={rectSortingStrategy}>
-              <div className="tile-workspace-grid" aria-describedby={toolbarDescriptionId}>
+              <div className="tile-workspace-grid" aria-describedby={isCustomizingLayout ? toolbarDescriptionId : undefined}>
                 {visibleTiles.map((tile) => (
-                  <SortableTileCard key={tile.id} tile={tile} onHide={handleHideTile} onSpanChange={handleSetTileSpan} />
+                  <SortableTileCard
+                    key={tile.id}
+                    tile={tile}
+                    isCustomizingLayout={isCustomizingLayout}
+                    onHide={handleHideTile}
+                    onSpanChange={handleSetTileSpan}
+                  />
                 ))}
               </div>
             </SortableContext>

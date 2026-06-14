@@ -1,5 +1,4 @@
 import { APP_VIEWS } from '../entities/app/appViews'
-import { matchesTextFilter } from '../shared/filtering'
 import type { ViewKey } from '../shared/models'
 
 export const MAX_PRIMARY_NAV_SECTIONS = 5
@@ -7,40 +6,14 @@ export const MAX_PRIMARY_NAV_SECTIONS = 5
 const PRIMARY_NAV_SECTION_DEFINITIONS = [
   {
     key: 'overview',
-    label: 'Start',
-    kicker: 'Start here',
-    heroTitle: 'Start, learn, and orient quickly',
-    heroBody:
-      'Use the live desk, product guide, and guided walkthrough as your first stop before diving into a specific workflow.',
-    landingBody:
-      'This section answers the first question new or returning operators have: where should I start for the job in front of me?',
-    viewKeys: ['prompt', 'dashboard', 'guide', 'demo'],
-    startPaths: [
-      {
-        title: 'Ask the operator prompt',
-        detail: 'Start from the job in front of you and let the assistant answer, clarify, or route you to the right workspace.',
-        viewKey: 'prompt',
-        actionLabel: 'Open Prompt Home',
-      },
-      {
-        title: 'Get oriented',
-        detail: 'Read the in-product handbook before you touch live workflows or need to explain the platform to someone new.',
-        viewKey: 'guide',
-        actionLabel: 'Open How It Works',
-      },
-      {
-        title: 'Watch the live desk',
-        detail: 'See desk health, recent activity, exposure, and open attention points on one screen.',
-        viewKey: 'dashboard',
-        actionLabel: 'Open Live Desk',
-      },
-      {
-        title: 'Run a safe walkthrough',
-        detail: 'Use a local-only scenario to understand the trade lifecycle without mutating live data.',
-        viewKey: 'demo',
-        actionLabel: 'Open Walkthrough',
-      },
-    ],
+    label: 'Home',
+    kicker: 'Brief',
+    heroTitle: 'Home',
+    heroBody: '',
+    landingBody: '',
+    landingViewKey: 'prompt',
+    viewKeys: ['prompt'],
+    startPaths: [],
   },
   {
     key: 'trading',
@@ -120,13 +93,31 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
     key: 'intelligence',
     label: 'Analysis',
     kicker: 'Understand',
-    heroTitle: 'Reports, reference data, and desk support',
+    heroTitle: 'Messaging, documents, reports, maps, and desk support',
     heroBody:
-      'Jump between reporting, reference data, and the assistant when you need answers faster than raw tables can give them.',
+      'Jump between messaging, uploaded documents, reporting, spatial context, reference data, and the assistant when you need answers faster than raw tables can give them.',
     landingBody:
-      'Use this section for analyst-style work: reporting, desk reference maintenance, and grounded AI assistance.',
-    viewKeys: ['reports', 'reference', 'assistant'],
+      'Use this section for analyst-style work: inbox review, document inspection, map analysis, reporting, desk reference maintenance, and grounded AI assistance.',
+    viewKeys: ['messages', 'library', 'reports', 'map', 'reference', 'assistant'],
     startPaths: [
+      {
+        title: 'Review messages',
+        detail: 'Open the unified messaging view when the work starts with inbox follow-up across desk messages, queue digests, and system notices.',
+        viewKey: 'messages',
+        actionLabel: 'Open Messages',
+      },
+      {
+        title: 'Browse uploaded files',
+        detail: 'Open the document library when the work starts with a PDF, confirmation packet, invoice, or other file that has already been uploaded.',
+        viewKey: 'library',
+        actionLabel: 'Open Library',
+      },
+      {
+        title: 'Review physical footprint',
+        detail: 'Open the dedicated map workspace to inspect map-ready assets, shared routes, and governed regions without entering maintenance mode.',
+        viewKey: 'map',
+        actionLabel: 'Open Map',
+      },
       {
         title: 'Run a report',
         detail: 'Open curated desk reporting when someone needs an answer on exposure, activity, credit, or settlement.',
@@ -153,11 +144,17 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
     kicker: 'Control',
     heroTitle: 'Access, settings, and privileged controls',
     heroBody:
-      'Keep sign-in, runtime settings, sync health, and privileged controls together without burying them under trading screens.',
+      'Keep sign-in, runtime settings, sync health, AI usage, and privileged controls together without burying them under trading screens.',
     landingBody:
-      'Use this section when the task is configuring the console, signing in, checking runtime health, or running privileged maintenance.',
-    viewKeys: ['admin', 'settings'],
+      'Use this section when the task is configuring the console, signing in, checking runtime health, reviewing token usage, or running privileged maintenance.',
+    viewKeys: ['token-analysis', 'admin', 'settings'],
     startPaths: [
+      {
+        title: 'Review token usage',
+        detail: 'Open the token tracker when you want AI provider usage by day, week, or month without opening the Assistant Console.',
+        viewKey: 'token-analysis',
+        actionLabel: 'Open Token Tracker',
+      },
       {
         title: 'Sign in or configure access',
         detail: 'Open settings when you need to connect the app, manage session details, or adjust runtime behavior.',
@@ -179,6 +176,7 @@ const PRIMARY_NAV_SECTION_DEFINITIONS = [
   heroTitle: string
   heroBody: string
   landingBody: string
+  landingViewKey?: ViewKey
   viewKeys: ViewKey[]
   startPaths: Array<{
     title: string
@@ -197,6 +195,7 @@ export type PrimaryNavigationSection = {
   heroTitle: string
   heroBody: string
   landingBody: string
+  landingViewKey: ViewKey | null
   views: typeof APP_VIEWS
   startPaths: Array<{
     title: string
@@ -219,6 +218,7 @@ export const PRIMARY_NAV_SECTIONS: PrimaryNavigationSection[] = PRIMARY_NAV_SECT
   heroTitle: section.heroTitle,
   heroBody: section.heroBody,
   landingBody: section.landingBody,
+  landingViewKey: section.landingViewKey ?? null,
   views: section.viewKeys.map((viewKey) => {
     const view = APP_VIEW_BY_KEY.get(viewKey)
     if (!view) {
@@ -272,48 +272,22 @@ export function primaryNavigationSectionByKey(sectionKey: PrimaryNavigationSecti
   return PRIMARY_NAV_SECTION_BY_KEY.get(sectionKey) ?? PRIMARY_NAV_SECTIONS[0]
 }
 
+export function primaryNavigationSectionLandingView(sectionKey: PrimaryNavigationSectionKey): ViewKey | null {
+  return primaryNavigationSectionByKey(sectionKey).landingViewKey
+}
+
+export function primaryNavigationSectionRendersNestedViews(
+  section: Pick<PrimaryNavigationSection, 'landingViewKey' | 'views'>,
+): boolean {
+  return !(
+    section.landingViewKey !== null &&
+    section.views.length === 1 &&
+    section.views[0]?.key === section.landingViewKey
+  )
+}
+
 export function primaryNavigationSectionForView(view: ViewKey): PrimaryNavigationSection {
   return PRIMARY_NAV_SECTIONS.find((section) => section.views.some((entry) => entry.key === view)) ?? PRIMARY_NAV_SECTIONS[0]
-}
-
-function matchesPrimaryNavigationSectionSearch(section: PrimaryNavigationSection, query: string) {
-  return matchesTextFilter(query, [
-    section.key,
-    section.label,
-    section.kicker,
-    section.heroTitle,
-    section.heroBody,
-    section.landingBody,
-    ...section.startPaths.flatMap((path) => [path.title, path.detail, path.actionLabel, path.view.label, path.view.kicker]),
-  ])
-}
-
-function matchesPrimaryNavigationViewSearch(
-  section: PrimaryNavigationSection,
-  view: PrimaryNavigationSection['views'][number],
-  query: string,
-) {
-  return matchesTextFilter(query, [view.key, view.label, view.kicker, section.label, section.kicker])
-}
-
-export function filterPrimaryNavigationSections(query: string): PrimaryNavigationSection[] {
-  const normalizedQuery = query.trim()
-  if (normalizedQuery.length === 0) {
-    return PRIMARY_NAV_SECTIONS
-  }
-
-  return PRIMARY_NAV_SECTIONS.flatMap((section) => {
-    const sectionMatches = matchesPrimaryNavigationSectionSearch(section, normalizedQuery)
-    const views = sectionMatches
-      ? section.views
-      : section.views.filter((view) => matchesPrimaryNavigationViewSearch(section, view, normalizedQuery))
-
-    if (!sectionMatches && views.length === 0) {
-      return []
-    }
-
-    return [{ ...section, views }]
-  })
 }
 
 export function shouldHandleClientSideNavigation(event: ClientSideNavigationEvent) {

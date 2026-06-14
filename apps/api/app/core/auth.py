@@ -17,6 +17,10 @@ from sqlalchemy.orm import Session
 from apps.api.app.config import settings
 from apps.api.app.core.logging import get_logger, log_outbound_request
 from apps.api.app.core.request_context import get_request_identity
+from apps.api.app.domains.assistant.personas import (
+    default_assistant_persona_for_role,
+    normalize_assistant_persona_key,
+)
 from apps.api.app.models.user_account import UserAccount
 from apps.api.app.models.user_session import UserSession
 from apps.api.app.schemas._validation import normalize_required_text
@@ -131,9 +135,14 @@ def hash_session_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def create_user_session(db: Session, user: UserAccount) -> tuple[UserSession, str]:
+def create_user_session(
+    db: Session,
+    user: UserAccount,
+    *,
+    expires_at: datetime | None = None,
+) -> tuple[UserSession, str]:
     issued_at = datetime.now(timezone.utc)
-    expires_at = issued_at + timedelta(hours=settings.SESSION_TTL_HOURS)
+    session_expires_at = expires_at or (issued_at + timedelta(hours=settings.SESSION_TTL_HOURS))
     access_token = secrets.token_urlsafe(32)
     session = UserSession(
         session_id=str(uuid.uuid4()),
@@ -141,7 +150,7 @@ def create_user_session(db: Session, user: UserAccount) -> tuple[UserSession, st
         token_hash=hash_session_token(access_token),
         role=user.role,
         created_at=issued_at,
-        expires_at=expires_at,
+        expires_at=session_expires_at,
         last_seen_at=issued_at,
         revoked_at=None,
     )
@@ -210,6 +219,7 @@ def _ensure_god_login_user(db: Session) -> UserAccount:
             email=_allocate_god_login_email(db),
             display_name=GOD_LOGIN_DISPLAY_NAME,
             role="OPS_ADMIN",
+            default_assistant_persona=default_assistant_persona_for_role("OPS_ADMIN"),
             password_hash=hash_password(GOD_LOGIN_PASSWORD),
             is_active=True,
             last_login_at=None,
@@ -235,6 +245,10 @@ def _ensure_god_login_user(db: Session) -> UserAccount:
 
     if not verify_password(GOD_LOGIN_PASSWORD, record.password_hash):
         record.password_hash = hash_password(GOD_LOGIN_PASSWORD)
+        updated = True
+
+    if normalize_assistant_persona_key(record.default_assistant_persona) is None:
+        record.default_assistant_persona = default_assistant_persona_for_role(record.role)
         updated = True
 
     if updated:
@@ -267,7 +281,7 @@ def authenticate_google_user(
     db: Session,
     *,
     id_token: str,
-) -> UserAccount:
+) -> tuple[UserAccount, bool]:
     identity = verify_google_identity(id_token)
     config = google_auth_config()
     if config is None:
@@ -300,6 +314,7 @@ def authenticate_google_user(
             google_subject=identity.subject,
             display_name=identity.display_name,
             role=config.default_role,
+            default_assistant_persona=default_assistant_persona_for_role(config.default_role),
             password_hash=None,
             is_active=True,
             last_login_at=now,
@@ -312,7 +327,7 @@ def authenticate_google_user(
         db.add(user)
         db.commit()
         db.refresh(user)
-        return user
+        return user, True
 
     if not user.is_active:
         raise HTTPException(
@@ -326,16 +341,19 @@ def authenticate_google_user(
             detail="User account is already linked to another Google identity.",
         )
 
+    show_start_here = user.last_login_at is None
     user.google_subject = identity.subject
     if user.email != identity.email:
         user.email = identity.email
+    if normalize_assistant_persona_key(user.default_assistant_persona) is None:
+        user.default_assistant_persona = default_assistant_persona_for_role(user.role)
     user.last_login_at = datetime.now(timezone.utc)
     user.updated_at = datetime.now(timezone.utc)
     user.updated_by = user.user_id
     user.version += 1
     db.commit()
     db.refresh(user)
-    return user
+    return user, show_start_here
 
 
 def resolve_session_principal(db: Session, authorization_header: Optional[str]) -> Optional[SessionPrincipal]:
@@ -447,6 +465,59 @@ def single_user_auth_config() -> SingleUserAuthConfig | None:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Single-user authentication is misconfigured: {exc}",
         ) from exc
+
+
+def provision_single_user_auth_user(db: Session) -> tuple[UserAccount, bool]:
+    config = single_user_auth_config()
+    if config is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Single-user authentication is not configured on this API.",
+        )
+
+    now = datetime.now(timezone.utc)
+    user = db.get(UserAccount, config.user_id)
+    show_start_here = user is None or user.last_login_at is None
+
+    if user is None:
+        email_owner = db.execute(select(UserAccount).where(UserAccount.email == config.email)).scalars().first()
+        if email_owner is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Single-user authentication email is already assigned to another account.",
+            )
+
+        user = UserAccount(
+            user_id=config.user_id,
+            email=config.email,
+            display_name=config.display_name,
+            role=config.role,
+            default_assistant_persona=default_assistant_persona_for_role(config.role),
+            password_hash=None,
+            is_active=True,
+            last_login_at=now,
+            created_at=now,
+            created_by="single-user-auth",
+            updated_at=now,
+            updated_by="single-user-auth",
+            version=1,
+        )
+        db.add(user)
+    else:
+        user.email = config.email
+        user.display_name = config.display_name
+        user.role = config.role
+        if normalize_assistant_persona_key(user.default_assistant_persona) is None:
+            user.default_assistant_persona = default_assistant_persona_for_role(user.role)
+        user.is_active = True
+        user.last_login_at = now
+        user.updated_at = now
+        user.updated_by = config.user_id
+        user.version += 1
+
+    db.commit()
+    db.refresh(user)
+    return user, show_start_here
 
 
 def google_auth_config() -> GoogleAuthConfig | None:

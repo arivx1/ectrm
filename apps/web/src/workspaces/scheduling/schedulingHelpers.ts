@@ -2,13 +2,9 @@ import type { DeliveryRecord, DeliverySchedulingWorkflowItemRecord } from '../..
 
 export type SchedulingWindowBand = 'LIVE' | 'NEXT_24' | 'NEXT_72' | 'LATER' | 'TBD'
 export type SchedulingStage = 'BLOCKED' | 'READY' | 'IN_FLIGHT' | 'WATCHLIST'
-export type SchedulingViewPreset =
-  | 'DESK'
-  | 'HOT_WINDOW'
-  | 'BLOCKED'
-  | 'READY'
-  | 'IN_FLIGHT'
-  | 'WATCHLIST'
+export type SchedulingLifecycleFilter = 'ALL' | 'OPEN' | 'CLOSED'
+export type SchedulingAllocationFilter = 'ALL' | 'ALLOCATED' | 'UNALLOCATED'
+export type SchedulingShipmentFilter = 'ALL' | 'SHIPPED' | 'UNSHIPPED'
 
 export type SchedulingWorkbenchRow = {
   delivery: DeliveryRecord
@@ -39,11 +35,11 @@ const STAGE_RANK: Record<SchedulingStage, number> = {
   IN_FLIGHT: 2,
   WATCHLIST: 3,
 }
-export const SCHEDULED_NOMINATION_STATUSES = new Set(['SCHEDULED', 'NOMINATED', 'COMPLETED'])
 export const NOMINATION_COMPLETE_STATUSES = new Set(['NOT_REQUIRED', 'SCHEDULED', 'NOMINATED', 'COMPLETED'])
 export const ALLOCATION_COMPLETE_STATUSES = new Set(['NOT_REQUIRED', 'ALLOCATED', 'COMPLETED'])
 export const SCHEDULING_WINDOW_HOURS = 72
 export const NEXT_DAY_WINDOW_HOURS = 24
+export const SCHEDULED_NOMINATION_STATUSES = new Set(['SCHEDULED', 'NOMINATED', 'COMPLETED'])
 
 function parseDeliveryTimestamp(value: string | null | undefined): number | null {
   if (!value) {
@@ -120,6 +116,28 @@ export function deliveryStatusTone(
     default:
       return 'in-progress'
   }
+}
+
+export function isClosedSchedulingDelivery(
+  delivery: Pick<DeliveryRecord, 'status'>,
+): boolean {
+  return delivery.status === 'COMPLETED'
+}
+
+export function isAllocatedSchedulingDelivery(
+  delivery: Pick<DeliveryRecord, 'allocation_status'>,
+): boolean {
+  return ALLOCATION_COMPLETE_STATUSES.has(delivery.allocation_status)
+}
+
+export function isShippedSchedulingDelivery(
+  delivery: Pick<DeliveryRecord, 'actualization_status' | 'execution_status' | 'status'>,
+): boolean {
+  return (
+    delivery.actualization_status === 'ACTUALIZED' ||
+    delivery.execution_status === 'COMPLETED' ||
+    delivery.status === 'COMPLETED'
+  )
 }
 
 export function windowBandForDelivery(
@@ -226,21 +244,43 @@ export function buildSchedulingWorkbenchRows(
     .sort(compareSchedulingWorkbenchRows)
 }
 
-export function matchesSchedulingView(
+export function matchesSchedulingLifecycleFilter(
   row: SchedulingWorkbenchRow,
-  preset: SchedulingViewPreset,
+  filter: SchedulingLifecycleFilter,
 ): boolean {
-  switch (preset) {
-    case 'HOT_WINDOW':
-      return row.isDueSoon || row.windowBand === 'LIVE'
-    case 'BLOCKED':
-      return row.stage === 'BLOCKED'
-    case 'READY':
-      return row.stage === 'READY'
-    case 'IN_FLIGHT':
-      return row.stage === 'IN_FLIGHT'
-    case 'WATCHLIST':
-      return row.stage === 'WATCHLIST'
+  switch (filter) {
+    case 'OPEN':
+      return !isClosedSchedulingDelivery(row.delivery)
+    case 'CLOSED':
+      return isClosedSchedulingDelivery(row.delivery)
+    default:
+      return true
+  }
+}
+
+export function matchesSchedulingAllocationFilter(
+  row: SchedulingWorkbenchRow,
+  filter: SchedulingAllocationFilter,
+): boolean {
+  switch (filter) {
+    case 'ALLOCATED':
+      return isAllocatedSchedulingDelivery(row.delivery)
+    case 'UNALLOCATED':
+      return !isAllocatedSchedulingDelivery(row.delivery)
+    default:
+      return true
+  }
+}
+
+export function matchesSchedulingShipmentFilter(
+  row: SchedulingWorkbenchRow,
+  filter: SchedulingShipmentFilter,
+): boolean {
+  switch (filter) {
+    case 'SHIPPED':
+      return isShippedSchedulingDelivery(row.delivery)
+    case 'UNSHIPPED':
+      return !isShippedSchedulingDelivery(row.delivery)
     default:
       return true
   }

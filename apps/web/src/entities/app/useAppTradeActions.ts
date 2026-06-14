@@ -1,7 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
+import { loadPreTradeReviewDrift } from '../pretrade/api'
 import { createTradeWorkflowItem } from '../operations/api'
-import { submitTradeEvent } from '../trade/api'
+import {
+  submitAmendTradeTerms,
+  submitBookTrade,
+  submitCancelTrade,
+  submitTradeEvent,
+} from '../trade/api'
 import { buildPreTradeWorkflowNote } from '../../features/trades/preTradeCapture'
 import type { useTradeAmendForm } from '../../features/trades/useTradeAmendForm'
 import type { useTradeCaptureForm } from '../../features/trades/useTradeCaptureForm'
@@ -19,9 +25,11 @@ import type {
   CounterpartyCreditProfileRecord,
   EventRow,
   InspectorTab,
+  PreTradeReviewDriftRecord,
   Trade,
   ViewKey,
 } from '../../shared/models'
+import type { StoredAuthSession } from '../../shared/mutation'
 import { formatNumber } from '../../shared/format'
 import {
   type OptionLifecycleEventType,
@@ -41,6 +49,7 @@ function parseOptionalTradeNumber(value: string): number | null {
 type RefreshMutationData = (mutation: 'trade-event') => Promise<void>
 
 export function useAppTradeActions(args: {
+  authSession: StoredAuthSession | null
   captureForm: ReturnType<typeof useTradeCaptureForm>
   amendForm: ReturnType<typeof useTradeAmendForm>
   counterpartyCreditProfiles: CounterpartyCreditProfileRecord[]
@@ -56,6 +65,7 @@ export function useAppTradeActions(args: {
   findCounterpartyCreditRestriction: (counterpartyCode: string) => string | null
 }) {
   const {
+    authSession,
     captureForm,
     amendForm,
     counterpartyCreditProfiles,
@@ -76,10 +86,54 @@ export function useAppTradeActions(args: {
   const [submitting, setSubmitting] = useState(false)
   const [amending, setAmending] = useState(false)
   const [cancelling, setCancelling] = useState(false)
+  const [preTradeReviewDrift, setPreTradeReviewDrift] = useState<PreTradeReviewDriftRecord | null>(null)
+  const [preTradeReviewDriftLoading, setPreTradeReviewDriftLoading] = useState(false)
+  const [preTradeReviewDriftError, setPreTradeReviewDriftError] = useState('')
   const [optionLifecycleSubmittingEvent, setOptionLifecycleSubmittingEvent] =
     useState<OptionLifecycleEventType | null>(null)
   const [optionLifecycleSubmittingTradeId, setOptionLifecycleSubmittingTradeId] =
     useState<string | null>(null)
+  const attachedPreTradeReviewId = captureForm.preTradeReviewContext?.reviewId ?? null
+
+  useEffect(() => {
+    if (!attachedPreTradeReviewId || !authSession?.accessToken) {
+      setPreTradeReviewDrift(null)
+      setPreTradeReviewDriftLoading(false)
+      setPreTradeReviewDriftError('')
+      return
+    }
+
+    let cancelled = false
+    setPreTradeReviewDriftLoading(true)
+    setPreTradeReviewDriftError('')
+
+    loadPreTradeReviewDrift(appConfig.apiBase, authSession.accessToken, attachedPreTradeReviewId)
+      .then((drift) => {
+        if (cancelled) {
+          return
+        }
+        setPreTradeReviewDrift(drift)
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return
+        }
+        setPreTradeReviewDrift(null)
+        setPreTradeReviewDriftError(
+          error instanceof Error ? error.message : 'Could not verify approval drift.',
+        )
+      })
+      .finally(() => {
+        if (cancelled) {
+          return
+        }
+        setPreTradeReviewDriftLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [attachedPreTradeReviewId, authSession?.accessToken])
 
   async function refreshTradeMutationData() {
     await refreshMutationData('trade-event')
@@ -260,6 +314,24 @@ export function useAppTradeActions(args: {
       return
     }
 
+    if (attachedPreTradeReviewId) {
+      if (preTradeReviewDriftLoading) {
+        setCreateError(`Pre-trade review #${attachedPreTradeReviewId} is still being checked for approval drift.`)
+        return
+      }
+      if (preTradeReviewDrift?.alignment_status === 'NOT_APPROVED') {
+        setCreateError(`Pre-trade review #${attachedPreTradeReviewId} is no longer approved and must be re-approved before booking.`)
+        return
+      }
+      if (preTradeReviewDrift?.requires_reapproval) {
+        const detail = preTradeReviewDrift.reasons.map((reason) => reason.summary).join(' ')
+        setCreateError(
+          `Pre-trade review #${attachedPreTradeReviewId} must be re-approved before booking. ${detail}`.trim(),
+        )
+        return
+      }
+    }
+
     if (!captureForm.tradeIdInput.trim()) {
       captureForm.setTradeIdInput(submission.tradeId)
     }
@@ -273,9 +345,8 @@ export function useAppTradeActions(args: {
         ? buildPreTradeWorkflowNote(captureForm.preTradeReviewContext)
         : null
 
-      await submitTradeEvent(appConfig.apiBase, {
-        aggregate_id: submission.tradeId,
-        event_type: 'TradeCreated',
+      await submitBookTrade(appConfig.apiBase, {
+        trade_id: submission.tradeId,
         payload: preTradeReviewId
           ? {
               ...submission.payload,
@@ -398,10 +469,10 @@ export function useAppTradeActions(args: {
     setAmending(true)
 
     try {
-      await submitTradeEvent(appConfig.apiBase, {
-        aggregate_id: selectedTradeId,
-        event_type: 'TradeAmended',
+      await submitAmendTradeTerms(appConfig.apiBase, {
+        trade_id: selectedTradeId,
         payload: submission.payload,
+        expected_last_event_id: selectedTrade.last_event_id,
       })
 
       await refreshTradeMutationData()
@@ -435,13 +506,13 @@ export function useAppTradeActions(args: {
     setCancelling(true)
 
     try {
-      await submitTradeEvent(appConfig.apiBase, {
-        aggregate_id: selectedTradeId,
-        event_type: 'TradeCancelled',
+      await submitCancelTrade(appConfig.apiBase, {
+        trade_id: selectedTradeId,
         payload: {
           status: tradeStatusValues.cancelled,
           cancellation_reason: reason.trim(),
         },
+        expected_last_event_id: selectedTrade.last_event_id,
       })
 
       await refreshTradeMutationData()
@@ -539,6 +610,9 @@ export function useAppTradeActions(args: {
     handleTradeOptionLifecycleEvent,
     optionLifecycleSubmittingEvent,
     optionLifecycleSubmittingTradeId,
+    preTradeReviewDrift,
+    preTradeReviewDriftError,
+    preTradeReviewDriftLoading,
     submitting,
   }
 }

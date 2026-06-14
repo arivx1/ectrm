@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, inspect, select, text
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.schema import Table
 
 from apps.api.app.models.event import Base
 from apps.api.app.schemas.operations import DatabaseOverviewOut
@@ -47,19 +48,29 @@ def _database_size_bytes(db: Session, *, dialect: str) -> Optional[int]:
     return None
 
 
-def _database_record_count(db: Session) -> int:
+def _existing_model_tables(db: Session) -> list[Table]:
+    inspector = inspect(db.get_bind())
+    return [
+        table
+        for table in Base.metadata.sorted_tables
+        if inspector.has_table(table.name, schema=table.schema)
+    ]
+
+
+def _database_record_count(db: Session, *, tables: list[Table]) -> int:
     total = 0
-    for table in Base.metadata.sorted_tables:
+    for table in tables:
         total += int(db.execute(select(func.count()).select_from(table)).scalar_one())
     return total
 
 
 def build_database_overview(db: Session) -> DatabaseOverviewOut:
     dialect = _database_dialect(db)
+    tables = _existing_model_tables(db)
     return DatabaseOverviewOut(
         dialect=dialect,
         name=_database_name(db, dialect=dialect),
         size_bytes=_database_size_bytes(db, dialect=dialect),
-        table_count=len(Base.metadata.sorted_tables),
-        record_count=_database_record_count(db),
+        table_count=len(tables),
+        record_count=_database_record_count(db, tables=tables),
     )

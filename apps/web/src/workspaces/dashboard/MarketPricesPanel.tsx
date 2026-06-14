@@ -4,6 +4,7 @@ import { loadPriceIndexObservations } from '../../entities/market-data/api'
 import { appConfig } from '../../shared/config'
 import type { PriceIndexObservationRecord } from '../../shared/models'
 import { CHART_HEIGHT, CHART_WIDTH, buildAreaPath, buildChartPoints, buildLinePath } from './chartUtils'
+import { selectPriceIndexCandidates } from './marketPriceSelection'
 
 type DashboardTrade = {
   price_index_code: string | null
@@ -16,6 +17,10 @@ type DashboardPriceIndex = {
   unit_code: string
   currency_code: string
   is_active: boolean
+  commodity_class?: string | null
+  commodity_code?: string | null
+  market?: string | null
+  location_code?: string | null
 }
 
 type PriceSeries = {
@@ -28,11 +33,12 @@ type MarketPricesTileContentProps = {
   activeTrades: DashboardTrade[]
   priceIndices: DashboardPriceIndex[]
   formatNumber: (value: number | null, digits?: number) => string
+  onOpenPriceIndexBrief?: (priceIndex: DashboardPriceIndex) => void
 }
 
 const PRICE_HISTORY_LIMIT = 24
-const MAX_PRICE_CANDIDATES = 8
 const MAX_PRICE_CARDS = 4
+const MAX_PRICE_STRIP_CARDS = 6
 
 function parseObservationDate(value: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
@@ -126,64 +132,96 @@ function changeTone(
   return 'flat'
 }
 
-function selectPriceIndexCandidates(
+function useMarketPriceSeries(
+  appLoading: boolean,
   activeTrades: DashboardTrade[],
   priceIndices: DashboardPriceIndex[],
-): DashboardPriceIndex[] {
-  const activeIndexMap = new Map(
-    priceIndices.filter((priceIndex) => priceIndex.is_active).map((priceIndex) => [priceIndex.code, priceIndex]),
+) {
+  const [priceSeries, setPriceSeries] = useState<PriceSeries[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const selectedPriceIndices = useMemo(
+    () => selectPriceIndexCandidates(activeTrades, priceIndices),
+    [activeTrades, priceIndices],
   )
-  const activityByCode = new Map<string, number>()
 
-  for (const trade of activeTrades) {
-    if (!trade.price_index_code) {
-      continue
+  useEffect(() => {
+    if (appLoading) {
+      return
     }
 
-    const nextCount = (activityByCode.get(trade.price_index_code) ?? 0) + 1
-    activityByCode.set(trade.price_index_code, nextCount)
+    if (selectedPriceIndices.length === 0) {
+      setPriceSeries([])
+      setLoading(false)
+      setError('')
+      return
+    }
+
+    let cancelled = false
+
+    async function loadSeries() {
+      setLoading(true)
+      setError('')
+
+      try {
+        const results = await Promise.allSettled(
+          selectedPriceIndices.map(async (priceIndex) => ({
+            priceIndex,
+            observations: await loadPriceIndexObservations(appConfig.apiBase, priceIndex.code, PRICE_HISTORY_LIMIT),
+          })),
+        )
+
+        if (cancelled) {
+          return
+        }
+
+        const fulfilledResults = results
+          .filter(
+            (
+              result,
+            ): result is PromiseFulfilledResult<{
+              priceIndex: DashboardPriceIndex
+              observations: PriceIndexObservationRecord[]
+            }> => result.status === 'fulfilled',
+          )
+          .map((result) => result.value)
+        const nextSeries = fulfilledResults
+          .filter((result) => result.observations.length > 0)
+          .map((result) => ({
+            priceIndex: result.priceIndex,
+            observations: result.observations,
+          }))
+
+        setPriceSeries(nextSeries)
+        setError(results.some((result) => result.status === 'rejected') ? 'Some price series could not be loaded.' : '')
+      } catch (nextError) {
+        if (cancelled) {
+          return
+        }
+
+        setPriceSeries([])
+        setError(nextError instanceof Error ? nextError.message : 'Unable to load recent market prices.')
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    void loadSeries()
+
+    return () => {
+      cancelled = true
+    }
+  }, [appLoading, selectedPriceIndices])
+
+  return {
+    error,
+    loading,
+    priceSeries,
+    selectedPriceIndices,
   }
-
-  const selected: DashboardPriceIndex[] = []
-  const seenCodes = new Set<string>()
-
-  const rankedTradeCodes = [...activityByCode.entries()]
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-    .map(([code]) => code)
-
-  for (const code of rankedTradeCodes) {
-    const priceIndex = activeIndexMap.get(code)
-    if (!priceIndex || seenCodes.has(priceIndex.code)) {
-      continue
-    }
-
-    selected.push(priceIndex)
-    seenCodes.add(priceIndex.code)
-  }
-
-  const fallbacks = [...activeIndexMap.values()].sort((left, right) => {
-    const providerCompare = left.provider.localeCompare(right.provider)
-    if (providerCompare !== 0) {
-      return providerCompare
-    }
-
-    return left.name.localeCompare(right.name)
-  })
-
-  for (const priceIndex of fallbacks) {
-    if (seenCodes.has(priceIndex.code)) {
-      continue
-    }
-
-    selected.push(priceIndex)
-    seenCodes.add(priceIndex.code)
-
-    if (selected.length >= MAX_PRICE_CANDIDATES) {
-      break
-    }
-  }
-
-  return selected.slice(0, MAX_PRICE_CANDIDATES)
 }
 
 function Sparkline({
@@ -231,80 +269,11 @@ export function MarketPricesTileContent({
   activeTrades,
   priceIndices,
   formatNumber,
+  onOpenPriceIndexBrief,
 }: MarketPricesTileContentProps) {
-  const [priceSeries, setPriceSeries] = useState<PriceSeries[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-
-  const selectedPriceIndices = useMemo(
-    () => selectPriceIndexCandidates(activeTrades, priceIndices),
-    [activeTrades, priceIndices],
-  )
-  const hasPriceSeries = priceSeries.length > 0
-
-  useEffect(() => {
-    if (appLoading) {
-      return
-    }
-
-    if (selectedPriceIndices.length === 0) {
-      setPriceSeries([])
-      setLoading(false)
-      setError('')
-      return
-    }
-
-    let cancelled = false
-
-    async function loadSeries() {
-      setLoading(true)
-      setError('')
-
-      try {
-        const results = await Promise.allSettled(
-          selectedPriceIndices.map(async (priceIndex) => ({
-            priceIndex,
-            observations: await loadPriceIndexObservations(appConfig.apiBase, priceIndex.code, PRICE_HISTORY_LIMIT),
-          })),
-        )
-
-        if (cancelled) {
-          return
-        }
-
-        const fulfilledResults = results
-          .filter((result): result is PromiseFulfilledResult<{ priceIndex: DashboardPriceIndex; observations: PriceIndexObservationRecord[] }> => result.status === 'fulfilled')
-          .map((result) => result.value)
-        const nextSeries = fulfilledResults
-          .filter((result) => result.observations.length > 0)
-          .slice(0, MAX_PRICE_CARDS)
-          .map((result) => ({
-            priceIndex: result.priceIndex,
-            observations: result.observations,
-          }))
-
-        setPriceSeries(nextSeries)
-        setError(results.some((result) => result.status === 'rejected') ? 'Some price series could not be loaded.' : '')
-      } catch (nextError) {
-        if (cancelled) {
-          return
-        }
-
-        setPriceSeries([])
-        setError(nextError instanceof Error ? nextError.message : 'Unable to load recent market prices.')
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
-      }
-    }
-
-    void loadSeries()
-
-    return () => {
-      cancelled = true
-    }
-  }, [appLoading, selectedPriceIndices])
+  const { error, loading, priceSeries } = useMarketPriceSeries(appLoading, activeTrades, priceIndices)
+  const visibleSeries = priceSeries.slice(0, MAX_PRICE_CARDS)
+  const hasPriceSeries = visibleSeries.length > 0
 
   return (
     <>
@@ -323,7 +292,7 @@ export function MarketPricesTileContent({
         <>
           {error && <p className="system-panel-note">{error}</p>}
           <div className="market-price-grid">
-            {priceSeries.map((series) => {
+            {visibleSeries.map((series) => {
               const latest = series.observations[0] ?? null
               const previous = series.observations[1] ?? null
               const tone = changeTone(latest, previous)
@@ -365,6 +334,18 @@ export function MarketPricesTileContent({
                     <strong>Low {formatNumber(low, observationDigits(latest))}</strong>
                     <strong>High {formatNumber(high, observationDigits(latest))}</strong>
                   </div>
+
+                  {onOpenPriceIndexBrief ? (
+                    <div className="workflow-item-button-row dashboard-tile-action-row">
+                      <button
+                        type="button"
+                        className="button button-ghost"
+                        onClick={() => onOpenPriceIndexBrief(series.priceIndex)}
+                      >
+                        Open Brief
+                      </button>
+                    </div>
+                  ) : null}
                 </article>
               )
             })}
@@ -377,5 +358,100 @@ export function MarketPricesTileContent({
         </div>
       )}
     </>
+  )
+}
+
+export function MarketMonitorStripTileContent({
+  appLoading,
+  activeTrades,
+  priceIndices,
+  formatNumber,
+  onOpenPriceIndexBrief,
+}: MarketPricesTileContentProps) {
+  const { error, loading, priceSeries, selectedPriceIndices } = useMarketPriceSeries(
+    appLoading,
+    activeTrades,
+    priceIndices,
+  )
+  const visibleSeries = priceSeries.slice(0, MAX_PRICE_STRIP_CARDS)
+  const hasPriceSeries = visibleSeries.length > 0
+
+  if (appLoading || loading) {
+    return (
+      <div className="market-monitor-strip-grid">
+        <div className="skeleton-block" />
+        <div className="skeleton-block" />
+        <div className="skeleton-block" />
+      </div>
+    )
+  }
+
+  if (!hasPriceSeries && error) {
+    return (
+      <div className="empty-state">
+        <strong>Market monitor unavailable</strong>
+        <p>{error}</p>
+      </div>
+    )
+  }
+
+  if (!hasPriceSeries) {
+    return (
+      <div className="empty-state">
+        <strong>No tracked curves in view</strong>
+        <p>Run a price sync or add active desk indices to populate the compact market strip.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="market-monitor-strip">
+      {error ? <p className="system-panel-note">{error}</p> : null}
+      <div className="market-monitor-strip-grid">
+        {visibleSeries.map((series) => {
+          const latest = series.observations[0] ?? null
+          const previous = series.observations[1] ?? null
+          const tone = changeTone(latest, previous)
+
+          return (
+            <article key={series.priceIndex.code} className="market-monitor-strip-card">
+              <div className="market-monitor-strip-head">
+                <strong>{series.priceIndex.code}</strong>
+                <span>{latest ? formatObservationDate(latest.observation_date) : '—'}</span>
+              </div>
+              <div className="market-monitor-strip-value">
+                <strong>{formatObservationValue(latest, formatNumber)}</strong>
+                <small className={`market-price-change market-price-change-${tone}`}>
+                  {formatDelta(latest, previous, formatNumber)}
+                </small>
+              </div>
+              <div className="market-monitor-strip-sparkline">
+                <Sparkline observations={series.observations} tone={tone} />
+              </div>
+              <div className="market-monitor-strip-meta">
+                <span>{series.priceIndex.name}</span>
+                <span>{series.priceIndex.provider}</span>
+              </div>
+              {onOpenPriceIndexBrief ? (
+                <button
+                  type="button"
+                  className="button button-ghost"
+                  onClick={() => onOpenPriceIndexBrief(series.priceIndex)}
+                >
+                  Open Brief
+                </button>
+              ) : null}
+            </article>
+          )
+        })}
+      </div>
+      <div className="market-monitor-strip-footer">
+        <span>
+          Showing {visibleSeries.length} of {selectedPriceIndices.length} tracked curve
+          {selectedPriceIndices.length === 1 ? '' : 's'}.
+        </span>
+        <span>Use the Market Prices tile for the fuller history and range view.</span>
+      </div>
+    </div>
   )
 }

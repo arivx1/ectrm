@@ -8,7 +8,7 @@ from time import perf_counter
 from typing import Any, Iterable, cast
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from apps.api.app.config import settings
 from apps.api.app.core.logging import get_logger, log_outbound_request
@@ -36,6 +36,12 @@ PROVIDER_SETUP_ENV_VARS: dict[DocumentProcessorProvider, str] = {
     "google": "GOOGLE_API_KEY",
 }
 
+DEFAULT_DOCUMENT_PROCESSOR_MODEL_OPTIONS: dict[DocumentProcessorProvider, tuple[str, ...]] = {
+    "openai": ("gpt-5", "gpt-5-mini", "gpt-5-nano"),
+    "anthropic": ("claude-sonnet-4-0", "claude-opus-4-0"),
+    "google": ("gemini-2.5-pro", "gemini-2.5-flash"),
+}
+
 VALID_DOCUMENT_PROCESSOR_PROVIDERS: tuple[DocumentProcessorProvider, ...] = (
     "openai",
     "anthropic",
@@ -60,6 +66,7 @@ class DocumentProcessorProviderConfig:
     label: str
     api_key: str
     model: str
+    model_options: tuple[str, ...]
     base_url: str
     configured: bool
     enabled: bool
@@ -111,6 +118,27 @@ class _ProcessorTableBlock(BaseModel):
     header_row_detected: bool = False
     confidence: float | None = Field(default=None, ge=0, le=1)
 
+    @field_validator("rows", mode="before")
+    @classmethod
+    def _normalize_cell_rows(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+
+        normalized_rows: list[object] = []
+        for row in value:
+            if isinstance(row, dict) and isinstance(row.get("cells"), list):
+                row_values: dict[str, object] = {}
+                for cell in row["cells"]:
+                    if not isinstance(cell, dict):
+                        continue
+                    column = clean_optional_text(cell.get("column"))
+                    if column is not None:
+                        row_values[column] = cell.get("value")
+                normalized_rows.append(row_values)
+            else:
+                normalized_rows.append(row)
+        return normalized_rows
+
 
 class _ProcessorPageAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -138,6 +166,7 @@ def build_document_processor_runtime_settings() -> DocumentProcessorRuntimeSetti
         default_provider=normalize_document_processor_default_provider(settings.DOCUMENT_AI_DEFAULT_PROVIDER),
         effective_default_provider=effective_default_provider,
         configured_provider_count=sum(1 for config in provider_configs if config.configured),
+        ai_processing_confidence_threshold=settings.DOCUMENT_AI_CONFIDENCE_THRESHOLD,
         providers=[
             DocumentProcessorProviderStatusOut(
                 provider=config.provider,
@@ -146,6 +175,7 @@ def build_document_processor_runtime_settings() -> DocumentProcessorRuntimeSetti
                 configured=config.configured,
                 is_default=config.is_default,
                 default_model=config.model,
+                available_models=list(config.model_options),
                 base_url=config.base_url,
                 setup_env_var=config.setup_env_var,
             )
@@ -162,6 +192,7 @@ def list_document_processor_configs() -> list[DocumentProcessorProviderConfig]:
             default_provider=default_provider,
             api_key=settings.OPENAI_API_KEY,
             model=(settings.DOCUMENT_AI_OPENAI_MODEL or settings.OPENAI_MODEL),
+            model_options=settings.DOCUMENT_AI_OPENAI_MODEL_OPTIONS,
             base_url=settings.OPENAI_BASE_URL,
         ),
         _build_provider_config(
@@ -169,6 +200,7 @@ def list_document_processor_configs() -> list[DocumentProcessorProviderConfig]:
             default_provider=default_provider,
             api_key=settings.ANTHROPIC_API_KEY,
             model=(settings.DOCUMENT_AI_ANTHROPIC_MODEL or settings.ANTHROPIC_MODEL),
+            model_options=settings.DOCUMENT_AI_ANTHROPIC_MODEL_OPTIONS,
             base_url=settings.ANTHROPIC_BASE_URL,
         ),
         _build_provider_config(
@@ -176,6 +208,7 @@ def list_document_processor_configs() -> list[DocumentProcessorProviderConfig]:
             default_provider=default_provider,
             api_key=settings.GOOGLE_API_KEY,
             model=(settings.DOCUMENT_AI_GOOGLE_MODEL or settings.GOOGLE_MODEL),
+            model_options=settings.DOCUMENT_AI_GOOGLE_MODEL_OPTIONS,
             base_url=settings.GOOGLE_BASE_URL,
         ),
     ]
@@ -226,9 +259,12 @@ def normalize_document_processor_selection(value: str | None) -> DocumentProcess
 
 def resolve_requested_document_processor(
     requested_provider: str | None = None,
+    requested_model: str | None = None,
 ) -> tuple[DocumentProcessorSelection | None, str | None]:
     normalized_selection = normalize_document_processor_selection(requested_provider)
     if normalized_selection == "builtin":
+        if clean_optional_text(requested_model) is not None:
+            raise ValueError("Built-in parsing does not accept a processing model selection.")
         return "builtin", None
 
     normalized_provider = normalize_document_processor_provider(normalized_selection)
@@ -240,12 +276,27 @@ def resolve_requested_document_processor(
         )
         if not config.configured:
             raise ValueError(f"{config.label} is not configured for document processing on this API.")
-        return config.provider, config.model
+        return config.provider, resolve_requested_document_processor_model(config, requested_model)
 
     config = _resolve_runtime_document_processor_config(None)
     if config is None:
         return None, None
-    return config.provider, config.model
+    return config.provider, resolve_requested_document_processor_model(config, requested_model)
+
+
+def resolve_requested_document_processor_model(
+    config: DocumentProcessorProviderConfig,
+    requested_model: str | None,
+) -> str:
+    normalized_model = clean_optional_text(requested_model)
+    if normalized_model is None:
+        return config.model
+
+    if normalized_model not in config.model_options:
+        raise ValueError(
+            f"{config.label} model '{normalized_model}' is not available for document processing on this API."
+        )
+    return normalized_model
 
 
 def run_document_processor_analysis(
@@ -281,6 +332,7 @@ def run_document_processor_analysis(
                 provider=config,
                 model=config.model,
                 filename=filename,
+                payload=payload,
                 pages=pages,
             )
         else:
@@ -356,20 +408,52 @@ def _build_provider_config(
     default_provider: DocumentProcessorProvider,
     api_key: str,
     model: str,
+    model_options: str,
     base_url: str,
 ) -> DocumentProcessorProviderConfig:
-    configured = bool(api_key.strip() and model.strip())
+    normalized_model = model.strip()
+    configured = bool(api_key.strip() and normalized_model)
     return DocumentProcessorProviderConfig(
         provider=provider,
         label=PROVIDER_LABELS[provider],
         api_key=api_key.strip(),
-        model=model.strip(),
+        model=normalized_model,
+        model_options=build_document_processor_model_options(
+            provider=provider,
+            default_model=normalized_model,
+            configured_model_options=model_options,
+        ),
         base_url=base_url.strip(),
         configured=configured,
         enabled=bool(settings.DOCUMENT_AI_ENABLED and configured),
         is_default=provider == default_provider,
         setup_env_var=PROVIDER_SETUP_ENV_VARS[provider],
     )
+
+
+def build_document_processor_model_options(
+    *,
+    provider: DocumentProcessorProvider,
+    default_model: str,
+    configured_model_options: str,
+) -> tuple[str, ...]:
+    seen_models: set[str] = set()
+    normalized_models: list[str] = []
+
+    def include(value: str | None) -> None:
+        normalized_value = clean_optional_text(value)
+        if not normalized_value or normalized_value in seen_models:
+            return
+        seen_models.add(normalized_value)
+        normalized_models.append(normalized_value)
+
+    include(default_model)
+    for value in configured_model_options.split(","):
+        include(value)
+    for value in DEFAULT_DOCUMENT_PROCESSOR_MODEL_OPTIONS[provider]:
+        include(value)
+
+    return tuple(normalized_models)
 
 
 def _generate_openai_document_analysis(
@@ -437,9 +521,10 @@ def _generate_anthropic_document_analysis(
     provider: DocumentProcessorProviderConfig,
     model: str,
     filename: str,
+    payload: bytes,
     pages: list[DocumentIngestionPage],
 ) -> _ProcessorResponse:
-    prompt = _build_text_document_prompt(filename=filename, page_count=len(pages), pages=pages)
+    prompt = _build_anthropic_document_prompt(filename=filename, page_count=len(pages), pages=pages)
     response_payload = _post_json(
         url=f"{provider.base_url.rstrip('/')}/v1/messages",
         headers={
@@ -454,7 +539,10 @@ def _generate_anthropic_document_analysis(
             "messages": [
                 {
                     "role": "user",
-                    "content": [{"type": "text", "text": prompt}],
+                    "content": [
+                        _build_anthropic_pdf_document_block(payload),
+                        {"type": "text", "text": prompt},
+                    ],
                 }
             ],
         },
@@ -651,6 +739,32 @@ def _build_text_document_prompt(
     )
 
 
+def _build_anthropic_document_prompt(
+    *,
+    filename: str,
+    page_count: int,
+    pages: list[DocumentIngestionPage],
+) -> str:
+    page_payload = [
+        {
+            "page_number": page.page_number,
+            "text_source": str((page.classification_payload or {}).get("text_source") or "none"),
+            "raw_text": page.raw_text or "",
+            "heuristic_document_kind": page.document_kind,
+        }
+        for page in pages
+    ]
+    return (
+        f"Filename: {filename}\n"
+        f"Page count: {page_count}\n\n"
+        f"{_document_schema_instructions()}\n\n"
+        "Read the attached PDF directly. Use the extracted text below only as fallback context when the PDF is "
+        "visually ambiguous or text extraction is sparse.\n\n"
+        f"Fallback extracted text by page:\n{json.dumps(page_payload, ensure_ascii=True)}\n\n"
+        f"{_document_response_contract()}"
+    )
+
+
 def _document_schema_instructions() -> str:
     registry = build_document_schema_registry()
     lines: list[str] = [
@@ -659,15 +773,27 @@ def _document_schema_instructions() -> str:
     for kind in registry.document_kinds:
         header_fields = ", ".join(field.field_key for field in kind.header_fields) or "none"
         table_templates = ", ".join(template.template_key for template in kind.table_templates) or "none"
+        extraction_objects = ", ".join(
+            f"{entry.object_key}->{entry.canonical_table or entry.source_object_type or 'semantic_object'}"
+            for entry in kind.extraction_objects
+        ) or "none"
         lines.append(
-            f"- {kind.document_kind}: fields [{header_fields}]; table templates [{table_templates}]"
+            f"- {kind.document_kind}: fields [{header_fields}]; table templates [{table_templates}]; "
+            f"extraction objects [{extraction_objects}]"
         )
     lines.append(
         "Use the supported field keys and template keys when they fit. "
         "If a field is useful but unsupported, create a short snake_case key."
     )
     lines.append(
+        "Extract only values supported by the document. Preserve table rows as table_blocks when the schema exposes a "
+        "matching table template; downstream normalization, validation, and business writes are handled by ECTRM."
+    )
+    lines.append(
         "If the page is unclear, set document_kind to UNKNOWN and leave fields or tables empty."
+    )
+    lines.append(
+        "If the page is readable but does not fit any supported kind, set document_kind to OTHER instead of forcing the nearest typed category."
     )
     return "\n".join(lines)
 
@@ -686,7 +812,7 @@ def _document_response_contract() -> str:
         '        {"field_key": "invoice_number", "label": "Invoice Number", "value": "INV-1007", "confidence": 0.95}\n'
         "      ],\n"
         '      "table_blocks": [\n'
-        '        {"template_key": "line_items", "title": "Charges", "columns": ["description", "quantity", "line_amount"], "rows": [{"description": "WTI April", "quantity": "1000", "line_amount": "79250"}], "header_row_detected": true, "confidence": 0.92}\n'
+        '        {"template_key": "line_items", "title": "Charges", "columns": ["description", "quantity", "line_amount"], "rows": [{"cells": [{"column": "description", "value": "WTI April"}, {"column": "quantity", "value": "1000"}, {"column": "line_amount", "value": "79250"}]}], "header_row_detected": true, "confidence": 0.92}\n'
         "      ],\n"
         '      "warnings": []\n'
         "    }\n"
@@ -705,14 +831,96 @@ def _build_openai_text_format() -> dict[str, Any]:
     return {
         "type": "json_schema",
         "name": OPENAI_DOCUMENT_RESPONSE_FORMAT_NAME,
-        "schema": _ProcessorResponse.model_json_schema(),
+        "schema": _build_openai_document_response_schema(),
         "strict": True,
     }
+
+
+def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
+    return {"anyOf": [schema, {"type": "null"}]}
+
+
+def _array_schema(items: dict[str, Any], *, max_items: int | None = None) -> dict[str, Any]:
+    schema: dict[str, Any] = {"type": "array", "items": items}
+    if max_items is not None:
+        schema["maxItems"] = max_items
+    return schema
+
+
+def _object_schema(properties: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(properties),
+        "additionalProperties": False,
+    }
+
+
+def _build_openai_document_response_schema() -> dict[str, Any]:
+    string_schema = {"type": "string"}
+    confidence_schema = _nullable({"type": "number", "minimum": 0, "maximum": 1})
+
+    table_cell_schema = _object_schema(
+        {
+            "column": {"type": "string", "maxLength": 120},
+            "value": _nullable({"type": "string", "maxLength": 500}),
+        }
+    )
+    table_row_schema = _object_schema(
+        {
+            "cells": _array_schema(table_cell_schema, max_items=64),
+        }
+    )
+    table_block_schema = _object_schema(
+        {
+            "template_key": _nullable({"type": "string", "maxLength": 64}),
+            "title": _nullable({"type": "string", "maxLength": 160}),
+            "columns": _array_schema(string_schema, max_items=24),
+            "rows": _array_schema(table_row_schema, max_items=250),
+            "header_row_detected": {"type": "boolean"},
+            "confidence": confidence_schema,
+        }
+    )
+    field_schema = _object_schema(
+        {
+            "field_key": string_schema,
+            "label": _nullable({"type": "string", "maxLength": 120}),
+            "value": {"type": "string", "maxLength": 500},
+            "confidence": confidence_schema,
+        }
+    )
+    page_schema = _object_schema(
+        {
+            "page_number": {"type": "integer", "minimum": 1},
+            "document_kind": {"type": "string", "minLength": 3, "maxLength": 64},
+            "document_subtype": _nullable({"type": "string", "maxLength": 128}),
+            "confidence": confidence_schema,
+            "header_fields": _array_schema(field_schema, max_items=64),
+            "table_blocks": _array_schema(table_block_schema, max_items=24),
+            "warnings": _array_schema(string_schema, max_items=24),
+        }
+    )
+    return _object_schema(
+        {
+            "pages": _array_schema(page_schema, max_items=250),
+        }
+    )
 
 
 def _build_pdf_data_url(payload: bytes) -> str:
     encoded = base64.b64encode(payload).decode("ascii")
     return f"data:application/pdf;base64,{encoded}"
+
+
+def _build_anthropic_pdf_document_block(payload: bytes) -> dict[str, Any]:
+    return {
+        "type": "document",
+        "source": {
+            "type": "base64",
+            "media_type": "application/pdf",
+            "data": base64.b64encode(payload).decode("ascii"),
+        },
+    }
 
 
 def _build_openai_input_file(

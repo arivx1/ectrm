@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apps.api.app.models.event import Base
@@ -14,6 +14,7 @@ class ReferenceCommodity(Base):
 
     code: Mapped[str] = mapped_column(String(50), primary_key=True)
     commodity_class: Mapped[str] = mapped_column(String(50), nullable=False)
+    allowed_transport_modes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

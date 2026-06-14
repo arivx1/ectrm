@@ -5,8 +5,11 @@
 }
 
 .assistant-admin-summary-grid,
+.assistant-agent-section-tabs,
+.assistant-agent-overview-grid,
 .assistant-control-tower-grid,
 .assistant-control-tower-signal-list,
+.assistant-supervision-summary-grid,
 .assistant-admin-grid,
 .assistant-admin-option-grid,
 .assistant-outcome-grid,
@@ -23,12 +26,15 @@
 
 .assistant-builder-shell,
 .assistant-builder-preview,
+.assistant-supervision-banner,
 .assistant-builder-template-grid,
 .assistant-role-catalog-shell,
 .assistant-role-catalog-grid,
 .assistant-role-detail,
 .assistant-profile-fit,
 .assistant-profile-fit-grid,
+.assistant-admin-construction-review,
+.assistant-construction-diff-list,
 .assistant-builder-preview-grid,
 .assistant-builder-warning-list,
 .assistant-profile-request-panel,
@@ -48,6 +54,82 @@
 .assistant-admin-summary-grid {
   margin-top: 1.2rem;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.assistant-agent-section-tabs {
+  margin-top: 1.2rem;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+}
+
+.assistant-agent-section-tab,
+.assistant-agent-overview-card {
+  display: grid;
+  gap: 0.35rem;
+  min-height: 5.75rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.72);
+  color: #24384a;
+  text-align: left;
+}
+
+.assistant-agent-section-tab {
+  cursor: pointer;
+}
+
+.assistant-agent-section-tab:hover,
+.assistant-agent-section-tab.is-active,
+.assistant-agent-overview-card:hover {
+  border-color: rgba(18, 124, 108, 0.3);
+  background: rgba(232, 244, 240, 0.82);
+  box-shadow: inset 0 0 0 1px rgba(18, 124, 108, 0.08);
+}
+
+.assistant-agent-section-tab strong,
+.assistant-agent-overview-card strong {
+  color: #13293d;
+}
+
+.assistant-agent-section-tab span,
+.assistant-agent-overview-card span {
+  color: #66717c;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.assistant-agent-section-tab span {
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: none;
+}
+
+.assistant-agent-overview-grid {
+  margin-top: 1rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.assistant-agent-overview-card {
+  min-height: 8rem;
+  cursor: pointer;
+}
+
+.assistant-agent-overview-card p {
+  margin: 0;
+  color: #3f5161;
+}
+
+.assistant-work-package-filter-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  align-items: end;
+}
+
+.assistant-work-package-filter-pills {
+  min-height: 2.75rem;
 }
 
 .assistant-control-tower-banner {
@@ -136,6 +218,33 @@
   display: grid;
   gap: 1rem;
   margin-top: 1.2rem;
+}
+
+.assistant-supervision-banner {
+  margin-top: 0.25rem;
+  padding: 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1.05rem;
+  background:
+    radial-gradient(circle at top left, rgba(18, 124, 108, 0.08), transparent 40%),
+    rgba(246, 245, 240, 0.88);
+  box-shadow: inset 4px 0 0 rgba(37, 107, 141, 0.34);
+}
+
+.assistant-supervision-banner.is-pause {
+  box-shadow: inset 4px 0 0 rgba(178, 73, 60, 0.68);
+}
+
+.assistant-supervision-banner.is-narrow {
+  box-shadow: inset 4px 0 0 rgba(198, 147, 46, 0.66);
+}
+
+.assistant-supervision-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+}
+
+.assistant-supervision-actions {
+  margin-top: 0.25rem;
 }
 
 .assistant-control-tower-signal-list {
@@ -744,6 +853,74 @@
   font-size: 0.88rem;
 }
 
+.assistant-admin-construction-review {
+  gap: 0.85rem;
+  padding: 0.95rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.95rem;
+  background:
+    radial-gradient(circle at top right, rgba(18, 124, 108, 0.1), transparent 34%),
+    rgba(248, 246, 239, 0.78);
+}
+
+.assistant-admin-construction-review > p,
+.assistant-admin-construction-review > small {
+  margin: 0;
+  color: #3f5161;
+}
+
+.assistant-admin-construction-review .assistant-construction-card,
+.assistant-admin-construction-review .assistant-construction-source-card,
+.assistant-admin-construction-review .assistant-construction-provenance-row {
+  border-color: rgba(18, 42, 56, 0.08);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.assistant-admin-construction-review .assistant-construction-head strong,
+.assistant-admin-construction-review .assistant-construction-card strong,
+.assistant-admin-construction-review .assistant-construction-source-card strong,
+.assistant-admin-construction-review .assistant-construction-provenance-list > strong {
+  color: #13293d;
+}
+
+.assistant-admin-construction-review .assistant-construction-head p,
+.assistant-admin-construction-review .assistant-construction-card p,
+.assistant-admin-construction-review .assistant-construction-source-card small,
+.assistant-admin-construction-review .assistant-construction-detail-list small,
+.assistant-admin-construction-review .assistant-construction-provenance-row small {
+  color: #3f5161;
+}
+
+.assistant-admin-draft-construction-review {
+  background:
+    radial-gradient(circle at top left, rgba(198, 147, 46, 0.12), transparent 34%),
+    rgba(255, 250, 236, 0.82);
+}
+
+.assistant-construction-diff-list {
+  gap: 0.55rem;
+}
+
+.assistant-construction-diff-row {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.assistant-construction-diff-row strong,
+.assistant-construction-diff-list > small {
+  color: #13293d;
+}
+
+.assistant-construction-diff-row p {
+  margin: 0;
+  color: #3f5161;
+  word-break: break-word;
+}
+
 .assistant-builder-inline-action {
   display: inline-flex;
   margin-left: 0.5rem;
@@ -774,6 +951,80 @@
 .assistant-admin-prompt {
   min-height: 9rem;
   resize: vertical;
+}
+
+.job-scheduling-grid {
+  grid-template-columns: minmax(22rem, 0.95fr) minmax(0, 1.05fr);
+}
+
+.job-json-field {
+  grid-column: 1 / -1;
+}
+
+.job-json-control {
+  min-height: 7rem;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  font-size: 0.86rem;
+}
+
+.job-weekday-group {
+  grid-column: 1 / -1;
+}
+
+.job-weekday-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.job-weekday-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid rgba(18, 42, 56, 0.1);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.72);
+  color: #13293d;
+}
+
+.job-weekday-toggle input {
+  margin: 0;
+}
+
+.job-schedule-row {
+  align-items: flex-start;
+}
+
+.job-schedule-actions {
+  min-width: 8.5rem;
+}
+
+.job-schedule-actions .secondary-button,
+.job-event-enqueue .secondary-button {
+  min-height: 2.25rem;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.86rem;
+}
+
+.job-event-enqueue-head {
+  margin-top: 0.4rem;
+}
+
+.job-event-enqueue {
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(18, 42, 56, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.55);
 }
 
 .assistant-draft-playground-toggle {

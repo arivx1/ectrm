@@ -8,24 +8,41 @@ from sqlalchemy.orm import Session
 from apps.api.app.domains.admin.services.mutation_provenance import record_mutation_provenance
 from apps.api.app.domains.assistant.services.chat import AssistantServiceError
 from apps.api.app.domains.assistant.services.eval_gates import evaluate_agent_eval_gate
+from apps.api.app.domains.assistant.services.agent_revisions import (
+    build_agent_revision_diff_summary,
+    normalize_agent_revision_payload,
+)
 from apps.api.app.domains.assistant.services.role_archetypes import get_role_archetype
+from apps.api.app.models.assistant_agent import AssistantAgent
 from apps.api.app.models.assistant_agent_eval import AssistantAgentEval
 from apps.api.app.models.assistant_agent_profile_request import AssistantAgentProfileRequest
+from apps.api.app.models.assistant_agent_revision import AssistantAgentRevision
 from apps.api.app.schemas.assistant import (
     AssistantAgentProfileRequestActivation,
     AssistantAgentProfileRequestCreate,
     AssistantAgentProfileRequestDecision,
+    AssistantAgentProfileRequestDiffOut,
     AssistantAgentProfileRequestOut,
+    AssistantAgentProfileRequestSubmit,
 )
 
 
 APPROVED_PROFILE_REQUEST_STATUSES = {"APPROVED", "ACTIVATED"}
+_AUTHORITY_LEVEL_RANK = {
+    "OBSERVE": 0,
+    "EXPLAIN": 1,
+    "DRAFT": 2,
+    "STAGE": 3,
+    "EXECUTE": 4,
+    "EXTERNAL_COMMIT": 5,
+}
 
 
 def list_profile_requests(
     db: Session,
     *,
     status: str | None = None,
+    requested_by: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[AssistantAgentProfileRequest]:
@@ -35,6 +52,8 @@ def list_profile_requests(
     )
     if status:
         stmt = stmt.where(AssistantAgentProfileRequest.status == status.strip().upper())
+    if requested_by:
+        stmt = stmt.where(AssistantAgentProfileRequest.requested_by == requested_by.strip())
     return list(db.scalars(stmt.offset(max(offset, 0)).limit(max(1, min(limit, 250)))).all())
 
 
@@ -45,13 +64,18 @@ def create_profile_request(
     now = datetime.now(timezone.utc)
     record = AssistantAgentProfileRequest(
         status="REQUESTED",
+        request_kind=payload.request_kind,
+        target_agent_id=payload.target_agent_id,
         requested_agent_id=payload.requested_agent_id,
+        change_summary=payload.change_summary,
         business_problem=payload.business_problem,
         proposed_mission=payload.proposed_mission,
         human_owner_role=payload.human_owner_role,
         requested_workspaces=list(payload.requested_workspaces),
         work_objects=list(payload.work_objects),
         requested_inputs_tools=list(payload.requested_inputs_tools),
+        requested_action_types=list(payload.requested_action_types),
+        requested_skills=list(payload.requested_skills),
         expected_outputs=list(payload.expected_outputs),
         requested_authority_ceiling=payload.requested_authority_ceiling,
         stop_conditions=list(payload.stop_conditions),
@@ -67,6 +91,26 @@ def create_profile_request(
     db.commit()
     db.refresh(record)
     return record
+
+
+def submit_profile_request(
+    db: Session,
+    *,
+    payload: AssistantAgentProfileRequestSubmit,
+    requested_by: str,
+) -> AssistantAgentProfileRequest:
+    target_agent = (
+        db.get(AssistantAgent, payload.target_agent_id)
+        if payload.target_agent_id
+        else None
+    )
+
+    normalized_payload = _normalize_submission_payload(
+        payload,
+        target_agent=target_agent,
+        requested_by=requested_by,
+    )
+    return create_profile_request(db, normalized_payload)
 
 
 def approve_profile_request(
@@ -138,9 +182,43 @@ def mark_profile_request_activated(
             status_code=409,
             detail=f"Profile request {request_id} must be approved before activation.",
         )
+    linked_agent = db.get(AssistantAgent, payload.linked_agent_id)
+    if linked_agent is None:
+        raise AssistantServiceError(status_code=404, detail="Linked assistant agent not found.")
+    if record.target_agent_id and linked_agent.agent_id != record.target_agent_id:
+        raise AssistantServiceError(
+            status_code=422,
+            detail="Existing-agent profile requests must be applied to their reviewed target agent.",
+        )
+    linked_revision = db.get(AssistantAgentRevision, payload.linked_revision_id)
+    if linked_revision is None or linked_revision.agent_id != linked_agent.agent_id:
+        raise AssistantServiceError(
+            status_code=404,
+            detail="Linked assistant agent revision not found for the selected agent.",
+        )
+    if (
+        linked_revision.published_at is None
+        or linked_agent.published_revision_id != linked_revision.revision_id
+    ):
+        raise AssistantServiceError(
+            status_code=409,
+            detail="Profile requests can only be marked applied after the linked agent revision is published.",
+        )
+    revision_payload = normalize_agent_revision_payload(linked_revision.payload)
+    if revision_payload.get("profile_request_id") != record.request_id:
+        raise AssistantServiceError(
+            status_code=422,
+            detail="Linked agent revision must carry the approved profile request ID before it can close the request.",
+        )
+    if linked_agent.profile_request_id != record.request_id:
+        raise AssistantServiceError(
+            status_code=422,
+            detail="Linked agent must carry the approved profile request ID before it can close the request.",
+        )
     now = datetime.now(timezone.utc)
     record.status = "ACTIVATED"
     record.linked_agent_id = payload.linked_agent_id
+    record.linked_revision_id = payload.linked_revision_id
     record.activated_by = payload.activated_by
     record.activated_at = now
     record.updated_at = now
@@ -150,6 +228,7 @@ def mark_profile_request_activated(
         record=record,
         operation_key="assistant_agent_profile_request.activated",
         linked_agent_id=payload.linked_agent_id,
+        linked_revision_id=payload.linked_revision_id,
     )
     return record
 
@@ -237,13 +316,18 @@ def to_profile_request_out(record: AssistantAgentProfileRequest) -> AssistantAge
     return AssistantAgentProfileRequestOut(
         request_id=record.request_id,
         status=record.status,
+        request_kind=record.request_kind,
+        target_agent_id=record.target_agent_id,
         requested_agent_id=record.requested_agent_id,
+        change_summary=record.change_summary,
         business_problem=record.business_problem,
         proposed_mission=record.proposed_mission,
         human_owner_role=record.human_owner_role,
         requested_workspaces=list(record.requested_workspaces or []),
         work_objects=list(record.work_objects or []),
         requested_inputs_tools=list(record.requested_inputs_tools or []),
+        requested_action_types=list(record.requested_action_types or []),
+        requested_skills=list(record.requested_skills or []),
         expected_outputs=list(record.expected_outputs or []),
         requested_authority_ceiling=record.requested_authority_ceiling,
         stop_conditions=list(record.stop_conditions or []),
@@ -252,6 +336,8 @@ def to_profile_request_out(record: AssistantAgentProfileRequest) -> AssistantAge
         approval_notes=record.approval_notes,
         rejection_reason=record.rejection_reason,
         linked_agent_id=record.linked_agent_id,
+        linked_revision_id=record.linked_revision_id,
+        applied_diff_summary=[],
         requested_at=record.requested_at,
         requested_by=record.requested_by,
         reviewed_at=record.reviewed_at,
@@ -260,6 +346,59 @@ def to_profile_request_out(record: AssistantAgentProfileRequest) -> AssistantAge
         activated_by=record.activated_by,
         updated_at=record.updated_at,
     )
+
+
+def build_profile_request_revision_diff(
+    db: Session,
+    record: AssistantAgentProfileRequest,
+) -> list[dict[str, str]]:
+    revision = _resolve_profile_request_revision(db, record)
+    if revision is None:
+        return []
+    previous_revision = db.scalars(
+        select(AssistantAgentRevision)
+        .where(AssistantAgentRevision.agent_id == revision.agent_id)
+        .where(AssistantAgentRevision.version < revision.version)
+        .order_by(AssistantAgentRevision.version.desc(), AssistantAgentRevision.revision_id.desc())
+        .limit(1)
+    ).first()
+    baseline_payload = previous_revision.payload if previous_revision is not None else None
+    return build_agent_revision_diff_summary(baseline_payload, revision.payload)
+
+
+def to_profile_request_out_with_diff(
+    db: Session,
+    record: AssistantAgentProfileRequest,
+) -> AssistantAgentProfileRequestOut:
+    result = to_profile_request_out(record)
+    result.applied_diff_summary = [
+        AssistantAgentProfileRequestDiffOut.model_validate(row)
+        for row in build_profile_request_revision_diff(db, record)
+    ]
+    return result
+
+
+def _resolve_profile_request_revision(
+    db: Session,
+    record: AssistantAgentProfileRequest,
+) -> AssistantAgentRevision | None:
+    if record.linked_revision_id is not None:
+        revision = db.get(AssistantAgentRevision, record.linked_revision_id)
+        if revision is not None:
+            return revision
+
+    linked_agent_id = record.linked_agent_id or record.target_agent_id or record.requested_agent_id
+    if not linked_agent_id:
+        return None
+    linked_agent = db.get(AssistantAgent, linked_agent_id)
+    if linked_agent is None or linked_agent.profile_request_id != record.request_id:
+        return None
+    if linked_agent.published_revision_id is None:
+        return None
+    revision = db.get(AssistantAgentRevision, linked_agent.published_revision_id)
+    if revision is None or revision.agent_id != linked_agent.agent_id:
+        return None
+    return revision
 
 
 def _get_profile_request_or_error(db: Session, request_id: int) -> AssistantAgentProfileRequest:
@@ -275,6 +414,7 @@ def _record_profile_request_provenance(
     record: AssistantAgentProfileRequest,
     operation_key: str,
     linked_agent_id: str | None = None,
+    linked_revision_id: int | None = None,
 ) -> None:
     affected_records: list[dict[str, object]] = [
         {
@@ -293,6 +433,15 @@ def _record_profile_request_provenance(
                 "label": linked_agent_id,
             }
         )
+    if linked_revision_id is not None:
+        affected_records.append(
+            {
+                "record_type": "assistant_agent_revision",
+                "record_id": linked_revision_id,
+                "action": "linked",
+                "label": f"revision-{linked_revision_id}",
+            }
+        )
     record_mutation_provenance(
         db,
         operation_key=operation_key,
@@ -301,10 +450,199 @@ def _record_profile_request_provenance(
         details={
             "request_id": record.request_id,
             "status": record.status,
+            "request_kind": record.request_kind,
+            "target_agent_id": record.target_agent_id,
             "requested_agent_id": record.requested_agent_id,
             "requested_authority_ceiling": record.requested_authority_ceiling,
             "workspace_count": len(record.requested_workspaces or []),
             "tool_count": len(record.requested_inputs_tools or []),
+            "action_count": len(record.requested_action_types or []),
+            "skill_count": len(record.requested_skills or []),
             "eval_case_count": len(record.proposed_eval_cases or []),
+            "linked_revision_id": linked_revision_id,
         },
     )
+
+
+def _normalize_submission_payload(
+    payload: AssistantAgentProfileRequestSubmit,
+    *,
+    target_agent: AssistantAgent | None,
+    requested_by: str,
+) -> AssistantAgentProfileRequestCreate:
+    request_kind = payload.request_kind
+    errors: list[str] = []
+
+    if request_kind == "NEW_SPECIALIZATION":
+        if payload.target_agent_id:
+            errors.append("New specialization requests should not target an existing managed agent.")
+        if not payload.human_owner_role:
+            errors.append("Human owner role is required for a new specialization request.")
+        if not payload.requested_workspaces:
+            errors.append("Select at least one workspace for a new specialization request.")
+        if not payload.work_objects:
+            errors.append("List at least one work object for a new specialization request.")
+        if not payload.expected_outputs:
+            errors.append("List at least one expected output for a new specialization request.")
+        if not payload.stop_conditions:
+            errors.append("List at least one stop condition for a new specialization request.")
+        if not payload.success_metrics:
+            errors.append("List at least one success metric for a new specialization request.")
+        if not payload.proposed_eval_cases:
+            errors.append("List at least one proposed eval case for a new specialization request.")
+        if payload.requested_authority_ceiling is None:
+            errors.append("Requested authority ceiling is required for a new specialization request.")
+    else:
+        if target_agent is None:
+            errors.append("Select an existing managed agent before submitting this request.")
+        if payload.requested_agent_id:
+            errors.append("Existing-agent change requests cannot assign a new requested_agent_id.")
+
+    if errors:
+        raise AssistantServiceError(status_code=422, detail="; ".join(errors))
+
+    if request_kind == "NEW_SPECIALIZATION":
+        return AssistantAgentProfileRequestCreate(
+            request_kind=request_kind,
+            target_agent_id=None,
+            requested_agent_id=payload.requested_agent_id,
+            change_summary=payload.change_summary,
+            business_problem=payload.business_problem,
+            proposed_mission=payload.proposed_mission,
+            human_owner_role=payload.human_owner_role or "",
+            requested_workspaces=list(payload.requested_workspaces),
+            work_objects=list(payload.work_objects),
+            requested_inputs_tools=list(payload.requested_inputs_tools),
+            requested_action_types=list(payload.requested_action_types),
+            requested_skills=list(payload.requested_skills),
+            expected_outputs=list(payload.expected_outputs),
+            requested_authority_ceiling=payload.requested_authority_ceiling or "DRAFT",
+            stop_conditions=list(payload.stop_conditions),
+            success_metrics=list(payload.success_metrics),
+            proposed_eval_cases=list(payload.proposed_eval_cases),
+            requested_by=requested_by,
+        )
+
+    assert target_agent is not None
+
+    if request_kind == "NARROW_ACCESS":
+        requested_workspaces = list(payload.requested_workspaces or target_agent.allowed_workspaces or [])
+        requested_inputs_tools = list(payload.requested_inputs_tools)
+        requested_action_types = list(payload.requested_action_types)
+        requested_skills = list(payload.requested_skills)
+    else:
+        requested_workspaces = list(payload.requested_workspaces or target_agent.allowed_workspaces or [])
+        requested_inputs_tools = list(payload.requested_inputs_tools or target_agent.allowed_tools or [])
+        requested_action_types = list(payload.requested_action_types or target_agent.allowed_action_types or [])
+        requested_skills = list(payload.requested_skills or target_agent.skills or [])
+    current_authority = target_agent.authority_ceiling or "DRAFT"
+    requested_authority = payload.requested_authority_ceiling or current_authority
+    human_owner_role = payload.human_owner_role or target_agent.human_owner_role or ""
+    work_objects = list(payload.work_objects or ["assistant agent profile"])
+    expected_outputs = list(
+        payload.expected_outputs
+        or [f"Reviewed update plan for {target_agent.name}.", "Explicit approved profile diffs for admin review."]
+    )
+    stop_conditions = list(
+        payload.stop_conditions
+        or [
+            "Stop if the requested change would exceed the current authority boundary without explicit admin review.",
+            "Stop if the target agent mission or ownership is unclear.",
+        ]
+    )
+    success_metrics = list(
+        payload.success_metrics
+        or [
+            f"Clarify why {target_agent.name} should change before any prompt or policy mutation.",
+            "Keep requested changes reviewable through the existing managed-agent revision flow.",
+        ]
+    )
+    proposed_eval_cases = list(
+        payload.proposed_eval_cases
+        or ["Confirms the requested profile change still respects reviewed authority and stop conditions."]
+    )
+
+    if request_kind == "NARROW_ACCESS":
+        errors = _validate_narrow_access_request(
+            target_agent=target_agent,
+            requested_workspaces=requested_workspaces,
+            requested_inputs_tools=requested_inputs_tools,
+            requested_action_types=requested_action_types,
+            requested_skills=requested_skills,
+            requested_authority=requested_authority,
+        )
+        if errors:
+            raise AssistantServiceError(status_code=422, detail="; ".join(errors))
+
+    return AssistantAgentProfileRequestCreate(
+        request_kind=request_kind,
+        target_agent_id=target_agent.agent_id,
+        requested_agent_id=None,
+        change_summary=payload.change_summary,
+        business_problem=payload.business_problem,
+        proposed_mission=payload.proposed_mission,
+        human_owner_role=human_owner_role,
+        requested_workspaces=requested_workspaces,
+        work_objects=work_objects,
+        requested_inputs_tools=requested_inputs_tools,
+        requested_action_types=requested_action_types,
+        requested_skills=requested_skills,
+        expected_outputs=expected_outputs,
+        requested_authority_ceiling=requested_authority,
+        stop_conditions=stop_conditions,
+        success_metrics=success_metrics,
+        proposed_eval_cases=proposed_eval_cases,
+        requested_by=requested_by,
+    )
+
+
+def _validate_narrow_access_request(
+    *,
+    target_agent: AssistantAgent,
+    requested_workspaces: list[str],
+    requested_inputs_tools: list[str],
+    requested_action_types: list[str],
+    requested_skills: list[str],
+    requested_authority: str,
+) -> list[str]:
+    errors: list[str] = []
+
+    current_workspaces = set(target_agent.allowed_workspaces or [])
+    current_tools = set(target_agent.allowed_tools or [])
+    current_actions = set(target_agent.allowed_action_types or [])
+    current_skills = set(target_agent.skills or [])
+
+    if not set(requested_workspaces).issubset(current_workspaces):
+        errors.append("Narrow access requests can only keep or remove currently allowed workspaces.")
+    if not requested_workspaces:
+        errors.append("Narrow access requests must keep at least one workspace.")
+    if not set(requested_inputs_tools).issubset(current_tools):
+        errors.append("Narrow access requests can only keep or remove currently allowed live tools.")
+    if not set(requested_action_types).issubset(current_actions):
+        errors.append("Narrow access requests can only keep or remove currently allowed governed actions.")
+    if not set(requested_skills).issubset(current_skills):
+        errors.append("Narrow access requests can only keep or remove currently pinned skills.")
+
+    current_authority = target_agent.authority_ceiling or "DRAFT"
+    if _authority_rank(requested_authority) > _authority_rank(current_authority):
+        errors.append("Narrow access requests cannot raise the current authority ceiling.")
+    if _authority_rank(requested_authority) < _authority_rank("STAGE") and requested_action_types:
+        errors.append("Narrow access requests below STAGE authority cannot keep governed action types.")
+
+    narrowed = (
+        len(requested_workspaces) < len(target_agent.allowed_workspaces or [])
+        or len(requested_inputs_tools) < len(target_agent.allowed_tools or [])
+        or len(requested_action_types) < len(target_agent.allowed_action_types or [])
+        or len(requested_skills) < len(target_agent.skills or [])
+        or _authority_rank(requested_authority) < _authority_rank(current_authority)
+    )
+    if not narrowed:
+        errors.append(
+            "Narrow access requests must reduce at least one workspace, tool, action, skill, or authority boundary."
+        )
+
+    return errors
+
+
+def _authority_rank(value: str) -> int:
+    return _AUTHORITY_LEVEL_RANK.get(value.strip().upper(), _AUTHORITY_LEVEL_RANK["DRAFT"])

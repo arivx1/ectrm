@@ -56,10 +56,10 @@ export const OPERATIONAL_WORKBOARD_REGISTRY: Record<
       'Dedicated confirmation records drive draft, issue, dispute, and amendment handling straight from the operational record set.',
   },
   workflowQueue: {
-    resourceKeys: ['work_items'],
+    resourceKeys: ['work_items', 'document_record_creation_requests'],
     title: 'Operational Work Queue',
     description:
-      'The queue stays focused on owner, due date, and downstream handoff decisions after record-managed ledgers set lifecycle state.',
+      'The queue stays focused on owner, due date, downstream handoffs, and document-driven missing-record intake after record-managed ledgers set lifecycle state.',
   },
   deliveryBoard: {
     resourceKeys: ['deliveries', 'shipments'],

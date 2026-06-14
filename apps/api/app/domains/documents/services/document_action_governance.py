@@ -14,6 +14,13 @@ FINANCIAL_OPERATIONS = {
     "create_trade_payment",
 }
 
+OPERATIONAL_MUTATION_OPERATIONS = {
+    "create_delivery_from_document",
+    "update_delivery_schedule_from_document",
+    "record_delivery_event_from_document",
+    "record_trade_actualization_from_document",
+}
+
 
 @dataclass(frozen=True)
 class DocumentActionGovernance:
@@ -63,8 +70,12 @@ def build_document_action_governance(
 
     if action_plan.action_type == "CREATE_RECORD_FROM_DOCUMENT":
         risk_flags.append("CREATES_NEW_RECORD")
+    if action_plan.action_type == "UPDATE_RECORD_FROM_DOCUMENT":
+        risk_flags.append("UPDATES_EXISTING_RECORD")
     if action_plan.operation_type in FINANCIAL_OPERATIONS:
         risk_flags.append("FINANCIAL_MUTATION")
+    if action_plan.operation_type in OPERATIONAL_MUTATION_OPERATIONS:
+        risk_flags.append("OPERATIONAL_MUTATION")
 
     if risk_flags:
         return DocumentActionGovernance(

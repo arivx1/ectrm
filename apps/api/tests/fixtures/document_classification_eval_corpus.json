@@ -1,0 +1,392 @@
+{
+  "corpus_version": "document-classification-eval-corpus-v1",
+  "thresholds": {
+    "min_kind_accuracy": 1.0,
+    "max_false_confidence_count": 0,
+    "low_confidence_threshold": 0.46,
+    "max_review_false_negative_count": 0,
+    "max_abstain_false_negative_count": 0,
+    "max_low_confidence_false_negative_count": 0
+  },
+  "cases": [
+    {
+      "case_id": "invoice_structured_pdf_text",
+      "filename": "april-invoice.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Invoice\nInvoice Number: INV-1007\nInvoice Date: 2026-04-06\nDue Date: 2026-04-15\nCounterparty: Shell Trading\nTotal Amount: USD 79250\n\nDescription  Quantity  Line Amount\nWTI April  1000  79250",
+      "expectations": {
+        "expected_document_kind": "INVOICE",
+        "min_confidence": 0.85,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Matched required invoice fields",
+          "Parsed table columns align with the line items layout"
+        ]
+      }
+    },
+    {
+      "case_id": "trade_confirmation_header_match",
+      "filename": "trade-confirmation.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Trade Confirmation\nConfirmation Number: CONF-3301\nTrade ID: T-3301\nTrade Date: 2026-04-08\nCounterparty: Shell Trading\n\nTerm Name  Term Value\nPricing Period  April 2026",
+      "expectations": {
+        "expected_document_kind": "TRADE_CONFIRMATION",
+        "min_confidence": 0.80,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected trade confirmation terminology",
+          "Matched required trade confirmation fields"
+        ]
+      }
+    },
+    {
+      "case_id": "pipeline_statement_nomination",
+      "filename": "ngpl-nomination-statement.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Pipeline Statement\nStatement Number: PIPE-100\nStatement Date: 2026-04-09\nPipeline System: NGPL\nNomination Reference: NOM-7\nReceipt Location: HENRY HUB\nDelivery Location: SABINE\nTrade ID: T-100",
+      "expectations": {
+        "expected_document_kind": "PIPELINE_STATEMENT",
+        "min_confidence": 0.80,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected pipeline statement terminology",
+          "Matched required pipeline statement fields"
+        ]
+      }
+    },
+    {
+      "case_id": "quality_specification_sheet",
+      "filename": "ulsd-specification-sheet.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Quality Specification\nSpecification Name: ULSD 10 PPM\nSpecification Version: 3.0\nEffective Date: 2026-04-01\nProduct: ULSD\nCounterparty: Shell Trading",
+      "expectations": {
+        "expected_document_kind": "QUALITY_SPECIFICATION",
+        "min_confidence": 0.78,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected quality specification terminology",
+          "Matched required quality specification fields"
+        ]
+      }
+    },
+    {
+      "case_id": "hazardous_cargo_safety_data_sheet",
+      "filename": "methanol-sds.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Safety Data Sheet\nDocument Number: SDS-200\nIssue Date: 2026-04-12\nProduct: Methanol\nUN Number: UN1230\nHazard Class: 3",
+      "expectations": {
+        "expected_document_kind": "HAZARDOUS_CARGO_DOCUMENTATION",
+        "min_confidence": 0.78,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected hazardous cargo documentation terminology",
+          "Matched required hazardous cargo documentation fields"
+        ]
+      }
+    },
+    {
+      "case_id": "broker_statement_account",
+      "filename": "broker-monthly-statement.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Broker Statement\nStatement Number: BR-200\nStatement Date: 2026-04-30\nBroker: ICE Clear\nAccount: ACC-77\nPeriod Start: 2026-04-01\nPeriod End: 2026-04-30\nCurrency: USD",
+      "expectations": {
+        "expected_document_kind": "BROKER_STATEMENT",
+        "min_confidence": 0.78,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected broker statement terminology",
+          "Matched required broker statement fields"
+        ]
+      }
+    },
+    {
+      "case_id": "deal_recap_trade_terms",
+      "filename": "deal-recap-wti.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Deal Recap\nRecap Date: 2026-04-08\nTrade ID: T-700\nCounterparty: Shell Trading\nCommodity: WTI\nQuantity: 1000 bbl\nPrice: USD 79.25",
+      "expectations": {
+        "expected_document_kind": "DEAL_RECAP",
+        "min_confidence": 0.78,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected deal recap terminology",
+          "Matched required deal recap fields"
+        ]
+      }
+    },
+    {
+      "case_id": "purchase_order_vessel_supply",
+      "filename": "PURCHASE ORDER NO 28561 (1).pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Purchase Order\nPurchase Order No 28561\nOrder Date: 2026-05-22\nBuyer: Gulf Trading LLC\nSeller: Atlantic Fuels\nCommodity: ULSD\nQuantity: 10000 bbl\nVessel: MT Example\nDelivery Location: Houston Terminal",
+      "expectations": {
+        "expected_document_kind": "PURCHASE_ORDER",
+        "min_confidence": 0.85,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected purchase order terminology",
+          "Matched required purchase order fields"
+        ]
+      }
+    },
+    {
+      "case_id": "sales_order_vessel_supply",
+      "filename": "SALES ORDER SO-4412.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Sales Order\nSales Order No SO-4412\nOrder Date: 2026-05-22\nCustomer: Gulf Trading LLC\nSeller: Atlantic Fuels\nCommodity: ULSD\nQuantity: 8000 bbl\nVessel: MT Example\nDelivery Location: Houston Terminal",
+      "expectations": {
+        "expected_document_kind": "SALES_ORDER",
+        "min_confidence": 0.85,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected sales order terminology",
+          "Matched required sales order fields"
+        ]
+      }
+    },
+    {
+      "case_id": "packing_list_delivery_order_goods_weights",
+      "filename": "klk-packing-list.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "PACKING LIST\nDelivery Order No. : 8010842123\nDate : 07-April-2026\nHaulier : SHIPPING POINT => SEE NEXT PAGE\nLoading Date : 07-Apr-2026\nDelivery Date : 07-Apr-2026\nCust. Ref No : 411064\n\nQuantity and Description of Goods    Package    Gross Wt.    Net Wt.    Tare Wt.\n01010 10101765 PALMERA DM-10 (LIQUID) DIMER ACID    1    19,700 MT    19,700 MT    0,000 MT\n\nSHIPPER: KLK Emmerich GmbH",
+      "expectations": {
+        "expected_document_kind": "PACKING_LIST",
+        "min_confidence": 0.85,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected packing list terminology",
+          "Matched required packing list fields"
+        ]
+      }
+    },
+    {
+      "case_id": "packing_list_title_line_scanned_form",
+      "filename": "klk-packing-list-page-4.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "KLK Emmerich GmbH\n\nPACKING LIST\n\nTo\nINTERATLAS CHEMICAL INC\n63 CHURCH ST. SUITE 203\nST CATHARINES, ONTARIO\n\nLoading Address\n4200 KLK Emmerich GmbH\nWardstrasse\n\nQuantity and Description of Goods     Package     Weight",
+      "expectations": {
+        "expected_document_kind": "PACKING_LIST",
+        "min_confidence": 0.70,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected packing list title line"
+        ]
+      }
+    },
+    {
+      "case_id": "certificate_of_analysis_quality_results_table",
+      "filename": "klk-quality-certificate-page-6.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "KLK OLEO\nINTERATLAS CHEMICAL INC\n\nProduct          PALMERA DM-10 (LIQUID) DIMER ACID\nQuantity (kg)    19700\nCustomer-Ref.    111064\nDelivery No.     8010842123000010\nBatch No.        EM0583-2604050303\nShipped by       SIMU 251872-6\nDate of Despatch 07.04.2026\nManufacturing Date 05.04.2026\n\nWe certify, that we have examined a sample of the above mentioned goods with the following results;\n\nTest Description       Unit       Min.       Max.       Result       Method\nAcid value             mgKOH/g    190        197        192          ISO 660\nColour Gardner         Gardner    0          8.0        6.2          ISO4630-2\nMonomer                %          1          3          1            In-house method\n1,5-Mer                %          4          6          5            In-house method\nTrimer                 %          18         22         20           In-house method\nDyn. Viscosity at 25C  mPa s      7700       8700       8019         ISO 3219\n\nAndre Jansen / Quality Control Team Lead",
+      "expectations": {
+        "expected_document_kind": "CERTIFICATE_OF_ANALYSIS",
+        "min_confidence": 0.46,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Matched required certificate of analysis fields",
+          "Parsed table columns align with the assay results layout"
+        ]
+      }
+    },
+    {
+      "case_id": "letter_of_credit_bank_instrument",
+      "filename": "letter-of-credit-lc-4488.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Letter of Credit\nLetter of Credit Number: LC-4488\nIssue Date: 2026-04-12\nExpiry Date: 2026-05-31\nIssuing Bank: First Commodity Bank\nApplicant: Gulf Trading LLC\nBeneficiary: Shell Trading\nAmount: USD 500000\nCurrency: USD",
+      "expectations": {
+        "expected_document_kind": "LETTER_OF_CREDIT",
+        "min_confidence": 0.82,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected letter of credit terminology",
+          "Matched required letter of credit fields"
+        ]
+      }
+    },
+    {
+      "case_id": "payment_advice_invoice_reference",
+      "filename": "payment-advice-pay-123.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Payment Advice\nPayment Reference: PAY-123\nAdvice Date: 2026-04-20\nInvoice Number: INV-1007\nPayer: Shell Trading\nPayee: Gulf Trading LLC\nAmount: USD 79250\nCurrency: USD",
+      "expectations": {
+        "expected_document_kind": "PAYMENT_ADVICE",
+        "min_confidence": 0.78,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected payment advice terminology",
+          "Matched required payment advice fields"
+        ]
+      }
+    },
+    {
+      "case_id": "nomination_pipeline_flow",
+      "filename": "pipeline-nomination.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Pipeline Nomination\nNomination Reference: NOM-700\nFlow Date: 2026-04-12\nPipeline System: NGPL\nContract Number: CN-900\nReceipt Location: HENRY HUB\nDelivery Location: SABINE\nQuantity: 10000 MMBtu",
+      "expectations": {
+        "expected_document_kind": "NOMINATION",
+        "min_confidence": 0.78,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected nomination terminology",
+          "Matched required nomination fields"
+        ]
+      }
+    },
+    {
+      "case_id": "curtailment_notice_capacity_constraint",
+      "filename": "curtailment-notice-curt-100.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Curtailment Notice\nCurtailment Notice Number: CURT-100\nNotice Date: 2026-04-13\nEffective Start: 2026-04-14 06:00\nIssuing Entity: NGPL\nPipeline System: NGPL\nNomination Reference: NOM-700\nCurtailed Quantity: 2500 MMBtu\nReason: Capacity constraint",
+      "expectations": {
+        "expected_document_kind": "CURTAILMENT_NOTICE",
+        "min_confidence": 0.80,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected curtailment notice terminology",
+          "Matched required curtailment notice fields"
+        ]
+      }
+    },
+    {
+      "case_id": "dispatch_notice_delivery_instruction",
+      "filename": "dispatch-notice-dsp-55.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Dispatch Notice\nDispatch Number: DSP-55\nDispatch Date: 2026-04-12\nDelivery ID: DEL-900\nCarrier: Fleet Hauling\nAsset Reference: TRUCK-12\nOrigin: Midland Terminal\nDestination: Houston Terminal\nQuantity: 800 bbl",
+      "expectations": {
+        "expected_document_kind": "DISPATCH_NOTICE",
+        "min_confidence": 0.80,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected dispatch notice terminology",
+          "Matched required dispatch notice fields"
+        ]
+      }
+    },
+    {
+      "case_id": "price_publication_index_assessment",
+      "filename": "price-publication-wti-cushing.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Price Publication\nPublication Date: 2026-04-15\nObservation Date: 2026-04-15\nPrice Index Code: WTI_CUSHING_D\nPublisher: EIA\nSource Series ID: PET.RWTC.D\nCommodity: WTI\nLocation: Cushing\nPrice: USD 84.25\nCurrency: USD\nUnit: BBL\n\nPrice Index Code  Commodity  Location  Price\nWTI_CUSHING_D  WTI  Cushing  84.25",
+      "expectations": {
+        "expected_document_kind": "PRICE_PUBLICATION",
+        "min_confidence": 0.80,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "supporting_evidence_contains": [
+          "Detected price publication terminology",
+          "Matched required price publication fields"
+        ]
+      }
+    },
+    {
+      "case_id": "scanned_invoice_ocr",
+      "filename": "scan-ocr-1007.pdf",
+      "text_source": "ocr",
+      "image_has_visible_content": true,
+      "raw_text": "Invoice\nInvoice Number: INV-1007\nInvoice Date: 2026-04-06\nCounterparty: Shell Trading\nTotal Amount: USD 79250\n\nDescription  Quantity  Line Amount\nWTI April  1000  79250",
+      "expectations": {
+        "expected_document_kind": "INVOICE",
+        "min_confidence": 0.60,
+        "max_confidence": 0.86,
+        "expect_review_recommended": false,
+        "expect_abstain": false,
+        "expect_low_confidence": false,
+        "conflict_contains": [
+          "OCR fallback was required"
+        ]
+      }
+    },
+    {
+      "case_id": "generic_statement_fallback",
+      "filename": "monthly-statement.pdf",
+      "text_source": "pdf_text",
+      "raw_text": "Monthly Statement\nAccount activity summary for June period.",
+      "expectations": {
+        "expected_document_kind": "OTHER",
+        "expected_document_subtype": "STATEMENT",
+        "max_confidence": 0.45,
+        "expect_review_recommended": true,
+        "expect_abstain": true,
+        "expect_low_confidence": true,
+        "conflict_contains": [
+          "manual review"
+        ]
+      }
+    },
+    {
+      "case_id": "filename_hint_only_blank_invoice",
+      "filename": "invoice-batch.pdf",
+      "text_source": "none",
+      "raw_text": null,
+      "expectations": {
+        "expected_document_kind": "OTHER",
+        "expected_document_subtype": "FILENAME_HINT_ONLY",
+        "max_confidence": 0.12,
+        "expect_review_recommended": true,
+        "expect_abstain": true,
+        "expect_low_confidence": true,
+        "supporting_evidence_contains": [
+          "Filename hints at invoice"
+        ],
+        "conflict_contains": [
+          "manual review"
+        ]
+      }
+    },
+    {
+      "case_id": "no_signal_upload",
+      "filename": "misc-upload.pdf",
+      "text_source": "none",
+      "raw_text": null,
+      "expectations": {
+        "expected_document_kind": "UNKNOWN",
+        "max_confidence": 0.12,
+        "expect_review_recommended": true,
+        "expect_abstain": true,
+        "expect_low_confidence": true,
+        "supporting_evidence_contains": [
+          "No stable document-specific signals"
+        ],
+        "conflict_contains": [
+          "manual review"
+        ]
+      }
+    }
+  ]
+}

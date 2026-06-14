@@ -1,20 +1,39 @@
 import { useEffect, useState } from 'react'
 
 import type {
+  CancelDeliveryTruckMovementInput,
+  CancelDeliveryTruckStopInput,
   CreateDeliveryEventInput,
+  DeliveryTruckMovementCreateInput,
+  DeliveryTruckStopCreateInput,
+  RecordDeliveryTruckStopCheckpointInput,
+  ReverseDeliveryTruckStopCheckpointInput,
+  SkipDeliveryTruckStopInput,
   UpdateDeliveryInput,
   UpdateDeliveryLogisticsDetailInput,
   UpdateDeliveryPipelineDetailInput,
   UpdateDeliveryPowerDetailInput,
+  UpdateDeliveryTruckDetailInput,
+  UpdateDeliveryVesselDetailInput,
+  UpdateDeliveryTruckMovementInput,
+  UpdateDeliveryTruckStopInput,
 } from '../../entities/shipments/api'
 import type {
   DeliveryExecutionStatus,
   DeliveryFieldSource,
   DeliveryRecord,
+  ReferenceRecord,
 } from '../../shared/models'
 import type { StoredAuthSession } from '../../shared/mutation'
+import {
+  buildTransportModeSelectOptions,
+  formatTransportModeLabel,
+  resolveAllowedTransportModesForDelivery,
+} from '../../shared/transportModes'
 import { DeliveryEventTimelineEditor } from './DeliveryEventTimelineEditor'
 import { DeliveryModeDetailEditor } from './DeliveryModeDetailEditor'
+import { DeliveryTruckWorkflowEditor } from './DeliveryTruckWorkflowEditor'
+import { DeliveryVesselTrackingEditor } from './DeliveryVesselTrackingEditor'
 import {
   buildSharedDeliveryResetOptions,
   normalizedNullableText,
@@ -23,6 +42,7 @@ import {
 
 type DeliveryDetailEditorProps = {
   authSession: StoredAuthSession | null
+  commodities: ReferenceRecord[]
   delivery: DeliveryRecord
   saveError: string
   savingDeliveryId: string | null
@@ -38,6 +58,53 @@ type DeliveryDetailEditorProps = {
     payload: UpdateDeliveryPipelineDetailInput,
   ) => Promise<void>
   onSavePowerDetails: (deliveryId: string, payload: UpdateDeliveryPowerDetailInput) => Promise<void>
+  onSaveTruckDetails: (deliveryId: string, payload: UpdateDeliveryTruckDetailInput) => Promise<void>
+  onSaveVesselDetails: (deliveryId: string, payload: UpdateDeliveryVesselDetailInput) => Promise<void>
+  onCreateTruckMovement: (
+    deliveryId: string,
+    payload: DeliveryTruckMovementCreateInput,
+  ) => Promise<void>
+  onSaveTruckMovement: (
+    deliveryId: string,
+    movementId: string,
+    payload: UpdateDeliveryTruckMovementInput,
+  ) => Promise<void>
+  onCancelTruckMovement: (
+    deliveryId: string,
+    movementId: string,
+    payload: CancelDeliveryTruckMovementInput,
+  ) => Promise<void>
+  onCreateTruckStop: (
+    deliveryId: string,
+    movementId: string,
+    payload: DeliveryTruckStopCreateInput,
+  ) => Promise<void>
+  onSaveTruckStop: (
+    deliveryId: string,
+    stopId: string,
+    payload: UpdateDeliveryTruckStopInput,
+  ) => Promise<void>
+  onSkipTruckStop: (
+    deliveryId: string,
+    stopId: string,
+    payload: SkipDeliveryTruckStopInput,
+  ) => Promise<void>
+  onCancelTruckStop: (
+    deliveryId: string,
+    stopId: string,
+    payload: CancelDeliveryTruckStopInput,
+  ) => Promise<void>
+  onRecordTruckStopCheckpoint: (
+    deliveryId: string,
+    stopId: string,
+    payload: RecordDeliveryTruckStopCheckpointInput,
+  ) => Promise<string | null>
+  onReverseTruckStopCheckpoint: (
+    deliveryId: string,
+    stopId: string,
+    eventId: number,
+    payload: ReverseDeliveryTruckStopCheckpointInput,
+  ) => Promise<string | null>
   onCreateEvent: (deliveryId: string, payload: CreateDeliveryEventInput) => Promise<void>
 }
 
@@ -54,17 +121,6 @@ type DeliveryDetailDraft = {
   externalReference: string
   opsNotes: string
 }
-
-const TRANSPORT_MODE_OPTIONS: DeliveryRecord['transport_mode'][] = [
-  'UNSPECIFIED',
-  'TRUCK',
-  'RAIL',
-  'BARGE',
-  'VESSEL',
-  'PIPELINE',
-  'POWER_GRID',
-  'STORAGE',
-]
 
 const EXECUTION_STATUS_OPTIONS: DeliveryExecutionStatus[] = [
   'PLANNED',
@@ -208,6 +264,7 @@ function sharedResetSourceTone(
 
 export function DeliveryDetailEditor({
   authSession,
+  commodities,
   delivery,
   saveError,
   savingDeliveryId,
@@ -217,6 +274,17 @@ export function DeliveryDetailEditor({
   onSaveLogisticsDetails,
   onSavePipelineDetails,
   onSavePowerDetails,
+  onSaveTruckDetails,
+  onSaveVesselDetails,
+  onCreateTruckMovement,
+  onSaveTruckMovement,
+  onCancelTruckMovement,
+  onCreateTruckStop,
+  onSaveTruckStop,
+  onSkipTruckStop,
+  onCancelTruckStop,
+  onRecordTruckStopCheckpoint,
+  onReverseTruckStopCheckpoint,
   onCreateEvent,
 }: DeliveryDetailEditorProps) {
   const [draft, setDraft] = useState<DeliveryDetailDraft>(() => buildDraft(delivery))
@@ -232,6 +300,14 @@ export function DeliveryDetailEditor({
   const resetDisabled = mutationPending || !authSession || resetOptions.length === 0
   const pendingModeFamily = modeFamilyForTransportMode(draft.transportMode)
   const modeSectionNeedsRefresh = pendingModeFamily !== delivery.mode_family
+  const allowedTransportModes = resolveAllowedTransportModesForDelivery(delivery, commodities)
+  const transportModeOptions = buildTransportModeSelectOptions({
+    allowedModes: allowedTransportModes,
+    currentMode: draft.transportMode,
+  })
+  const transportConstraintLoaded = allowedTransportModes.length > 0
+  const currentModeAllowed =
+    draft.transportMode === 'UNSPECIFIED' || allowedTransportModes.includes(draft.transportMode)
 
   async function handleSave() {
     if (!hasChanges || validationMessage) {
@@ -298,14 +374,19 @@ export function DeliveryDetailEditor({
               }
               disabled={mutationPending}
             >
-              {TRANSPORT_MODE_OPTIONS.map((option) => (
+              {transportModeOptions.map((option) => (
                 <option key={option} value={option}>
-                  {formatEnumLabel(option)}
+                  {formatTransportModeLabel(option)}
                 </option>
               ))}
             </select>
             <small className="shipment-editor-source">
               Source {formatEnumLabel(delivery.transport_mode_source)}
+            </small>
+            <small className={`shipment-editor-source ${transportConstraintLoaded && !currentModeAllowed ? 'field-error' : ''}`}>
+              {transportConstraintLoaded
+                ? `Allowed for ${delivery.commodity}: ${allowedTransportModes.map(formatTransportModeLabel).join(', ')}`
+                : 'No commodity transport rule is loaded for this product yet.'}
             </small>
           </label>
 
@@ -530,6 +611,35 @@ export function DeliveryDetailEditor({
           onSavePowerDetails={onSavePowerDetails}
         />
       )}
+
+      {delivery.transport_mode === 'TRUCK' ? (
+        <DeliveryTruckWorkflowEditor
+          authSession={authSession}
+          delivery={delivery}
+          savingDeliveryId={savingDeliveryId}
+          formatDate={formatDate}
+          onSaveTruckDetails={onSaveTruckDetails}
+          onCreateTruckMovement={onCreateTruckMovement}
+          onSaveTruckMovement={onSaveTruckMovement}
+          onCancelTruckMovement={onCancelTruckMovement}
+          onCreateTruckStop={onCreateTruckStop}
+          onSaveTruckStop={onSaveTruckStop}
+          onSkipTruckStop={onSkipTruckStop}
+          onCancelTruckStop={onCancelTruckStop}
+          onRecordTruckStopCheckpoint={onRecordTruckStopCheckpoint}
+          onReverseTruckStopCheckpoint={onReverseTruckStopCheckpoint}
+        />
+      ) : null}
+
+      {delivery.transport_mode === 'VESSEL' ? (
+        <DeliveryVesselTrackingEditor
+          authSession={authSession}
+          delivery={delivery}
+          savingDeliveryId={savingDeliveryId}
+          formatDate={formatDate}
+          onSaveVesselDetails={onSaveVesselDetails}
+        />
+      ) : null}
 
       <DeliveryEventTimelineEditor
         authSession={authSession}

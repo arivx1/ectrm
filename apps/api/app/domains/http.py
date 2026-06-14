@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from fastapi import APIRouter, FastAPI
 
 from apps.api.app.domains.accruals.routes import router as accruals_router
+from apps.api.app.domains.job_scheduling.routes import router as job_scheduling_router
 from apps.api.app.domains.operations.routes import router as operations_router
+from apps.api.app.domains.mcp.routes import router as mcp_router
 from apps.api.app.domains.reports.routes import router as reports_router
 from apps.api.app.domains.settlement.routes import router as settlement_router
 from apps.api.app.routes.admin_data import admin_router as admin_data_router
@@ -18,7 +20,11 @@ from apps.api.app.routes.documents import router as documents_router
 from apps.api.app.routes.events import router as events_router
 from apps.api.app.routes.external_data import admin_router as external_data_admin_router
 from apps.api.app.routes.external_data import router as external_data_router
+from apps.api.app.routes.home_view_definitions import router as home_view_definitions_router
+from apps.api.app.routes.integrations import admin_router as integrations_admin_router
+from apps.api.app.routes.integrations import router as integrations_router
 from apps.api.app.routes.layout_definitions import router as layout_definitions_router
+from apps.api.app.routes.messages import router as messages_router
 from apps.api.app.routes.option_exposures import router as option_exposures_router
 from apps.api.app.routes.positions import router as positions_router
 from apps.api.app.routes.pretrade import router as pretrade_router
@@ -27,9 +33,11 @@ from apps.api.app.routes.roadmap import admin_router as roadmap_admin_router
 from apps.api.app.routes.roadmap import router as roadmap_router
 from apps.api.app.routes.trades import router as trades_router
 from apps.api.app.routes.trading_sources import admin_router as trading_sources_admin_router
+from apps.api.app.routes.user_events import router as user_events_router
 from apps.api.app.routes.users import router as users_router
 from apps.api.app.routes.weather import admin_router as weather_admin_router
 from apps.api.app.routes.weather import router as weather_router
+from apps.api.app.domains.wiki.routes import router as wiki_router
 
 
 @dataclass(frozen=True)
@@ -43,27 +51,35 @@ HTTP_ROUTE_REGISTRATIONS: tuple[HttpRouteRegistration, ...] = (
     HttpRouteRegistration(domain="auth", name="auth", router=auth_router),
     HttpRouteRegistration(domain="operations", name="operations", router=operations_router),
     HttpRouteRegistration(domain="events", name="events", router=events_router),
+    HttpRouteRegistration(domain="home", name="home-view-definitions", router=home_view_definitions_router),
     HttpRouteRegistration(domain="layout", name="layout-definitions", router=layout_definitions_router),
+    HttpRouteRegistration(domain="messages", name="messages", router=messages_router),
     HttpRouteRegistration(domain="accruals", name="accruals", router=accruals_router),
     HttpRouteRegistration(domain="reference-data", name="reference-data", router=reference_data_router),
     HttpRouteRegistration(domain="admin", name="admin-data", router=admin_data_router),
     HttpRouteRegistration(domain="admin", name="trading-sources-admin", router=trading_sources_admin_router),
     HttpRouteRegistration(domain="external-data", name="external-data", router=external_data_router),
     HttpRouteRegistration(domain="admin", name="external-data-admin", router=external_data_admin_router),
+    HttpRouteRegistration(domain="integrations", name="integrations", router=integrations_router),
+    HttpRouteRegistration(domain="integrations", name="integrations-admin", router=integrations_admin_router),
     HttpRouteRegistration(domain="assistant", name="assistant", router=assistant_router),
     HttpRouteRegistration(domain="assistant", name="assistant-admin", router=assistant_admin_router),
+    HttpRouteRegistration(domain="mcp", name="mcp-status", router=mcp_router),
     HttpRouteRegistration(domain="codex", name="codex-admin", router=codex_router),
     HttpRouteRegistration(domain="codex", name="codex-callback", router=codex_callback_router),
     HttpRouteRegistration(domain="trading", name="trades", router=trades_router),
+    HttpRouteRegistration(domain="operations", name="user-events", router=user_events_router),
     HttpRouteRegistration(domain="pretrade", name="pretrade", router=pretrade_router),
     HttpRouteRegistration(domain="risk", name="option-exposures", router=option_exposures_router),
     HttpRouteRegistration(domain="risk", name="positions", router=positions_router),
     HttpRouteRegistration(domain="documents", name="documents", router=documents_router),
+    HttpRouteRegistration(domain="wiki", name="wiki", router=wiki_router),
     HttpRouteRegistration(domain="settlement", name="settlement", router=settlement_router),
     HttpRouteRegistration(domain="roadmap", name="roadmap", router=roadmap_router),
     HttpRouteRegistration(domain="roadmap", name="roadmap-admin", router=roadmap_admin_router),
     HttpRouteRegistration(domain="reports", name="reports", router=reports_router),
     HttpRouteRegistration(domain="admin", name="users", router=users_router),
+    HttpRouteRegistration(domain="job-scheduling", name="job-scheduling-admin", router=job_scheduling_router),
     HttpRouteRegistration(domain="weather", name="weather", router=weather_router),
     HttpRouteRegistration(domain="weather", name="weather-admin", router=weather_admin_router),
 )

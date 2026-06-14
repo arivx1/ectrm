@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  filterPrimaryNavigationSections,
   isPrimaryNavigationSectionKey,
   MAX_PRIMARY_NAV_SECTIONS,
   MOBILE_NAV_MEDIA_QUERY,
   MOBILE_NAVIGATION_PANEL_ID,
   mobileNavigationToggleLabel,
   PRIMARY_NAV_SECTIONS,
+  primaryNavigationSectionLandingView,
   primaryNavigationSectionForView,
+  primaryNavigationSectionRendersNestedViews,
   shouldHandleClientSideNavigation,
   shouldHideMobileNavigation,
 } from '../src/app/navigation'
@@ -70,13 +71,22 @@ describe('mobile navigation helpers', () => {
     expect(PRIMARY_NAV_SECTIONS.length).toBeLessThanOrEqual(MAX_PRIMARY_NAV_SECTIONS)
 
     const sectionViewKeys = PRIMARY_NAV_SECTIONS.flatMap((section) => section.views.map((view) => view.key))
+    const navigableViewKeys = APP_VIEWS.map((view) => view.key).filter((viewKey) => viewKey !== 'dashboard')
 
-    expect(sectionViewKeys).toHaveLength(APP_VIEWS.length)
-    expect(new Set(sectionViewKeys)).toEqual(new Set(APP_VIEWS.map((view) => view.key)))
+    expect(sectionViewKeys).toHaveLength(navigableViewKeys.length)
+    expect(new Set(sectionViewKeys)).toEqual(new Set(navigableViewKeys))
+    expect(PRIMARY_NAV_SECTIONS.find((section) => section.key === 'overview')?.views.map((view) => view.key)).toEqual([
+      'prompt',
+    ])
   })
 
   it('defines clear start paths for each section landing', () => {
     for (const section of PRIMARY_NAV_SECTIONS) {
+      if (section.landingViewKey !== null) {
+        expect(section.startPaths).toEqual([])
+        continue
+      }
+
       expect(section.startPaths.length).toBeGreaterThan(0)
 
       const sectionViewKeys = new Set(section.views.map((view) => view.key))
@@ -95,37 +105,33 @@ describe('mobile navigation helpers', () => {
     ])
   })
 
+  it('routes the overview section directly to Apps instead of rendering a duplicate Home landing page', () => {
+    expect(primaryNavigationSectionLandingView('overview')).toBe('prompt')
+    expect(primaryNavigationSectionLandingView('trading')).toBeNull()
+  })
+
+  it('renders Home as a single nav button without an Apps sub-button', () => {
+    const overviewSection = PRIMARY_NAV_SECTIONS.find((section) => section.key === 'overview')
+
+    expect(overviewSection).toBeDefined()
+    expect(primaryNavigationSectionRendersNestedViews(overviewSection!)).toBe(false)
+    expect(
+      PRIMARY_NAV_SECTIONS.filter(primaryNavigationSectionRendersNestedViews).map((section) => section.key),
+    ).toEqual(['trading', 'execution', 'intelligence', 'administration'])
+  })
+
   it('maps representative workspaces into their grouped nav sections', () => {
     expect(primaryNavigationSectionForView('prompt').key).toBe('overview')
     expect(primaryNavigationSectionForView('dashboard').key).toBe('overview')
-    expect(primaryNavigationSectionForView('demo').key).toBe('overview')
     expect(primaryNavigationSectionForView('pretrade').key).toBe('trading')
     expect(primaryNavigationSectionForView('trades').key).toBe('trading')
     expect(primaryNavigationSectionForView('shipments').key).toBe('execution')
+    expect(primaryNavigationSectionForView('messages').key).toBe('intelligence')
+    expect(primaryNavigationSectionForView('library').key).toBe('intelligence')
+    expect(primaryNavigationSectionForView('map').key).toBe('intelligence')
     expect(primaryNavigationSectionForView('assistant').key).toBe('intelligence')
+    expect(primaryNavigationSectionForView('token-analysis').key).toBe('administration')
     expect(primaryNavigationSectionForView('settings').key).toBe('administration')
-  })
-
-  it('filters navigation sections by matching workspace labels and section copy', () => {
-    expect(filterPrimaryNavigationSections('shipments')).toEqual([
-      expect.objectContaining({
-        key: 'execution',
-        views: [expect.objectContaining({ key: 'shipments' })],
-      }),
-    ])
-
-    expect(filterPrimaryNavigationSections('walkthrough')).toEqual([
-      expect.objectContaining({
-        key: 'overview',
-        views: expect.arrayContaining([
-          expect.objectContaining({ key: 'dashboard' }),
-          expect.objectContaining({ key: 'guide' }),
-          expect.objectContaining({ key: 'demo' }),
-        ]),
-      }),
-    ])
-
-    expect(filterPrimaryNavigationSections('definitely not a workspace')).toEqual([])
   })
 
   it('recognizes supported primary navigation section keys', () => {

@@ -11,10 +11,11 @@ if not hasattr(enum, "StrEnum"):
 
     enum.StrEnum = _CompatStrEnum  # type: ignore[attr-defined]
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from apps.api.app.domains.admin.services.projection_monitoring import _resolve_email_recipients
 from apps.api.app.models import Base
 from apps.api.app.models.event import Event
 from apps.api.app.models.roadmap_document import RoadmapDocument
@@ -64,6 +65,45 @@ class ProjectionMonitoringApiTests(unittest.TestCase):
                 session.query(model).delete()
             session.commit()
         self.now = datetime(2026, 4, 15, 12, 0, tzinfo=timezone.utc)
+
+    def test_email_recipient_resolution_tolerates_older_user_profile_schema(self) -> None:
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE user_accounts (
+                        user_id VARCHAR(64) PRIMARY KEY,
+                        email VARCHAR(255) NOT NULL,
+                        display_name VARCHAR(160) NOT NULL,
+                        role VARCHAR(50) NOT NULL,
+                        is_active BOOLEAN NOT NULL
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO user_accounts (user_id, email, display_name, role, is_active)
+                    VALUES
+                        ('ops-admin', 'OPS-ADMIN@example.com', 'Ops Admin', 'OPS_ADMIN', 1),
+                        ('viewer', 'viewer@example.com', 'Viewer', 'VIEWER', 1),
+                        ('inactive-admin', 'inactive@example.com', 'Inactive', 'OPS_ADMIN', 0)
+                    """
+                )
+            )
+
+        try:
+            with SessionLocal() as session:
+                self.assertEqual(_resolve_email_recipients(session), ["ops-admin@example.com"])
+        finally:
+            engine.dispose()
 
     def _seed_issue_mix(self) -> None:
         with self.SessionLocal() as session:

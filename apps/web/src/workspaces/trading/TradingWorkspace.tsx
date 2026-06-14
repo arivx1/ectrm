@@ -11,6 +11,7 @@ import { normalizeAppRouteHandoff, type AppRouteHandoff } from '../../shared/app
 import { combineTextFilters, matchesTextFilter } from '../../shared/filtering'
 import { formatCurrencyAmount } from '../../shared/format'
 import type {
+  PreTradeGovernanceAuditExportRecord,
   PreTradeRecommendationRunRecord,
   PreTradeReviewItemRecord,
   TradeCreditExceptionRecord,
@@ -30,6 +31,7 @@ import { DataSheet, type DataSheetColumn } from '../../shared/ui/DataSheet'
 import { TileLayout } from '../../shared/ui/TileLayout'
 import { WorkspaceHandoffFocusBanner } from '../../shared/ui/WorkspaceHandoffFocusBanner'
 import { WorkspaceLocalFilterBar } from '../../shared/ui/WorkspaceLocalFilterBar'
+import { saveTradeWorkbookFromBrowser } from '../../features/trades/tradeExcelWorkbook'
 import { tradeTooltipCopy } from '../../features/trades/tooltipCopy'
 import { InlineTooltipLabel, Tooltip } from '../../shared/ui/Tooltip'
 import { OperationalBoardController } from '../operations/OperationalBoardController'
@@ -90,6 +92,10 @@ type Trade = {
   credit_approval_status?: string
   credit_hold_active?: boolean
   credit_hold_reason?: string | null
+  pretrade_review_id?: number | null
+  pretrade_recommendation_run_id?: number | null
+  pretrade_approval_governance_snapshot?: PreTradeGovernanceAuditExportRecord | null
+  pretrade_booking_governance_snapshot?: PreTradeGovernanceAuditExportRecord | null
 }
 
 type EventRow = {
@@ -373,6 +379,19 @@ function parsePreTradeReviewId(selectedTradeEvents: EventRow[]): number | null {
   const tradeCreatedEvent = selectedTradeEvents.find((event) => event.event_type === 'TradeCreated')
   const candidate = tradeCreatedEvent?.payload.pretrade_review_id
   return typeof candidate === 'number' && Number.isInteger(candidate) && candidate > 0 ? candidate : null
+}
+
+function governanceRiskStatusLabel(value: string): string {
+  return value.replaceAll('_', ' ')
+}
+
+function governanceAuditSummary(snapshot: PreTradeGovernanceAuditExportRecord): string {
+  return [
+    governanceRiskStatusLabel(snapshot.summary.risk_status),
+    `${snapshot.audit_rows.length} audit rows`,
+    `${snapshot.summary.override_count} overrides`,
+    `${snapshot.summary.stale_evidence_run_count} stale runs`,
+  ].join(' | ')
 }
 
 type TradingWorkspaceProps = {
@@ -680,9 +699,26 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
   const [linkedPreTradeReviewError, setLinkedPreTradeReviewError] = useState('')
   const [linkedPreTradeRecommendationRun, setLinkedPreTradeRecommendationRun] = useState<PreTradeRecommendationRunRecord | null>(null)
   const [linkedPreTradeRecommendationRunError, setLinkedPreTradeRecommendationRunError] = useState('')
-  const linkedPreTradeReviewId = useMemo(() => parsePreTradeReviewId(selectedTradeEvents), [selectedTradeEvents])
+  const linkedPreTradeReviewId = useMemo(
+    () => selectedTrade?.pretrade_review_id ?? parsePreTradeReviewId(selectedTradeEvents),
+    [selectedTrade?.pretrade_review_id, selectedTradeEvents],
+  )
   const linkedPreTradeReviewAccessToken = authSession?.accessToken ?? null
-  const linkedPreTradeRecommendationRunId = linkedPreTradeReview?.recommendation_run_id ?? null
+  const linkedPreTradeRecommendationRunId = (
+    linkedPreTradeReview?.recommendation_run_id
+    ?? selectedTrade?.pretrade_recommendation_run_id
+    ?? null
+  )
+  const linkedPreTradeApprovalGovernanceSnapshot = (
+    selectedTrade?.pretrade_approval_governance_snapshot
+    ?? linkedPreTradeReview?.approval_governance_snapshot
+    ?? null
+  )
+  const linkedPreTradeBookingGovernanceSnapshot = (
+    selectedTrade?.pretrade_booking_governance_snapshot
+    ?? linkedPreTradeReview?.booking_governance_snapshot
+    ?? null
+  )
 
   useEffect(() => {
     if (!linkedPreTradeReviewAccessToken || linkedPreTradeReviewId === null) {
@@ -897,6 +933,90 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
     tradeMetadataSource === 'fallback' && tradeMetadataError
       ? `Using built-in trade metadata fallback while the server metadata contract is unavailable: ${tradeMetadataError}`
       : null
+  const [excelDialogOpen, setExcelDialogOpen] = useState(false)
+  const [excelTradeId, setExcelTradeId] = useState('')
+  const [excelTradeConfirmed, setExcelTradeConfirmed] = useState(false)
+  const [excelExporting, setExcelExporting] = useState(false)
+  const [excelExportMessage, setExcelExportMessage] = useState('')
+  const [excelExportError, setExcelExportError] = useState('')
+  const excelSelectedTrade = useMemo(
+    () => trades.find((trade) => trade.trade_id === excelTradeId) ?? null,
+    [excelTradeId, trades],
+  )
+
+  function openTradeExcelDialog() {
+    const preferredTradeId = selectedTrade?.trade_id ?? visibleTrades[0]?.trade_id ?? trades[0]?.trade_id ?? ''
+    setExcelTradeId(preferredTradeId)
+    setExcelTradeConfirmed(false)
+    setExcelExportMessage('')
+    setExcelExportError('')
+    setExcelDialogOpen(true)
+  }
+
+  function closeTradeExcelDialog() {
+    if (excelExporting) {
+      return
+    }
+    setExcelDialogOpen(false)
+  }
+
+  function handleExcelTradeSelectionChange(value: string) {
+    setExcelTradeId(value)
+    setExcelTradeConfirmed(false)
+    setExcelExportMessage('')
+    setExcelExportError('')
+  }
+
+  function handleConfirmExcelTrade() {
+    if (!excelSelectedTrade) {
+      setExcelExportError('Choose a trade before confirming the workbook.')
+      return
+    }
+
+    setSelectedTradeId(excelSelectedTrade.trade_id)
+    setInspectorTab('overview')
+    setExcelTradeConfirmed(true)
+    setExcelExportError('')
+    setExcelExportMessage(`Confirmed ${excelSelectedTrade.trade_id}.`)
+  }
+
+  async function handleSaveExcelWorkbook() {
+    if (!excelSelectedTrade) {
+      setExcelExportError('Choose a trade before saving the workbook.')
+      return
+    }
+    if (!excelTradeConfirmed) {
+      setExcelExportError('Confirm the selected trade before saving the workbook.')
+      return
+    }
+
+    setExcelExporting(true)
+    setExcelExportError('')
+    setExcelExportMessage('')
+    try {
+      const result = await saveTradeWorkbookFromBrowser(excelSelectedTrade)
+      switch (result.status) {
+        case 'saved':
+          setExcelExportMessage(`Saved ${result.filename}.`)
+          return
+        case 'downloaded':
+          setExcelExportMessage(`Downloaded ${result.filename}.`)
+          return
+        case 'cancelled':
+          setExcelExportMessage('Save cancelled.')
+          return
+        case 'unavailable':
+          setExcelExportError('Workbook saving is unavailable in this browser context.')
+          return
+        default:
+          return
+      }
+    } catch (error) {
+      setExcelExportError(error instanceof Error ? error.message : 'Could not save the workbook.')
+    } finally {
+      setExcelExporting(false)
+    }
+  }
 
   const tradeBoardColumns: DataSheetColumn<Trade>[] = [
     {
@@ -988,6 +1108,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
   ]
 
   return (
+    <>
     <TileLayout
       workspaceId="trades"
       workspaceLabel="Trading"
@@ -1288,6 +1409,18 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                         <span>Review Booked By</span>
                         <strong>{linkedPreTradeReview.booked_by ?? '—'}</strong>
                       </div>
+                      {linkedPreTradeApprovalGovernanceSnapshot ? (
+                        <div className="detail-row">
+                          <span>Approval Audit</span>
+                          <strong>{formatDate(linkedPreTradeApprovalGovernanceSnapshot.generated_at)}</strong>
+                        </div>
+                      ) : null}
+                      {linkedPreTradeBookingGovernanceSnapshot ? (
+                        <div className="detail-row">
+                          <span>Booking Audit</span>
+                          <strong>{formatDate(linkedPreTradeBookingGovernanceSnapshot.generated_at)}</strong>
+                        </div>
+                      ) : null}
                       {linkedPreTradeReview.recommendation_summary ? (
                         <div className="detail-row">
                           <span>Recommendation</span>
@@ -1649,6 +1782,31 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                             ))}
                           </div>
                         </>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {linkedPreTradeApprovalGovernanceSnapshot || linkedPreTradeBookingGovernanceSnapshot ? (
+                    <div className="stack">
+                      <span className="eyebrow">Decision-Time Audit</span>
+                      {linkedPreTradeApprovalGovernanceSnapshot ? (
+                        <div className="surface pretrade-next-actions">
+                          <strong>Approval Snapshot</strong>
+                          <p>
+                            {formatDate(linkedPreTradeApprovalGovernanceSnapshot.generated_at)}
+                            {` | ${linkedPreTradeApprovalGovernanceSnapshot.exported_by}`}
+                          </p>
+                          <small>{governanceAuditSummary(linkedPreTradeApprovalGovernanceSnapshot)}</small>
+                        </div>
+                      ) : null}
+                      {linkedPreTradeBookingGovernanceSnapshot ? (
+                        <div className="surface pretrade-next-actions">
+                          <strong>Booking Snapshot</strong>
+                          <p>
+                            {formatDate(linkedPreTradeBookingGovernanceSnapshot.generated_at)}
+                            {` | ${linkedPreTradeBookingGovernanceSnapshot.exported_by}`}
+                          </p>
+                          <small>{governanceAuditSummary(linkedPreTradeBookingGovernanceSnapshot)}</small>
+                        </div>
                       ) : null}
                     </div>
                   ) : null}
@@ -2227,12 +2385,22 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
               emptyStateDetail={
                 hasScreenFilter
                   ? 'Clear the local filter to reopen the broader blotter and resync the inspector with active rows.'
-                  : 'Book a trade or open the walkthrough to seed the blotter and inspector with live-looking trade context.'
+                  : 'Book a trade to seed the blotter and inspector with live-looking trade context.'
               }
             >
               <DataSheet
                 label="Trade Blotter"
                 description="Browse the live trade projection like a terminal blotter. Arrow between cells to keep the inspector synced to the active row."
+                toolbarActions={
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={openTradeExcelDialog}
+                    disabled={trades.length === 0}
+                  >
+                    Trade To Excel
+                  </button>
+                }
                 columns={tradeBoardColumns}
                 rows={visibleTrades}
                 getRowId={(trade) => trade.trade_id}
@@ -2245,7 +2413,7 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
                 emptyMessage={
                   hasScreenFilter
                     ? 'No trades match the current local filter.'
-                    : 'Book a trade or open the walkthrough to seed the blotter and inspector with trade context.'
+                    : 'Book a trade to seed the blotter and inspector with trade context.'
                 }
               />
             </OperationalBoardController>
@@ -2253,5 +2421,116 @@ export function TradingWorkspace(props: TradingWorkspaceProps) {
         },
       ]}
     />
+    {excelDialogOpen ? (
+      <div className="modal-backdrop" role="presentation" onMouseDown={closeTradeExcelDialog}>
+        <section
+          className="trade-excel-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="trade-excel-dialog-title"
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <div className="trade-excel-dialog-head">
+            <div>
+              <span className="eyebrow">Excel</span>
+              <h3 id="trade-excel-dialog-title">Trade To Workbook</h3>
+            </div>
+            <button
+              type="button"
+              className="button button-ghost"
+              onClick={closeTradeExcelDialog}
+              disabled={excelExporting}
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="form-grid">
+            <label className="field field-wide">
+              <span>Trade</span>
+              <select
+                value={excelTradeId}
+                onChange={(event) => handleExcelTradeSelectionChange(event.target.value)}
+                disabled={excelExporting}
+              >
+                {trades.map((trade) => (
+                  <option key={trade.trade_id} value={trade.trade_id}>
+                    {trade.trade_id} · {trade.commodity} · {trade.book}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {excelSelectedTrade ? (
+            <div className="trade-excel-confirmation-grid" aria-live="polite">
+              <article>
+                <span>Trade</span>
+                <strong>{excelSelectedTrade.trade_id}</strong>
+              </article>
+              <article>
+                <span>Commodity</span>
+                <strong>{excelSelectedTrade.commodity}</strong>
+              </article>
+              <article>
+                <span>Book</span>
+                <strong>{excelSelectedTrade.book}</strong>
+              </article>
+              <article>
+                <span>Side</span>
+                <strong>{excelSelectedTrade.trade_side ?? 'Leg-defined'}</strong>
+              </article>
+              <article>
+                <span>Price</span>
+                <strong>{formatMoney(excelSelectedTrade.price)}</strong>
+              </article>
+              <article>
+                <span>Volume</span>
+                <strong>{formatNumber(excelSelectedTrade.volume, 0)}</strong>
+              </article>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <strong>No trade available</strong>
+              <p>Load a trade before creating a workbook.</p>
+            </div>
+          )}
+
+          {excelExportError ? <p className="field-error">{excelExportError}</p> : null}
+          {excelExportMessage ? <p className="form-note">{excelExportMessage}</p> : null}
+
+          <div className="trade-excel-dialog-actions">
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={closeTradeExcelDialog}
+              disabled={excelExporting}
+            >
+              Cancel
+            </button>
+            {!excelTradeConfirmed ? (
+              <button
+                type="button"
+                className="button"
+                onClick={handleConfirmExcelTrade}
+                disabled={!excelSelectedTrade || excelExporting}
+              >
+                Confirm Trade
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="button"
+                onClick={handleSaveExcelWorkbook}
+                disabled={!excelSelectedTrade || excelExporting}
+              >
+                {excelExporting ? 'Saving...' : 'Save Workbook'}
+              </button>
+            )}
+          </div>
+        </section>
+      </div>
+    ) : null}
+    </>
   )
 }

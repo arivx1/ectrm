@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from hashlib import sha256
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -28,10 +29,21 @@ from apps.api.app.schemas.document import DocumentProcessorSelection
 from apps.api.app.schemas.document import DocumentProcessorRuntimeSettingsOut
 from apps.api.app.schemas.document import DocumentSchemaRegistryOut
 
+from .document_activity import append_document_activity_event
+from .document_activity import build_document_classification_snapshot
+from .document_activity import build_document_processing_snapshot
 from .document_ingestion_analysis import build_page_warnings
 from .document_ingestion_analysis import classify_document_page
 from .document_ingestion_analysis import extract_document_header_fields
 from .document_ingestion_analysis import extract_document_table_blocks
+from .document_classification_scoring import score_document_page_classification
+from .document_classification_scoring import serialize_deterministic_assessment
+from .document_classification_learning import apply_learned_classification_override
+from .document_classification_learning import initialize_page_classification_payload
+from .document_classification_learning import record_page_classification_correction
+from .document_classification_learning import update_system_classification_payload
+from .document_facets import refresh_system_suggested_page_facets
+from .document_facets import replace_document_facet_values
 from .document_ingestion_analysis import extract_page_text as _extract_page_text
 from .document_ingestion_common import CLASSIFIER_VERSION
 from .document_ingestion_common import DOCUMENT_PROCESSOR_ACTOR_ID
@@ -47,7 +59,10 @@ from .document_ingestion_review import normalize_header_fields
 from .document_ingestion_review import normalize_table_blocks
 from .document_ingestion_review import validate_document_review_status_transition
 from .document_ingestion_review import validate_page_review_state
+from .document_logical_documents import sync_document_logical_documents
+from .document_logical_documents import update_document_logical_document_splits
 from .document_ingestion_serialization import get_document_page_preview_path
+from .document_ingestion_serialization import get_document_source_file_details as _get_document_source_file_details
 from .document_ingestion_serialization import load_document_and_pages
 from .document_ingestion_serialization import mark_document_processing_failed
 from .document_ingestion_serialization import serialize_documents
@@ -72,7 +87,18 @@ def list_document_schema_registry() -> DocumentSchemaRegistryOut:
 
 
 def build_document_processor_runtime_settings() -> DocumentProcessorRuntimeSettingsOut:
-    return _build_document_processor_runtime_settings()
+    runtime_settings = _build_document_processor_runtime_settings()
+    from apps.api.app.domains.integrations.services.gmail_inbox import (
+        build_gmail_inbox_runtime_settings,
+    )
+
+    runtime_settings.gmail_inbox = build_gmail_inbox_runtime_settings()
+    return runtime_settings
+
+
+def resolve_document_ai_confidence_threshold(value: float | None = None) -> float:
+    threshold = settings.DOCUMENT_AI_CONFIDENCE_THRESHOLD if value is None else value
+    return round(min(max(float(threshold), 0.0), 1.0), 4)
 
 
 def list_document_ingestions(
@@ -103,6 +129,14 @@ def get_document_ingestion(db: Session, *, document_id: str) -> DocumentIngestio
     return serialize_documents(db, [document])[0]
 
 
+def get_document_source_file_details(
+    db: Session,
+    *,
+    document_id: str,
+) -> tuple[Path, str, str]:
+    return _get_document_source_file_details(db, document_id=document_id)
+
+
 def ingest_pdf_document(
     db: Session,
     *,
@@ -112,6 +146,8 @@ def ingest_pdf_document(
     payload: bytes,
     display_name: str | None = None,
     processor_provider: DocumentProcessorSelection | None = None,
+    processor_model: str | None = None,
+    ai_confidence_threshold: float | None = None,
 ) -> DocumentIngestionOut:
     if not payload:
         raise ValueError("The uploaded PDF was empty")
@@ -122,7 +158,11 @@ def ingest_pdf_document(
     normalized_filename = normalize_filename(filename)
     normalized_display_name = normalize_display_name(display_name, normalized_filename)
     normalized_content_type = (content_type or "application/pdf").strip() or "application/pdf"
-    resolved_processor_provider, resolved_processor_model = resolve_requested_document_processor(processor_provider)
+    resolved_processor_provider, resolved_processor_model = resolve_requested_document_processor(
+        processor_provider,
+        processor_model,
+    )
+    resolved_ai_confidence_threshold = resolve_document_ai_confidence_threshold(ai_confidence_threshold)
     if normalized_content_type.lower() != "application/pdf" and not normalized_filename.lower().endswith(".pdf"):
         raise ValueError("Only PDF uploads are supported")
     if not payload.lstrip().startswith(b"%PDF-"):
@@ -196,7 +236,41 @@ def ingest_pdf_document(
     for page_record in page_records:
         db.add(page_record)
     db.flush()
-    return serialize_documents(db, [document], preloaded_pages=page_records)[0]
+    logical_documents = sync_document_logical_documents(
+        db,
+        document=document,
+        pages=page_records,
+        actor_id=actor_id,
+        occurred_at=now,
+        emit_activity=False,
+    )
+    document.analysis_summary = build_document_summary(
+        page_records,
+        review_status=document.review_status,
+        logical_documents=list(logical_documents),
+    )
+    append_document_activity_event(
+        db,
+        document_id=document.document_id,
+        actor_id=actor_id,
+        event_type="DocumentUploaded",
+        occurred_at=now,
+        payload={
+            "filename": document.original_filename,
+            "display_name": document.display_name,
+            "size_bytes": document.size_bytes,
+            "page_count": document.page_count,
+            "processor_provider": document.processor_provider,
+            "processor_model": document.processor_model,
+            "ai_confidence_threshold": resolved_ai_confidence_threshold,
+        },
+    )
+    return serialize_documents(
+        db,
+        [document],
+        preloaded_pages=page_records,
+        preloaded_logical_documents=logical_documents,
+    )[0]
 
 
 def process_document_ingestion(
@@ -205,15 +279,15 @@ def process_document_ingestion(
     document_id: str,
     actor_id: str = DOCUMENT_PROCESSOR_ACTOR_ID,
     reset_review_state: bool = False,
+    ai_confidence_threshold: float | None = None,
 ) -> DocumentIngestionOut:
     document, pages = load_document_and_pages(db, document_id=document_id)
+    resolved_ai_confidence_threshold = resolve_document_ai_confidence_threshold(ai_confidence_threshold)
     now = datetime.now(timezone.utc)
     document.status = "PROCESSING"
     document.processing_errors = []
     document.updated_at = now
     document.updated_by = actor_id
-    document.analysis_summary = build_document_summary(pages, review_status=document.review_status)
-
     if reset_review_state:
         document.review_status = "UNREVIEWED"
         document.review_notes = None
@@ -241,6 +315,27 @@ def process_document_ingestion(
             page.reviewed_at = None
             page.reviewed_by = None
 
+    logical_documents = sync_document_logical_documents(
+        db,
+        document=document,
+        pages=pages,
+        actor_id=actor_id,
+        occurred_at=now,
+        emit_activity=True,
+    )
+    document.analysis_summary = build_document_summary(
+        pages,
+        review_status=document.review_status,
+        logical_documents=list(logical_documents),
+    )
+    append_document_activity_event(
+        db,
+        document_id=document.document_id,
+        actor_id=actor_id,
+        event_type="DocumentProcessingStarted",
+        occurred_at=now,
+        payload=build_document_processing_snapshot(document, pages),
+    )
     db.flush()
 
     try:
@@ -261,24 +356,40 @@ def process_document_ingestion(
                     document_id=document.document_id,
                     filename=document.original_filename,
                     processed_at=now,
+                    ai_confidence_threshold=resolved_ai_confidence_threshold,
                 )
                 page_errors.extend(page.processing_errors or [])
         finally:
             if rendered_document is not None:
                 rendered_document.close()
 
-        processor_outcome, processor_warnings = run_document_processor_analysis(
-            filename=document.original_filename,
-            payload=payload,
-            pages=pages,
+        processor_target_page_numbers = _low_confidence_processor_target_page_numbers(
+            pages,
             processor_provider=document.processor_provider,
+            confidence_threshold=resolved_ai_confidence_threshold,
         )
+        processor_outcome: DocumentProcessorOutcome | None = None
+        processor_warnings: list[str] = []
+        if processor_target_page_numbers:
+            processor_outcome, processor_warnings = run_document_processor_analysis(
+                filename=document.original_filename,
+                payload=payload,
+                pages=pages,
+                processor_provider=document.processor_provider,
+            )
         if processor_outcome is not None:
             document.processor_provider = processor_outcome.provider
             document.processor_model = processor_outcome.model
             _apply_document_processor_outcome(
                 pages=pages,
                 outcome=processor_outcome,
+                target_page_numbers=processor_target_page_numbers,
+            )
+        for page in pages:
+            apply_learned_classification_override(
+                db,
+                page=page,
+                filename=document.original_filename,
             )
         if processor_warnings:
             _apply_document_processor_warnings(
@@ -286,22 +397,68 @@ def process_document_ingestion(
                 provider=document.processor_provider,
                 model=document.processor_model,
                 warnings=processor_warnings,
+                target_page_numbers=processor_target_page_numbers,
             )
+        for page in pages:
+            refresh_system_suggested_page_facets(db, page=page)
 
+        completed_at = datetime.now(timezone.utc)
         document.status = "FAILED" if page_errors and len(page_errors) == len(pages) else "ANALYZED"
         document.processing_errors = page_errors
-        document.analysis_summary = build_document_summary(pages, review_status=document.review_status)
-        document.updated_at = datetime.now(timezone.utc)
+        logical_documents = sync_document_logical_documents(
+            db,
+            document=document,
+            pages=pages,
+            actor_id=actor_id,
+            occurred_at=completed_at,
+            emit_activity=True,
+        )
+        document.analysis_summary = build_document_summary(
+            pages,
+            review_status=document.review_status,
+            logical_documents=list(logical_documents),
+        )
+        document.updated_at = completed_at
         document.updated_by = actor_id
         document.version += 1
+        append_document_activity_event(
+            db,
+            document_id=document.document_id,
+            actor_id=actor_id,
+            event_type="DocumentAnalyzed",
+            occurred_at=completed_at,
+            payload=build_document_processing_snapshot(document, pages),
+        )
+        append_document_activity_event(
+            db,
+            document_id=document.document_id,
+            actor_id=actor_id,
+            event_type="DocumentClassified",
+            occurred_at=completed_at,
+            payload={
+                "classification": build_document_classification_snapshot(pages),
+            },
+        )
         db.flush()
-        return serialize_documents(db, [document], preloaded_pages=pages)[0]
+        return serialize_documents(
+            db,
+            [document],
+            preloaded_pages=pages,
+            preloaded_logical_documents=logical_documents,
+        )[0]
     except Exception as exc:
         mark_document_processing_failed(
             document=document,
             pages=pages,
             actor_id=actor_id,
             error_message=str(exc),
+        )
+        sync_document_logical_documents(
+            db,
+            document=document,
+            pages=pages,
+            actor_id=actor_id,
+            emit_activity=True,
         )
         db.flush()
         raise
@@ -313,14 +470,46 @@ def reprocess_document_ingestion(
     document_id: str,
     actor_id: str,
     processor_provider: DocumentProcessorSelection | None = None,
+    processor_model: str | None = None,
+    ai_confidence_threshold: float | None = None,
     processor_provider_specified: bool = False,
+    processor_model_specified: bool = False,
 ) -> DocumentIngestionOut:
     document, pages = load_document_and_pages(db, document_id=document_id)
     now = datetime.now(timezone.utc)
-    if processor_provider_specified:
-        resolved_processor_provider, resolved_processor_model = resolve_requested_document_processor(processor_provider)
+    previous_classification_snapshot = build_document_classification_snapshot(pages)
+    previous_review_status = document.review_status
+    previous_processor_provider = document.processor_provider
+    previous_processor_model = document.processor_model
+    if processor_provider_specified or processor_model_specified:
+        requested_provider = processor_provider if processor_provider_specified else document.processor_provider
+        requested_model = (
+            processor_model
+            if processor_model_specified
+            else (None if processor_provider_specified else document.processor_model)
+        )
+        resolved_processor_provider, resolved_processor_model = resolve_requested_document_processor(
+            requested_provider,
+            requested_model,
+        )
         document.processor_provider = resolved_processor_provider
         document.processor_model = resolved_processor_model
+    append_document_activity_event(
+        db,
+        document_id=document.document_id,
+        actor_id=actor_id,
+        event_type="DocumentReprocessRequested",
+        occurred_at=now,
+        payload={
+            "previous_classification": previous_classification_snapshot,
+            "previous_review_status": previous_review_status,
+            "previous_processor_provider": previous_processor_provider,
+            "previous_processor_model": previous_processor_model,
+            "processor_provider": document.processor_provider,
+            "processor_model": document.processor_model,
+            "ai_confidence_threshold": resolve_document_ai_confidence_threshold(ai_confidence_threshold),
+        },
+    )
     document.status = "UPLOADED"
     document.processing_errors = []
     document.review_status = "UNREVIEWED"
@@ -351,18 +540,38 @@ def reprocess_document_ingestion(
         page.reviewed_by = None
         page.updated_at = now
 
-    document.analysis_summary = build_document_summary(pages, review_status=document.review_status)
+    logical_documents = sync_document_logical_documents(
+        db,
+        document=document,
+        pages=pages,
+        actor_id=actor_id,
+        occurred_at=now,
+        emit_activity=True,
+    )
+    document.analysis_summary = build_document_summary(
+        pages,
+        review_status=document.review_status,
+        logical_documents=list(logical_documents),
+    )
     db.flush()
-    return serialize_documents(db, [document], preloaded_pages=pages)[0]
+    return serialize_documents(
+        db,
+        [document],
+        preloaded_pages=pages,
+        preloaded_logical_documents=logical_documents,
+    )[0]
 
 
 def _apply_document_processor_outcome(
     *,
     pages: list[DocumentIngestionPage],
     outcome: DocumentProcessorOutcome,
+    target_page_numbers: set[int] | None = None,
 ) -> None:
     page_map = {page.page_number: page for page in pages}
     for result in outcome.pages:
+        if target_page_numbers is not None and result.page_number not in target_page_numbers:
+            continue
         page = page_map.get(result.page_number)
         if page is None:
             continue
@@ -390,7 +599,16 @@ def _apply_document_processor_outcome(
         classification_payload["processor_overrode_heuristics"] = overrode_heuristics
         classification_payload["processor_partial"] = result.partial
         classification_payload["processor_warnings"] = list(result.warnings or [])
-        page.classification_payload = classification_payload
+        page.classification_payload = update_system_classification_payload(
+            classification_payload,
+            document_kind=page.document_kind,
+            document_subtype=page.document_subtype,
+            confidence=page.classification_confidence,
+            matched_by=f"processor:{outcome.provider}",
+            source="processor",
+            provider=outcome.provider,
+            model=outcome.model,
+        )
         if result.warnings:
             page.processing_warnings = _dedupe_preserving_order(
                 [*list(page.processing_warnings or []), *result.warnings]
@@ -403,11 +621,14 @@ def _apply_document_processor_warnings(
     provider: str | None,
     model: str | None,
     warnings: list[str],
+    target_page_numbers: set[int] | None = None,
 ) -> None:
     if not warnings:
         return
     deduped_warnings = _dedupe_preserving_order([warning for warning in warnings if warning])
     for page in pages:
+        if target_page_numbers is not None and page.page_number not in target_page_numbers:
+            continue
         page.processing_warnings = _dedupe_preserving_order(
             [*list(page.processing_warnings or []), *deduped_warnings]
         )
@@ -423,6 +644,51 @@ def _apply_document_processor_warnings(
             [*existing_warnings, *deduped_warnings]
         )
         page.classification_payload = classification_payload
+
+
+def _low_confidence_processor_target_page_numbers(
+    pages: list[DocumentIngestionPage],
+    *,
+    processor_provider: str | None,
+    confidence_threshold: float,
+) -> set[int]:
+    target_page_numbers: set[int] = set()
+    for page in pages:
+        processor_required = (
+            processor_provider != "builtin"
+            and _page_has_low_confidence_deterministic_classification(
+                page,
+                confidence_threshold=confidence_threshold,
+            )
+        )
+        classification_payload = dict(page.classification_payload or {})
+        classification_payload["ai_processing_confidence_threshold"] = confidence_threshold
+        classification_payload["ai_processing_required"] = processor_required
+        page.classification_payload = classification_payload
+        if processor_required:
+            target_page_numbers.add(page.page_number)
+    if processor_provider == "builtin":
+        return set()
+    return target_page_numbers
+
+
+def _page_has_low_confidence_deterministic_classification(
+    page: DocumentIngestionPage,
+    *,
+    confidence_threshold: float,
+) -> bool:
+    classification_payload = dict(page.classification_payload or {})
+    deterministic_assessment = classification_payload.get("deterministic_assessment")
+    confidence: float | None = None
+    if isinstance(deterministic_assessment, dict):
+        raw_confidence = deterministic_assessment.get("confidence")
+        if isinstance(raw_confidence, (int, float)):
+            confidence = float(raw_confidence)
+    if confidence is None and page.classification_confidence is not None:
+        confidence = float(page.classification_confidence)
+    if confidence is None:
+        return True
+    return confidence < confidence_threshold
 
 
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
@@ -441,6 +707,7 @@ def run_document_processing_job(
     *,
     document_id: str,
     reset_review_state: bool = False,
+    ai_confidence_threshold: float | None = None,
 ) -> None:
     try:
         with session_factory() as db:
@@ -449,6 +716,7 @@ def run_document_processing_job(
                 document_id=document_id,
                 actor_id=DOCUMENT_PROCESSOR_ACTOR_ID,
                 reset_review_state=reset_review_state,
+                ai_confidence_threshold=ai_confidence_threshold,
             )
             db.commit()
     except Exception:
@@ -460,6 +728,23 @@ def run_document_processing_job(
                     pages=pages,
                     actor_id=DOCUMENT_PROCESSOR_ACTOR_ID,
                     error_message="Background document processing failed.",
+                )
+                sync_document_logical_documents(
+                    db,
+                    document=document,
+                    pages=pages,
+                    actor_id=DOCUMENT_PROCESSOR_ACTOR_ID,
+                    emit_activity=True,
+                )
+                append_document_activity_event(
+                    db,
+                    document_id=document.document_id,
+                    actor_id=DOCUMENT_PROCESSOR_ACTOR_ID,
+                    event_type="DocumentProcessingFailed",
+                    payload={
+                        "error_message": "Background document processing failed.",
+                        "processing": build_document_processing_snapshot(document, pages),
+                    },
                 )
                 db.commit()
 
@@ -473,6 +758,8 @@ def update_document_ingestion(
 ) -> DocumentIngestionOut:
     document, pages = load_document_and_pages(db, document_id=document_id)
     now = datetime.now(timezone.utc)
+    previous_classification_snapshot = build_document_classification_snapshot(pages)
+    previous_review_status = document.review_status
 
     if "display_name" in changes:
         display_name = normalize_display_name(changes.get("display_name"), document.original_filename)
@@ -481,9 +768,51 @@ def update_document_ingestion(
     if "review_notes" in changes:
         document.review_notes = _clean_optional_text(changes.get("review_notes"))
 
+    if "facet_values" in changes:
+        replace_document_facet_values(
+            db,
+            document_id=document_id,
+            page_id=None,
+            actor_id=actor_id,
+            raw_values=changes.get("facet_values") or [],
+        )
+
+    document_kind_changed = False
+    if "document_kind" in changes:
+        next_document_kind = str(changes.get("document_kind") or "").upper()
+        if next_document_kind not in list_supported_document_kinds():
+            raise ValueError(f"Document kind '{next_document_kind}' is not supported")
+
+        for page in pages:
+            previous_document_kind = page.document_kind
+            previous_document_subtype = page.document_subtype
+            if page.document_kind != next_document_kind:
+                document_kind_changed = True
+                page.document_kind = next_document_kind
+                page.classification_confidence = 1.0
+                page.header_fields = extract_document_header_fields(page.document_kind, page.raw_text)
+            record_page_classification_correction(
+                page,
+                actor_id=actor_id,
+                changed_at=now,
+                previous_document_kind=previous_document_kind,
+                previous_document_subtype=previous_document_subtype,
+            )
+            if previous_document_kind != page.document_kind:
+                page.updated_at = now
+                refresh_system_suggested_page_facets(db, page=page)
+
+        if document_kind_changed:
+            document.review_status = derive_document_review_status_after_page_change(document.review_status, pages)
+            if document.review_status != "VERIFIED":
+                document.reviewed_at = None
+                document.reviewed_by = None
+
     if "review_status" in changes:
         next_review_status = str(changes["review_status"]).upper()
-        validate_document_review_status_transition(next_review_status, pages)
+        verification_mode = str(changes.get("verification_mode") or "STRICT").upper()
+        if verification_mode != "STATUS_ONLY":
+            validate_document_review_status_transition(next_review_status, pages)
         document.review_status = next_review_status
         if next_review_status == "VERIFIED":
             document.reviewed_at = now
@@ -492,12 +821,56 @@ def update_document_ingestion(
             document.reviewed_at = None
             document.reviewed_by = None
 
-    document.analysis_summary = build_document_summary(pages, review_status=document.review_status)
+    logical_documents = sync_document_logical_documents(
+        db,
+        document=document,
+        pages=pages,
+        actor_id=actor_id,
+        occurred_at=now,
+        emit_activity=True,
+    )
+    document.analysis_summary = build_document_summary(
+        pages,
+        review_status=document.review_status,
+        logical_documents=list(logical_documents),
+    )
     document.updated_at = now
     document.updated_by = actor_id
     document.version += 1
+    if document_kind_changed:
+        append_document_activity_event(
+            db,
+            document_id=document.document_id,
+            actor_id=actor_id,
+            event_type="DocumentClassificationCorrected",
+            occurred_at=now,
+            payload={
+                "previous_classification": previous_classification_snapshot,
+                "classification": build_document_classification_snapshot(pages),
+            },
+        )
+    if "review_status" in changes and previous_review_status != document.review_status:
+        append_document_activity_event(
+            db,
+            document_id=document.document_id,
+            actor_id=actor_id,
+            event_type="DocumentReviewUpdated",
+            occurred_at=now,
+            payload={
+                "previous_review_status": previous_review_status,
+                "review_status": document.review_status,
+                "reviewed_at": document.reviewed_at,
+                "reviewed_by": document.reviewed_by,
+                "verification_mode": changes.get("verification_mode") or "STRICT",
+            },
+        )
     db.flush()
-    return serialize_documents(db, [document], preloaded_pages=pages)[0]
+    return serialize_documents(
+        db,
+        [document],
+        preloaded_pages=pages,
+        preloaded_logical_documents=logical_documents,
+    )[0]
 
 
 def update_document_ingestion_page(
@@ -514,7 +887,10 @@ def update_document_ingestion_page(
         raise LookupError(f"Page '{page_id}' was not found for document '{document_id}'")
 
     now = datetime.now(timezone.utc)
+    previous_classification_snapshot = build_document_classification_snapshot(pages)
     previous_document_kind = page.document_kind
+    previous_document_subtype = page.document_subtype
+    previous_review_status = page.review_status
     next_document_kind = str(changes.get("document_kind", page.document_kind)).upper()
     if next_document_kind not in list_supported_document_kinds():
         raise ValueError(f"Document kind '{next_document_kind}' is not supported")
@@ -525,12 +901,6 @@ def update_document_ingestion_page(
     if "document_kind" in changes:
         page.document_kind = next_document_kind
         page.classification_confidence = 1.0
-        classification_payload = dict(page.classification_payload or {})
-        classification_payload["review_override"] = True
-        classification_payload["review_override_by"] = actor_id
-        classification_payload["review_override_at"] = now.isoformat()
-        classification_payload["previous_document_kind"] = previous_document_kind
-        page.classification_payload = classification_payload
 
     if "header_fields" in changes:
         page.header_fields = normalize_header_fields(changes.get("header_fields") or [], document_kind=page.document_kind)
@@ -539,6 +909,17 @@ def update_document_ingestion_page(
 
     if "table_blocks" in changes:
         page.table_blocks = normalize_table_blocks(changes.get("table_blocks") or [], document_kind=page.document_kind)
+
+    if "facet_values" in changes:
+        replace_document_facet_values(
+            db,
+            document_id=document_id,
+            page_id=page.page_id,
+            actor_id=actor_id,
+            raw_values=changes.get("facet_values") or [],
+        )
+    elif page.document_kind != previous_document_kind:
+        refresh_system_suggested_page_facets(db, page=page)
 
     if "review_notes" in changes:
         page.review_notes = _clean_optional_text(changes.get("review_notes"))
@@ -559,18 +940,118 @@ def update_document_ingestion_page(
             page.reviewed_at = None
             page.reviewed_by = None
 
+    record_page_classification_correction(
+        page,
+        actor_id=actor_id,
+        changed_at=now,
+        previous_document_kind=previous_document_kind,
+        previous_document_subtype=previous_document_subtype,
+    )
     page.updated_at = now
 
     document.review_status = derive_document_review_status_after_page_change(document.review_status, pages)
     if document.review_status != "VERIFIED":
         document.reviewed_at = None
         document.reviewed_by = None
-    document.analysis_summary = build_document_summary(pages, review_status=document.review_status)
+    logical_documents = sync_document_logical_documents(
+        db,
+        document=document,
+        pages=pages,
+        actor_id=actor_id,
+        occurred_at=now,
+        emit_activity=True,
+    )
+    document.analysis_summary = build_document_summary(
+        pages,
+        review_status=document.review_status,
+        logical_documents=list(logical_documents),
+    )
+    document.updated_at = now
+    document.updated_by = actor_id
+    document.version += 1
+    if page.document_kind != previous_document_kind or page.document_subtype != previous_document_subtype:
+        append_document_activity_event(
+            db,
+            document_id=document.document_id,
+            actor_id=actor_id,
+            event_type="DocumentPageClassificationUpdated",
+            occurred_at=now,
+            payload={
+                "page_number": page.page_number,
+                "previous_document_kind": previous_document_kind,
+                "previous_document_subtype": previous_document_subtype,
+                "document_kind": page.document_kind,
+                "document_subtype": page.document_subtype,
+                "previous_classification": previous_classification_snapshot,
+                "classification": build_document_classification_snapshot(pages),
+            },
+        )
+    if "review_status" in changes and previous_review_status != page.review_status:
+        append_document_activity_event(
+            db,
+            document_id=document.document_id,
+            actor_id=actor_id,
+            event_type="DocumentReviewUpdated",
+            occurred_at=now,
+            payload={
+                "page_number": page.page_number,
+                "previous_review_status": previous_review_status,
+                "review_status": page.review_status,
+                "reviewed_at": page.reviewed_at,
+                "reviewed_by": page.reviewed_by,
+            },
+        )
+    db.flush()
+    return serialize_documents(
+        db,
+        [document],
+        preloaded_pages=pages,
+        preloaded_logical_documents=logical_documents,
+    )[0]
+
+
+def update_document_logical_documents(
+    db: Session,
+    *,
+    document_id: str,
+    actor_id: str,
+    changes: dict[str, Any],
+) -> DocumentIngestionOut:
+    document, pages = load_document_and_pages(db, document_id=document_id)
+    now = datetime.now(timezone.utc)
+    logical_documents_payload = [
+        dict(item)
+        for item in changes.get("logical_documents", [])
+        if isinstance(item, dict)
+    ]
+    logical_documents = update_document_logical_document_splits(
+        db,
+        document=document,
+        pages=pages,
+        actor_id=actor_id,
+        logical_documents=logical_documents_payload,
+        expected_document_version=changes.get("expected_document_version"),
+        occurred_at=now,
+    )
+    if document.review_status == "VERIFIED":
+        document.review_status = "IN_REVIEW"
+        document.reviewed_at = None
+        document.reviewed_by = None
+    document.analysis_summary = build_document_summary(
+        pages,
+        review_status=document.review_status,
+        logical_documents=list(logical_documents),
+    )
     document.updated_at = now
     document.updated_by = actor_id
     document.version += 1
     db.flush()
-    return serialize_documents(db, [document], preloaded_pages=pages)[0]
+    return serialize_documents(
+        db,
+        [document],
+        preloaded_pages=pages,
+        preloaded_logical_documents=logical_documents,
+    )[0]
 
 
 def _populate_page_analysis(
@@ -581,6 +1062,7 @@ def _populate_page_analysis(
     document_id: str,
     filename: str,
     processed_at: datetime,
+    ai_confidence_threshold: float,
 ) -> None:
     preview_warnings: list[str] = []
     ocr_warnings: list[str] = []
@@ -617,13 +1099,20 @@ def _populate_page_analysis(
                 text_source = "ocr"
                 ocr_warnings = ["OCR fallback extracted text from the rendered page image.", *ocr_warnings]
 
-    classification = classify_document_page(filename, raw_text)
-    header_fields = extract_document_header_fields(
+    table_blocks = extract_document_table_blocks(raw_text, text_source=text_source)
+    deterministic_assessment = score_document_page_classification(
+        filename=filename,
+        raw_text=raw_text,
+        text_source=text_source,
+        table_blocks=table_blocks,
+        image_has_visible_content=image_has_visible_content,
+    )
+    classification = deterministic_assessment.classification
+    header_fields = list(deterministic_assessment.header_fields) or extract_document_header_fields(
         classification.document_kind,
         raw_text,
         text_source=text_source,
     )
-    table_blocks = extract_document_table_blocks(raw_text, text_source=text_source)
     extraction_status = "FAILED" if extraction_errors else "ANALYZED"
 
     page_record.classification_status = "ANALYZED"
@@ -631,13 +1120,20 @@ def _populate_page_analysis(
     page_record.document_kind = classification.document_kind
     page_record.document_subtype = classification.document_subtype
     page_record.classification_confidence = classification.confidence
-    page_record.classification_payload = {
-        "matched_by": classification.matched_by,
-        "filename": filename,
-        "preview_generated": preview_generated,
-        "text_source": text_source,
-        "ocr_used": text_source == "ocr",
-    }
+    page_record.classification_payload = initialize_page_classification_payload(
+        filename=filename,
+        raw_text=raw_text,
+        matched_by=classification.matched_by,
+        preview_generated=preview_generated,
+        image_has_visible_content=image_has_visible_content,
+        text_source=text_source,
+        document_kind=classification.document_kind,
+        document_subtype=classification.document_subtype,
+        confidence=classification.confidence,
+        source="heuristic",
+        deterministic_assessment=serialize_deterministic_assessment(deterministic_assessment),
+        ai_processing_confidence_threshold=ai_confidence_threshold,
+    )
     page_record.header_fields = header_fields
     page_record.table_blocks = table_blocks
     page_record.raw_text = raw_text

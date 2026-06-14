@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any
+from typing import Literal
 from typing import Optional
 
 from pydantic import BaseModel
@@ -165,6 +166,12 @@ class ExternalDataProviderStatusOut(BaseModel):
     latest_run_status: str
     success_sla_hours: int
     scheduler_interval_minutes: int
+    ingestion_method: str
+    ingestion_mode: str
+    source_system: str
+    source_endpoint: Optional[str]
+    sync_job_name: str
+    default_lookback_days: Optional[int]
     active_series_count: int
     due_for_sync: bool
     last_run_at: Optional[datetime]
@@ -186,6 +193,55 @@ class ExternalDataSyncStatusOut(BaseModel):
     running_provider_count: int
     unknown_provider_count: int
     providers: list[ExternalDataProviderStatusOut]
+
+
+class PriceSourceReviewOut(BaseModel):
+    id: int
+    price_index_code: str
+    price_index_name: Optional[str]
+    commodity_code: Optional[str]
+    quote_type: Optional[str]
+    market: Optional[str]
+    location_code: Optional[str]
+    price_unit_code: Optional[str]
+    price_currency_code: Optional[str]
+    price_index_is_active: Optional[bool]
+    provider: str
+    dataset_code: Optional[str]
+    series_id: str
+    frequency: str
+    source_unit: str
+    source_currency_code: Optional[str]
+    transform_rule: Optional[str]
+    ingestion_method: Optional[str]
+    ingestion_mode: Optional[str]
+    source_system: Optional[str]
+    source_endpoint: Optional[str]
+    sync_job_name: Optional[str]
+    default_lookback_days: Optional[int]
+    is_active: bool
+    review_status: str
+    provider_health_status: Optional[str]
+    scheduler_interval_minutes: Optional[int]
+    success_sla_hours: Optional[int]
+    due_for_sync: Optional[bool]
+    provider_latest_observation_at: Optional[datetime]
+    provider_observation_age_hours: Optional[float]
+    latest_run_status: Optional[str]
+    latest_run_id: Optional[int]
+    last_success_at: Optional[datetime]
+    provider_error_summary: Optional[str]
+    latest_observation_date: Optional[date]
+    latest_value: Optional[float]
+    latest_unit_code: Optional[str]
+    latest_currency_code: Optional[str]
+    latest_source_revision: Optional[str]
+    latest_source_published_at: Optional[datetime]
+    latest_downloaded_at: Optional[datetime]
+    latest_observation_run_id: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+    version: int
 
 
 class MarketContextPriceOut(BaseModel):
@@ -237,6 +293,100 @@ class MarketContextOut(BaseModel):
     macro: list[MarketContextSeriesOut]
     positioning: list[MarketContextSeriesOut]
     freshness: list[MarketContextFreshnessOut]
+
+
+class MarketNewsHeadlineOut(BaseModel):
+    title: str
+    source: Optional[str]
+    published_at: Optional[datetime]
+    link: str
+
+
+MarketNewsImpactDirection = Literal["up", "down", "neutral"]
+MarketNewsImpactHorizon = Literal[
+    "immediate",
+    "near_term",
+    "mid_term",
+    "long_term",
+    "very_long_term",
+]
+MarketNewsLocationScope = Literal[
+    "region",
+    "country",
+    "state",
+    "province",
+    "territory",
+    "city",
+    "unspecified",
+]
+
+
+class MarketNewsTaggingImpactIn(BaseModel):
+    direction: MarketNewsImpactDirection
+    horizon: MarketNewsImpactHorizon
+
+
+class MarketNewsTaggingLocationIn(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
+    scope: MarketNewsLocationScope
+
+
+class MarketNewsTaggingBaselineIn(BaseModel):
+    supply: MarketNewsTaggingImpactIn
+    demand: MarketNewsTaggingImpactIn
+    market_location: MarketNewsTaggingLocationIn
+
+
+class MarketNewsTaggingItemIn(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=280)
+    source: Optional[str] = Field(default=None, max_length=160)
+    published_at: Optional[datetime] = None
+    deterministic: MarketNewsTaggingBaselineIn
+
+
+class MarketNewsTaggingRequest(BaseModel):
+    commodity: Optional[str] = Field(default=None, min_length=1, max_length=50)
+    items: list[MarketNewsTaggingItemIn] = Field(min_length=1, max_length=10)
+
+
+class MarketNewsTaggingImpactOut(BaseModel):
+    direction: MarketNewsImpactDirection
+    horizon: MarketNewsImpactHorizon
+    confidence: float = Field(ge=0, le=1)
+    rationale: Optional[str] = Field(default=None, max_length=240)
+    source: Literal["ai"] = "ai"
+
+
+class MarketNewsTaggingLocationOut(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
+    scope: MarketNewsLocationScope
+    confidence: float = Field(ge=0, le=1)
+    rationale: Optional[str] = Field(default=None, max_length=240)
+    source: Literal["ai"] = "ai"
+
+
+class MarketNewsTaggingItemOut(BaseModel):
+    id: str
+    supply: MarketNewsTaggingImpactOut
+    demand: MarketNewsTaggingImpactOut
+    market_location: MarketNewsTaggingLocationOut
+
+
+class MarketNewsTaggingOut(BaseModel):
+    generated_at: datetime
+    provider: str
+    model: Optional[str]
+    items: list[MarketNewsTaggingItemOut]
+    warnings: list[str] = Field(default_factory=list)
+
+
+class MarketNewsOut(BaseModel):
+    generated_at: datetime
+    commodity: Optional[str]
+    search_query: str
+    count: int
+    items: list[MarketNewsHeadlineOut]
 
 
 class PriceIndexObservationOut(BaseModel):

@@ -1,0 +1,324 @@
+.assistant-chart-artifact-list {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.35rem;
+}
+
+.assistant-chart-card {
+  display: grid;
+  gap: 0.85rem;
+  width: min(100%, 38rem);
+  margin: 0;
+  padding: 0.85rem;
+  border: 1px solid rgba(18, 42, 56, 0.12);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.96);
+  color: #163044;
+  box-shadow: 0 0.75rem 1.6rem rgba(18, 42, 56, 0.08);
+}
+
+.assistant-message-bubble .assistant-chart-card {
+  border-color: rgba(126, 154, 184, 0.2);
+  background: rgba(247, 250, 252, 0.08);
+  color: var(--terminal-text);
+  box-shadow: none;
+}
+
+.assistant-chart-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.8rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.assistant-chart-header strong {
+  color: inherit;
+  font-size: 0.95rem;
+}
+
+.assistant-chart-header span {
+  color: #66717c;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.assistant-message-bubble .assistant-chart-header span {
+  color: var(--terminal-dim);
+}
+
+.assistant-chart-visual {
+  display: grid;
+  grid-template-columns: minmax(7rem, 9rem) minmax(0, 1fr);
+  gap: 0.95rem;
+  align-items: center;
+}
+
+.assistant-chart-visual.is-bar {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.assistant-chart-visual.is-line,
+.assistant-chart-visual.is-area,
+.assistant-chart-visual.is-scatter,
+.assistant-chart-visual.is-histogram {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.assistant-chart-pie {
+  width: 100%;
+  max-width: 9rem;
+  aspect-ratio: 1;
+  overflow: visible;
+}
+
+.assistant-chart-pie path,
+.assistant-chart-pie circle {
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 1.4;
+}
+
+.assistant-chart-pie .assistant-chart-pie-ring {
+  fill: none;
+  stroke: rgba(18, 42, 56, 0.18);
+  stroke-width: 1.1;
+}
+
+.assistant-message-bubble .assistant-chart-pie .assistant-chart-pie-ring {
+  stroke: rgba(255, 255, 255, 0.24);
+}
+
+.assistant-chart-legend {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.assistant-chart-legend-item {
+  display: grid;
+  grid-template-columns: 0.75rem minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.assistant-chart-swatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 0.2rem;
+}
+
+.assistant-chart-label,
+.assistant-chart-bar-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: inherit;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.assistant-chart-value {
+  display: inline-grid;
+  gap: 0.05rem;
+  justify-items: end;
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.86rem;
+}
+
+.assistant-chart-value span {
+  color: #66717c;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.assistant-message-bubble .assistant-chart-value span {
+  color: var(--terminal-dim);
+}
+
+.assistant-chart-bars {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.assistant-chart-bar-row {
+  display: grid;
+  grid-template-columns: minmax(7rem, 1fr) minmax(5rem, 2fr) auto;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.assistant-chart-bar-track {
+  display: block;
+  height: 0.65rem;
+  overflow: hidden;
+  border-radius: 0.35rem;
+  background: rgba(18, 42, 56, 0.08);
+}
+
+.assistant-message-bubble .assistant-chart-bar-track {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.assistant-chart-bar-fill {
+  display: block;
+  height: 100%;
+  min-width: 0.35rem;
+  border-radius: inherit;
+}
+
+.assistant-chart-line-wrap {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.assistant-chart-line {
+  width: 100%;
+  min-height: 9rem;
+  overflow: visible;
+}
+
+.assistant-chart-axis,
+.assistant-chart-gridline {
+  fill: none;
+  stroke: rgba(18, 42, 56, 0.18);
+  stroke-width: 1;
+}
+
+.assistant-message-bubble .assistant-chart-axis,
+.assistant-message-bubble .assistant-chart-gridline {
+  stroke: rgba(255, 255, 255, 0.16);
+}
+
+.assistant-chart-axis-value {
+  fill: #66717c;
+  font-size: 0.56rem;
+  font-weight: 700;
+}
+
+.assistant-message-bubble .assistant-chart-axis-value {
+  fill: var(--terminal-dim);
+}
+
+.assistant-chart-line-path {
+  fill: none;
+  stroke: #3478f6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.6;
+}
+
+.assistant-chart-area-fill {
+  fill: rgba(52, 120, 246, 0.18);
+  stroke: none;
+}
+
+.assistant-chart-line-point {
+  stroke: rgba(255, 255, 255, 0.92);
+  stroke-width: 1.2;
+}
+
+.assistant-chart-axis-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #66717c;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.assistant-message-bubble .assistant-chart-axis-labels {
+  color: var(--terminal-dim);
+}
+
+.assistant-chart-histogram {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(2.4rem, 1fr);
+  gap: 0.45rem;
+  min-height: 10rem;
+  align-items: end;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.assistant-chart-histogram-bin {
+  display: grid;
+  grid-template-rows: minmax(6rem, 1fr) auto auto;
+  gap: 0.25rem;
+  min-width: 2.4rem;
+  align-items: end;
+  text-align: center;
+}
+
+.assistant-chart-histogram-column {
+  display: flex;
+  align-items: end;
+  width: 100%;
+  height: 6.5rem;
+  border-radius: 0.35rem 0.35rem 0.2rem 0.2rem;
+  background: rgba(18, 42, 56, 0.08);
+  overflow: hidden;
+}
+
+.assistant-message-bubble .assistant-chart-histogram-column {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.assistant-chart-histogram-fill {
+  display: block;
+  width: 100%;
+  min-height: 0.25rem;
+  border-radius: inherit;
+}
+
+.assistant-chart-histogram-bin strong,
+.assistant-chart-histogram-bin span {
+  overflow-wrap: anywhere;
+  color: inherit;
+  font-size: 0.74rem;
+}
+
+.assistant-chart-point-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.assistant-chart-point-summary span {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: baseline;
+  padding: 0.25rem 0.45rem;
+  border-radius: 0.35rem;
+  background: rgba(18, 42, 56, 0.06);
+  color: #66717c;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.assistant-message-bubble .assistant-chart-point-summary span {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--terminal-dim);
+}
+
+.assistant-chart-point-summary strong {
+  color: inherit;
+}
+
+@media (max-width: 720px) {
+  .assistant-chart-visual,
+  .assistant-chart-bar-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .assistant-chart-pie {
+    max-width: 11rem;
+  }
+
+  .assistant-chart-value,
+  .assistant-chart-bar-row strong {
+    justify-self: start;
+  }
+}

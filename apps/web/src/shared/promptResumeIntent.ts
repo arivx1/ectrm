@@ -1,5 +1,9 @@
+import type { AssistantWorkspaceSummaryTarget } from './models'
+
 export type PromptResumeIntent = {
   draft: string
+  applicationContext?: string
+  summaryTargets?: AssistantWorkspaceSummaryTarget[]
   submitAfterSignIn: boolean
   createdAt: string
 }
@@ -9,6 +13,7 @@ const PROMPT_RESUME_INTENT_STORAGE_EVENT = 'ectrm:prompt-resume-intent'
 const PROMPT_SIGN_IN_RETURN_INTENT_STORAGE_KEY = 'ectrm.prompt-sign-in-return-intent'
 const PROMPT_SIGN_IN_RETURN_INTENT_STORAGE_EVENT = 'ectrm:prompt-sign-in-return-intent'
 const MAX_PROMPT_RESUME_DRAFT_LENGTH = 4000
+const MAX_PROMPT_RESUME_APPLICATION_CONTEXT_LENGTH = 20_000
 
 let cachedPromptResumeIntentRaw: string | null | undefined
 let cachedPromptResumeIntent: PromptResumeIntent | null = null
@@ -43,6 +48,27 @@ function normalizeCreatedAt(value: unknown): string {
   return normalizedValue ?? new Date(0).toISOString()
 }
 
+function normalizeSummaryTargets(value: unknown): AssistantWorkspaceSummaryTarget[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  const normalizedTargets = value
+    .map((target) => normalizeOptionalText(target))
+    .filter((target): target is AssistantWorkspaceSummaryTarget => target !== null)
+
+  return normalizedTargets.length > 0 ? Array.from(new Set(normalizedTargets)) : undefined
+}
+
+function normalizeApplicationContext(value: unknown): string | undefined {
+  const normalizedValue = normalizeOptionalText(value)
+  if (!normalizedValue) {
+    return undefined
+  }
+
+  return normalizedValue.slice(0, MAX_PROMPT_RESUME_APPLICATION_CONTEXT_LENGTH)
+}
+
 export function normalizePromptResumeIntent(
   value: Partial<PromptResumeIntent> | null | undefined,
 ): PromptResumeIntent | null {
@@ -53,6 +79,8 @@ export function normalizePromptResumeIntent(
 
   return {
     draft: draft.slice(0, MAX_PROMPT_RESUME_DRAFT_LENGTH),
+    applicationContext: normalizeApplicationContext(value?.applicationContext),
+    summaryTargets: normalizeSummaryTargets(value?.summaryTargets),
     submitAfterSignIn: value?.submitAfterSignIn === true,
     createdAt: normalizeCreatedAt(value?.createdAt),
   }
@@ -90,6 +118,8 @@ export function savePromptResumeIntent(
 ): PromptResumeIntent | null {
   const normalizedIntent = normalizePromptResumeIntent({
     draft: intent.draft,
+    applicationContext: intent.applicationContext,
+    summaryTargets: intent.summaryTargets,
     submitAfterSignIn: intent.submitAfterSignIn,
     createdAt: intent.createdAt ?? new Date().toISOString(),
   })

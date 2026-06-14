@@ -5,8 +5,13 @@ import type {
   DocumentSchemaRegistryRecord,
 } from '../../shared/models'
 import {
+  formatDocumentKindLabel,
   pageProcessorTrace,
+  pageClassificationCorrected,
+  pageLearningApplied,
+  pageLearningExampleCount,
   PAGE_REVIEW_STATUS_OPTIONS,
+  pageSystemClassification,
   processorLabel,
   processorTraceTone,
   pageRoutingAssessment,
@@ -16,6 +21,7 @@ import {
   routingStatusTone,
   routingStrategyLabel,
 } from './documentIngestionUtils'
+import { DocumentFacetEditor } from './DocumentFacetEditor'
 import { DocumentIngestionHeaderFieldsEditor } from './DocumentIngestionHeaderFieldsEditor'
 import { DocumentIngestionTableBlocksEditor } from './DocumentIngestionTableBlocksEditor'
 import type { DocumentIngestionController } from './useDocumentIngestionController'
@@ -42,6 +48,13 @@ export function DocumentIngestionPageEditor({
   const pagePreviewIsLoading = controller.pagePreviewLoading[page.page_id] === true
   const routingAssessment = pageRoutingAssessment(page)
   const processorTrace = pageProcessorTrace(page)
+  const systemClassification = pageSystemClassification(page)
+  const classificationCorrected = pageClassificationCorrected(page)
+  const learningApplied = pageLearningApplied(page)
+  const learningExampleCount = pageLearningExampleCount(page)
+  const deterministicAssessment = page.understanding.deterministic_assessment
+  const deterministicSupportingEvidence = deterministicAssessment.supporting_evidence.filter((value) => value.trim())
+  const deterministicConflicts = deterministicAssessment.conflicts.filter((value) => value.trim())
   const nonProcessorWarnings = page.processing_warnings.filter((warning) => !processorTrace?.warnings.includes(warning))
 
   return (
@@ -104,6 +117,75 @@ export function DocumentIngestionPageEditor({
             ))}
           </select>
         </label>
+      </div>
+
+      <div className="document-schema-note">
+        <div className="document-ingestion-chip-row">
+          <span className={`status-pill status-pill-${learningApplied ? 'active' : 'planned'}`}>
+            {learningApplied ? 'LEARNED' : 'SYSTEM'}
+          </span>
+          <span className="entity-chip entity-chip-soft">
+            {formatDocumentKindLabel(systemClassification.documentKind)}
+            {systemClassification.documentSubtype ? ` • ${systemClassification.documentSubtype}` : ''}
+          </span>
+          {systemClassification.confidence !== null ? (
+            <span className="entity-chip entity-chip-soft">
+              {Math.round(systemClassification.confidence * 100)}% confidence
+            </span>
+          ) : null}
+        </div>
+        {classificationCorrected ? (
+          <p>
+            Corrected from {formatDocumentKindLabel(systemClassification.documentKind)}
+            {systemClassification.documentSubtype ? ` • ${systemClassification.documentSubtype}` : ''}
+            {' to '}
+            {formatDocumentKindLabel(page.document_kind)}
+            {page.document_subtype ? ` • ${page.document_subtype}` : ''}. Future uploads with similar extracted
+            content can reuse this saved classification.
+          </p>
+        ) : (
+          <p>
+            Change the kind or subtype if the upload was classified incorrectly. Saved corrections become a deterministic
+            learning signal for future uploads with similar document content.
+          </p>
+        )}
+        {learningApplied ? (
+          <p>
+            This page reused {learningExampleCount} prior correction{learningExampleCount === 1 ? '' : 's'} before the
+            review step.
+          </p>
+        ) : null}
+        {systemClassification.matchedBy ? <p>System evidence: {systemClassification.matchedBy.replaceAll('_', ' ')}.</p> : null}
+        {deterministicAssessment.document_kind ? (
+          <div className="document-schema-note">
+            <div className="document-ingestion-chip-row">
+              <span className={`status-pill status-pill-${deterministicConflicts.length > 0 ? 'in-progress' : 'active'}`}>
+                DETERMINISTIC
+              </span>
+              <span className="entity-chip entity-chip-soft">
+                {formatDocumentKindLabel(deterministicAssessment.document_kind)}
+                {deterministicAssessment.document_subtype ? ` • ${deterministicAssessment.document_subtype}` : ''}
+              </span>
+              {deterministicAssessment.confidence !== null ? (
+                <span className="entity-chip entity-chip-soft">
+                  {Math.round(deterministicAssessment.confidence * 100)}% confidence
+                </span>
+              ) : null}
+            </div>
+            {deterministicAssessment.document_kind !== systemClassification.documentKind ? (
+              <p>
+                The final system classification differs because a later AI or learned override changed the review
+                starting point.
+              </p>
+            ) : null}
+            {deterministicSupportingEvidence.map((evidence) => (
+              <p key={evidence}>{evidence}</p>
+            ))}
+            {deterministicConflicts.map((conflict) => (
+              <p key={conflict}>Watch for: {conflict}</p>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <div className="document-page-evidence">
@@ -195,6 +277,20 @@ export function DocumentIngestionPageEditor({
           ) : null}
         </div>
       </div>
+
+      <DocumentFacetEditor
+        documentId={document.document_id}
+        pageId={page.page_id}
+        title={`Page ${page.page_number} Tags`}
+        values={page.facet_values ?? []}
+        facetSchemas={schemaRegistry?.document_facets}
+        onChange={(nextValues) =>
+          controller.updatePageDraft(document.document_id, page.page_id, (current) => ({
+            ...current,
+            facet_values: nextValues,
+          }))
+        }
+      />
 
       <DocumentIngestionHeaderFieldsEditor
         controller={controller}

@@ -364,6 +364,22 @@
   min-width: 0;
 }
 
+.hero-compact {
+  align-items: center;
+}
+
+.hero-compact .hero-copy {
+  width: 100%;
+}
+
+.hero-compact-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 .hero-heading-row {
   display: flex;
   justify-content: space-between;
@@ -392,6 +408,25 @@
   max-width: 14ch;
   font-size: clamp(2.6rem, 4.2vw, 4.4rem);
   line-height: 0.94;
+}
+
+.hero.hero-compact h2 {
+  flex: 1 1 30rem;
+  min-width: 0;
+  max-width: none;
+  margin-top: 0;
+  font-size: clamp(1.45rem, 2.1vw, 2.2rem);
+  line-height: 1.08;
+}
+
+.hero.hero-price-report h2 {
+  max-width: 32ch;
+  font-size: clamp(1.9rem, 2.7vw, 2.7rem);
+  line-height: 1.05;
+}
+
+.hero-compact-heading-row .hero-session-pill {
+  flex: 0 0 auto;
 }
 
 .hero p {
@@ -636,6 +671,11 @@
     linear-gradient(180deg, rgba(11, 20, 31, 0.96), rgba(8, 15, 24, 0.98));
 }
 
+.tile-layout-preset-bar {
+  border-color: rgba(126, 154, 184, 0.16);
+  background: rgba(8, 15, 24, 0.88);
+}
+
 .tile-layout-toolbar h3,
 .workspace-tile-copy h3 {
   color: var(--terminal-text);
@@ -740,6 +780,10 @@
   gap: 0.85rem;
 }
 
+.workspace-local-filter-controls[hidden] {
+  display: none;
+}
+
 .workspace-local-filter-field {
   flex: 1 1 26rem;
   max-width: 42rem;
@@ -752,101 +796,3 @@
   justify-content: end;
   gap: 0.65rem;
 }
-
-.nav-global-filter {
-  gap: 0.9rem;
-}
-
-.nav-global-filter.is-collapsed {
-  gap: 0.8rem;
-}
-
-.nav-global-filter-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.85rem;
-  align-items: flex-start;
-}
-
-.nav-global-filter-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-shrink: 0;
-  padding-inline: 0.95rem;
-}
-
-.nav-global-filter-toggle-indicator {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.6rem;
-  min-height: 1.6rem;
-  border-radius: 999px;
-  border: 1px solid rgba(126, 154, 184, 0.16);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--terminal-text);
-  font-weight: 700;
-  line-height: 1;
-}
-
-.nav-global-filter .workspace-local-filter-controls {
-  align-items: stretch;
-}
-
-.nav-global-filter .workspace-local-filter-field {
-  flex-basis: 100%;
-  max-width: none;
-}
-
-.nav-global-filter .workspace-local-filter-actions {
-  justify-content: flex-start;
-}
-
-.nav-global-filter-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.nav-global-filter-summary[hidden] {
-  display: none;
-}
-
-.nav-global-filter-summary-copy {
-  display: grid;
-  gap: 0.5rem;
-  min-width: 0;
-}
-
-.nav-global-filter-summary-copy small {
-  margin: 0;
-  color: var(--terminal-dim);
-  line-height: 1.5;
-}
-
-.nav-global-filter-summary-value {
-  color: var(--terminal-text-soft);
-  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
-  overflow-wrap: anywhere;
-}
-
-.nav-global-filter-empty {
-  text-align: left;
-}
-
-@media (max-width: 720px) {
-  .nav-global-filter-head,
-  .nav-global-filter-summary {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .nav-global-filter-toggle {
-    justify-content: space-between;
-    width: 100%;
-  }
-}
-

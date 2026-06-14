@@ -609,7 +609,7 @@ architecture into an operating habit.
   - Settlement Analyst
   - Document Triage
   - Desk Briefing
-- add role archetypes and draft profiles for Phase 1 candidates:
+- add role archetypes and pilot blueprints for Phase 1 candidates:
   - Market Research Agent
   - Pre-Trade Structuring Agent
   - Document Agent
@@ -622,17 +622,16 @@ architecture into an operating habit.
 
 ### Implementation notes
 
-- The Admin seed action now synchronizes a 13-profile pilot lineup:
-  3 active seeded profiles, 5 current role-preset drafts, and 5 Phase 1 pilot
-  drafts.
+- The Admin seed action now synchronizes only the seeded-default lineup:
+  Trade Ops Copilot, Settlement Copilot, and Trade Governor.
+- Market Research Agent, Pre-Trade Structuring Agent, and Document Agent are
+  exposed in Admin as template-only Phase 1 pilot blueprints until their
+  dedicated product workflows land.
 - Synchronized profiles are role-derived and carry a role key, human owner,
   authority ceiling, activation note, effective-policy surface, and eval-gate
   status when reloaded through the policy-aware Admin API.
-- Phase 1 roles start draft-only. Document Agent and Pre-Trade Structuring
-  Agent require eval coverage plus outcome review before gaining any staged
-  action authority.
-- Admin should describe reusable starting points as role presets or role
-  profiles, not as standalone prompt templates.
+- Admin should describe reusable starting points as seeded defaults, pilot
+  blueprints, or role presets, not as standalone prompt templates.
 - Pilot exit review uses the outcome and autonomy review surfaces to decide
   promote, narrow, pause, or retire for each profile.
 
@@ -653,9 +652,9 @@ Product engineer coordinating backend, frontend, and eval follow-through.
 
 ### Acceptance criteria
 
-- all current seeded and template agents are represented as role-derived
-  profiles
-- Phase 1 pilot roles are visible in Admin with clear status
+- current seeded defaults are represented as role-derived profiles
+- Phase 1 pilot roles are visible in Admin with clear seeded-default versus
+  template-only status
 - no active profile lacks a role key, owner, authority ceiling, and policy
   validation result
 - docs describe the pilot lineup, customization path, and promotion rules

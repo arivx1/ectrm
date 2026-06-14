@@ -21,6 +21,9 @@ operations with session-based access control.
 - `/health`, `/version`, `/settings/public`: safe service and runtime metadata
 - `/assistant/*`: assistant provider status, prompt-context preview, protected
   prompt routing, current-user run lookup, and public managed-agent listing
+- `/mcp-status`: public runtime metadata for the ChatGPT MCP scaffold
+- `/mcp/login`, `/mcp/whoami`: OAuth browser handoff and identity-debug helpers
+  for the ChatGPT MCP surface when OAuth mode is enabled
 - `/auth`: bootstrap the first admin, sign in with password or Google, inspect
   the current session, and log out
 - `/events`: append and list event rows
@@ -78,12 +81,49 @@ uvicorn apps.api.app.main:app --host 0.0.0.0 --port 8000 --reload
 
 The default API base URL is `http://127.0.0.1:8000`.
 
+If you want the standard local API and web workflow in one command from the
+repo root, use:
+
+```bash
+make dev
+```
+
+To enable the first ChatGPT MCP scaffold locally, set `MCP_ENABLED=true` in
+`apps/api/.env`, run the API normally, and connect an MCP client to:
+
+```text
+http://127.0.0.1:8000/mcp/
+```
+
+The current scaffold is intentionally read-only. It exposes `search` and
+`fetch` over checked-in repo docs only.
+
+If you also want the MCP surface to require a real ECTRM identity, enable the
+OAuth bridge with at least:
+
+```text
+MCP_AUTH_MODE=oauth
+MCP_OAUTH_ISSUER_URL=http://127.0.0.1:8000/mcp
+MCP_OAUTH_SIGNING_SECRET=<strong-random-secret>
+```
+
+The current first pass keeps the browser-side authorization UI deliberately
+narrow:
+
+- password sign-in against existing ECTRM local users
+- optional single-user login when `SINGLE_USER_AUTH_ENABLED=true`
+- no Google sign-in inside the MCP OAuth page yet
+
+For ChatGPT developer mode beyond localhost, `MCP_OAUTH_ISSUER_URL` should be a
+public HTTPS URL that resolves to the mounted `/mcp` base.
+
 ## Verification
 
 From the repo root, the canonical backend verification wrapper is:
 
 ```bash
 make api-contract-check
+make api-mcp-test
 make api-assistant-evals
 make api-test
 ```
@@ -108,6 +148,9 @@ make api-test
 It currently runs on Python `3.12` and does not provision PostgreSQL, because
 the checked-in backend test suite uses self-contained test database fixtures
 for the default CI path.
+
+`make api-mcp-test` is the narrow MCP transport lane. Use it whenever changes
+touch `/mcp`, MCP auth, or the published `search` and `fetch` tools.
 
 `make api-assistant-evals` is the explicit assistant-governance eval gate. Use
 it whenever changes affect prompt behavior, provider fallback, tool access, or
@@ -209,10 +252,15 @@ The most important settings are:
 - `CORS_ALLOW_ORIGINS`: allowed web origins
 - `BOOTSTRAP_ADMIN_TOKEN`: enables first-admin creation through the API
 - `GOOGLE_AUTH_ENABLED`, `GOOGLE_AUTH_CLIENT_ID`: expose Google sign-in in the
-  web app and validate Google identity tokens on the API
+  web app, validate Google identity tokens on the API, and enable the
+  browser-side Google Calendar panel in Settings when a client ID is present
 - `GOOGLE_AUTH_AUTO_CREATE_USERS`: optionally create a local account the first
   time a valid Google user signs in
 - `GOOGLE_AUTH_DEFAULT_ROLE`: role assigned to auto-created Google users
+- `PROJECTION_MONITORING_EMAIL_*`: outbound email transport used when the
+  projection-monitoring policy includes the `EMAIL` delivery channel
+- `GMAIL_INBOX_*`: inbound Gmail attachment intake for importing PDF emails
+  into the document-ingestion queue
 - `SESSION_TTL_HOURS`: how long sessions stay valid
 - `ASSISTANT_ENABLED`: global switch for assistant routing
 - `ASSISTANT_DEFAULT_PROVIDER`: which provider the API prefers by default
@@ -222,6 +270,28 @@ The most important settings are:
   prompts
 - `ASSISTANT_BUSINESS_CONTEXT`: reusable operating-model context added to
   assistant prompts
+- `MCP_ENABLED`: enables the first remote MCP scaffold for ChatGPT developer
+  mode and MCP Inspector testing
+- `MCP_AUTH_MODE`: `none` for the original local docs-only surface or `oauth`
+  to require ChatGPT and other MCP clients to authenticate as explicit ECTRM
+  users
+- `MCP_SERVER_NAME`, `MCP_SERVER_INSTRUCTIONS`: configure the public-facing MCP
+  server identity and read-only guidance
+- `MCP_DOCS_RESULT_LIMIT`: caps how many doc matches the starter `search` tool
+  returns
+- `MCP_DOCS_REPO_URL_OVERRIDE`: optional canonical repo URL override for MCP
+  search and fetch citations when local git remotes are unavailable or
+  unsuitable
+- `MCP_OAUTH_ISSUER_URL`: absolute mounted `/mcp` URL advertised to OAuth-capable
+  MCP clients; use localhost only for local testing and HTTPS for hosted use
+- `MCP_OAUTH_SIGNING_SECRET`: HMAC secret used to sign MCP OAuth access and
+  refresh tokens
+- `MCP_OAUTH_REQUIRED_SCOPES`: space-delimited scopes granted to the first
+  read-only MCP tool family
+- `MCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS`,
+  `MCP_OAUTH_REFRESH_TOKEN_TTL_SECONDS`,
+  `MCP_OAUTH_AUTHORIZATION_CODE_TTL_SECONDS`: expiry controls for the OAuth
+  access-token, refresh-token, and authorization-code lifecycle
 - `use_live_tools` on assistant requests: exposes read-only runtime data tools
   to the selected model provider, executes requested tool calls server-side,
   and returns tool-call traces with the response; prompt preview stays a pure
@@ -245,6 +315,101 @@ a visible failure to the backend request log quickly.
 - `KALSHI_BASE_URL`: points at the Kalshi REST API for public market data
 - `KALSHI_SYNC_INTERVAL_MINUTES`, `KALSHI_SYNC_SUCCESS_SLA_HOURS`: control
   when Kalshi is considered due and when the sync is considered stale
+
+## Browser Google Calendar Panel
+
+The Settings workspace can show upcoming Google Calendar events without routing
+calendar traffic through the API. To enable that panel:
+
+1. In Google Cloud, create or select the project that will own the browser-side
+   calendar access.
+2. Enable the Google Calendar API in that project.
+3. If Google prompts for it, complete the OAuth consent setup for the project.
+4. Create an OAuth client ID with application type `Web application`.
+5. Under authorized JavaScript origins, add the local web origins you use for
+   ECTRM, such as:
+   - `http://localhost:5173`
+   - `http://127.0.0.1:5173`
+   - any alternate local Vite origin you actually run, such as
+     `http://localhost:5174`
+6. Copy the client ID value. It should look similar to:
+
+   ```text
+   1234567890-abc123def456.apps.googleusercontent.com
+   ```
+
+7. Add it to `apps/api/.env`:
+
+   ```text
+   GOOGLE_AUTH_CLIENT_ID=1234567890-abc123def456.apps.googleusercontent.com
+   ```
+
+8. Restart the API and reload the Settings workspace.
+
+`GOOGLE_AUTH_ENABLED=true` is only required when you also want Google-based app
+sign-in. The calendar panel itself only needs the exposed client ID because the
+browser requests `calendar.readonly` access directly from Google.
+
+Implementation notes:
+
+- Set the client ID, not the client secret.
+- The API exposes `GOOGLE_AUTH_CLIENT_ID` through `GET /settings/public`, and
+  the browser uses that value to request Google Calendar readonly access
+  directly from Google.
+- The Google access token stays in the browser session for this panel and is
+  not persisted by the ECTRM API.
+
+## Gmail Inbox Delivery
+
+Projection monitoring already has an outbound email seam. If you want those
+alerts to land in a Gmail or Google Workspace inbox instead of the local email
+archive fallback, configure the API with:
+
+- `PROJECTION_MONITORING_EMAIL_SMTP_HOST=smtp.gmail.com`
+- `PROJECTION_MONITORING_EMAIL_SMTP_PORT=587`
+- `PROJECTION_MONITORING_EMAIL_FROM=<your-google-address>`
+- `PROJECTION_MONITORING_EMAIL_SMTP_USERNAME=<your-google-address>`
+- `PROJECTION_MONITORING_EMAIL_SMTP_PASSWORD=<google-app-password>`
+
+Then make sure the target Gmail address is either:
+
+- listed in `PROJECTION_MONITORING_EMAIL_RECIPIENTS`, or
+- attached to an active admin-capable user account in ECTRM
+
+If `PROJECTION_MONITORING_EMAIL_SMTP_HOST` is blank, the `EMAIL` channel stays
+local-first and records delivery into the archived sink instead of sending to
+an external inbox.
+
+## Gmail Inbox Intake
+
+The document workspace can also pull PDF attachments directly from a Gmail or
+Google Workspace inbox and run them through the same governed document
+ingestion pipeline used for manual uploads.
+
+Configure the API with:
+
+- `GMAIL_INBOX_ENABLED=true`
+- `GMAIL_INBOX_CLIENT_ID=<google-oauth-client-id>`
+- `GMAIL_INBOX_CLIENT_SECRET=<google-oauth-client-secret>`
+- `GMAIL_INBOX_REFRESH_TOKEN=<google-oauth-refresh-token>`
+- `GMAIL_INBOX_ACCOUNT_EMAIL=<mailbox-address>`
+- `GMAIL_INBOX_QUERY=has:attachment filename:pdf in:inbox`
+
+The current first-pass import is intentionally narrow:
+
+- it reads Gmail through the read-only Gmail API
+- it lets authenticated users browse recent matching Gmail messages in the
+  Document Intake workspace before importing anything
+- it imports PDF attachments only
+- it stages those files as `document_ingestion` records instead of mutating
+  business records directly
+- it records per-message receipts so the same attachment is not imported twice
+
+Once configured, authenticated users can call `POST /documents/imports/gmail`
+or use the Documents workspace button to pull the next batch into the review
+queue. The same workspace now reads `GET /documents/gmail/messages` and
+`GET /documents/gmail/messages/{message_id}` to render a read-only in-app inbox
+browser for the configured mailbox.
 
 ## Implementation Shape
 

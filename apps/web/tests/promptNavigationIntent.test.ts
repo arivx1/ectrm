@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildPromptNavigationIntentKey,
   buildPromptNavigationRouteHandoff,
   normalizePromptNavigationIntent,
   parsePromptNavigationIntentsFromAssistantContent,
@@ -63,6 +64,24 @@ describe('prompt navigation intents', () => {
     expect(promptNavigationIntentDetail(intent!)).toBe('Open Work Queue focused on TRD-1001.')
   })
 
+  it('builds a deterministic key for prompt handoff outcome tracking', () => {
+    const intent = normalizePromptNavigationIntent({
+      kind: 'open_workspace',
+      targetView: 'operations',
+      label: 'Open Work Queue',
+      focus: {
+        type: 'trade',
+        id: 'TRD-1001',
+        label: 'TRD-1001',
+      },
+    })
+
+    expect(intent).not.toBeNull()
+    expect(buildPromptNavigationIntentKey(intent!)).toBe(
+      'open_workspace|operations|trade|TRD-1001|||Open Work Queue',
+    )
+  })
+
   it('extracts assistant navigation intent blocks without showing control JSON', () => {
     const parsed = parsePromptNavigationIntentsFromAssistantContent(
       [
@@ -107,6 +126,7 @@ describe('prompt navigation intents', () => {
         sourceActionRequestId: undefined,
       },
     ])
+    expect(parsed.warnings).toEqual([])
   })
 
   it('builds assistant route handoff metadata from focused intents', () => {
@@ -142,5 +162,88 @@ describe('prompt navigation intents', () => {
       sourceConversationId: null,
       sourceActionRequestId: null,
     })
+  })
+
+  it('builds assistant terminal-dashboard handoffs for supported market instruments', () => {
+    const intent = normalizePromptNavigationIntent({
+      kind: 'open_workspace',
+      targetView: 'dashboard',
+      label: 'Open Henry Hub IFERC brief',
+      rationale: 'Review the curve beside related trades, exposure, and activity.',
+      filter: 'HH_IFERC',
+      focus: {
+        type: 'market_instrument',
+        id: 'price_index:HH_IFERC',
+        label: 'Henry Hub IFERC',
+      },
+      sourceRunId: 202,
+      sourceConversationId: 33,
+    })
+
+    expect(intent).not.toBeNull()
+    expect(buildPromptNavigationRouteHandoff(intent!)).toEqual({
+      source: 'assistant',
+      tradeId: 'price_index:HH_IFERC',
+      focus: {
+        type: 'market_instrument',
+        id: 'price_index:HH_IFERC',
+        label: 'Henry Hub IFERC',
+      },
+      tradeInspectorTab: null,
+      eventType: null,
+      label: 'Open Henry Hub IFERC brief',
+      rationale: 'Review the curve beside related trades, exposure, and activity.',
+      filter: 'HH_IFERC',
+      sourceRunId: 202,
+      sourceConversationId: 33,
+      sourceActionRequestId: null,
+    })
+  })
+
+  it('fails closed when assistant terminal handoffs include unsupported focus metadata', () => {
+    const parsed = parsePromptNavigationIntentsFromAssistantContent(
+      [
+        'I can explain where to look, but this handoff should not run.',
+        '```navigation_intent',
+        JSON.stringify({
+          kind: 'open_workspace',
+          target_view: 'dashboard',
+          label: 'Open Custom Terminal Formula',
+          focus: {
+            type: 'arbitrary_expression',
+            id: 'price > moving_average(20)',
+            label: 'Custom formula',
+          },
+        }),
+        '```',
+      ].join('\n'),
+    )
+
+    expect(parsed.content).toBe('I can explain where to look, but this handoff should not run.')
+    expect(parsed.intents).toEqual([])
+    expect(parsed.warnings).toEqual([
+      'A workspace handoff suggestion could not be applied and was ignored.',
+    ])
+  })
+
+  it('fails closed for invalid navigation_intent blocks and raises a warning', () => {
+    const parsed = parsePromptNavigationIntentsFromAssistantContent(
+      [
+        'Stay on Home for now while we confirm the route.',
+        '```navigation_intent',
+        JSON.stringify({
+          kind: 'open_workspace',
+          target_view: 'not-a-real-workspace',
+          label: 'Broken Handoff',
+        }),
+        '```',
+      ].join('\n'),
+    )
+
+    expect(parsed.content).toBe('Stay on Home for now while we confirm the route.')
+    expect(parsed.intents).toEqual([])
+    expect(parsed.warnings).toEqual([
+      'A workspace handoff suggestion could not be applied and was ignored.',
+    ])
   })
 })

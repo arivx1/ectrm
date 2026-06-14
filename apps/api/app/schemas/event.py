@@ -13,6 +13,10 @@ class EventCreate(BaseModel):
     occurred_at: datetime
     actor_id: Optional[str] = None
     causation_id: Optional[str] = None
+    command_type: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    command_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    expected_last_event_id: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    source_surface: Optional[str] = Field(default=None, min_length=1, max_length=100)
     payload: Dict[str, Any] = Field(default_factory=dict)
     schema_version: int = 1
 

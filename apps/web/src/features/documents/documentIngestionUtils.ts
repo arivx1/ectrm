@@ -1,5 +1,6 @@
 import type {
   DocumentActionPlanRecord,
+  DocumentFacetAssignmentRecord,
   DocumentExtractedFieldRecord,
   DocumentLinkageAssessmentRecord,
   DocumentProcessorDocumentTraceRecord,
@@ -49,13 +50,31 @@ export function humanizeKey(value: string): string {
   return value.replaceAll('_', ' ').replace(/\b\w/g, (character) => character.toUpperCase())
 }
 
-export function dominantDocumentKind(document: DocumentIngestionRecord): string {
+export function dominantDocumentKindCode(document: DocumentIngestionRecord): string {
   const candidate = document.analysis_summary.dominant_document_kind
-  return typeof candidate === 'string' && candidate.trim() ? candidate.replaceAll('_', ' ') : 'UNKNOWN'
+  if (typeof candidate === 'string' && candidate.trim()) {
+    return candidate
+  }
+  const pageCandidate = document.pages.find((page) => page.document_kind?.trim())?.document_kind
+  return pageCandidate?.trim() ? pageCandidate : 'UNKNOWN'
+}
+
+export function dominantDocumentKind(document: DocumentIngestionRecord): string {
+  return formatDocumentKindLabel(dominantDocumentKindCode(document))
 }
 
 export function reviewedPageCount(document: DocumentIngestionRecord): number {
   const candidate = document.analysis_summary.reviewed_page_count
+  return typeof candidate === 'number' ? candidate : 0
+}
+
+export function correctedPageCount(document: DocumentIngestionRecord): number {
+  const candidate = document.analysis_summary.corrected_page_count
+  return typeof candidate === 'number' ? candidate : 0
+}
+
+export function learnedPageCount(document: DocumentIngestionRecord): number {
+  const candidate = document.analysis_summary.learning_applied_page_count
   return typeof candidate === 'number' ? candidate : 0
 }
 
@@ -75,6 +94,41 @@ export function documentRecordLinks(document: DocumentIngestionRecord): Document
   return document.record_links
 }
 
+export function activeDocumentFacetValues(values: DocumentFacetAssignmentRecord[] | null | undefined): DocumentFacetAssignmentRecord[] {
+  const seen = new Set<string>()
+  const activeValues: DocumentFacetAssignmentRecord[] = []
+  for (const value of values ?? []) {
+    if (value.review_status === 'REJECTED') {
+      continue
+    }
+    const key = `${value.page_id ?? 'document'}:${value.facet_key}:${value.value_code}`
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    activeValues.push(value)
+  }
+  return activeValues
+}
+
+export function documentFacetDisplayValues(document: DocumentIngestionRecord): DocumentFacetAssignmentRecord[] {
+  const seen = new Set<string>()
+  const values: DocumentFacetAssignmentRecord[] = []
+  for (const value of activeDocumentFacetValues(document.facet_values)) {
+    const key = `${value.facet_key}:${value.value_code}`
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    values.push(value)
+  }
+  return values
+}
+
+export function formatDocumentFacetLabel(value: DocumentFacetAssignmentRecord): string {
+  return `${value.facet_label}: ${value.value_label}`
+}
+
 export function documentProcessorTrace(document: DocumentIngestionRecord): DocumentProcessorDocumentTraceRecord | null {
   return document.processor_trace
 }
@@ -85,6 +139,59 @@ export function pageProcessorTrace(page: DocumentIngestionPageRecord): DocumentP
 
 export function pageRoutingAssessment(page: DocumentIngestionPageRecord): DocumentRoutingAssessmentRecord | null {
   return page.routing_assessment
+}
+
+export function formatDocumentKindLabel(value: string | null | undefined): string {
+  const normalized = value?.trim()
+  if (!normalized) {
+    return 'UNKNOWN'
+  }
+  if (normalized.toUpperCase() === 'MIXED') {
+    return 'Mixed / Page-level'
+  }
+  return normalized.replaceAll('_', ' ')
+}
+
+export function pageSystemClassification(page: DocumentIngestionPageRecord): {
+  documentKind: string
+  documentSubtype: string | null
+  confidence: number | null
+  source: string | null
+  matchedBy: string | null
+} {
+  const payload = page.classification_payload
+  return {
+    documentKind:
+      typeof payload.system_document_kind === 'string' && payload.system_document_kind.trim()
+        ? payload.system_document_kind
+        : page.document_kind,
+    documentSubtype:
+      typeof payload.system_document_subtype === 'string' && payload.system_document_subtype.trim()
+        ? payload.system_document_subtype
+        : null,
+    confidence: typeof payload.system_classification_confidence === 'number' ? payload.system_classification_confidence : null,
+    source:
+      typeof payload.system_classification_source === 'string' && payload.system_classification_source.trim()
+        ? payload.system_classification_source
+        : null,
+    matchedBy:
+      typeof payload.system_matched_by === 'string' && payload.system_matched_by.trim()
+        ? payload.system_matched_by
+        : null,
+  }
+}
+
+export function pageClassificationCorrected(page: DocumentIngestionPageRecord): boolean {
+  return page.classification_payload.classification_corrected === true
+}
+
+export function pageLearningApplied(page: DocumentIngestionPageRecord): boolean {
+  return page.classification_payload.learning_applied === true
+}
+
+export function pageLearningExampleCount(page: DocumentIngestionPageRecord): number {
+  const candidate = page.classification_payload.learning_example_count
+  return typeof candidate === 'number' ? candidate : 0
 }
 
 export function processorLabel(provider: 'builtin' | 'openai' | 'anthropic' | 'google' | null | undefined): string {
@@ -181,10 +288,12 @@ export function actionPlanExecutable(plan: DocumentActionPlanRecord | null | und
   return Boolean(
     plan &&
       plan.status === 'READY' &&
-      plan.operation_type &&
-      ['link_document_to_record', 'create_trade_confirmation', 'issue_trade_invoice', 'create_trade_payment'].includes(
-        plan.operation_type,
-      ),
+      plan.action_type === 'ATTACH_EXISTING_RECORD' &&
+      plan.operation_type === 'link_document_to_record' &&
+      plan.candidate_state === 'ATTACH_READY' &&
+      plan.target?.existing_record === true &&
+      plan.target.record_id &&
+      plan.confidence >= 0.9,
   )
 }
 
@@ -279,6 +388,9 @@ export function uniqueCustomFieldKey(fields: DocumentExtractedFieldRecord[]): st
 export function toDocumentUpdatePayload(document: DocumentIngestionRecord): UpdateDocumentIngestionInput {
   return {
     display_name: document.display_name,
+    facet_values: activeDocumentFacetValues(document.facet_values)
+      .filter((facetValue) => facetValue.page_id === null)
+      .map(toDocumentFacetAssignmentInput),
     review_status: document.review_status,
     review_notes: document.review_notes,
   }
@@ -303,7 +415,20 @@ export function toPageUpdatePayload(page: DocumentIngestionPageRecord): UpdateDo
       header_row_detected: table.header_row_detected,
       source: table.source,
     })),
+    facet_values: activeDocumentFacetValues(page.facet_values).map(toDocumentFacetAssignmentInput),
     review_status: page.review_status,
     review_notes: page.review_notes,
+  }
+}
+
+function toDocumentFacetAssignmentInput(value: DocumentFacetAssignmentRecord) {
+  return {
+    facet_key: value.facet_key,
+    value_code: value.value_code,
+    value_label: value.value_label,
+    source: value.source,
+    confidence: value.confidence,
+    review_status: value.review_status,
+    evidence: value.evidence,
   }
 }

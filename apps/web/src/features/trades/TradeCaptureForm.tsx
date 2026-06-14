@@ -13,7 +13,10 @@ import {
 } from './tradeSearchFields'
 import { combineLocalDateTimeInput, splitLocalDateTimeInput } from './tradeDraftUtils'
 import { tradeTooltipCopy } from './tooltipCopy'
-import type { PreTradeReviewCaptureContext } from '../../shared/models'
+import type {
+  PreTradeReviewCaptureContext,
+  PreTradeReviewDriftRecord,
+} from '../../shared/models'
 import { FieldLabel } from '../../shared/ui/Tooltip'
 import type { TradeCaptureAppliedRule } from '../../shared/tradeCaptureSettings'
 import {
@@ -139,6 +142,9 @@ type TradeCaptureFormProps = {
   updateDraftLeg: (index: number, field: keyof TradeLegDraft, value: string) => void
   duplicateSourceTradeId: string | null
   preTradeReviewContext: PreTradeReviewCaptureContext | null
+  preTradeReviewDrift: PreTradeReviewDriftRecord | null
+  preTradeReviewDriftLoading: boolean
+  preTradeReviewDriftError: string
   submitting: boolean
   referenceDataLoading: boolean
   hasReferenceOptions: boolean
@@ -275,6 +281,9 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     updateDraftLeg,
     duplicateSourceTradeId,
     preTradeReviewContext,
+    preTradeReviewDrift,
+    preTradeReviewDriftLoading,
+    preTradeReviewDriftError,
     submitting,
     referenceDataLoading,
     hasReferenceOptions,
@@ -329,6 +338,26 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
     effectiveStartDateInput.trim().length > 0 ||
     effectiveEndDateInput.trim().length > 0
   const preTradeReviewExcerpt = preTradeReviewContext?.reviewNotes?.trim() || preTradeReviewContext?.reviewThesis?.trim() || ''
+  const preTradeReviewBookingBlocked =
+    Boolean(preTradeReviewContext) &&
+    (
+      preTradeReviewDriftLoading ||
+      preTradeReviewDrift?.requires_reapproval === true ||
+      preTradeReviewDrift?.alignment_status === 'NOT_APPROVED'
+    )
+  const hasAlignedPreTradeReview =
+    preTradeReviewContext &&
+    !preTradeReviewDriftLoading &&
+    !preTradeReviewDriftError &&
+    preTradeReviewDrift?.alignment_status === 'ALIGNED'
+  const hasReapprovalBlockedPreTradeReview =
+    preTradeReviewContext &&
+    !preTradeReviewDriftLoading &&
+    preTradeReviewDrift?.requires_reapproval
+  const hasNotApprovedPreTradeReview =
+    preTradeReviewContext &&
+    !preTradeReviewDriftLoading &&
+    preTradeReviewDrift?.alignment_status === 'NOT_APPROVED'
 
   useEffect(() => {
     if (!selectedCommodity && commodityInput.trim().length === 0) {
@@ -461,12 +490,93 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
             {preTradeReviewContext.recommendationRationale ? (
               <p>{`Rationale: ${preTradeReviewContext.recommendationRationale}`}</p>
             ) : null}
+            {preTradeReviewContext.enrichment?.opportunity_category ? (
+              <p>{`Opportunity: ${preTradeReviewContext.enrichment.opportunity_category.replaceAll('_', ' ')}`}</p>
+            ) : null}
+            {preTradeReviewContext.enrichment?.source_freshness_summary ? (
+              <p>{`Sources: ${preTradeReviewContext.enrichment.source_freshness_summary}`}</p>
+            ) : null}
+            {preTradeReviewContext.enrichment?.reviewer_focus.length ? (
+              <p>{`Review focus: ${preTradeReviewContext.enrichment.reviewer_focus.slice(0, 2).join(' | ')}`}</p>
+            ) : null}
             {preTradeReviewContext.recommendationOverrideReason ? (
               <p>
                 {`Recommendation override: ${preTradeReviewContext.recommendationOverrideReason}`}
               </p>
             ) : null}
             {preTradeReviewExcerpt ? <p>{preTradeReviewExcerpt}</p> : null}
+          </div>
+        </div>
+      )}
+
+      {preTradeReviewContext && preTradeReviewDriftLoading && (
+        <div className="field-full">
+          <div className="feedback-banner feedback-banner-success trade-structure-note">
+            <strong>Checking current approval alignment</strong>
+            <p>{`Review #${preTradeReviewContext.reviewId} is being checked against the latest recommendation and evidence before booking.`}</p>
+          </div>
+        </div>
+      )}
+
+      {hasAlignedPreTradeReview && preTradeReviewDrift && (
+        <div className="field-full">
+          <div className="feedback-banner feedback-banner-success trade-structure-note">
+            <strong>Still Aligned</strong>
+            <p>{`Review #${preTradeReviewContext.reviewId} still matches its approval-time recommendation and evidence.`}</p>
+            {preTradeReviewDrift.latest_recommendation_run_id ? (
+              <p>
+                {`Latest live recommendation is #${preTradeReviewDrift.latest_recommendation_run_id}${preTradeReviewDrift.latest_recommendation_score !== null ? ` with score ${preTradeReviewDrift.latest_recommendation_score}` : ''}.`}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {hasReapprovalBlockedPreTradeReview && preTradeReviewDrift && (
+        <div className="field-full">
+          <div className="feedback-banner feedback-banner-error trade-structure-note">
+            <strong>Re-Approval Required</strong>
+            <p>{`Review #${preTradeReviewContext.reviewId} drifted after approval and must be approved again before this trade can be booked.`}</p>
+            {preTradeReviewDrift.approved_recommendation_run_id ? (
+              <p>
+                {`Approved on recommendation #${preTradeReviewDrift.approved_recommendation_run_id}${preTradeReviewDrift.approved_recommendation_score !== null ? ` with score ${preTradeReviewDrift.approved_recommendation_score}` : ''}.`}
+              </p>
+            ) : null}
+            {preTradeReviewDrift.current_recommendation_run_id ? (
+              <p>
+                {`Current attachment is recommendation #${preTradeReviewDrift.current_recommendation_run_id}${preTradeReviewDrift.current_recommendation_score !== null ? ` with score ${preTradeReviewDrift.current_recommendation_score}` : ''}.`}
+              </p>
+            ) : null}
+            {preTradeReviewDrift.current_impaired_sources.length > 0 ? (
+              <p>{`Impaired sources: ${preTradeReviewDrift.current_impaired_sources.join(', ')}.`}</p>
+            ) : null}
+            <ul>
+              {preTradeReviewDrift.reasons.map((reason) => (
+                <li key={reason.code}>
+                  <strong>{reason.summary}</strong>
+                  {` ${reason.detail}`}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {hasNotApprovedPreTradeReview && (
+        <div className="field-full">
+          <div className="feedback-banner feedback-banner-error trade-structure-note">
+            <strong>Approval No Longer Active</strong>
+            <p>{`Review #${preTradeReviewContext.reviewId} is no longer approved and must be approved again before booking.`}</p>
+          </div>
+        </div>
+      )}
+
+      {preTradeReviewContext && preTradeReviewDriftError && !preTradeReviewDriftLoading && (
+        <div className="field-full">
+          <div className="feedback-banner feedback-banner-error trade-structure-note">
+            <strong>Could Not Verify Approval Drift</strong>
+            <p>{preTradeReviewDriftError}</p>
+            <p>Booking will still be checked server-side when you submit the trade.</p>
           </div>
         </div>
       )}
@@ -593,6 +703,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
         />
 
         <TradeFormDisclosure
+          persistenceKey="trade-capture.desk-metadata"
           title="Desk Metadata"
           summary="External linkage and trader attribution"
           description="The common path is already above. Open this only when the ticket needs a source-system ID or explicit trader ownership."
@@ -717,6 +828,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
         </label>
 
         <TradeFormDisclosure
+          persistenceKey="trade-capture.schedule-overrides"
           title="Schedule Overrides"
           summary="Trade date and effective window"
           description="Execution date normally sets the trade day. Open this only when you need an explicit trade date or a separate effective range."
@@ -990,6 +1102,7 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           </label>
         )}
         <TradeFormDisclosure
+          persistenceKey="trade-capture.workflow-defaults"
           title="Workflow Defaults"
           summary="Pricing and settlement status"
           description="Most tickets can keep the defaults shown in the overview. Open this only when the trade is already priced or settled on arrival."
@@ -1031,7 +1144,11 @@ export function TradeCaptureForm(props: TradeCaptureFormProps) {
           <button type="button" className="button button-ghost" onClick={onClearForm} disabled={submitting}>
             Clear Form
           </button>
-          <button type="submit" className="button button-primary" disabled={submitting || referenceDataLoading || !hasReferenceOptions}>
+          <button
+            type="submit"
+            className="button button-primary"
+            disabled={submitting || referenceDataLoading || !hasReferenceOptions || preTradeReviewBookingBlocked}
+          >
             {submitting ? 'Submitting...' : 'Create Trade'}
           </button>
         </div>

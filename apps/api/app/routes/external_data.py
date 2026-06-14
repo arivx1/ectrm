@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Annotated
 from typing import List
 from typing import Optional
 
@@ -14,15 +15,36 @@ from apps.api.app.deps.db import get_db
 from apps.api.app.domains.reference_data.services.external_data import (
     import_counterparty_credit_snapshots,
     preview_dnb_counterparty_credit_rows,
+    sync_alpha_vantage_prices,
+    sync_bls_ppi_series,
     sync_caiso_series,
     sync_cftc_series,
     sync_eia_fundamental_series,
     sync_eia_series,
+    sync_eia_wholesale_power_series,
     sync_ercot_series,
     sync_fred_series,
     sync_kalshi_series,
+    sync_miso_series,
+    sync_nyiso_series,
+    sync_usda_nass_series,
+    sync_world_bank_series,
 )
 from apps.api.app.domains.reference_data.services.external_data.market_context import build_market_context
+from apps.api.app.domains.reference_data.services.external_data.market_news import (
+    DEFAULT_MARKET_NEWS_LIMIT,
+    DEFAULT_MARKET_NEWS_LOOKBACK_DAYS,
+    MAX_MARKET_NEWS_LIMIT,
+    MAX_MARKET_NEWS_LOOKBACK_DAYS,
+    MarketNewsClientError,
+    load_market_news_headlines,
+)
+from apps.api.app.domains.reference_data.services.external_data.market_news_ai import (
+    build_market_news_ai_tags,
+)
+from apps.api.app.domains.reference_data.services.external_data.price_source_review import (
+    list_price_source_review_rows,
+)
 from apps.api.app.domains.reference_data.services.external_data.sync_status import build_external_data_sync_status
 from apps.api.app.models.external_data_run import ExternalDataRun
 from apps.api.app.models.external_series_definition import ExternalSeriesDefinition
@@ -41,6 +63,10 @@ from apps.api.app.schemas.external_data import (
     ExternalSeriesObservationOut,
     ExternalSeriesSyncRequest,
     MarketContextOut,
+    MarketNewsTaggingOut,
+    MarketNewsTaggingRequest,
+    MarketNewsOut,
+    PriceSourceReviewOut,
     PriceIndexObservationOut,
 )
 
@@ -84,6 +110,26 @@ def get_external_data_sync_status(
     )
 
 
+@admin_router.get("/price-sources", response_model=List[PriceSourceReviewOut])
+def list_price_sources_for_review(
+    provider: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    limit: int = STANDARD_LIST_LIMIT_QUERY,
+    offset: int = LIST_OFFSET_QUERY,
+    db: Session = Depends(get_db),
+) -> List[PriceSourceReviewOut]:
+    return [
+        PriceSourceReviewOut(**row)
+        for row in list_price_source_review_rows(
+            db,
+            provider=provider,
+            is_active=is_active,
+            limit=limit,
+            offset=offset,
+        )
+    ]
+
+
 @admin_router.post("/eia/sync", response_model=ExternalDataRunOut)
 def trigger_eia_sync(payload: EIASyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
     actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
@@ -109,6 +155,57 @@ def trigger_fred_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(
     return _to_run_out(run)
 
 
+@admin_router.post("/alpha-vantage/sync", response_model=ExternalDataRunOut)
+def trigger_alpha_vantage_sync(
+    payload: ExternalSeriesSyncRequest,
+    db: Session = Depends(get_db),
+) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_alpha_vantage_prices(
+        db,
+        price_index_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/bls-ppi/sync", response_model=ExternalDataRunOut)
+def trigger_bls_ppi_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_bls_ppi_series(
+        db,
+        price_index_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/world-bank/sync", response_model=ExternalDataRunOut)
+def trigger_world_bank_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_world_bank_series(
+        db,
+        price_index_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/usda-nass/sync", response_model=ExternalDataRunOut)
+def trigger_usda_nass_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_usda_nass_series(
+        db,
+        price_index_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
 @admin_router.post("/eia-fundamentals/sync", response_model=ExternalDataRunOut)
 def trigger_eia_fundamentals_sync(
     payload: ExternalSeriesSyncRequest,
@@ -118,6 +215,21 @@ def trigger_eia_fundamentals_sync(
     run = sync_eia_fundamental_series(
         db,
         series_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/eia-wholesale-power/sync", response_model=ExternalDataRunOut)
+def trigger_eia_wholesale_power_sync(
+    payload: ExternalSeriesSyncRequest,
+    db: Session = Depends(get_db),
+) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_eia_wholesale_power_series(
+        db,
+        price_index_code=payload.series_code,
         lookback_days=payload.lookback_days,
         requested_by=actor_id,
     )
@@ -154,6 +266,30 @@ def trigger_ercot_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends
     run = sync_ercot_series(
         db,
         series_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/miso/sync", response_model=ExternalDataRunOut)
+def trigger_miso_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_miso_series(
+        db,
+        price_index_code=payload.series_code,
+        lookback_days=payload.lookback_days,
+        requested_by=actor_id,
+    )
+    return _to_run_out(run)
+
+
+@admin_router.post("/nyiso/sync", response_model=ExternalDataRunOut)
+def trigger_nyiso_sync(payload: ExternalSeriesSyncRequest, db: Session = Depends(get_db)) -> ExternalDataRunOut:
+    actor_id = resolve_audit_actor_id(payload.requested_by, required=False)
+    run = sync_nyiso_series(
+        db,
+        price_index_code=payload.series_code,
         lookback_days=payload.lookback_days,
         requested_by=actor_id,
     )
@@ -299,6 +435,37 @@ def get_market_context(
     return MarketContextOut(**payload)
 
 
+@router.get("/market-data/news/headlines", response_model=MarketNewsOut)
+def list_market_news_headlines(
+    commodity: Annotated[Optional[str], Query(min_length=1, max_length=50)] = None,
+    query: Annotated[Optional[str], Query(min_length=1, max_length=240)] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_MARKET_NEWS_LIMIT)] = DEFAULT_MARKET_NEWS_LIMIT,
+    lookback_days: Annotated[int, Query(ge=1, le=MAX_MARKET_NEWS_LOOKBACK_DAYS)] = DEFAULT_MARKET_NEWS_LOOKBACK_DAYS,
+) -> MarketNewsOut:
+    try:
+        payload = load_market_news_headlines(
+            query=query,
+            commodity=commodity.strip().upper() if commodity else None,
+            limit=limit,
+            lookback_days=lookback_days,
+        )
+    except MarketNewsClientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    return MarketNewsOut(**payload)
+
+
+@router.post("/market-data/news/headlines/tagging", response_model=MarketNewsTaggingOut)
+async def tag_market_news_headlines(
+    payload: MarketNewsTaggingRequest,
+) -> MarketNewsTaggingOut:
+    tags_payload = await build_market_news_ai_tags(payload)
+    return MarketNewsTaggingOut(**tags_payload)
+
+
 @router.get(
     "/market-data/external-series/{series_code}/observations",
     response_model=List[ExternalSeriesObservationOut],
@@ -349,6 +516,7 @@ def get_latest_external_series_observation(
 )
 def list_latest_price_index_observations(
     price_index_codes: List[str] = Query(default=[]),
+    limit_per_code: Annotated[int, Query(ge=1, le=10)] = 1,
     db: Session = Depends(get_db),
 ) -> List[PriceIndexObservationOut]:
     normalized_codes: list[str] = []
@@ -374,12 +542,20 @@ def list_latest_price_index_observations(
         )
     ).scalars().all()
 
-    latest_by_code: dict[str, PriceIndexObservation] = {}
+    rows_by_code: dict[str, list[PriceIndexObservation]] = {
+        code: [] for code in normalized_codes
+    }
     for row in rows:
-        if row.price_index_code not in latest_by_code:
-            latest_by_code[row.price_index_code] = row
+        code_rows = rows_by_code.get(row.price_index_code)
+        if code_rows is None or len(code_rows) >= limit_per_code:
+            continue
+        code_rows.append(row)
 
-    return [_to_observation_out(latest_by_code[code]) for code in normalized_codes if code in latest_by_code]
+    return [
+        _to_observation_out(row)
+        for code in normalized_codes
+        for row in rows_by_code[code]
+    ]
 
 
 @router.get(
@@ -493,6 +669,12 @@ def _to_external_data_provider_status_out(row: dict) -> ExternalDataProviderStat
         latest_run_status=str(row["latest_run_status"]),
         success_sla_hours=int(row["success_sla_hours"]),
         scheduler_interval_minutes=int(row["scheduler_interval_minutes"]),
+        ingestion_method=str(row["ingestion_method"]),
+        ingestion_mode=str(row["ingestion_mode"]),
+        source_system=str(row["source_system"]),
+        source_endpoint=row.get("source_endpoint"),
+        sync_job_name=str(row["sync_job_name"]),
+        default_lookback_days=row.get("default_lookback_days"),
         active_series_count=int(row["active_series_count"]),
         due_for_sync=bool(row["due_for_sync"]),
         last_run_at=row.get("last_run_at"),

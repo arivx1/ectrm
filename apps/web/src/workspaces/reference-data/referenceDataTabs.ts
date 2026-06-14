@@ -1,6 +1,10 @@
 import type { ReferenceTab } from '../../shared/models'
 import type { ReferenceDataTabDefinition } from './referenceDataTabShared'
 import {
+  ReferenceDataAssetsDirectory,
+  ReferenceDataAssetsEditor,
+} from './tabs/ReferenceDataAssetsTab'
+import {
   ReferenceDataBooksDirectory,
   ReferenceDataBooksEditor,
   ReferenceDataBooksToolbar,
@@ -22,6 +26,10 @@ import {
   ReferenceDataLocationsEditor,
 } from './tabs/ReferenceDataLocationsTab'
 import {
+  ReferenceDataRailRoutesDirectory,
+  ReferenceDataRailRoutesEditor,
+} from './tabs/ReferenceDataRailRoutesTab'
+import {
   ReferenceDataPortfoliosDirectory,
   ReferenceDataPortfoliosEditor,
 } from './tabs/ReferenceDataPortfoliosTab'
@@ -29,6 +37,10 @@ import {
   ReferenceDataPriceIndicesDirectory,
   ReferenceDataPriceIndicesEditor,
 } from './tabs/ReferenceDataPriceIndicesTab'
+import {
+  ReferenceDataSpatialFeaturesDirectory,
+  ReferenceDataSpatialFeaturesEditor,
+} from './tabs/ReferenceDataSpatialFeaturesTab'
 import {
   ReferenceDataUnitsDirectory,
   ReferenceDataUnitsEditor,
@@ -42,6 +54,13 @@ export const REFERENCE_TAB_DEFINITIONS: Record<ReferenceTab, ReferenceDataTabDef
     Directory: ReferenceDataBooksDirectory,
     Editor: ReferenceDataBooksEditor,
     Toolbar: ReferenceDataBooksToolbar,
+  },
+  assets: {
+    label: 'Assets',
+    tooltip: 'Assets track physical infrastructure and facilities that shape exposure, production, and operational planning.',
+    editorTitle: 'Asset Editor',
+    Directory: ReferenceDataAssetsDirectory,
+    Editor: ReferenceDataAssetsEditor,
   },
   commodities: {
     label: 'Commodities',
@@ -77,6 +96,20 @@ export const REFERENCE_TAB_DEFINITIONS: Record<ReferenceTab, ReferenceDataTabDef
     editorTitle: 'Location Editor',
     Directory: ReferenceDataLocationsDirectory,
     Editor: ReferenceDataLocationsEditor,
+  },
+  'rail-routes': {
+    label: 'Rail Routes',
+    tooltip: 'Rail routes define governed lanes, service clocks, and reusable scheduling context for rail delivery execution.',
+    editorTitle: 'Rail Route Editor',
+    Directory: ReferenceDataRailRoutesDirectory,
+    Editor: ReferenceDataRailRoutesEditor,
+  },
+  'spatial-features': {
+    label: 'Spatial Features',
+    tooltip: 'Spatial features govern shared routes, pipelines, regions, and map overlays that do not belong in a point-only asset record.',
+    editorTitle: 'Spatial Feature Editor',
+    Directory: ReferenceDataSpatialFeaturesDirectory,
+    Editor: ReferenceDataSpatialFeaturesEditor,
   },
   counterparties: {
     label: 'Counterparties',

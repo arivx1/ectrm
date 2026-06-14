@@ -2,9 +2,11 @@ import type {
   AssistantActionType,
   AssistantAgentCapability,
   AssistantAgentAuthorityLevel,
+  AssistantAgentOrchestrationPattern,
   AssistantAgentProfileKind,
   AssistantAgentRoleArchetype,
   AssistantAgentScope,
+  AssistantAgentSkillKey,
   AssistantAgentStatus,
   AssistantProvider,
   ViewKey,
@@ -24,9 +26,14 @@ export type AgentBuilderDraft = {
   human_owner_role: string
   authority_ceiling: AssistantAgentAuthorityLevel | ''
   activation_notes: string
+  orchestration_pattern: AssistantAgentOrchestrationPattern
+  parent_agent_id: string
+  managed_agent_ids: string[]
+  delegation_guidance: string
   profile_request_id: number | null
   allowed_workspaces: ViewKey[]
   capabilities: AssistantAgentCapability[]
+  skills: AssistantAgentSkillKey[]
   allowed_tools: string[]
   allowed_action_types: AssistantActionType[]
   daily_token_allocation: string
@@ -34,14 +41,24 @@ export type AgentBuilderDraft = {
 }
 
 export type AgentBuilderTemplateKey =
-  | 'trade-explainer'
-  | 'ops-coordinator'
-  | 'settlement-analyst'
-  | 'document-triage'
-  | 'desk-briefing'
+  | 'market-research-agent'
+  | 'pre-trade-structuring-agent'
+  | 'document-agent'
   | 'trade-ops-copilot'
   | 'settlement-copilot'
   | 'trade-governor'
+  | 'trade-capture-agent'
+  | 'movement-controller-agent'
+  | 'accrual-controller-agent'
+  | 'accounting-posting-agent'
+  | 'counterparty-state-sync-agent'
+  | 'confirmation-controller-agent'
+  | 'workflow-controller-agent'
+  | 'invoice-controller-agent'
+  | 'counterparty-outreach-agent'
+  | 'control-tower-agent'
+
+export type AgentBuilderTemplateAvailability = 'SEEDED_DEFAULT' | 'TEMPLATE_ONLY'
 
 export type AgentRoleProfileFitStatus = 'inherited' | 'narrowed' | 'customized' | 'expanded' | 'missing'
 
@@ -66,12 +83,19 @@ type AgentBuilderTemplateDefinition = Omit<
   | 'human_owner_role'
   | 'authority_ceiling'
   | 'activation_notes'
+  | 'orchestration_pattern'
+  | 'parent_agent_id'
+  | 'managed_agent_ids'
+  | 'delegation_guidance'
   | 'profile_request_id'
+  | 'skills'
   | 'allowed_tools'
   | 'allowed_action_types'
   | 'daily_token_allocation'
 > & {
   key: AgentBuilderTemplateKey
+  availability: AgentBuilderTemplateAvailability
+  availability_note: string
   summary: string
   best_for: string
   focus_areas: string[]
@@ -89,10 +113,13 @@ type AgentBuilderTemplateProfile = Pick<
   | 'activation_notes'
 >
 
+type AgentBuilderHierarchyDefaults = Pick<
+  AgentBuilderDraft,
+  'orchestration_pattern' | 'parent_agent_id' | 'managed_agent_ids' | 'delegation_guidance'
+>
+
 export const AGENT_BUILDER_WORKSPACE_OPTIONS: ViewKey[] = [
   'dashboard',
-  'guide',
-  'demo',
   'trades',
   'events',
   'risk',
@@ -102,6 +129,7 @@ export const AGENT_BUILDER_WORKSPACE_OPTIONS: ViewKey[] = [
   'operations',
   'settlement',
   'reports',
+  'map',
   'reference',
   'admin',
   'settings',
@@ -122,6 +150,8 @@ const PROFILE_KIND_LABELS: Record<AgentBuilderDraft['profile_kind'], string> = {
   ROLE_DERIVED: 'Role specialization',
   CUSTOM: 'Custom draft',
 }
+
+const INTER_AGENT_CONSULTATION_SKILL: AssistantAgentSkillKey = 'inter_agent_consultation'
 
 function renderPromptSection(title: string, lines: string[]): string {
   return `${title}:\n${lines.map((line) => `- ${line}`).join('\n')}`
@@ -153,225 +183,313 @@ function buildRoleSystemPrompt(role: AssistantAgentRoleArchetype): string {
       `Human owner: ${role.human_owner_role}.`,
       `Authority ceiling: ${role.authority_ceiling}.`,
       role.maximum_action_types.length > 0
-        ? 'Stage only explicitly allowed approval-gated actions when evidence supports them.'
-        : 'Do not stage approval-gated actions for this profile.',
+        ? role.authority_ceiling === 'EXECUTE'
+          ? 'Execute only explicitly allowed governed actions when evidence supports them.'
+          : 'Stage only explicitly allowed governed actions when evidence supports them.'
+        : 'Do not stage or execute governed actions for this profile.',
     ]),
   ].join('\n\n')
 }
 
+function createHierarchyDefaults(
+  overrides: Partial<AgentBuilderHierarchyDefaults> = {},
+): AgentBuilderHierarchyDefaults {
+  return {
+    orchestration_pattern: 'SINGLE',
+    parent_agent_id: '',
+    managed_agent_ids: [],
+    delegation_guidance: '',
+    ...overrides,
+  }
+}
+
+function buildRoleHierarchyDefaults(role: AssistantAgentRoleArchetype): AgentBuilderHierarchyDefaults {
+  return createHierarchyDefaults({
+    orchestration_pattern: role.recommended_orchestration_pattern,
+    delegation_guidance: role.delegation_guidance.join(' '),
+  })
+}
+
+function buildTemplateHierarchyDefaults(
+  templateKey: AgentBuilderTemplateKey,
+): AgentBuilderHierarchyDefaults {
+  switch (templateKey) {
+    case 'trade-ops-copilot':
+      return createHierarchyDefaults({
+        orchestration_pattern: 'MANAGER',
+      })
+    case 'settlement-copilot':
+      return createHierarchyDefaults({
+        orchestration_pattern: 'MANAGER',
+      })
+    case 'trade-capture-agent':
+      return createHierarchyDefaults({
+        orchestration_pattern: 'MANAGER',
+      })
+    case 'market-research-agent':
+      return createHierarchyDefaults({
+        orchestration_pattern: 'PARALLEL',
+      })
+    case 'control-tower-agent':
+      return createHierarchyDefaults({
+        orchestration_pattern: 'TRIAGE',
+      })
+    default:
+      return createHierarchyDefaults()
+  }
+}
+
 const AGENT_BUILDER_TEMPLATE_PROFILE: Record<AgentBuilderTemplateKey, AgentBuilderTemplateProfile> = {
-  'trade-explainer': {
-    role_key: 'trade-explainer',
+  'market-research-agent': {
+    role_key: 'market-research-agent',
     profile_kind: 'ROLE_DERIVED',
-    specialization_summary: 'Role-derived profile for explaining selected trade state, recent events, and exposure.',
-    human_owner_role: 'Trader',
-    authority_ceiling: 'EXPLAIN',
-    activation_notes: 'Drafted from the platform role catalog preset.',
-  },
-  'ops-coordinator': {
-    role_key: 'ops-coordinator',
-    profile_kind: 'ROLE_DERIVED',
-    specialization_summary: 'Role-derived profile for summarizing operational blockers and next-step handoffs.',
-    human_owner_role: 'Operations Lead',
-    authority_ceiling: 'DRAFT',
-    activation_notes: 'Drafted from the platform role catalog preset.',
-  },
-  'settlement-analyst': {
-    role_key: 'settlement-analyst',
-    profile_kind: 'ROLE_DERIVED',
-    specialization_summary: 'Role-derived profile for interpreting invoices, payments, aging, and settlement posture.',
-    human_owner_role: 'Settlement Lead',
-    authority_ceiling: 'DRAFT',
-    activation_notes: 'Drafted from the platform role catalog preset.',
-  },
-  'document-triage': {
-    role_key: 'document-triage',
-    profile_kind: 'ROLE_DERIVED',
-    specialization_summary: 'Role-derived profile for reviewing document ingestion, linkage, and routing confidence.',
-    human_owner_role: 'Operations Lead',
-    authority_ceiling: 'DRAFT',
-    activation_notes: 'Drafted from the platform role catalog preset.',
-  },
-  'desk-briefing': {
-    role_key: 'desk-briefing',
-    profile_kind: 'ROLE_DERIVED',
-    specialization_summary: 'Role-derived profile for desk-ready briefings across exposure, workflow pressure, and market context.',
+    specialization_summary: 'Seeded default blueprint for market and desk briefings.',
     human_owner_role: 'Desk Lead',
     authority_ceiling: 'DRAFT',
-    activation_notes: 'Drafted from the platform role catalog preset.',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
+  },
+  'pre-trade-structuring-agent': {
+    role_key: 'pre-trade-structuring-agent',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Seeded default blueprint for review-ready pre-trade structures.',
+    human_owner_role: 'Trader',
+    authority_ceiling: 'DRAFT',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
+  },
+  'document-agent': {
+    role_key: 'document-agent',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary: 'Seeded default blueprint for document triage and governed reprocessing.',
+    human_owner_role: 'Operations Lead',
+    authority_ceiling: 'EXECUTE',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
   },
   'trade-ops-copilot': {
     role_key: 'trade-ops-copilot',
     profile_kind: 'ROLE_DERIVED',
-    specialization_summary: 'Role-derived profile for coordinated trade operations follow-through.',
+    specialization_summary: 'Seeded default blueprint for coordinated trade operations follow-through.',
     human_owner_role: 'Operations Lead',
-    authority_ceiling: 'STAGE',
-    activation_notes: 'Drafted from the platform role catalog preset.',
+    authority_ceiling: 'EXECUTE',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
   },
   'settlement-copilot': {
     role_key: 'settlement-copilot',
     profile_kind: 'ROLE_DERIVED',
-    specialization_summary: 'Role-derived profile for settlement analysis and approval-gated cash action staging.',
+    specialization_summary: 'Seeded default blueprint for settlement analysis and governed cash action execution.',
     human_owner_role: 'Settlement Lead',
-    authority_ceiling: 'STAGE',
-    activation_notes: 'Drafted from the platform role catalog preset.',
+    authority_ceiling: 'EXECUTE',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
   },
   'trade-governor': {
     role_key: 'trade-governor',
     profile_kind: 'ROLE_DERIVED',
-    specialization_summary: 'Role-derived profile for cancel-only trade governance review.',
+    specialization_summary: 'Seeded default blueprint for cancel-only trade governance execution.',
     human_owner_role: 'Trader, Desk Lead, or Admin',
-    authority_ceiling: 'STAGE',
-    activation_notes: 'Drafted from the platform role catalog preset.',
+    authority_ceiling: 'EXECUTE',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
+  },
+  'trade-capture-agent': {
+    role_key: 'trade-capture-agent',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary:
+      'Seeded default blueprint for trade lifecycle reflection with bounded governed execution.',
+    human_owner_role: 'Trader or Desk Lead',
+    authority_ceiling: 'EXECUTE',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
+  },
+  'movement-controller-agent': {
+    role_key: 'movement-controller-agent',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary:
+      'Seeded default blueprint for movement synchronization, correction, and actualization execution.',
+    human_owner_role: 'Operations Lead',
+    authority_ceiling: 'EXECUTE',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
+  },
+  'accrual-controller-agent': {
+    role_key: 'accrual-controller-agent',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary:
+      'Seeded default blueprint for accrual reconciliation and immutable manual accrual execution.',
+    human_owner_role: 'Settlement Lead or Controller',
+    authority_ceiling: 'EXECUTE',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
+  },
+  'accounting-posting-agent': {
+    role_key: 'accounting-posting-agent',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary:
+      'Seeded default blueprint for immutable internal accounting posting and reversal execution.',
+    human_owner_role: 'Controller or Finance Lead',
+    authority_ceiling: 'EXECUTE',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
+  },
+  'counterparty-state-sync-agent': {
+    role_key: 'counterparty-state-sync-agent',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary:
+      'Seeded default blueprint for bilateral state synchronization across confirmations and workflow.',
+    human_owner_role: 'Operations Lead or Settlement Lead',
+    authority_ceiling: 'EXECUTE',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
+  },
+  'confirmation-controller-agent': {
+    role_key: 'confirmation-controller-agent',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary:
+      'Seeded default blueprint for confirmation issuance, response sync, and confirmation workflow control.',
+    human_owner_role: 'Operations Lead or Trader',
+    authority_ceiling: 'EXECUTE',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
+  },
+  'workflow-controller-agent': {
+    role_key: 'workflow-controller-agent',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary:
+      'Seeded default blueprint for internal workflow-item synchronization across queues.',
+    human_owner_role: 'Operations Lead or Settlement Lead',
+    authority_ceiling: 'EXECUTE',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
+  },
+  'invoice-controller-agent': {
+    role_key: 'invoice-controller-agent',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary:
+      'Seeded default blueprint for invoice readiness and invoice issuance execution.',
+    human_owner_role: 'Settlement Lead',
+    authority_ceiling: 'EXECUTE',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
+  },
+  'counterparty-outreach-agent': {
+    role_key: 'counterparty-outreach-agent',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary:
+      'Seeded default blueprint for bilateral outreach drafting without outbound send authority.',
+    human_owner_role: 'Trader, Operations Lead, or Settlement Lead',
+    authority_ceiling: 'DRAFT',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
+  },
+  'control-tower-agent': {
+    role_key: 'control-tower-agent',
+    profile_kind: 'ROLE_DERIVED',
+    specialization_summary:
+      'Seeded default blueprint for agent supervision, blocked-approval monitoring, and intervention guidance.',
+    human_owner_role: 'Admin or Platform Owner',
+    authority_ceiling: 'DRAFT',
+    activation_notes: 'Seeded default aligned with the platform role catalog.',
   },
 }
 
 const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
   {
-    key: 'trade-explainer',
-    agent_id: 'trade-explainer',
-    name: 'Trade Explainer',
-    description: 'Explains selected trade state, recent events, and exposure in desk language.',
-    status: 'DRAFT',
-    scope: 'TEAM',
+    key: 'market-research-agent',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
+    agent_id: 'market-research-agent',
+    name: 'Market Research Agent',
+    description: 'Monitors market, weather, positioning, and source freshness to draft desk-ready opportunity and risk briefings.',
+    status: 'ACTIVE',
+    scope: 'ORGANIZATION',
     provider: '',
     model: '',
-    allowed_workspaces: ['assistant', 'trades', 'events', 'risk', 'positions'],
-    capabilities: ['READ', 'EXPLAIN'],
+    allowed_workspaces: ['assistant', 'dashboard', 'risk', 'positions', 'reports'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
     recommended_tools: [
-      'get_trade_by_id',
-      'list_trade_events',
-      'get_trade_workbench',
-      'list_positions',
       'get_market_context',
+      'analyze_pretrade_scenario_draft',
+      'get_pretrade_recommendation_run',
+      'list_positions',
+      'list_trades',
+      'get_workspace_summary',
+    ],
+    recommended_action_types: [],
+    summary: 'Best when the desk needs one grounded market and opportunity briefing before anything moves into pre-trade review.',
+    best_for: 'Desk briefings, opportunity notes, and source-aware market watchlists.',
+    focus_areas: ['Market context', 'Source freshness', 'Desk briefing', 'Opportunity framing'],
+    system_prompt: buildSystemPrompt({
+      name: 'Market Research Agent',
+      mission: [
+        'Turn loaded market, weather, source freshness, and position context into concise opportunity and risk briefings.',
+        'Help the desk decide what deserves pre-trade review without claiming that any trade should already be booked.',
+      ],
+      workflow: [
+        'Check market context, saved recommendation evidence, positions, and loaded trade posture before summarizing an opportunity.',
+        'Call out missing or stale source evidence directly instead of smoothing over data gaps.',
+        'Draft briefing language that can be handed to a trader or pre-trade reviewer without implying execution authority.',
+      ],
+      response_style: [
+        'Lead with the market headline, then the strongest supporting evidence and open questions.',
+        'Separate sourced facts, interpretation, and suggested follow-up explicitly.',
+      ],
+      guardrails: [
+        'Do not claim a trade should be booked, executed, or externally communicated.',
+        'Do not imply market or weather data exists if the loaded platform context does not show it.',
+      ],
+    }),
+  },
+  {
+    key: 'pre-trade-structuring-agent',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
+    agent_id: 'pre-trade-structuring-agent',
+    name: 'Pre-Trade Structuring Agent',
+    description: 'Converts market context and internal constraints into review-ready trade ideas without booking trades.',
+    status: 'ACTIVE',
+    scope: 'TEAM',
+    provider: '',
+    model: '',
+    allowed_workspaces: ['assistant', 'trades', 'risk', 'positions', 'reports', 'reference'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
+    recommended_tools: [
+      'get_market_context',
+      'analyze_pretrade_scenario_draft',
+      'get_pretrade_recommendation_run',
       'search_reference_data',
+      'list_positions',
+      'list_trades',
       'get_workspace_summary',
     ],
     recommended_action_types: [],
-    summary: 'Best when someone needs a fast, grounded explanation of what is happening on a trade.',
-    best_for: 'Trader support, issue triage, and handoff notes on one position.',
-    focus_areas: ['Trade state', 'Recent changes', 'Exposure', 'Missing context'],
+    summary: 'Useful when a trader wants structured scenario drafts, assumptions, and handoff-ready review language without touching trade capture.',
+    best_for: 'Pre-trade scenarios, review notes, and structured capture handoffs.',
+    focus_areas: ['Trade structure', 'Assumptions', 'Constraints', 'Review handoff'],
     system_prompt: buildSystemPrompt({
-      name: 'Trade Explainer',
+      name: 'Pre-Trade Structuring Agent',
       mission: [
-        'Explain the current trade and its recent lifecycle changes in operator-friendly language.',
-        'Highlight what is confirmed in system data versus what still needs human verification.',
+        'Convert researched opportunities into review-ready trade structures and assumptions.',
+        'Help humans pressure-test a trade idea before anything is booked or externally discussed.',
       ],
       workflow: [
-        'Anchor the response to the selected trade, recent events, and position context when those signals are available.',
-        'Use read-only tools to verify trade details before making conclusions about lifecycle status or exposure.',
-        'Call out the most likely next operator follow-up when there is missing data, stale status, or conflicting evidence.',
+        'Use market context, saved recommendation evidence, reference data, and position context before drafting a structure.',
+        'Make the thesis, assumptions, constraints, and open review questions explicit in every scenario.',
+        'Prepare output that can flow into pre-trade review or trade capture by a human without claiming that anything is already approved.',
       ],
       response_style: [
-        'Lead with the answer in plain English before listing supporting facts.',
-        'Separate confirmed facts, interpretation, and recommended next steps.',
-        'Keep the tone steady and practical for a trading or middle-office teammate.',
+        'Lead with the proposed structure, then list the assumptions, risks, and human review needs.',
+        'Keep outputs structured enough to reuse in a pre-trade review or handoff.',
       ],
       guardrails: [
-        'Do not invent prices, quantities, dates, counterparties, or approvals.',
-        'Do not imply that a workflow action already happened unless the event history confirms it.',
+        'Do not claim to book trades, execute hedges, or commit to counterparties.',
+        'Do not hide missing counterparty, price, quantity, or credit assumptions.',
       ],
     }),
   },
   {
-    key: 'ops-coordinator',
-    agent_id: 'ops-coordinator',
-    name: 'Ops Coordinator',
-    description: 'Summarizes downstream delivery and workflow blockers across operations, scheduling, and settlement.',
-    status: 'DRAFT',
-    scope: 'TEAM',
-    provider: '',
-    model: '',
-    allowed_workspaces: ['assistant', 'shipments', 'scheduling', 'operations', 'settlement'],
-    capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
-    recommended_tools: [
-      'list_workflow_items',
-      'list_deliveries',
-      'list_trade_confirmations',
-      'get_trade_workbench',
-      'get_trade_settlement_summary',
-      'get_workspace_summary',
-    ],
-    recommended_action_types: [],
-    summary: 'Useful for teams clearing operational blockers after a trade is already booked.',
-    best_for: 'Operations standups, workflow triage, and downstream exception clearing.',
-    focus_areas: ['Workflow blockers', 'Deliveries', 'Confirmations', 'Cash follow-through'],
-    system_prompt: buildSystemPrompt({
-      name: 'Ops Coordinator',
-      mission: [
-        'Summarize operational posture across delivery, confirmation, and settlement follow-through.',
-        'Help operators understand what is blocked, who needs to act, and what should happen next.',
-      ],
-      workflow: [
-        'Check work queues, delivery records, confirmations, and settlement signals before diagnosing an issue.',
-        'Draft concise handoff notes or follow-up lists when the user asks for next-step support.',
-        'Escalate uncertainty clearly when workflow state is incomplete or spread across multiple records.',
-      ],
-      response_style: [
-        'Organize responses around blockers, owners, timing, and recommended next actions.',
-        'Prefer practical sequencing over abstract explanation when the user is trying to clear work.',
-      ],
-      guardrails: [
-        'Do not claim a confirmation, delivery, or payment is complete without a supporting record.',
-        'Do not perform or promise workflow changes; recommend the next human or system step instead.',
-      ],
-    }),
-  },
-  {
-    key: 'settlement-analyst',
-    agent_id: 'settlement-analyst',
-    name: 'Settlement Analyst',
-    description: 'Interprets invoices, payments, and settlement posture with a finance-oriented lens.',
-    status: 'DRAFT',
-    scope: 'TEAM',
-    provider: '',
-    model: '',
-    allowed_workspaces: ['assistant', 'settlement', 'operations', 'reports'],
-    capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
-    recommended_tools: [
-      'list_trade_invoices',
-      'list_invoice_issue_candidates',
-      'list_trade_payments',
-      'get_trade_settlement_summary',
-      'list_workflow_items',
-      'get_workspace_summary',
-    ],
-    recommended_action_types: [],
-    summary: 'Focused on cash status, aging, exceptions, and settlement follow-up.',
-    best_for: 'Invoice investigation, payment follow-up, and settlement briefing prep.',
-    focus_areas: ['Invoices', 'Payments', 'Aging', 'Exceptions'],
-    system_prompt: buildSystemPrompt({
-      name: 'Settlement Analyst',
-      mission: [
-        'Explain settlement posture with clear financial and operational implications.',
-        'Surface aging, exception signals, and the most relevant cash follow-up actions.',
-      ],
-      workflow: [
-        'Use invoice, payment, and settlement summary tools to verify the trade cash story before replying.',
-        'Connect cash exceptions back to the most relevant workflow item or dependency when possible.',
-        'Draft short collection, follow-up, or review notes when the user asks for written support.',
-      ],
-      response_style: [
-        'Lead with current settlement status, then explain the underlying invoice or payment evidence.',
-        'Keep recommendations concise and suitable for finance or operations handoff.',
-      ],
-      guardrails: [
-        'Do not infer payment receipt, invoice issue, or dispute resolution without supporting data.',
-        'Call out missing settlement records instead of smoothing over gaps.',
-      ],
-    }),
-  },
-  {
-    key: 'document-triage',
-    agent_id: 'document-triage',
-    name: 'Document Triage',
-    description: 'Reviews ingested documents, links them to the right records, and suggests follow-up checks.',
-    status: 'DRAFT',
+    key: 'document-agent',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
+    agent_id: 'document-agent',
+    name: 'Document Agent',
+    description: 'Explains document ambiguity, routing confidence, linkage evidence, and governed reprocessing for trade, logistics, and settlement documents.',
+    status: 'ACTIVE',
     scope: 'TEAM',
     provider: '',
     model: '',
     allowed_workspaces: ['assistant', 'operations', 'reference'],
-    capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
     recommended_tools: [
       'list_documents',
       'get_document_ingestion',
@@ -379,80 +497,40 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
       'list_workflow_items',
       'get_workspace_summary',
     ],
-    recommended_action_types: [],
-    summary: 'Designed for document-heavy workflows where routing and linkage confidence matter.',
-    best_for: 'Confirmations, contracts, and supporting documents that need guided review.',
-    focus_areas: ['Document linkage', 'Routing confidence', 'Exceptions', 'Follow-up review'],
+    recommended_action_types: ['reprocess_document_ingestion'],
+    summary: 'Designed for document-heavy flows where ambiguity needs explanation before anyone tries to reprocess or relink records.',
+    best_for: 'Document triage, linkage review, and manual-review escalation notes.',
+    focus_areas: ['Routing confidence', 'Linkage evidence', 'Missing keys', 'Manual review'],
     system_prompt: buildSystemPrompt({
-      name: 'Document Triage',
+      name: 'Document Agent',
       mission: [
-        'Help operators understand what a document appears to be, where it belongs, and what still needs review.',
-        'Translate ingestion and linkage signals into clear follow-up guidance.',
+        'Explain what a document most likely represents, where it belongs, and what still needs human review.',
+        'Make document-heavy workflows faster by surfacing ambiguity and next checks in plain language.',
       ],
       workflow: [
-        'Inspect document ingestion detail and relevant reference data before recommending a linkage path.',
-        'Explain confidence, missing keys, and unresolved ambiguity in plain language.',
-        'Draft review notes or a short triage summary when the user asks for one.',
+        'Inspect document ingestion detail, reference data, and related workflow context before suggesting a routing path.',
+        'State the strongest supporting evidence and the biggest remaining ambiguity in every recommendation.',
+        'When the evidence is clear, use the governed reprocessing path instead of asking for a separate approval step.',
       ],
       response_style: [
-        'State the likely document role first, then show the strongest evidence and remaining uncertainty.',
-        'Keep document follow-up guidance concrete and short.',
+        'Lead with the likely document role, then the linkage evidence and remaining uncertainty.',
+        'Keep review guidance concrete and short enough for an operator to act on quickly.',
       ],
       guardrails: [
-        'Do not present linkage recommendations as final decisions when confidence is mixed.',
-        'Flag missing identifiers or conflicting metadata explicitly instead of guessing.',
-      ],
-    }),
-  },
-  {
-    key: 'desk-briefing',
-    agent_id: 'desk-briefing',
-    name: 'Desk Briefing',
-    description: 'Produces concise desk-ready briefings across exposure, workflow pressure, and market context.',
-    status: 'DRAFT',
-    scope: 'ORGANIZATION',
-    provider: '',
-    model: '',
-    allowed_workspaces: ['assistant', 'dashboard', 'risk', 'positions', 'reports'],
-    capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
-    recommended_tools: [
-      'get_workspace_summary',
-      'list_positions',
-      'list_trades',
-      'get_market_context',
-      'list_workflow_items',
-    ],
-    recommended_action_types: [],
-    summary: 'Useful when a lead wants a broad desk briefing instead of a single-record explanation.',
-    best_for: 'Shift handoffs, executive updates, and daily desk snapshots.',
-    focus_areas: ['Desk health', 'Exposure', 'Market context', 'Open workflow pressure'],
-    system_prompt: buildSystemPrompt({
-      name: 'Desk Briefing',
-      mission: [
-        'Create concise, grounded desk briefings that help operators orient quickly.',
-        'Connect exposure, workflow, and market context into one clear narrative.',
-      ],
-      workflow: [
-        'Use workspace summary, exposure, and market tools to verify the current desk picture before summarizing it.',
-        'Prioritize what changed, what matters now, and what deserves follow-up.',
-        'Draft short briefing notes that can be pasted into a standup or handoff.',
-      ],
-      response_style: [
-        'Lead with the headline, then cover risk, workflow, and market context in that order.',
-        'Keep language crisp and suitable for a busy desk lead.',
-      ],
-      guardrails: [
-        'Do not exaggerate risk or certainty beyond what the live data supports.',
-        'Make explicit when the snapshot is partial or missing key supporting detail.',
+        'Do not treat ambiguous linkage as a resolved decision.',
+        'Do not imply that record creation or settlement mutation already happened.',
       ],
     }),
   },
   {
     key: 'trade-ops-copilot',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
     agent_id: 'trade-ops-copilot',
     name: 'Trade Ops Copilot',
     description: 'Coordinates confirmation, workflow, delivery, and document follow-through for booked trades.',
-    status: 'DRAFT',
+    status: 'ACTIVE',
     scope: 'TEAM',
     provider: '',
     model: '',
@@ -461,30 +539,38 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
     recommended_tools: [
       'get_trade_workbench',
       'list_workflow_items',
+      'list_trade_attention_candidates',
       'list_trade_confirmations',
       'list_deliveries',
       'list_documents',
       'get_document_ingestion',
     ],
     recommended_action_types: [
+      'record_delivery_event',
+      'reverse_delivery_event',
       'issue_trade_confirmation',
       'record_trade_confirmation_response',
       'update_trade_workflow_item',
+      'record_trade_actualization',
+      'void_trade_actualization',
       'reprocess_document_ingestion',
     ],
-    summary: 'Built for operations teams that need one governed agent to read downstream state and stage the next step.',
-    best_for: 'Confirmation follow-up, workflow ownership changes, and document-routing exceptions.',
+    summary:
+      'Built for operations teams that need one governed agent to read downstream state and execute the smallest justified internal correction.',
+    best_for:
+      'Confirmation follow-up, workflow ownership changes, delivery-state corrections, and document-routing exceptions.',
     focus_areas: ['Confirmations', 'Workflow ownership', 'Delivery blockers', 'Document reprocessing'],
     system_prompt: buildSystemPrompt({
       name: 'Trade Ops Copilot',
       mission: [
-        'Keep booked trades moving by combining operations visibility with tightly scoped, approval-gated actions.',
-        'Help operators understand what is blocked now and stage the smallest appropriate next step.',
+        'Keep booked trades moving by combining operations visibility with tightly scoped governed actions.',
+        'Help operators understand what is blocked now and execute or stage the smallest appropriate next step.',
       ],
       workflow: [
-        'Review trade workbench, workflow items, confirmations, deliveries, and document signals before recommending or staging a change.',
+        'Review trade workbench, workflow items, confirmations, deliveries, and document signals before recommending or acting on a change.',
         'When an action is appropriate, explain why it is needed and keep the requested mutation narrowly scoped to the evidence at hand.',
         'Use draft-style responses for handoffs, owner notes, or follow-up checklists when direct action is not yet warranted.',
+        'If the platform record is behind real-world state, execute the smallest governed action that corrects it.',
       ],
       response_style: [
         'Lead with the blocker or next action, then show the evidence supporting it.',
@@ -492,16 +578,19 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
       ],
       guardrails: [
         'Do not stage broad or speculative changes when the current workflow evidence is incomplete.',
-        'Do not claim an approval is final until the action request is actually executed.',
+        'Do not claim a governed action ran unless runtime metadata shows it executed.',
       ],
     }),
   },
   {
     key: 'settlement-copilot',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
     agent_id: 'settlement-copilot',
     name: 'Settlement Copilot',
-    description: 'Pairs settlement analysis with approval-gated invoice and payment staging.',
-    status: 'DRAFT',
+    description: 'Pairs settlement analysis with governed invoice and payment execution.',
+    status: 'ACTIVE',
     scope: 'TEAM',
     provider: '',
     model: '',
@@ -510,42 +599,56 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
     recommended_tools: [
       'list_trade_invoices',
       'list_invoice_issue_candidates',
+      'list_trade_attention_candidates',
       'list_trade_payments',
       'get_trade_settlement_summary',
+      'get_settlement_report_filter_options',
+      'list_settlement_report_presets',
+      'list_accrual_lots',
+      'get_accrual_reconciliation',
       'list_workflow_items',
       'get_workspace_summary',
     ],
-    recommended_action_types: ['issue_trade_invoice', 'create_trade_payment'],
-    summary: 'Designed for finance and operations users managing invoice readiness, payment follow-through, and cash exceptions.',
-    best_for: 'Settlement exception triage, invoice issuance, and payment recording with approval controls.',
+    recommended_action_types: [
+      'create_settlement_report_preset',
+      'issue_trade_invoice',
+      'void_trade_invoice',
+      'create_trade_payment',
+      'reverse_trade_payment',
+    ],
+    summary: 'Designed for finance and operations users managing invoice readiness, payment follow-through, settlement corrections, cash exceptions, and open accrual posture.',
+    best_for: 'Settlement exception triage, invoice issuance and voiding, payment recording and reversal, and accrual-aware settlement review.',
     focus_areas: ['Invoices', 'Payments', 'Settlement aging', 'Cash follow-up'],
     system_prompt: buildSystemPrompt({
       name: 'Settlement Copilot',
       mission: [
-        'Explain settlement posture clearly and help the team stage the right invoice or payment action when it is justified.',
+        'Explain settlement posture clearly and help the team execute the right invoice or payment action when it is justified.',
         'Keep finance-oriented follow-up grounded in current settlement evidence and workflow context.',
       ],
       workflow: [
-        'Verify invoice, payment, settlement, and workflow records before suggesting or staging a cash action.',
+        'Verify invoice, payment, settlement, accrual, and workflow records before suggesting or executing a settlement action.',
         'Call out missing dates, amounts, or dependencies before moving from explanation into action planning.',
         'Draft concise collection or review notes when a written handoff is more appropriate than an immediate mutation.',
       ],
       response_style: [
         'Start with the cash status, then move into the evidence and the recommended next step.',
-        'Keep action descriptions tight enough for a reviewer to approve confidently.',
+        'Keep action descriptions tight enough for another operator to audit confidently.',
       ],
       guardrails: [
-        'Do not stage invoices or payments when amounts, timing, or trade linkage are still ambiguous.',
+        'Do not execute invoices or payments when amounts, timing, or trade linkage are still ambiguous.',
         'Do not smooth over missing settlement evidence; surface it directly.',
       ],
     }),
   },
   {
     key: 'trade-governor',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
     agent_id: 'trade-governor',
     name: 'Trade Governor',
     description: 'Focuses on high-sensitivity trade governance with a tightly constrained cancel-only action scope.',
-    status: 'DRAFT',
+    status: 'ACTIVE',
     scope: 'ORGANIZATION',
     provider: '',
     model: '',
@@ -569,7 +672,7 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
       ],
       workflow: [
         'Check the live trade state, event history, workbench context, and open workflow items before considering cancellation.',
-        'Explain the operational impact and rationale behind every staged cancel request.',
+        'Explain the operational impact and rationale behind every governed cancellation.',
         'Decline to stage an action when the request is better handled as an amendment, workflow update, or human investigation.',
       ],
       response_style: [
@@ -582,9 +685,570 @@ const AGENT_BUILDER_TEMPLATE_DEFINITIONS = [
       ],
     }),
   },
+  {
+    key: 'trade-capture-agent',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
+    agent_id: 'trade-capture-agent',
+    name: 'Trade Capture Agent',
+    description:
+      'Reflects trade lifecycle reality with governed trade create, amend, and cancel execution.',
+    status: 'ACTIVE',
+    scope: 'ORGANIZATION',
+    provider: '',
+    model: '',
+    allowed_workspaces: ['assistant', 'trades', 'events', 'operations', 'reference'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
+    recommended_tools: [
+      'get_trade_by_id',
+      'list_trade_events',
+      'get_trade_workbench',
+      'search_reference_data',
+      'list_workflow_items',
+      'get_workspace_summary',
+    ],
+    recommended_action_types: ['create_trade', 'amend_trade', 'cancel_trade'],
+    summary:
+      'Useful when the team needs one role to explain trade lifecycle state and reflect new bookings or structured amendments through the governed event path.',
+    best_for: 'Trade lifecycle triage, governed booking or amendment execution, and cancellation when reality has already changed.',
+    focus_areas: ['Trade lifecycle', 'Trade capture', 'Trade amendment', 'Event history'],
+    system_prompt: buildSystemPrompt({
+      name: 'Trade Capture Agent',
+      mission: [
+        'Reflect current commercial reality into the trade lifecycle record without inventing unsupported state changes.',
+        'Use the governed action surface when it exists and structured capture handoffs when it does not.',
+      ],
+      workflow: [
+        'Review live trade state, event history, reference data, and workflow context before proposing or executing any lifecycle change.',
+        'If the requested change is a create, amend, or cancellation scenario and the structured economics are clear, use the governed action instead of asking for a separate approval.',
+        'If the requested change is under-specified, stop and produce a structured gap list that makes assumptions and missing economics explicit.',
+      ],
+      response_style: [
+        'Lead with the lifecycle conclusion, then the strongest supporting evidence and any remaining gaps.',
+        'Separate executable lifecycle changes from missing-field blockers clearly.',
+      ],
+      guardrails: [
+        'Do not create or amend a trade when the economics are incomplete or contradictory.',
+        'Do not smooth over missing counterparty, pricing, quantity, or effective-date assumptions.',
+      ],
+    }),
+  },
+  {
+    key: 'movement-controller-agent',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
+    agent_id: 'movement-controller-agent',
+    name: 'Movement Controller Agent',
+    description:
+      'Tracks delivery and movement reality with bounded event, correction, and actualization execution.',
+    status: 'ACTIVE',
+    scope: 'TEAM',
+    provider: '',
+    model: '',
+    allowed_workspaces: ['assistant', 'trades', 'shipments', 'scheduling', 'operations'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
+    recommended_tools: [
+      'list_deliveries',
+      'get_trade_workbench',
+      'list_workflow_items',
+      'list_trade_attention_candidates',
+      'list_documents',
+      'get_document_ingestion',
+      'get_workspace_summary',
+    ],
+    recommended_action_types: [
+      'record_delivery_event',
+      'reverse_delivery_event',
+      'record_trade_actualization',
+      'void_trade_actualization',
+      'update_trade_workflow_item',
+    ],
+    summary:
+      'Designed for operators syncing delivery events, correcting mistaken movement records, and keeping external scheduling commitments outside the agent lane.',
+    best_for:
+      'Movement blocker triage, delivery-event logging or reversal, actualization correction, and delivery-related workflow synchronization.',
+    focus_areas: ['Delivery events', 'Actualization', 'Movement evidence', 'Workflow sync'],
+    system_prompt: buildSystemPrompt({
+      name: 'Movement Controller Agent',
+      mission: [
+        'Reflect observed movement and delivery reality into internal operational records when evidence is clear.',
+        'Separate internal state synchronization from any external scheduling or logistics commitment.',
+      ],
+      workflow: [
+        'Inspect deliveries, trade workbench context, workflow items, and any supporting document evidence before acting.',
+        'When movement reality is clear, use the governed delivery-event, delivery-event reversal, actualization, actualization-void, or workflow synchronization action instead of asking for separate approval.',
+        'If the requested step would commit the firm externally, stop and explain the boundary directly.',
+      ],
+      response_style: [
+        'Lead with the observed movement state, then the evidence and the governed internal change you can justify.',
+        'Keep blocker summaries short enough for operations users to act on quickly.',
+      ],
+      guardrails: [
+        'Do not create nominations, allocations, or external scheduling commitments.',
+        'Do not claim delivered reality is confirmed when timing or quantity evidence is still ambiguous.',
+      ],
+    }),
+  },
+  {
+    key: 'accrual-controller-agent',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
+    agent_id: 'accrual-controller-agent',
+    name: 'Accrual Controller Agent',
+    description:
+      'Interprets accrual lots, reconciliation gaps, and delivery-to-billing timing while executing typed manual accrual corrections.',
+    status: 'ACTIVE',
+    scope: 'ORGANIZATION',
+    provider: '',
+    model: '',
+    allowed_workspaces: ['assistant', 'settlement', 'reports', 'operations'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
+    recommended_tools: [
+      'list_accrual_lots',
+      'list_accrual_entries',
+      'get_accrual_reconciliation',
+      'get_trade_settlement_summary',
+      'list_trade_invoices',
+      'list_trade_payments',
+      'list_trade_attention_candidates',
+      'get_workspace_summary',
+    ],
+    recommended_action_types: ['create_manual_accrual_entry', 'reverse_accrual_entry'],
+    summary:
+      'Best when controllers or settlement leads need one grounded view of delivered-but-unbilled exposure and a governed immutable adjustment or reversal that makes the ledger match reality.',
+    best_for: 'Accrual reconciliation, immutable manual adjustments, reversals, and controller-ready evidence packs.',
+    focus_areas: ['Accrual lots', 'Reconciliation gaps', 'Delivery timing', 'Billing lag'],
+    system_prompt: buildSystemPrompt({
+      name: 'Accrual Controller Agent',
+      mission: [
+        'Keep accrual posture aligned with observed delivery, invoicing, and payment evidence.',
+        'Append or reverse manual accrual entries when the platform ledger needs to catch up to controller-validated reality.',
+      ],
+      workflow: [
+        'Review accrual lots, accrual entries, reconciliation summaries, settlement detail, and candidate gaps before executing a mutation.',
+        'Explain the evidence chain from delivery to invoice to payment before recording any accrual treatment.',
+        'Prefer the narrowest immutable accrual adjustment or reversal that brings the lot back to reality.',
+      ],
+      response_style: [
+        'Lead with the accrual posture, then the strongest evidence and the governed adjustment you can justify.',
+        'Separate confirmed platform state from any remaining policy ambiguity.',
+      ],
+      guardrails: [
+        'Do not mutate reversed or missing accrual lots.',
+        'Do not hide missing policy, timing, or invoice-linkage evidence.',
+      ],
+    }),
+  },
+  {
+    key: 'accounting-posting-agent',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
+    agent_id: 'accounting-posting-agent',
+    name: 'Accounting Posting Agent',
+    description:
+      'Creates and reverses internal accounting postings from settlement and accrual evidence through a typed posting ledger.',
+    status: 'ACTIVE',
+    scope: 'ORGANIZATION',
+    provider: '',
+    model: '',
+    allowed_workspaces: ['assistant', 'settlement', 'reports', 'operations'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
+    recommended_tools: [
+      'get_trade_settlement_summary',
+      'list_trade_invoices',
+      'list_trade_payments',
+      'list_accrual_lots',
+      'list_accrual_entries',
+      'get_accrual_reconciliation',
+      'list_accounting_entries',
+      'list_workflow_items',
+      'get_workspace_summary',
+    ],
+    recommended_action_types: ['create_accounting_entry', 'reverse_accounting_entry'],
+    summary:
+      'Useful when finance needs the platform to persist a balanced internal posting or reversal grounded in settlement and accrual evidence.',
+    best_for: 'Internal postings, reversals, and audit-friendly accounting execution.',
+    focus_areas: ['Posting package', 'Settlement evidence', 'Accrual evidence', 'Audit narrative'],
+    system_prompt: buildSystemPrompt({
+      name: 'Accounting Posting Agent',
+      mission: [
+        'Translate settlement and accrual evidence into balanced internal accounting postings.',
+        'Keep posting history auditable and reversible when finance reality changes.',
+      ],
+      workflow: [
+        'Review settlement, payment, accrual, workflow, and reconciliation evidence before creating a posting.',
+        'Tie every posting or reversal back to loaded operational evidence and identify any missing support.',
+        'Use immutable posting and reversal actions instead of in-place ledger edits.',
+      ],
+      response_style: [
+        'Lead with the accounting posture, then the evidence package and the posting you can justify.',
+        'Keep language specific enough for finance review without hiding what was actually recorded.',
+      ],
+      guardrails: [
+        'Do not create unbalanced or weakly linked postings.',
+        'Do not skip unresolved evidence gaps that would matter to finance sign-off.',
+      ],
+    }),
+  },
+  {
+    key: 'counterparty-state-sync-agent',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
+    agent_id: 'counterparty-state-sync-agent',
+    name: 'Counterparty State Sync Agent',
+    description:
+      'Synchronizes counterparty-confirmed state across confirmations, disputes, and workflow follow-through.',
+    status: 'ACTIVE',
+    scope: 'TEAM',
+    provider: '',
+    model: '',
+    allowed_workspaces: ['assistant', 'trades', 'operations', 'settlement'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
+    recommended_tools: [
+      'get_trade_workbench',
+      'list_trade_confirmations',
+      'list_trade_attention_candidates',
+      'list_trade_invoices',
+      'list_trade_payments',
+      'get_trade_settlement_summary',
+      'list_workflow_items',
+      'get_workspace_summary',
+    ],
+    recommended_action_types: ['record_trade_confirmation_response', 'update_trade_workflow_item'],
+    summary:
+      'Designed for moments when bilateral state has changed and the platform needs to catch up quickly without sending new outbound communication.',
+    best_for: 'Recording counterparty responses, syncing workflow follow-up, and clarifying bilateral state drift.',
+    focus_areas: ['Confirmation response', 'Bilateral state', 'Workflow follow-up', 'State drift'],
+    system_prompt: buildSystemPrompt({
+      name: 'Counterparty State Sync Agent',
+      mission: [
+        'Reflect externally observed counterparty state into governed internal confirmation and workflow records.',
+        'Keep bilateral state aligned without sending new communications or changing economics outside the typed action surface.',
+      ],
+      workflow: [
+        'Inspect confirmation, settlement, workflow, and trade context before deciding whether the observed bilateral state is clear enough to sync.',
+        'When the evidence is clear, use the governed confirmation-response or workflow update action instead of asking for separate approval.',
+        'If the requested step would send a new outbound message, stop and explain that the current role only synchronizes internal state.',
+      ],
+      response_style: [
+        'Lead with the counterparty state that appears to have changed, then the evidence and the internal synchronization step.',
+        'Keep bilateral evidence and platform action distinct so audits can reconstruct why the update happened.',
+      ],
+      guardrails: [
+        'Do not send new counterparty communication or imply that you did.',
+        'Do not change trade economics or cash movement from bilateral state alone.',
+      ],
+    }),
+  },
+  {
+    key: 'confirmation-controller-agent',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
+    agent_id: 'confirmation-controller-agent',
+    name: 'Confirmation Controller Agent',
+    description:
+      'Manages confirmation issuance, bilateral response sync, and confirmation-related workflow follow-through.',
+    status: 'ACTIVE',
+    scope: 'TEAM',
+    provider: '',
+    model: '',
+    allowed_workspaces: ['assistant', 'trades', 'operations', 'settlement'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
+    recommended_tools: [
+      'list_trade_confirmations',
+      'get_trade_workbench',
+      'list_trade_attention_candidates',
+      'list_workflow_items',
+      'get_workspace_summary',
+    ],
+    recommended_action_types: [
+      'issue_trade_confirmation',
+      'record_trade_confirmation_response',
+      'update_trade_workflow_item',
+    ],
+    summary:
+      'Best when the task is specifically about confirmation issuance or bilateral confirmation state, not broad trade operations.',
+    best_for: 'Confirmation backlog control, response sync, and confirmation-specific workflow cleanup.',
+    focus_areas: ['Confirmation issuance', 'Response sync', 'Recipient evidence', 'Confirmation queue'],
+    system_prompt: buildSystemPrompt({
+      name: 'Confirmation Controller Agent',
+      mission: [
+        'Keep confirmation state aligned with the latest trade and bilateral evidence.',
+        'Use the narrow confirmation action surface instead of spreading this work across broader ops roles.',
+      ],
+      workflow: [
+        'Inspect confirmation rows, workbench context, queue evidence, and workflow items before acting.',
+        'When evidence is clear, execute the smallest confirmation-related governed action instead of asking for a separate approval.',
+        'If the request drifts into trade negotiation, economics changes, or outbound communication beyond the confirmation record, stop and explain the boundary.',
+      ],
+      response_style: [
+        'Lead with the confirmation state, then the evidence and the exact confirmation action you can justify.',
+        'Keep bilateral evidence and internal platform state clearly separated.',
+      ],
+      guardrails: [
+        'Do not amend trade economics or broader commercial terms.',
+        'Do not imply a counterparty communication was sent beyond the governed confirmation surface.',
+      ],
+    }),
+  },
+  {
+    key: 'workflow-controller-agent',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
+    agent_id: 'workflow-controller-agent',
+    name: 'Workflow Controller Agent',
+    description:
+      'Owns internal workflow-item synchronization across operational, settlement, and exception queues.',
+    status: 'ACTIVE',
+    scope: 'ORGANIZATION',
+    provider: '',
+    model: '',
+    allowed_workspaces: ['assistant', 'operations', 'settlement', 'shipments', 'scheduling'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
+    recommended_tools: [
+      'list_workflow_items',
+      'list_trade_attention_candidates',
+      'get_trade_workbench',
+      'list_trade_invoices',
+      'list_trade_payments',
+      'get_trade_settlement_summary',
+      'get_workspace_summary',
+    ],
+    recommended_action_types: ['update_trade_workflow_item'],
+    summary:
+      'Useful when the real problem is stale queue ownership or due-date hygiene and the underlying business record does not need a separate ledger mutation first.',
+    best_for: 'Queue cleanup, owner reassignment, due-date synchronization, and exception workflow hygiene.',
+    focus_areas: ['Workflow ownership', 'Due dates', 'Exception queues', 'Handoffs'],
+    system_prompt: buildSystemPrompt({
+      name: 'Workflow Controller Agent',
+      mission: [
+        'Keep workflow ownership, due dates, and internal statuses aligned with current platform reality.',
+        'Use the workflow-item action path as the narrow mutation lane for queue control and handoff hygiene.',
+      ],
+      workflow: [
+        'Review queue evidence, related trade or settlement state, and current workflow ownership before making a change.',
+        'Execute workflow-item updates when they truly solve the queue problem instead of asking for separate approval.',
+        'If the requested outcome depends on a ledger-managed record change first, stop and explain that the workflow item is not the right mutation surface.',
+      ],
+      response_style: [
+        'Lead with the queue problem, then the precise workflow change you can justify.',
+        'Keep the explanation grounded in current queue and record evidence.',
+      ],
+      guardrails: [
+        'Do not use workflow updates to fake a ledger or settlement state transition.',
+        'Do not change workflow items when the target record or ownership evidence is unclear.',
+      ],
+    }),
+  },
+  {
+    key: 'invoice-controller-agent',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
+    agent_id: 'invoice-controller-agent',
+    name: 'Invoice Controller Agent',
+    description:
+      'Focuses on invoice readiness, issuance, and invoice-specific settlement exception handling.',
+    status: 'ACTIVE',
+    scope: 'TEAM',
+    provider: '',
+    model: '',
+    allowed_workspaces: ['assistant', 'settlement', 'operations', 'reports'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT', 'ACTION'],
+    recommended_tools: [
+      'list_invoice_issue_candidates',
+      'list_trade_invoices',
+      'get_trade_settlement_summary',
+      'list_accrual_lots',
+      'get_accrual_reconciliation',
+      'list_workflow_items',
+      'get_workspace_summary',
+    ],
+    recommended_action_types: ['issue_trade_invoice', 'void_trade_invoice'],
+    summary:
+      'Designed for teams that want a narrower invoice-only execution role instead of routing every billing question through the broader settlement copilot.',
+    best_for: 'Invoice readiness, invoice issuance and voiding, and invoice-specific settlement exceptions.',
+    focus_areas: ['Invoice candidates', 'Readiness evidence', 'Billing exceptions', 'Settlement handoff'],
+    system_prompt: buildSystemPrompt({
+      name: 'Invoice Controller Agent',
+      mission: [
+        'Turn settlement readiness evidence into clean invoice issuance decisions and follow-through.',
+        'Operate as a narrower invoice-focused lane when a full settlement copilot is broader than the task requires.',
+      ],
+      workflow: [
+        'Review invoice candidates, settlement summaries, accrual context, and workflow detail before acting.',
+        'When invoice readiness is clear, execute invoice issuance through the governed path instead of asking for separate approval.',
+        'When an invoice no longer reflects reality, void it through the typed correction path instead of relying on an undocumented delete.',
+        'If the task drifts into cash release, accounting entry creation, or unresolved settlement ambiguity, stop and explain the missing boundary.',
+      ],
+      response_style: [
+        'Lead with invoice readiness, then the strongest evidence and the exact issuance step you can justify.',
+        'Keep billing blockers and missing evidence explicit.',
+      ],
+      guardrails: [
+        'Do not release cash or imply that accounting entries were posted.',
+        'Do not force invoice issuance when amount, timing, currency, or linkage evidence is incomplete.',
+      ],
+    }),
+  },
+  {
+    key: 'counterparty-outreach-agent',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
+    agent_id: 'counterparty-outreach-agent',
+    name: 'Counterparty Outreach Agent',
+    description: 'Drafts and tracks bilateral counterparty communications.',
+    status: 'ACTIVE',
+    scope: 'ORGANIZATION',
+    provider: '',
+    model: '',
+    allowed_workspaces: ['assistant', 'operations', 'settlement', 'trades'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
+    recommended_tools: [
+      'get_trade_workbench',
+      'list_workflow_items',
+      'list_trade_attention_candidates',
+      'list_trade_confirmations',
+      'get_trade_settlement_summary',
+    ],
+    recommended_action_types: [],
+    summary:
+      'Useful when operators or traders need a clean bilateral draft without granting the agent any outbound send authority.',
+    best_for: 'Confirmation chase drafts, collection-note drafts, and counterparty follow-up preparation.',
+    focus_areas: ['Outreach draft', 'Bilateral context', 'Tone control', 'Review handoff'],
+    system_prompt: buildSystemPrompt({
+      name: 'Counterparty Outreach Agent',
+      mission: [
+        'Draft counterparty outreach without sending or binding external communications.',
+        'Help the team move faster on bilateral follow-up while keeping human send authority intact.',
+      ],
+      workflow: [
+        'Review trade, confirmation, workflow, and settlement context before drafting any external-facing language.',
+        'Write drafts that clearly reflect the current platform state and the intended ask or update.',
+        'If the user is really asking to send, stop and explain that this role only prepares the message.',
+      ],
+      response_style: [
+        'Lead with the purpose of the outreach, then provide review-ready draft text and any caveats.',
+        'Keep external-facing language specific and easy for a human to approve or edit.',
+      ],
+      guardrails: [
+        'Do not send or imply that you sent an external message.',
+        'Do not bind the firm to economics, logistics, or settlement commitments.',
+      ],
+    }),
+  },
+  {
+    key: 'control-tower-agent',
+    availability: 'SEEDED_DEFAULT',
+    availability_note:
+      'A synchronized seeded default already exists. Use this blueprint to create a narrowed specialization without changing the synced default.',
+    agent_id: 'control-tower-agent',
+    name: 'Control Tower Agent',
+    description: 'Monitors other agents, stale runs, blocked approvals, and intervention needs.',
+    status: 'ACTIVE',
+    scope: 'ORGANIZATION',
+    provider: '',
+    model: '',
+    allowed_workspaces: ['assistant', 'admin'],
+    capabilities: ['READ', 'EXPLAIN', 'DRAFT'],
+    recommended_tools: ['get_workspace_summary'],
+    recommended_action_types: [],
+    summary:
+      'Best for supervisors who need one agent focused on agent health, blocked approvals, and where manual intervention is now required.',
+    best_for: 'Agent oversight, blocked-approval monitoring, and operational intervention summaries.',
+    focus_areas: ['Agent health', 'Blocked approvals', 'Interventions', 'Operational drift'],
+    system_prompt: buildSystemPrompt({
+      name: 'Control Tower Agent',
+      mission: [
+        'Summarize agent health, blocked approvals, and intervention recommendations.',
+        'Help platform owners spot where autonomy is helping, stalling, or drifting before it becomes noisy.',
+      ],
+      workflow: [
+        'Review the available admin summary context before making intervention recommendations.',
+        'Surface the highest-signal agent or approval bottlenecks first, then the evidence supporting them.',
+        'Recommend interventions without mutating configuration, policy, or permissions.',
+      ],
+      response_style: [
+        'Lead with the highest-priority supervision issue, then the evidence and the recommended human intervention.',
+        'Keep supervision guidance concise and operationally specific.',
+      ],
+      guardrails: [
+        'Do not change agent policy, permissions, or configuration.',
+        'Do not imply a kill switch, pause, or promotion already happened.',
+      ],
+    }),
+  },
 ] satisfies AgentBuilderTemplateDefinition[]
 
 export const AGENT_BUILDER_TEMPLATES = AGENT_BUILDER_TEMPLATE_DEFINITIONS
+
+const AGENT_BUILDER_TEMPLATE_SKILLS: Record<AgentBuilderTemplateKey, AssistantAgentSkillKey[]> = {
+  'market-research-agent': ['market_intelligence', 'inter_agent_consultation'],
+  'pre-trade-structuring-agent': ['pretrade_structuring', 'market_intelligence', 'inter_agent_consultation'],
+  'document-agent': ['document_triage', 'trade_operations_coordination', 'inter_agent_consultation'],
+  'trade-ops-copilot': [
+    'trade_operations_coordination',
+    'confirmation_control',
+    'workflow_control',
+    'movement_control',
+    'document_triage',
+    'inter_agent_consultation',
+  ],
+  'settlement-copilot': [
+    'settlement_operations',
+    'invoice_control',
+    'accrual_control',
+    'reporting_reconciliation',
+    'inter_agent_consultation',
+  ],
+  'trade-governor': ['trade_governance', 'trade_lifecycle_management', 'inter_agent_consultation'],
+  'trade-capture-agent': ['trade_lifecycle_management', 'trade_governance', 'inter_agent_consultation'],
+  'movement-controller-agent': ['movement_control', 'logistics_coordination', 'workflow_control', 'inter_agent_consultation'],
+  'accrual-controller-agent': ['accrual_control', 'settlement_operations', 'inter_agent_consultation'],
+  'accounting-posting-agent': ['accounting_posting', 'reporting_reconciliation', 'inter_agent_consultation'],
+  'counterparty-state-sync-agent': [
+    'counterparty_state_sync',
+    'confirmation_control',
+    'workflow_control',
+    'inter_agent_consultation',
+  ],
+  'confirmation-controller-agent': [
+    'confirmation_control',
+    'workflow_control',
+    'counterparty_state_sync',
+    'inter_agent_consultation',
+  ],
+  'workflow-controller-agent': ['workflow_control', 'trade_operations_coordination', 'inter_agent_consultation'],
+  'invoice-controller-agent': ['invoice_control', 'settlement_operations', 'inter_agent_consultation'],
+  'counterparty-outreach-agent': ['counterparty_outreach', 'counterparty_state_sync', 'inter_agent_consultation'],
+  'control-tower-agent': ['agent_supervision', 'reporting_reconciliation', 'inter_agent_consultation'],
+}
+
+const INTER_AGENT_COORDINATION_TOOLS = ['consult_managed_agent', 'enlist_managed_agent'] as const
+
+function withInterAgentCoordinationTools(
+  toolNames: readonly string[],
+  skills: readonly AssistantAgentSkillKey[],
+): string[] {
+  if (!skills.includes(INTER_AGENT_CONSULTATION_SKILL)) {
+    return [...toolNames]
+  }
+  const nextToolNames = [...toolNames]
+  for (const toolName of INTER_AGENT_COORDINATION_TOOLS) {
+    if (!nextToolNames.includes(toolName)) {
+      nextToolNames.push(toolName)
+    }
+  }
+  return nextToolNames
+}
 
 export function createEmptyAgentBuilderDraft(): AgentBuilderDraft {
   return {
@@ -601,9 +1265,14 @@ export function createEmptyAgentBuilderDraft(): AgentBuilderDraft {
     human_owner_role: '',
     authority_ceiling: '',
     activation_notes: '',
+    orchestration_pattern: 'SINGLE',
+    parent_agent_id: '',
+    managed_agent_ids: [],
+    delegation_guidance: '',
     profile_request_id: null,
     allowed_workspaces: ['assistant'],
     capabilities: ['READ', 'EXPLAIN'],
+    skills: [],
     allowed_tools: [],
     allowed_action_types: [],
     daily_token_allocation: '',
@@ -636,11 +1305,14 @@ export function buildAgentBuilderDraft(
 ): AgentBuilderDraft {
   const template = getAgentBuilderTemplate(templateKey)
   const profile = AGENT_BUILDER_TEMPLATE_PROFILE[templateKey]
+  const hierarchyDefaults = buildTemplateHierarchyDefaults(templateKey)
+  const skills = AGENT_BUILDER_TEMPLATE_SKILLS[templateKey]
+  const recommendedTools = withInterAgentCoordinationTools(template.recommended_tools, skills)
   const availableToolSet = new Set(availableTools.map((toolName) => toolName.trim().toLowerCase()))
   const allowedTools =
     availableToolSet.size === 0
       ? []
-      : template.recommended_tools.filter((toolName) => availableToolSet.has(toolName.toLowerCase()))
+      : recommendedTools.filter((toolName) => availableToolSet.has(toolName.toLowerCase()))
 
   return {
     agent_id: template.agent_id,
@@ -656,9 +1328,14 @@ export function buildAgentBuilderDraft(
     human_owner_role: profile.human_owner_role,
     authority_ceiling: profile.authority_ceiling,
     activation_notes: profile.activation_notes,
+    orchestration_pattern: hierarchyDefaults.orchestration_pattern,
+    parent_agent_id: hierarchyDefaults.parent_agent_id,
+    managed_agent_ids: [...hierarchyDefaults.managed_agent_ids],
+    delegation_guidance: hierarchyDefaults.delegation_guidance,
     profile_request_id: null,
     allowed_workspaces: [...template.allowed_workspaces],
     capabilities: [...template.capabilities],
+    skills: [...skills],
     allowed_tools: allowedTools,
     allowed_action_types: [...template.recommended_action_types],
     daily_token_allocation: '',
@@ -670,11 +1347,13 @@ export function buildAgentBuilderDraftFromRole(
   role: AssistantAgentRoleArchetype,
   availableTools: string[],
 ): AgentBuilderDraft {
+  const hierarchyDefaults = buildRoleHierarchyDefaults(role)
+  const roleDefaultTools = withInterAgentCoordinationTools(role.default_tools, role.skills)
   const availableToolSet = new Set(availableTools.map((toolName) => toolName.trim().toLowerCase()))
   const allowedTools =
     availableToolSet.size === 0
       ? []
-      : role.default_tools.filter((toolName) => availableToolSet.has(toolName.toLowerCase()))
+      : roleDefaultTools.filter((toolName) => availableToolSet.has(toolName.toLowerCase()))
   const profileName = `${role.name} Specialization`
 
   return {
@@ -691,9 +1370,14 @@ export function buildAgentBuilderDraftFromRole(
     human_owner_role: role.human_owner_role,
     authority_ceiling: role.authority_ceiling,
     activation_notes: `Drafted from the ${role.name} role catalog entry.`,
+    orchestration_pattern: hierarchyDefaults.orchestration_pattern,
+    parent_agent_id: hierarchyDefaults.parent_agent_id,
+    managed_agent_ids: [...hierarchyDefaults.managed_agent_ids],
+    delegation_guidance: hierarchyDefaults.delegation_guidance,
     profile_request_id: null,
     allowed_workspaces: [...role.allowed_workspaces],
     capabilities: [...role.capability_ceiling],
+    skills: [...role.skills],
     allowed_tools: allowedTools,
     allowed_action_types: [...role.maximum_action_types],
     daily_token_allocation: '',
@@ -729,14 +1413,41 @@ export function evaluateAgentRoleProfileFit(
   if (form.allowed_tools.length > 0 && !form.capabilities.includes('READ')) {
     errors.push('Live tools require READ capability.')
   }
+  if (
+    form.allowed_tools.some((toolName) => INTER_AGENT_COORDINATION_TOOLS.includes(toolName as (typeof INTER_AGENT_COORDINATION_TOOLS)[number])) &&
+    !form.skills.includes(INTER_AGENT_CONSULTATION_SKILL)
+  ) {
+    errors.push('Inter-agent coordination tools require the Inter-Agent Consultation skill.')
+  }
+  if (form.orchestration_pattern !== 'SINGLE' && !form.skills.includes(INTER_AGENT_CONSULTATION_SKILL)) {
+    errors.push(
+      `${form.orchestration_pattern} orchestration requires the Inter-Agent Consultation skill.`,
+    )
+  }
   if (form.allowed_action_types.length > 0 && !form.capabilities.includes('ACTION')) {
     errors.push('Governed actions require ACTION capability.')
   }
   if (form.capabilities.includes('ACTION') && form.allowed_action_types.length === 0) {
     errors.push('ACTION-capable profiles need at least one explicit governed action.')
   }
+  if (form.managed_agent_ids.length > 0 && form.orchestration_pattern === 'SINGLE') {
+    errors.push('Managed subordinates require a non-SINGLE orchestration pattern.')
+  }
+  if (
+    form.parent_agent_id &&
+    form.managed_agent_ids.includes(form.parent_agent_id)
+  ) {
+    errors.push('Parent agent cannot also appear in managed subordinates.')
+  }
+  if (form.agent_id.trim() && form.parent_agent_id.trim() === form.agent_id.trim()) {
+    errors.push('Parent agent cannot match the current agent id.')
+  }
+  if (form.agent_id.trim() && form.managed_agent_ids.includes(form.agent_id.trim())) {
+    errors.push('Managed subordinates cannot include the current agent id.')
+  }
 
   if (role) {
+    const roleDefaultTools = withInterAgentCoordinationTools(role.default_tools, role.skills)
     const workspaceSection = compareSubset(
       'Workspaces',
       form.allowed_workspaces,
@@ -749,15 +1460,25 @@ export function evaluateAgentRoleProfileFit(
       role.capability_ceiling,
       (values) => values.join(' · '),
     )
+    const skillSection = compareSubset(
+      'Skills',
+      form.skills,
+      role.skills,
+      (values) => `${values.length} role skill${values.length === 1 ? '' : 's'}`,
+      {
+        emptyStatus: 'inherited',
+        emptyDetail: `${role.skills.length} role skill${role.skills.length === 1 ? '' : 's'} inherited on save`,
+      },
+    )
     const toolSection = compareSubset(
       'Live tools',
       form.allowed_tools,
-      role.default_tools,
+      roleDefaultTools,
       (values) => `${values.length} role default tool${values.length === 1 ? '' : 's'}`,
       {
         emptyStatus: form.capabilities.includes('READ') ? 'inherited' : 'customized',
         emptyDetail: form.capabilities.includes('READ')
-          ? `${role.default_tools.length} role default tool${role.default_tools.length === 1 ? '' : 's'} inherited on save`
+          ? `${roleDefaultTools.length} role default tool${roleDefaultTools.length === 1 ? '' : 's'} inherited on save`
           : 'READ disabled, so no live tools are available',
       },
     )
@@ -774,8 +1495,17 @@ export function evaluateAgentRoleProfileFit(
       },
     )
     const authoritySection = compareAuthority(form.authority_ceiling, role.authority_ceiling)
+    const hierarchySection = compareHierarchy(form, role)
 
-    sections.push(workspaceSection, capabilitySection, toolSection, actionSection, authoritySection)
+    sections.push(
+      workspaceSection,
+      capabilitySection,
+      skillSection,
+      toolSection,
+      actionSection,
+      authoritySection,
+      hierarchySection,
+    )
 
     for (const section of sections) {
       if (section.status === 'expanded') {
@@ -801,6 +1531,9 @@ export function evaluateAgentRoleProfileFit(
 
     if (role.catalog_status === 'PHASE_2_PLUS') {
       warnings.push(`${role.name} is marked ${role.catalog_status}; confirm domain readiness before activation.`)
+    }
+    if (form.skills.length === 0) {
+      warnings.push('Blank role-derived skills inherit role defaults on save.')
     }
     if (form.allowed_tools.length === 0 && form.capabilities.includes('READ')) {
       warnings.push('Blank role-derived live tools inherit role defaults on save.')
@@ -919,5 +1652,37 @@ function compareAuthority(
     label: 'Authority',
     status: 'narrowed',
     detail: `${current} below role ceiling ${baseline}`,
+  }
+}
+
+function compareHierarchy(
+  form: AgentBuilderDraft,
+  role: AssistantAgentRoleArchetype,
+): AgentRoleProfileFitSection {
+  const recommendedManagedCount = role.recommended_managed_role_keys.length
+  const currentManagedCount = form.managed_agent_ids.length
+  const recommendationDetail =
+    recommendedManagedCount > 0
+      ? `${role.recommended_orchestration_pattern} with ${recommendedManagedCount} recommended subordinate role${recommendedManagedCount === 1 ? '' : 's'}`
+      : role.recommended_orchestration_pattern
+
+  if (form.orchestration_pattern === role.recommended_orchestration_pattern) {
+    const managedDetail =
+      currentManagedCount > 0
+        ? ` · ${currentManagedCount} managed agent${currentManagedCount === 1 ? '' : 's'} selected`
+        : role.recommended_managed_role_keys.length > 0
+          ? ' · subordinate wiring still needs concrete agent ids'
+          : ''
+    return {
+      label: 'Hierarchy',
+      status: 'inherited',
+      detail: `${recommendationDetail}${managedDetail}`,
+    }
+  }
+
+  return {
+    label: 'Hierarchy',
+    status: 'customized',
+    detail: `${form.orchestration_pattern} selected · recommended ${recommendationDetail}`,
   }
 }

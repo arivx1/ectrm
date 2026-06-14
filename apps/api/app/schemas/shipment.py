@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DeliverySchedulingWorkflowItemOut(BaseModel):
@@ -26,6 +26,11 @@ class DeliveryActualizationWrite(BaseModel):
     notes: Optional[str] = None
 
 
+class DeliveryActualizationVoidWrite(BaseModel):
+    void_reason: str
+    notes: Optional[str] = None
+
+
 class DeliveryActualizationOut(BaseModel):
     actualization_id: int
     delivery_id: str
@@ -33,12 +38,15 @@ class DeliveryActualizationOut(BaseModel):
     leg_no: Optional[int]
     unit_of_measure: Optional[str]
     planned_quantity: Optional[float]
-    actual_quantity: float
+    actual_quantity: Optional[float]
     quantity_variance: Optional[float]
     actualization_status: str
-    actualized_at: datetime
+    actualized_at: Optional[datetime]
     source: Optional[str]
     notes: Optional[str]
+    voided_at: Optional[datetime]
+    voided_by: Optional[str]
+    void_reason: Optional[str]
     created_at: datetime
     created_by: str
     updated_at: datetime
@@ -54,6 +62,8 @@ class DeliveryEventOut(BaseModel):
     event_type: str
     execution_status: str
     occurred_at: datetime
+    reversal_of_event_id: Optional[int]
+    reversal_reason: Optional[str]
     location_code: Optional[str]
     reference_code: Optional[str]
     source: Optional[str]
@@ -63,6 +73,233 @@ class DeliveryEventOut(BaseModel):
     updated_at: datetime
     updated_by: str
     version: int
+
+
+class DeliveryTruckDetailOut(BaseModel):
+    delivery_id: str
+    target_run_count: Optional[int]
+    dispatcher_owner: Optional[str]
+    tracking_provider: Optional[str]
+    tracking_policy: Optional[str]
+    default_carrier_name: Optional[str]
+    default_carrier_name_source: str
+    default_external_carrier_reference: Optional[str]
+    default_external_carrier_reference_source: str
+    equipment_type: Optional[str]
+    equipment_type_source: str
+    origin_geofence_code: Optional[str]
+    origin_geofence_code_source: str
+    destination_geofence_code: Optional[str]
+    destination_geofence_code_source: str
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
+class DeliveryTruckStopOut(BaseModel):
+    stop_id: str
+    movement_id: str
+    stop_sequence: int
+    stop_type: str
+    status: str
+    status_reason: Optional[str]
+    location_code: Optional[str]
+    location_code_source: str
+    planned_arrival_start: Optional[datetime]
+    planned_arrival_end: Optional[datetime]
+    planned_departure_start: Optional[datetime]
+    planned_departure_end: Optional[datetime]
+    appointment_reference: Optional[str]
+    appointment_reference_source: str
+    planned_quantity: Optional[float]
+    actual_quantity: Optional[float]
+    actual_arrived_at: Optional[datetime]
+    actual_departed_at: Optional[datetime]
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
+class DeliveryTruckMovementTrackingHealthOut(BaseModel):
+    last_evaluated_at: datetime
+    eta_status: str
+    eta_status_reason: str
+    tracking_freshness_status: str
+    tracking_freshness_reason: str
+    dwell_status: str
+    dwell_status_reason: str
+    exception_severity: str
+    primary_exception: Optional[str]
+    stale_after_minutes: int
+    dwell_threshold_minutes: int
+    destination_stop_id: Optional[str]
+    current_stop_id: Optional[str]
+    minutes_since_last_signal: Optional[int]
+    current_dwell_minutes: Optional[int]
+    eta_late_minutes: Optional[int]
+
+
+class DeliveryTruckMovementSummaryOut(BaseModel):
+    movement_id: str
+    delivery_id: str
+    sequence_no: int
+    status: str
+    status_reason: Optional[str]
+    planned_quantity: Optional[float]
+    planned_unit_of_measure: Optional[str]
+    carrier_name: Optional[str]
+    carrier_name_source: str
+    external_carrier_reference: Optional[str]
+    external_carrier_reference_source: str
+    dispatcher_owner: Optional[str]
+    dispatcher_owner_source: str
+    current_stop_sequence: Optional[int]
+    current_location_code: Optional[str]
+    last_signal_at: Optional[datetime]
+    current_eta_at_destination: Optional[datetime]
+    tracking_health: DeliveryTruckMovementTrackingHealthOut
+    hold_reason_code: Optional[str]
+    hold_reason_code_source: str
+    stop_count: int
+    active_stop_count: int
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
+class DeliveryTruckMovementOut(DeliveryTruckMovementSummaryOut):
+    driver_name: Optional[str]
+    driver_name_source: str
+    driver_phone: Optional[str]
+    driver_phone_source: str
+    tractor_reference: Optional[str]
+    tractor_reference_source: str
+    trailer_reference: Optional[str]
+    trailer_reference_source: str
+    external_load_reference: Optional[str]
+    external_load_reference_source: str
+    bill_of_lading_number: Optional[str]
+    bill_of_lading_number_source: str
+    truck_ticket_number: Optional[str]
+    truck_ticket_number_source: str
+    stops: list[DeliveryTruckStopOut]
+
+
+class DeliveryTruckTrackingExceptionOut(BaseModel):
+    delivery_id: str
+    trade_id: str
+    leg_no: Optional[int]
+    external_trade_id: Optional[str]
+    book: str
+    portfolio: Optional[str]
+    counterparty: Optional[str]
+    commodity_class: str
+    commodity: str
+    transport_mode: str
+    execution_status: str
+    delivery_start: Optional[date]
+    delivery_end: Optional[date]
+    location_code: Optional[str]
+    origin_location_code: Optional[str]
+    destination_location_code: Optional[str]
+    operations_owner: Optional[str]
+    movement: DeliveryTruckMovementSummaryOut
+    tracking_health: DeliveryTruckMovementTrackingHealthOut
+
+
+class DeliveryVesselTrackingHealthOut(BaseModel):
+    last_evaluated_at: datetime
+    tracking_freshness_status: str
+    tracking_freshness_reason: str
+    eta_status: str
+    eta_status_reason: str
+    exception_severity: str
+    primary_exception: Optional[str]
+    stale_after_minutes: int
+    minutes_since_last_signal: Optional[int]
+    eta_late_minutes: Optional[int]
+
+
+class DeliveryVesselDetailOut(BaseModel):
+    delivery_id: str
+    vessel_name: Optional[str]
+    imo_number: Optional[str]
+    mmsi_number: Optional[str]
+    call_sign: Optional[str]
+    voyage_number: Optional[str]
+    tracking_provider: Optional[str]
+    tracking_policy: Optional[str]
+    last_signal_at: Optional[datetime]
+    last_position_at: Optional[datetime]
+    last_latitude: Optional[float]
+    last_longitude: Optional[float]
+    last_speed_knots: Optional[float]
+    last_course_degrees: Optional[float]
+    last_heading_degrees: Optional[float]
+    last_navigational_status: Optional[str]
+    current_destination: Optional[str]
+    current_eta_at_destination: Optional[datetime]
+    tracking_health: DeliveryVesselTrackingHealthOut
+    created_at: datetime
+    created_by: str
+    updated_at: datetime
+    updated_by: str
+    version: int
+
+
+class DeliveryTrackingSignalOut(BaseModel):
+    signal_id: int
+    delivery_id: Optional[str]
+    movement_id: Optional[str]
+    stop_id: Optional[str]
+    source_system: str
+    source_event_id: Optional[str]
+    signal_type: str
+    occurred_at: datetime
+    received_at: datetime
+    latitude: Optional[float]
+    longitude: Optional[float]
+    speed_knots: Optional[float]
+    course_degrees: Optional[float]
+    heading_degrees: Optional[float]
+    draught_meters: Optional[float]
+    location_code: Optional[str]
+    destination: Optional[str]
+    eta_at_destination: Optional[datetime]
+    external_status: Optional[str]
+    normalized_status: Optional[str]
+    match_confidence: Optional[float]
+    dedupe_key: str
+    processing_status: str
+    processing_error: Optional[str]
+    raw_payload: dict[str, Any]
+
+
+class DeliveryTrackingSignalIngestResultOut(BaseModel):
+    ingest_status: str
+    duplicate: bool
+    signal: DeliveryTrackingSignalOut
+    movement: DeliveryTruckMovementSummaryOut
+
+
+class DeliveryVesselTrackingSignalIngestResultOut(BaseModel):
+    ingest_status: str
+    duplicate: bool
+    signal: DeliveryTrackingSignalOut
+    vessel_detail: DeliveryVesselDetailOut
+    tracking_health: DeliveryVesselTrackingHealthOut
+
+
+class DeliveryVesselAisstreamRefreshOut(DeliveryVesselTrackingSignalIngestResultOut):
+    provider: str
+    matched_mmsi: str
+    listened_seconds: int
 
 
 class DeliveryObligationOut(BaseModel):
@@ -111,6 +348,34 @@ class DeliveryObligationOut(BaseModel):
     load_reference_source: Optional[str] = None
     discharge_reference: Optional[str] = None
     discharge_reference_source: Optional[str] = None
+    truck_detail: Optional[DeliveryTruckDetailOut] = None
+    truck_movement_count: int = 0
+    active_truck_movement_count: int = 0
+    vessel_detail: Optional[DeliveryVesselDetailOut] = None
+    vessel_tracking_health: Optional[DeliveryVesselTrackingHealthOut] = None
+    rail_route_code: Optional[str] = None
+    rail_route_code_source: Optional[str] = None
+    rail_line_code: Optional[str] = None
+    railroad_code: Optional[str] = None
+    rail_route_direction: Optional[str] = None
+    rail_schedule_timezone: Optional[str] = None
+    rail_service_calendar_code: Optional[str] = None
+    rail_placement_cutoff_time_local: Optional[str] = None
+    rail_release_cutoff_time_local: Optional[str] = None
+    rail_placement_free_time_hours: Optional[int] = None
+    rail_release_free_time_hours: Optional[int] = None
+    origin_station_code: Optional[str] = None
+    origin_station_code_source: Optional[str] = None
+    destination_station_code: Optional[str] = None
+    destination_station_code_source: Optional[str] = None
+    waybill_reference: Optional[str] = None
+    waybill_reference_source: Optional[str] = None
+    release_number: Optional[str] = None
+    release_number_source: Optional[str] = None
+    unit_train_id: Optional[str] = None
+    unit_train_id_source: Optional[str] = None
+    railcar_count: Optional[int] = None
+    railcar_count_source: Optional[str] = None
     receipt_location_code: Optional[str] = None
     receipt_location_code_source: Optional[str] = None
     delivery_location_code: Optional[str] = None
@@ -219,6 +484,28 @@ class DeliveryLogisticsDetailUpdate(BaseModel):
     reset_fields: Optional[list[str]] = None
 
 
+class DeliveryTruckDetailUpdate(BaseModel):
+    target_run_count: Optional[int] = None
+    dispatcher_owner: Optional[str] = None
+    tracking_provider: Optional[str] = None
+    tracking_policy: Optional[str] = None
+    default_carrier_name: Optional[str] = None
+    default_external_carrier_reference: Optional[str] = None
+    equipment_type: Optional[str] = None
+    origin_geofence_code: Optional[str] = None
+    destination_geofence_code: Optional[str] = None
+
+
+class DeliveryVesselDetailUpdate(BaseModel):
+    vessel_name: Optional[str] = None
+    imo_number: Optional[str] = None
+    mmsi_number: Optional[str] = None
+    call_sign: Optional[str] = None
+    voyage_number: Optional[str] = None
+    tracking_provider: Optional[str] = None
+    tracking_policy: Optional[str] = None
+
+
 class DeliveryPipelineDetailUpdate(BaseModel):
     pipeline_system: Optional[str] = None
     pipeline_path: Optional[str] = None
@@ -227,6 +514,17 @@ class DeliveryPipelineDetailUpdate(BaseModel):
     pipeline_contract_number: Optional[str] = None
     pipeline_cycle_code: Optional[str] = None
     nomination_reference: Optional[str] = None
+    reset_fields: Optional[list[str]] = None
+
+
+class DeliveryRailDetailUpdate(BaseModel):
+    rail_route_code: Optional[str] = None
+    origin_station_code: Optional[str] = None
+    destination_station_code: Optional[str] = None
+    waybill_reference: Optional[str] = None
+    release_number: Optional[str] = None
+    unit_train_id: Optional[str] = None
+    railcar_count: Optional[int] = None
     reset_fields: Optional[list[str]] = None
 
 
@@ -248,6 +546,127 @@ class DeliveryEventWrite(BaseModel):
     reference_code: Optional[str] = None
     source: Optional[str] = None
     notes: Optional[str] = None
+
+
+class DeliveryEventReverseWrite(BaseModel):
+    reversal_reason: str
+    reversed_at: Optional[datetime] = None
+    source: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class DeliveryTruckStopCreate(BaseModel):
+    stop_sequence: Optional[int] = None
+    stop_type: str
+    location_code: Optional[str] = None
+    planned_arrival_start: Optional[datetime] = None
+    planned_arrival_end: Optional[datetime] = None
+    planned_departure_start: Optional[datetime] = None
+    planned_departure_end: Optional[datetime] = None
+    appointment_reference: Optional[str] = None
+    planned_quantity: Optional[float] = None
+    status: Optional[str] = None
+
+
+class DeliveryTruckMovementCreate(BaseModel):
+    sequence_no: int
+    planned_quantity: Optional[float] = None
+    planned_unit_of_measure: Optional[str] = None
+    carrier_name: Optional[str] = None
+    external_carrier_reference: Optional[str] = None
+    dispatcher_owner: Optional[str] = None
+    driver_name: Optional[str] = None
+    driver_phone: Optional[str] = None
+    tractor_reference: Optional[str] = None
+    trailer_reference: Optional[str] = None
+    external_load_reference: Optional[str] = None
+    bill_of_lading_number: Optional[str] = None
+    truck_ticket_number: Optional[str] = None
+    hold_reason_code: Optional[str] = None
+    status: Optional[str] = None
+    stops: list[DeliveryTruckStopCreate]
+
+
+class DeliveryTruckMovementUpdate(BaseModel):
+    sequence_no: Optional[int] = None
+    planned_quantity: Optional[float] = None
+    planned_unit_of_measure: Optional[str] = None
+    carrier_name: Optional[str] = None
+    external_carrier_reference: Optional[str] = None
+    dispatcher_owner: Optional[str] = None
+    driver_name: Optional[str] = None
+    driver_phone: Optional[str] = None
+    tractor_reference: Optional[str] = None
+    trailer_reference: Optional[str] = None
+    external_load_reference: Optional[str] = None
+    bill_of_lading_number: Optional[str] = None
+    truck_ticket_number: Optional[str] = None
+    hold_reason_code: Optional[str] = None
+    status: Optional[str] = None
+    status_reason: Optional[str] = None
+
+
+class DeliveryTruckMovementCancelWrite(BaseModel):
+    cancel_reason: str
+
+
+class DeliveryTruckStopUpdate(BaseModel):
+    stop_sequence: Optional[int] = None
+    stop_type: Optional[str] = None
+    location_code: Optional[str] = None
+    planned_arrival_start: Optional[datetime] = None
+    planned_arrival_end: Optional[datetime] = None
+    planned_departure_start: Optional[datetime] = None
+    planned_departure_end: Optional[datetime] = None
+    appointment_reference: Optional[str] = None
+    planned_quantity: Optional[float] = None
+    actual_quantity: Optional[float] = None
+    actual_arrived_at: Optional[datetime] = None
+    actual_departed_at: Optional[datetime] = None
+    status: Optional[str] = None
+    status_reason: Optional[str] = None
+
+
+class DeliveryTruckStopSkipWrite(BaseModel):
+    skip_reason: str
+
+
+class DeliveryTruckStopCancelWrite(BaseModel):
+    cancel_reason: str
+
+
+class DeliveryTruckStopCheckpointWrite(BaseModel):
+    checkpoint_code: str
+    occurred_at: datetime
+    notes: Optional[str] = None
+
+
+class DeliveryTruckStopCheckpointReverseWrite(BaseModel):
+    reversal_reason: str
+    reversed_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class DeliveryTrackingSignalWrite(BaseModel):
+    source_system: Optional[str] = None
+    source_event_id: Optional[str] = None
+    signal_type: str
+    occurred_at: datetime
+    received_at: Optional[datetime] = None
+    stop_id: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    speed_knots: Optional[float] = None
+    course_degrees: Optional[float] = None
+    heading_degrees: Optional[float] = None
+    draught_meters: Optional[float] = None
+    location_code: Optional[str] = None
+    destination: Optional[str] = None
+    external_status: Optional[str] = None
+    normalized_status: Optional[str] = None
+    match_confidence: Optional[float] = None
+    eta_at_destination: Optional[datetime] = None
+    raw_payload: dict[str, Any] = Field(default_factory=dict)
 
 
 ShipmentOut = DeliveryObligationOut

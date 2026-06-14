@@ -4,7 +4,9 @@ import type { DeliveryRecord, DeliverySchedulingWorkflowItemRecord } from '../sr
 import {
   buildSchedulingWorkbenchRows,
   deliveryStartTimestamp,
-  matchesSchedulingView,
+  matchesSchedulingAllocationFilter,
+  matchesSchedulingLifecycleFilter,
+  matchesSchedulingShipmentFilter,
   selectUpcomingSchedulingWindows,
   windowBandForDelivery,
 } from '../src/workspaces/scheduling/schedulingHelpers'
@@ -268,7 +270,7 @@ describe('scheduling workspace helpers', () => {
     expect(rows[2].owner).toBe('scheduler.gas')
   })
 
-  it('supports saved-view matching for hot-window and stage slices', () => {
+  it('supports lifecycle, allocation, and shipment filters without hiding stage ordering', () => {
     const [blockedRow, readyRow, watchlistRow] = buildSchedulingWorkbenchRows(
       [
         buildDelivery({
@@ -312,12 +314,14 @@ describe('scheduling workspace helpers', () => {
         buildDelivery({
           delivery_id: 'DLV-LATER',
           trade_id: 'TRD-LATER',
-          status: 'IN_PROGRESS',
+          status: 'COMPLETED',
           blockers: [],
           blocker_count: 0,
           confirmation_status: 'CONFIRMED',
           nomination_status: 'COMPLETED',
           allocation_status: 'COMPLETED',
+          actualization_status: 'ACTUALIZED',
+          execution_status: 'COMPLETED',
           delivery_start: '2026-04-20',
           scheduling_stage: 'WATCHLIST',
           open_scheduling_work_item_count: 0,
@@ -335,11 +339,11 @@ describe('scheduling workspace helpers', () => {
       72 * 60 * 60 * 1000,
     )
 
-    expect(matchesSchedulingView(blockedRow, 'BLOCKED')).toBe(true)
-    expect(matchesSchedulingView(blockedRow, 'HOT_WINDOW')).toBe(true)
-    expect(matchesSchedulingView(readyRow, 'READY')).toBe(true)
-    expect(matchesSchedulingView(readyRow, 'HOT_WINDOW')).toBe(true)
-    expect(matchesSchedulingView(watchlistRow, 'WATCHLIST')).toBe(true)
-    expect(matchesSchedulingView(watchlistRow, 'HOT_WINDOW')).toBe(false)
+    expect(matchesSchedulingLifecycleFilter(blockedRow, 'OPEN')).toBe(true)
+    expect(matchesSchedulingLifecycleFilter(watchlistRow, 'CLOSED')).toBe(true)
+    expect(matchesSchedulingAllocationFilter(readyRow, 'UNALLOCATED')).toBe(true)
+    expect(matchesSchedulingAllocationFilter(watchlistRow, 'ALLOCATED')).toBe(true)
+    expect(matchesSchedulingShipmentFilter(readyRow, 'UNSHIPPED')).toBe(true)
+    expect(matchesSchedulingShipmentFilter(watchlistRow, 'SHIPPED')).toBe(true)
   })
 })

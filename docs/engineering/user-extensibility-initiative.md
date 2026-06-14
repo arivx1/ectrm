@@ -579,6 +579,10 @@ Recommended first UI targets:
 - dashboard layout
 - trading table and inspector view state
 
+Detailed architecture for the Prompt Home version of this pattern:
+
+- [Home View Instances Work Packages](./home-view-instances-work-packages.md)
+
 Admin and governance deliverables:
 
 - capture audit metadata for definition changes even before shared publishing
@@ -625,6 +629,10 @@ Exit criteria:
 Goal:
 
 - let users define reusable reports and calculated outputs on curated datasets
+
+Detailed architecture:
+
+- [Excel-Style Reporting Architecture](./excel-style-reporting-architecture.md)
 
 Backend deliverables:
 
